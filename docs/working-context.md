@@ -808,6 +808,7 @@ Current validation result after the role-aware-routing, reviewer-switcher, perso
 - Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
 - Adapter installation diagnostics passed: `bridge install` switches the selected native instruction adapter without project registration, preserves unrelated content, and leaves the repository untouched during `--dry-run`.
 - Release-hardening browser verification passed for Decisions, Assumptions, and Agent Runs navigation, empty/detail states, run query deep links, question acceptance, and immediate visibility of the newly accepted Decision.
+- GitHub Actions CI run `31265758794` passed on initial commit `efe10f3` in 1 minute 2 seconds, including the isolated PostgreSQL integration path.
 - All TypeScript package builds and the Next.js production build passed after the role-aware, reviewer-switcher, personalized-inbox, inbox-filter, protected-review, transactional-outbox, and CLI-diagnostics slices.
 
 The temporary smoke-test directory and server processes were cleaned up afterward.
@@ -1271,7 +1272,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- The workflow has not been executed by GitHub from this local workspace; it is committed as reproducible CI configuration for the repository owner to verify after publishing.
+- GitHub Actions CI run `31265758794` completed successfully for initial commit `efe10f3`, exercising the isolated PostgreSQL service in addition to typecheck, tests, and production builds.
 - Apache License 2.0 is selected in root `LICENSE` and declared in every workspace package. Packages remain marked private until an intentional registry-publication decision.
 
 ### 20.20 Completed GitHub release-readiness hardening
