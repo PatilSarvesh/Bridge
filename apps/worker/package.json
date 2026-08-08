@@ -1,0 +1,21 @@
+{
+  "name": "@bridge/worker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run src --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@bridge/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "4.23.11"
+  }
+}

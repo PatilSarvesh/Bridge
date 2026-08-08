@@ -1,0 +1,32 @@
+{
+  "name": "bridge",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "pnpm --parallel --filter @bridge/api --filter @bridge/web dev",
+    "dev:all": "turbo run dev --parallel",
+    "dev:api": "pnpm --filter @bridge/api dev",
+    "dev:mcp": "pnpm --filter @bridge/mcp dev",
+    "dev:web": "pnpm --filter @bridge/web dev",
+    "dev:worker": "pnpm --filter @bridge/worker dev",
+    "cli:pack": "pnpm --filter @bridge/cli pack:local",
+    "db:generate": "pnpm --filter @bridge/database db:generate",
+    "db:migrate": "pnpm --filter @bridge/database db:migrate",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "turbo": "2.10.8",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

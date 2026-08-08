@@ -1,0 +1,924 @@
+import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { buildApp } from "./app.js";
+
+describe("Bridge API vertical slice", () => {
+  const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
+
+  afterEach(async () => {
+    await Promise.all(apps.splice(0).map((app) => app.close()));
+  });
+
+  it("lists same-organization fixed human principals for the prototype reviewer switcher", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/principals",
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: Array<{ id: string; roles: string[] }> }>().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: demoPrincipals.architect.id }),
+        expect.objectContaining({ id: demoPrincipals.qaLead.id, roles: expect.arrayContaining(["qa-lead"]) }),
+      ]),
+    );
+    expect(response.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id))
+      .not.toContain(demoPrincipals.outsider.id);
+  });
+
+  it("lists and marks scoped human notifications without exposing them to agents", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-notification-question-001",
+        title: "Which audit evidence should block the release?",
+        type: "decision",
+        category: "qa",
+        context: "The release pipeline needs a clear evidence threshold before deployment.",
+        whyItMatters: "An unclear threshold can ship defects or block safe releases without evidence.",
+        intendedOwnerIds: [demoPrincipals.qaLead.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "critical-only", label: "Critical failures only", tradeoffs: "Protects release flow while blocking serious defects." },
+          { key: "any-failure", label: "Any failure", tradeoffs: "Maximizes caution but can delay unrelated releases." },
+        ],
+        recommendationKey: "critical-only",
+        scope: { component: "release-pipeline" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string }>();
+
+    const notifications = await app.inject({
+      method: "GET",
+      url: `/v1/notifications?projectId=${demoProject.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(notifications.statusCode).toBe(200);
+    const listed = notifications.json<{ items: Array<{ id: string; type: string; targetId: string }>; unreadCount: number }>();
+    expect(listed).toMatchObject({ unreadCount: 1, items: [expect.objectContaining({ type: "question_assigned", targetId: question.id })] });
+
+    const agentNotifications = await app.inject({
+      method: "GET",
+      url: `/v1/notifications?projectId=${demoProject.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(agentNotifications.statusCode).toBe(403);
+
+    const marked = await app.inject({
+      method: "POST",
+      url: `/v1/notifications/${listed.items[0]!.id}/read`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(marked.statusCode).toBe(200);
+    expect(marked.json<{ readAt?: string }>().readAt).toBeDefined();
+
+    const unread = await app.inject({
+      method: "GET",
+      url: `/v1/notifications?projectId=${demoProject.id}&unreadOnly=true`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(unread.statusCode).toBe(200);
+    expect(unread.json<{ items: unknown[]; unreadCount: number }>()).toMatchObject({ items: [], unreadCount: 0 });
+  });
+
+  it("returns a personalized question inbox while keeping the shared question list available", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-inbox-role-question",
+        title: "Which QA evidence should block the release?",
+        type: "decision",
+        category: "qa",
+        context: "The release pipeline needs a QA evidence threshold before deployment.",
+        whyItMatters: "A weak threshold can ship defects while an excessive threshold can block safe releases.",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: ["QA Lead"],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "critical-only", label: "Block on critical failures", tradeoffs: "Keeps release flow moving while protecting critical paths." },
+          { key: "any-failure", label: "Block on any failure", tradeoffs: "Maximizes caution but may delay fixes unrelated to the release." },
+        ],
+        recommendationKey: "critical-only",
+        scope: { component: "release-pipeline" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const roleQuestionId = created.json<{ id: string }>().id;
+
+    const qaInbox = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(qaInbox.statusCode).toBe(200);
+    expect(qaInbox.json<{ items: Array<{ id: string; canAccept: boolean; inboxReasons: string[] }> }>().items)
+      .toEqual([
+        expect.objectContaining({ id: roleQuestionId, canAccept: true, inboxReasons: ["role_owner"] }),
+      ]);
+
+    const filteredInbox = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?category=QA&role=QA%20Lead`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(filteredInbox.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: roleQuestionId }),
+    ]);
+
+    const invalidFilter = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?risk=urgent`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalidFilter.statusCode).toBe(400);
+
+    const contributorInbox = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(contributorInbox.json<{ items: unknown[] }>().items).toEqual([]);
+
+    const sharedQuestions = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(sharedQuestions.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toEqual(
+      expect.arrayContaining([runtime.sampleQuestionId, roleQuestionId]),
+    );
+  });
+
+  it("registers and lists a fresh project for the local prototype", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const payload = {
+      idempotencyKey: "api-hospital-project-001",
+      name: "Hospital Management System",
+      decisionOwnerIds: [],
+    };
+
+    const denied = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload,
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+    const registration = created.json<{
+      disposition: string;
+      project: { id: string; name: string };
+    }>();
+    expect(registration).toMatchObject({
+      disposition: "created",
+      project: { name: "Hospital Management System" },
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json<{ project: { id: string } }>().project.id).toBe(registration.project.id);
+
+    const projects = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(projects.json<{ items: Array<{ id: string }> }>().items.map((project) => project.id))
+      .toContain(registration.project.id);
+  });
+
+  it("supports the fresh Hospital project question-and-specification acceptance journey", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        idempotencyKey: "acceptance-hospital-project",
+        name: "Hospital Management System",
+        decisionOwnerIds: [],
+      },
+    });
+    const projectId = projectResponse.json<{ project: { id: string } }>().project.id;
+    const runResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/runs`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "acceptance-hospital-run",
+        client: "codex",
+        capability: "cli",
+        taskSummary: "Build a production-quality Hospital Management System",
+        scope: { repository: "hospital-management-system", component: "platform" },
+        externalLinks: [],
+      },
+    });
+    const runId = runResponse.json<{ run: { id: string } }>().run.id;
+
+    const questionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${projectId}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "acceptance-patient-identity-question",
+        runId,
+        title: "Which patient identity policy should the hospital system enforce?",
+        type: "decision",
+        category: "privacy",
+        context: "The platform needs one patient identity policy across registration and clinical care.",
+        whyItMatters: "Incorrect matching can merge patients or expose protected health information.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "protected",
+        reversible: false,
+        blocking: true,
+        options: [
+          {
+            key: "enterprise-mrn",
+            label: "Enterprise medical record number",
+            tradeoffs: "One identifier with duplicate-detection governance.",
+          },
+          {
+            key: "facility-mrn",
+            label: "Facility-specific record numbers",
+            tradeoffs: "Local autonomy with cross-facility reconciliation.",
+          },
+        ],
+        recommendationKey: "enterprise-mrn",
+        scope: { repository: "hospital-management-system", component: "patient-registry" },
+      },
+    });
+    expect(questionResponse.statusCode).toBe(201);
+
+    const specificationTypes = ["prd", "adr", "api_contract", "test_plan"] as const;
+    for (const type of specificationTypes) {
+      const publication = await app.inject({
+        method: "POST",
+        url: `/v1/projects/${projectId}/artifacts`,
+        headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+        payload: {
+          idempotencyKey: `acceptance-hospital-${type}`,
+          title: `Hospital Management System ${type}`,
+          type,
+          summary: `Initial ${type} for the greenfield hospital platform.`,
+          body: `# Hospital Management System ${type}\n\nInitial governed specification for the hospital platform.`,
+          intendedReviewerIds: [demoPrincipals.architect.id],
+          citedDecisionIds: [],
+          requestReview: true,
+          scope: { repository: "hospital-management-system", component: "platform" },
+          runId,
+        },
+      });
+      expect(publication.statusCode).toBe(201);
+    }
+
+    const [projectsResponse, questionsResponse, artifactsResponse, finalRunResponse] = await Promise.all([
+      app.inject({
+        method: "GET",
+        url: "/v1/projects",
+        headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      }),
+      app.inject({
+        method: "GET",
+        url: `/v1/projects/${projectId}/questions`,
+        headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      }),
+      app.inject({
+        method: "GET",
+        url: `/v1/projects/${projectId}/artifacts`,
+        headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      }),
+      app.inject({
+        method: "GET",
+        url: `/v1/runs/${runId}`,
+        headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      }),
+    ]);
+    expect(projectsResponse.json<{ items: Array<{ id: string; name: string }> }>().items)
+      .toContainEqual(expect.objectContaining({ id: projectId, name: "Hospital Management System" }));
+    expect(questionsResponse.json<{ items: unknown[] }>().items).toHaveLength(1);
+    expect(artifactsResponse.json<{ items: Array<{ type: string }> }>().items.map((item) => item.type).sort())
+      .toEqual([...specificationTypes].sort());
+    expect(finalRunResponse.json<{
+      status: string;
+      questionIds: string[];
+      artifactVersionIds: string[];
+    }>()).toMatchObject({
+      status: "waiting_for_human",
+      questionIds: [expect.any(String)],
+      artifactVersionIds: [expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
+    });
+  });
+
+  it("routes role-owned questions to a matching fixed human principal", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-role-owned-question-001",
+        title: "Which patient registration test policy should be required?",
+        type: "decision",
+        category: "qa",
+        context: "The hospital registration flow needs a consistent test policy before release.",
+        whyItMatters: "Missing critical-path coverage can allow patient intake regressions into production.",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: ["QA Lead"],
+        risk: "high",
+        reversible: true,
+        blocking: true,
+        options: [
+          { key: "critical-path", label: "Require critical-path coverage", tradeoffs: "Adds release work but protects intake behavior." },
+          { key: "smoke-only", label: "Require smoke coverage only", tradeoffs: "Faster release with less regression confidence." },
+        ],
+        recommendationKey: "critical-path",
+        scope: { repository: "hospital-management-system", component: "patient-registration" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string; ownerIds: string[]; ownerRoles: string[] }>();
+    expect(question).toMatchObject({ ownerIds: [], ownerRoles: ["qa-lead"] });
+
+    const contributorDenied = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: { optionKey: "critical-path", rationale: "A contributor without the assigned QA role cannot accept this decision." },
+    });
+    expect(contributorDenied.statusCode).toBe(403);
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: { optionKey: "critical-path", rationale: "The QA lead accepts critical-path coverage for patient registration." },
+    });
+    expect(accepted.statusCode).toBe(201);
+  });
+
+  it("records a run-linked assumption and requires human resolution", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/runs`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-assumption-run-001",
+        client: "codex",
+        capability: "cli",
+        taskSummary: "Instrument transfer retry metrics",
+        scope: { component: "transfers" },
+        externalLinks: [],
+      },
+    });
+    const runId = startResponse.json<{ run: { id: string } }>().run.id;
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/assumptions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-assumption-001",
+        runId,
+        statement: "Internal retry metrics may use the existing transfer namespace.",
+        rationale: "The namespace is internal, reversible, and used by adjacent transfer metrics.",
+        category: "observability",
+        risk: "low",
+        confidence: "medium",
+        reversible: true,
+        reversalCost: "Rename the metric and update its internal dashboard query.",
+        scope: { component: "transfers" },
+        sourceLinks: [],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const assumption = createResponse.json<{ id: string; version: number }>();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/assumptions/${assumption.id}/resolve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        expectedVersion: assumption.version,
+        status: "confirmed",
+        rationale: "An agent cannot elevate its own assumption to confirmed project context.",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const confirmed = await app.inject({
+      method: "POST",
+      url: `/v1/assumptions/${assumption.id}/resolve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: assumption.version,
+        status: "confirmed",
+        rationale: "The namespace is consistent with the project's internal observability conventions.",
+      },
+    });
+    expect(confirmed.json<{ status: string }>().status).toBe("confirmed");
+
+    const context = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context?task=instrument%20retry%20metrics&categories=observability&component=transfers`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(context.json<{ items: Array<{ id: string; authority: string }> }>().items).toEqual([
+      expect.objectContaining({ id: assumption.id, authority: "confirmed" }),
+    ]);
+  });
+
+  it("exposes a durable run continuation after its blocking answer is accepted", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/runs`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-run-test-001",
+        client: "codex",
+        capability: "cli",
+        taskSummary: "Implement transfer retry handling",
+        scope: { component: "transfers" },
+        externalLinks: [],
+      },
+    });
+    expect(startResponse.statusCode).toBe(201);
+    const registration = startResponse.json<{
+      run: { id: string };
+      resumeContextKey: string;
+    }>();
+
+    const questionResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-run-question-001",
+        runId: registration.run.id,
+        title: "Which transfer failures should be retried automatically?",
+        type: "decision",
+        category: "architecture",
+        context: "The worker currently retries every transfer failure without classification.",
+        whyItMatters: "Permanent failures should not consume capacity or hide user action.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "transient", label: "Retry transient failures", tradeoffs: "Requires classification." },
+          { key: "all", label: "Retry all failures", tradeoffs: "May retry permanent errors." },
+        ],
+        recommendationKey: "transient",
+        scope: { component: "transfers" },
+      },
+    });
+    const question = questionResponse.json<{ id: string }>();
+
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/v1/runs/${registration.run.id}/continuation`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { resumeContextKey: registration.resumeContextKey },
+    });
+    expect(blocked.json<{ canContinue: boolean }>().canContinue).toBe(false);
+
+    await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        optionKey: "transient",
+        rationale: "Only transient failures should be retried using a bounded policy.",
+      },
+    });
+    const ready = await app.inject({
+      method: "POST",
+      url: `/v1/runs/${registration.run.id}/continuation`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { resumeContextKey: registration.resumeContextKey },
+    });
+    expect(ready.json<{ canContinue: boolean; acceptedDecisionIds: string[] }>()).toMatchObject({
+      canContinue: true,
+      acceptedDecisionIds: [expect.any(String)],
+    });
+  });
+
+  it("supports shared responses before the owner accepts a question and returns the decision as context", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-test-question-001",
+        title: "Which transfer failures should be retried automatically?",
+        type: "decision",
+        category: "architecture",
+        context: "The transfer implementation currently retries every failed request.",
+        whyItMatters: "Permanent failures should not create repeated load or hide the actual issue.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "transient", label: "Retry transient failures", tradeoffs: "Requires classification." },
+          { key: "all", label: "Retry all failures", tradeoffs: "May retry invalid requests." },
+        ],
+        recommendationKey: "transient",
+        scope: { component: "transfers" },
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const question = createResponse.json<{ id: string }>();
+
+    const proposedResponse = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/responses`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        optionKey: "transient",
+        answer: "Retry transient failures only.",
+        rationale: "Permanent failures should remain visible to the caller instead of consuming retry capacity.",
+      },
+    });
+    expect(proposedResponse.statusCode).toBe(201);
+    expect(proposedResponse.json<{ authorId: string; optionKey?: string }>()).toMatchObject({
+      authorId: demoPrincipals.contributor.id,
+      optionKey: "transient",
+    });
+
+    const discussion = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${question.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(discussion.json<{ responses: Array<{ authorId: string }> }>().responses).toEqual([
+      expect.objectContaining({ authorId: demoPrincipals.contributor.id }),
+    ]);
+
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        optionKey: "transient",
+        rationale: "Retry only failures that may succeed later, with bounded backoff and idempotency.",
+      },
+    });
+    expect(acceptResponse.statusCode).toBe(201);
+
+    const contextResponse = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context?task=implement%20transient%20transfer%20retries&component=transfers`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(contextResponse.statusCode).toBe(200);
+    expect(contextResponse.json<{ items: Array<{ title: string }> }>().items[0]?.title).toBe(
+      "Retry transient failures",
+    );
+  });
+
+  it("records threaded clarification comments with optimistic version checks", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-comment-question-001",
+        title: "Which export retention window should the service use?",
+        type: "decision",
+        category: "privacy",
+        context: "The export service needs a bounded retention policy before deletion.",
+        whyItMatters: "An unclear retention policy can keep sensitive data longer than intended.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "seven-days", label: "Seven days", tradeoffs: "Short retention with more re-exports." },
+          { key: "thirty-days", label: "Thirty days", tradeoffs: "More recovery time with greater exposure." },
+        ],
+        recommendationKey: "seven-days",
+        scope: { component: "export" },
+      },
+    });
+    const question = created.json<{ id: string; version: number }>();
+
+    const agentComment = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { expectedVersion: question.version, body: "Agents cannot impersonate human clarification participants." },
+    });
+    expect(agentComment.statusCode).toBe(403);
+
+    const rootComment = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version,
+        body: "Does this retention window apply to exports created by support as well?",
+      },
+    });
+    expect(rootComment.statusCode).toBe(201);
+    const root = rootComment.json<{ id: string }>();
+
+    const reply = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: question.version + 1,
+        parentCommentId: root.id,
+        body: "Yes. The same policy applies to support-created exports and is enforced at deletion time.",
+      },
+    });
+    expect(reply.statusCode).toBe(201);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${question.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json<{ status: string; comments: Array<{ id: string; parentCommentId?: string }> }>()).toMatchObject({
+      status: "in_discussion",
+      comments: [
+        expect.objectContaining({ id: root.id }),
+        expect.objectContaining({ parentCommentId: root.id }),
+      ],
+    });
+
+    const missingParent = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version + 2,
+        parentCommentId: "qcm_missing",
+        body: "This should reject a parent comment from another question.",
+      },
+    });
+    expect(missingParent.statusCode).toBe(422);
+  });
+
+  it("finds and reuses an exact project question instead of creating another interruption", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const input = {
+      idempotencyKey: "api-question-match-001",
+      title: "Which transfer failures should be retried automatically?",
+      type: "decision",
+      category: "architecture",
+      context: "The transfer worker retries every failed request without classifying the failure.",
+      whyItMatters: "Permanent failures should not consume capacity or hide required user action.",
+      intendedOwnerIds: [demoPrincipals.architect.id],
+      risk: "high",
+      reversible: false,
+      blocking: true,
+      options: [
+        { key: "transient", label: "Retry transient failures", tradeoffs: "Requires classification." },
+        { key: "all", label: "Retry all failures", tradeoffs: "May retry invalid work." },
+      ],
+      recommendationKey: "transient",
+      scope: { component: "transfers" },
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: input,
+    });
+    expect(first.statusCode).toBe(201);
+    const firstQuestion = first.json<{ id: string; submissionDisposition: string }>();
+    expect(firstQuestion.submissionDisposition).toBe("created");
+
+    const matches = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions/matches`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: input,
+    });
+    expect(matches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items).toEqual([
+      expect.objectContaining({ questionId: firstQuestion.id, matchKind: "exact" }),
+    ]);
+
+    const reused = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { ...input, idempotencyKey: "api-question-match-002" },
+    });
+    expect(reused.statusCode).toBe(200);
+    expect(reused.json<{ id: string; submissionDisposition: string }>()).toMatchObject({
+      id: firstQuestion.id,
+      submissionDisposition: "reused_pending",
+    });
+  });
+
+  it("prevents an agent from accepting its own recommendation", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${runtime.sampleQuestionId}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        optionKey: "transient-only",
+        rationale: "The agent should not be able to authorize this decision itself.",
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json<{ code: string }>().code).toBe("FORBIDDEN");
+  });
+
+  it("records a separate protected security review before the owner accepts", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-protected-review-question",
+        title: "Which privacy retention policy should apply?",
+        type: "decision",
+        category: "privacy",
+        context: "The hospital platform needs a bounded retention policy for protected patient data.",
+        whyItMatters: "Unreviewed retention rules can create privacy and compliance exposure.",
+        intendedOwnerIds: [demoPrincipals.qaLead.id],
+        intendedOwnerRoles: [],
+        risk: "protected",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "transient", label: "Retain only the governed period", tradeoffs: "Limits exposure but requires deletion controls." },
+          { key: "all", label: "Retain indefinitely", tradeoffs: "Simplifies retrieval but increases privacy risk." },
+        ],
+        recommendationKey: "transient",
+        scope: { component: "patient-records" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string; version: number }>();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: {
+        expectedVersion: question.version,
+        status: "approved",
+        rationale: "The owner cannot replace the separate security reviewer in this workflow.",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const review = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.securityReviewer.id },
+      payload: {
+        expectedVersion: question.version,
+        status: "approved",
+        rationale: "The retention policy is bounded and includes an enforceable deletion control.",
+      },
+    });
+    expect(review.statusCode).toBe(201);
+    expect(review.json<{ reviewerId: string; status: string }>()).toMatchObject({
+      reviewerId: demoPrincipals.securityReviewer.id,
+      status: "approved",
+    });
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/accept`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: {
+        optionKey: "transient",
+        rationale: "The owner accepts the protected policy after separate security review approval.",
+      },
+    });
+    expect(accepted.statusCode).toBe(201);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${question.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(detail.json<{ reviews: Array<{ reviewerId: string; status: string }> }>().reviews).toEqual([
+      expect.objectContaining({ reviewerId: demoPrincipals.securityReviewer.id, status: "approved" }),
+    ]);
+  });
+
+  it("publishes an agent specification, accepts only human approval, and includes it in context", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const publishResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/artifacts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-artifact-test-001",
+        title: "Transfer retry policy",
+        type: "adr",
+        summary: "Defines bounded retry behavior for transient transfer failures.",
+        body: "# Transfer retry policy\n\nRetry transient failures using bounded exponential backoff and idempotency keys.",
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "transfers" },
+      },
+    });
+    expect(publishResponse.statusCode).toBe(201);
+    const publication = publishResponse.json<{ version: { id: string } }>();
+
+    const deniedResponse = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { rationale: "An agent must not approve its own generated specification version." },
+    });
+    expect(deniedResponse.statusCode).toBe(403);
+
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { rationale: "The policy is bounded, observable, and safe for the transfer component." },
+    });
+    expect(approveResponse.statusCode).toBe(201);
+
+    const contextResponse = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context?task=implement%20transfer%20retry&categories=specification&component=transfers`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(contextResponse.statusCode).toBe(200);
+    expect(contextResponse.json<{ items: Array<{ id: string; type: string }> }>().items).toEqual([
+      expect.objectContaining({ id: publication.version.id, type: "artifact" }),
+    ]);
+  });
+});

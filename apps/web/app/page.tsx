@@ -1,0 +1,1412 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
+const defaultPrincipalId = "usr_architect";
+
+interface Project {
+  readonly id: string;
+  readonly name: string;
+  readonly decisionOwnerIds: readonly string[];
+}
+
+interface Principal {
+  readonly id: string;
+  readonly displayName: string;
+  readonly roles: readonly string[];
+}
+
+interface Option {
+  readonly key: string;
+  readonly label: string;
+  readonly tradeoffs: string;
+}
+
+interface QuestionResponse {
+  readonly id: string;
+  readonly authorId: string;
+  readonly answer: string;
+  readonly rationale: string;
+  readonly optionKey?: string;
+  readonly createdAt: string;
+}
+
+interface QuestionReview {
+  readonly id: string;
+  readonly reviewerId: string;
+  readonly reviewerRole: string;
+  readonly status: "approved" | "rejected";
+  readonly rationale: string;
+  readonly createdAt: string;
+}
+
+interface QuestionComment {
+  readonly id: string;
+  readonly parentCommentId?: string;
+  readonly authorId: string;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+interface Question {
+  readonly id: string;
+  readonly title: string;
+  readonly category: string;
+  readonly context: string;
+  readonly whyItMatters: string;
+  readonly risk: "low" | "medium" | "high" | "protected";
+  readonly blocking: boolean;
+  readonly options: readonly Option[];
+  readonly recommendationKey?: string;
+  readonly ownerIds: readonly string[];
+  readonly ownerRoles: readonly string[];
+  readonly status: string;
+  readonly decisionId?: string;
+  readonly responses: readonly QuestionResponse[];
+  readonly reviews: readonly QuestionReview[];
+  readonly comments: readonly QuestionComment[];
+  readonly acceptedResponseId?: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly version: number;
+  readonly inboxReasons?: readonly string[];
+  readonly canAccept?: boolean;
+}
+
+type InboxFilterKey = "status" | "risk" | "category" | "role";
+type InboxFilters = Partial<Record<InboxFilterKey, string>>;
+
+interface ArtifactVersion {
+  readonly id: string;
+  readonly version: number;
+  readonly summary: string;
+  readonly body: string;
+  readonly status: "draft" | "in_review" | "approved" | "superseded";
+  readonly createdById: string;
+  readonly createdAt: string;
+  readonly approvedById?: string;
+  readonly approvalRationale?: string;
+  readonly approvedAt?: string;
+}
+
+interface Artifact {
+  readonly id: string;
+  readonly title: string;
+  readonly type: "prd" | "adr" | "api_contract" | "test_plan";
+  readonly scope: Readonly<Record<string, string>>;
+  readonly reviewerIds: readonly string[];
+  readonly currentVersionId: string;
+  readonly approvedVersionId?: string;
+  readonly versions: readonly ArtifactVersion[];
+}
+
+interface Notification {
+  readonly id: string;
+  readonly projectId: string;
+  readonly recipientId: string;
+  readonly type:
+    | "question_assigned"
+    | "question_response"
+    | "question_comment"
+    | "question_review"
+    | "question_accepted"
+    | "artifact_review_requested"
+    | "artifact_approved";
+  readonly title: string;
+  readonly body: string;
+  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "artifact" | "artifact_version";
+  readonly targetId: string;
+  readonly createdAt: string;
+  readonly readAt?: string;
+}
+
+interface Decision {
+  readonly id: string;
+  readonly questionId: string;
+  readonly answer: string;
+  readonly rationale: string;
+  readonly category: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly ownerId: string;
+  readonly status: "active" | "superseded" | "expired" | "revoked";
+  readonly createdAt: string;
+  readonly reviewAt: string;
+}
+
+interface Assumption {
+  readonly id: string;
+  readonly runId?: string;
+  readonly statement: string;
+  readonly rationale: string;
+  readonly category: string;
+  readonly risk: "low" | "medium" | "high" | "protected";
+  readonly confidence: "low" | "medium" | "high";
+  readonly reversible: boolean;
+  readonly reversalCost: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly sourceLinks: readonly string[];
+  readonly status: "active" | "confirmed" | "rejected" | "expired" | "superseded";
+  readonly createdById: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly resolutionRationale?: string;
+  readonly version: number;
+}
+
+interface AgentRun {
+  readonly id: string;
+  readonly agentId: string;
+  readonly client: string;
+  readonly capability: string;
+  readonly taskSummary: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly status: "running" | "waiting_for_human" | "completed" | "failed" | "cancelled";
+  readonly contextSnapshotIds: readonly string[];
+  readonly questionIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
+  readonly assumptionIds: readonly string[];
+  readonly resultLinks: readonly string[];
+  readonly startedAt: string;
+  readonly updatedAt: string;
+  readonly endedAt?: string;
+  readonly summary?: string;
+  readonly continuesRunId?: string;
+  readonly version: number;
+}
+
+type View =
+  | "inbox"
+  | "questions"
+  | "specifications"
+  | "notifications"
+  | "decisions"
+  | "assumptions"
+  | "runs";
+
+async function bridgeFetch<T>(
+  path: string,
+  init?: RequestInit,
+  actingPrincipalId = defaultPrincipalId,
+): Promise<T> {
+  const response = await fetch(`${apiUrl}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
+      "x-bridge-principal-id": actingPrincipalId,
+      ...init?.headers,
+    },
+  });
+  const body: unknown = await response.json();
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body !== null && "message" in body
+        ? String(body.message)
+        : "Bridge request failed.";
+    throw new Error(message);
+  }
+  return body as T;
+}
+
+function currentVersion(artifact: Artifact | undefined): ArtifactVersion | undefined {
+  return artifact?.versions.find((version) => version.id === artifact.currentVersionId);
+}
+
+export default function Home() {
+  const [view, setView] = useState<View>("inbox");
+  const [principals, setPrincipals] = useState<readonly Principal[]>([]);
+  const [activePrincipalId, setActivePrincipalId] = useState(defaultPrincipalId);
+  const [projects, setProjects] = useState<readonly Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [questions, setQuestions] = useState<readonly Question[]>([]);
+  const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
+  const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
+  const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
+  const [notifications, setNotifications] = useState<readonly Notification[]>([]);
+  const [decisions, setDecisions] = useState<readonly Decision[]>([]);
+  const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
+  const [runs, setRuns] = useState<readonly AgentRun[]>([]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
+  const [selectedDecisionId, setSelectedDecisionId] = useState<string>();
+  const [selectedAssumptionId, setSelectedAssumptionId] = useState<string>();
+  const [selectedRunId, setSelectedRunId] = useState<string>();
+  const [selectedOption, setSelectedOption] = useState<string>();
+  const [responseOption, setResponseOption] = useState<string>();
+  const [responseAnswer, setResponseAnswer] = useState("");
+  const [responseRationale, setResponseRationale] = useState("");
+  const [commentBody, setCommentBody] = useState("");
+  const [replyToCommentId, setReplyToCommentId] = useState<string>();
+  const [reviewStatus, setReviewStatus] = useState<"approved" | "rejected">("approved");
+  const [reviewRationale, setReviewRationale] = useState("");
+  const [rationale, setRationale] = useState(
+    "Retry only transient failures with bounded exponential backoff and idempotency keys.",
+  );
+  const [approvalRationale, setApprovalRationale] = useState(
+    "The specification accurately records the accepted approach and its operational constraints.",
+  );
+  const [questionsLoading, setQuestionsLoading] = useState(true);
+  const [artifactsLoading, setArtifactsLoading] = useState(true);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [referenceDataLoading, setReferenceDataLoading] = useState(true);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [principalsLoading, setPrincipalsLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const activePrincipal = useMemo(
+    () => principals.find((principal) => principal.id === activePrincipalId),
+    [activePrincipalId, principals],
+  );
+
+  const inboxFilterOptions = useMemo(() => ({
+    categories: [...new Set(questions.map((question) => question.category))].sort((left, right) => left.localeCompare(right)),
+    roles: [...new Set(questions.flatMap((question) => question.ownerRoles))].sort((left, right) => left.localeCompare(right)),
+  }), [questions]);
+  const hasInboxFilters = Object.values(inboxFilters).some(Boolean);
+
+  const loadPrincipals = useCallback(async () => {
+    setPrincipalsLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly Principal[] }>(
+        "/v1/principals",
+        undefined,
+        defaultPrincipalId,
+      );
+      setPrincipals(response.items);
+      setActivePrincipalId((current) =>
+        response.items.some((principal) => principal.id === current)
+          ? current
+          : response.items[0]?.id ?? defaultPrincipalId,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load local reviewers.");
+    } finally {
+      setPrincipalsLoading(false);
+    }
+  }, []);
+
+  const loadProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly Project[] }>(
+        "/v1/projects",
+        undefined,
+        activePrincipalId,
+      );
+      setProjects(response.items);
+      setSelectedProjectId((current) =>
+        current && response.items.some((project) => project.id === current)
+          ? current
+          : response.items[0]?.id,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load Bridge projects.");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, [activePrincipalId]);
+
+  const loadQuestions = useCallback(async () => {
+    if (!selectedProjectId) {
+      setQuestions([]);
+      setInboxQuestions([]);
+      setQuestionsLoading(false);
+      return;
+    }
+    setQuestionsLoading(true);
+    setError(undefined);
+    try {
+      const inboxQuery = new URLSearchParams(
+        Object.entries(inboxFilters).filter((entry): entry is [string, string] => Boolean(entry[1])),
+      ).toString();
+      const [questionsResponse, inboxResponse] = await Promise.all([
+        bridgeFetch<{ items: readonly Question[] }>(
+          `/v1/projects/${selectedProjectId}/questions`,
+          undefined,
+          activePrincipalId,
+        ),
+        bridgeFetch<{ items: readonly Question[] }>(
+          `/v1/projects/${selectedProjectId}/inbox${inboxQuery ? `?${inboxQuery}` : ""}`,
+          undefined,
+          activePrincipalId,
+        ),
+      ]);
+      setQuestions(questionsResponse.items);
+      setInboxQuestions(inboxResponse.items);
+      setSelectedId((current) =>
+        current && questionsResponse.items.some((question) => question.id === current)
+          ? current
+          : questionsResponse.items[0]?.id,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load Bridge questions.");
+    } finally {
+      setQuestionsLoading(false);
+    }
+  }, [activePrincipalId, inboxFilters, selectedProjectId]);
+
+  const loadArtifacts = useCallback(async () => {
+    if (!selectedProjectId) {
+      setArtifacts([]);
+      setArtifactsLoading(false);
+      return;
+    }
+    setArtifactsLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly Artifact[] }>(
+        `/v1/projects/${selectedProjectId}/artifacts`,
+        undefined,
+        activePrincipalId,
+      );
+      setArtifacts(response.items);
+      setSelectedArtifactId((current) =>
+        current && response.items.some((artifact) => artifact.id === current)
+          ? current
+          : response.items[0]?.id,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load specifications.");
+    } finally {
+      setArtifactsLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!selectedProjectId) {
+      setNotifications([]);
+      setNotificationsLoading(false);
+      return;
+    }
+    setNotificationsLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly Notification[] }>(
+        `/v1/notifications?projectId=${encodeURIComponent(selectedProjectId)}`,
+        undefined,
+        activePrincipalId,
+      );
+      setNotifications(response.items);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load notifications.");
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const loadReferenceData = useCallback(async () => {
+    if (!selectedProjectId) {
+      setDecisions([]);
+      setAssumptions([]);
+      setRuns([]);
+      setReferenceDataLoading(false);
+      return;
+    }
+    setReferenceDataLoading(true);
+    setError(undefined);
+    try {
+      const [decisionResponse, assumptionResponse, runResponse] = await Promise.all([
+        bridgeFetch<{ items: readonly Decision[] }>(
+          `/v1/projects/${selectedProjectId}/decisions`,
+          undefined,
+          activePrincipalId,
+        ),
+        bridgeFetch<{ items: readonly Assumption[] }>(
+          `/v1/projects/${selectedProjectId}/assumptions`,
+          undefined,
+          activePrincipalId,
+        ),
+        bridgeFetch<{ items: readonly AgentRun[] }>(
+          `/v1/projects/${selectedProjectId}/runs`,
+          undefined,
+          activePrincipalId,
+        ),
+      ]);
+      setDecisions(decisionResponse.items);
+      setAssumptions(assumptionResponse.items);
+      setRuns(runResponse.items);
+      setSelectedDecisionId((current) =>
+        current && decisionResponse.items.some((decision) => decision.id === current)
+          ? current
+          : decisionResponse.items[0]?.id,
+      );
+      setSelectedAssumptionId((current) =>
+        current && assumptionResponse.items.some((assumption) => assumption.id === current)
+          ? current
+          : assumptionResponse.items[0]?.id,
+      );
+      setSelectedRunId((current) =>
+        current && runResponse.items.some((run) => run.id === current)
+          ? current
+          : runResponse.items[0]?.id,
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project records.");
+    } finally {
+      setReferenceDataLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const requestedView = parameters.get("view");
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs"].includes(requestedView ?? "")) {
+      setView(requestedView as View);
+    }
+    const projectId = parameters.get("projectId");
+    const questionId = parameters.get("questionId");
+    const artifactId = parameters.get("artifactId");
+    const decisionId = parameters.get("decisionId");
+    const assumptionId = parameters.get("assumptionId");
+    const runId = parameters.get("runId");
+    if (projectId) setSelectedProjectId(projectId);
+    if (questionId) setSelectedId(questionId);
+    if (artifactId) setSelectedArtifactId(artifactId);
+    if (decisionId) setSelectedDecisionId(decisionId);
+    if (assumptionId) setSelectedAssumptionId(assumptionId);
+    if (runId) setSelectedRunId(runId);
+  }, []);
+
+  useEffect(() => {
+    void loadPrincipals();
+  }, [loadPrincipals]);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    void loadQuestions();
+    void loadArtifacts();
+    void loadNotifications();
+    void loadReferenceData();
+  }, [loadArtifacts, loadNotifications, loadQuestions, loadReferenceData]);
+
+  const markNotificationRead = useCallback(async (notificationId: string) => {
+    const updated = await bridgeFetch<Notification>(`/v1/notifications/${notificationId}/read`, {
+      method: "POST",
+    }, activePrincipalId);
+    setNotifications((current) => current.map((notification) =>
+      notification.id === updated.id ? updated : notification,
+    ));
+    return updated;
+  }, [activePrincipalId]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    await bridgeFetch<{ markedCount: number }>("/v1/notifications/read-all", {
+      method: "POST",
+      body: JSON.stringify({ projectId: selectedProjectId }),
+    }, activePrincipalId);
+    await loadNotifications();
+  }, [activePrincipalId, loadNotifications, selectedProjectId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId),
+    [projects, selectedProjectId],
+  );
+
+  const visibleQuestions = view === "inbox" ? inboxQuestions : questions;
+  const selectedQuestion = useMemo(
+    () => visibleQuestions.find((question) => question.id === selectedId) ?? visibleQuestions[0],
+    [selectedId, visibleQuestions],
+  );
+  const selectedQuestionInboxItem = useMemo(
+    () => (selectedQuestion ? inboxQuestions.find((question) => question.id === selectedQuestion.id) : undefined),
+    [inboxQuestions, selectedQuestion],
+  );
+  const selectedArtifact = useMemo(
+    () => artifacts.find((artifact) => artifact.id === selectedArtifactId),
+    [artifacts, selectedArtifactId],
+  );
+  const selectedArtifactVersion = currentVersion(selectedArtifact);
+  const selectedDecision = useMemo(
+    () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
+    [decisions, selectedDecisionId],
+  );
+  const selectedAssumption = useMemo(
+    () => assumptions.find((assumption) => assumption.id === selectedAssumptionId) ?? assumptions[0],
+    [assumptions, selectedAssumptionId],
+  );
+  const selectedRun = useMemo(
+    () => runs.find((run) => run.id === selectedRunId) ?? runs[0],
+    [runs, selectedRunId],
+  );
+  const viewTitle: Record<View, string> = {
+    inbox: "My Inbox",
+    questions: "Questions",
+    specifications: "Specifications",
+    notifications: "Notifications",
+    decisions: "Decisions",
+    assumptions: "Assumptions",
+    runs: "Agent Runs",
+  };
+
+  useEffect(() => {
+    if (selectedQuestion) {
+      setSelectedOption(selectedQuestion.recommendationKey ?? selectedQuestion.options[0]?.key);
+      setResponseOption(undefined);
+      setResponseAnswer("");
+      setResponseRationale("");
+      setCommentBody("");
+      setReplyToCommentId(undefined);
+      setReviewStatus("approved");
+      setReviewRationale("");
+    }
+  }, [selectedQuestion]);
+
+  const proposeAnswer = async () => {
+    if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/responses`, {
+        method: "POST",
+        body: JSON.stringify({
+          answer: responseAnswer,
+          rationale: responseRationale,
+          ...(responseOption ? { optionKey: responseOption } : {}),
+        }),
+      }, activePrincipalId);
+      setResponseAnswer("");
+      setResponseRationale("");
+      setResponseOption(undefined);
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to add your response.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reviewQuestion = async () => {
+    if (!selectedQuestion || selectedQuestion.risk !== "protected" || reviewRationale.trim().length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          status: reviewStatus,
+          rationale: reviewRationale,
+        }),
+      }, activePrincipalId);
+      setReviewRationale("");
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to record security review.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addQuestionComment = async () => {
+    if (!selectedQuestion || commentBody.trim().length < 2) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/comments`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          body: commentBody,
+          ...(replyToCommentId ? { parentCommentId: replyToCommentId } : {}),
+        }),
+      }, activePrincipalId);
+      setCommentBody("");
+      setReplyToCommentId(undefined);
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to add clarification comment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const acceptDecision = async () => {
+    if (!selectedQuestion || !selectedOption || rationale.trim().length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ optionKey: selectedOption, rationale }),
+      }, activePrincipalId);
+      await Promise.all([loadQuestions(), loadNotifications(), loadReferenceData()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to accept decision.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const approveSpecification = async () => {
+    if (!selectedArtifactVersion || approvalRationale.trim().length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/artifact-versions/${selectedArtifactVersion.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ rationale: approvalRationale }),
+      }, activePrincipalId);
+      await Promise.all([loadArtifacts(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to approve specification.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const updateInboxFilter = (key: InboxFilterKey, value: string) => {
+    setInboxFilters((current) => ({
+      ...current,
+      ...(value ? { [key]: value } : { [key]: undefined }),
+    }));
+  };
+
+  const pendingQuestions = inboxQuestions.length;
+  const pendingSpecifications = artifacts.filter((artifact) =>
+    ["draft", "in_review"].includes(currentVersion(artifact)?.status ?? ""),
+  ).length;
+  const pendingNotifications = notifications.filter((notification) => !notification.readAt).length;
+
+  const openNotification = async (notification: Notification) => {
+    setError(undefined);
+    try {
+      await markNotificationRead(notification.id);
+      if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
+        setView("specifications");
+        const artifact = notification.targetType === "artifact"
+          ? artifacts.find((candidate) => candidate.id === notification.targetId)
+          : artifacts.find((candidate) => candidate.versions.some((version) => version.id === notification.targetId));
+        if (artifact) setSelectedArtifactId(artifact.id);
+      } else {
+        setView("questions");
+        const question = notification.targetType === "question"
+          ? questions.find((candidate) => candidate.id === notification.targetId)
+          : questions.find((candidate) =>
+            candidate.responses.some((response) => response.id === notification.targetId) ||
+            candidate.comments.some((comment) => comment.id === notification.targetId) ||
+            candidate.reviews.some((review) => review.id === notification.targetId) ||
+            candidate.decisionId === notification.targetId,
+          );
+        if (question) setSelectedId(question.id);
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to open notification.");
+    }
+  };
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span>B</span> Bridge</div>
+        <div className="project">
+          <label htmlFor="bridge-project"><small>Project</small></label>
+          <select
+            id="bridge-project"
+            value={selectedProjectId ?? ""}
+            disabled={projectsLoading || projects.length === 0}
+            onChange={(event) => setSelectedProjectId(event.target.value)}
+          >
+            {projects.length === 0 ? <option value="">No projects</option> : null}
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="reviewer">
+          <label htmlFor="bridge-reviewer"><small>Reviewing as</small></label>
+          <select
+            id="bridge-reviewer"
+            value={activePrincipalId}
+            disabled={principalsLoading || principals.length === 0}
+            onChange={(event) => setActivePrincipalId(event.target.value)}
+          >
+            {principals.length === 0 ? <option value="">No reviewers</option> : null}
+            {principals.map((principal) => (
+              <option key={principal.id} value={principal.id}>{principal.displayName}</option>
+            ))}
+          </select>
+          <small>{activePrincipal?.roles.join(" · ") ?? "Loading reviewer roles…"}</small>
+        </div>
+        <nav aria-label="Bridge navigation">
+          <button
+            type="button"
+            aria-current={view === "inbox" ? "page" : undefined}
+            onClick={() => setView("inbox")}
+          >Inbox <span>{pendingQuestions}</span></button>
+          <button
+            type="button"
+            aria-current={view === "notifications" ? "page" : undefined}
+            onClick={() => setView("notifications")}
+          >Notifications <span>{pendingNotifications}</span></button>
+          <button
+            type="button"
+            aria-current={view === "questions" ? "page" : undefined}
+            onClick={() => setView("questions")}
+          >Questions</button>
+          <button
+            type="button"
+            aria-current={view === "decisions" ? "page" : undefined}
+            onClick={() => setView("decisions")}
+          >Decisions</button>
+          <button
+            type="button"
+            aria-current={view === "specifications" ? "page" : undefined}
+            onClick={() => setView("specifications")}
+          >Specifications <span>{pendingSpecifications}</span></button>
+          <button
+            type="button"
+            aria-current={view === "assumptions" ? "page" : undefined}
+            onClick={() => setView("assumptions")}
+          >Assumptions</button>
+          <button
+            type="button"
+            aria-current={view === "runs" ? "page" : undefined}
+            onClick={() => setView("runs")}
+          >Agent Runs</button>
+        </nav>
+        <div className="identity"><strong>{activePrincipal?.displayName ?? "Local reviewer"}</strong><small>Prototype identity</small></div>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <strong>{viewTitle[view]}</strong>
+          <span>{selectedProject?.name ?? "Select a project"}</span>
+        </header>
+        <div className="content">
+          {error ? <div className="error" role="alert">{error}</div> : null}
+
+          {view === "notifications" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Notifications for this project</h1>
+                  <p>Questions, discussion, protected reviews, and specification changes that need your attention.</p>
+                </div>
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={notificationsLoading || pendingNotifications === 0}
+                  onClick={() => void markAllNotificationsRead()}
+                >Mark all read</button>
+              </div>
+              {notificationsLoading ? <div className="empty">Loading notifications…</div> : null}
+              {!notificationsLoading && notifications.length === 0 ? (
+                <div className="empty">No notifications for this project yet.</div>
+              ) : null}
+              {!notificationsLoading && notifications.length > 0 ? (
+                <div className="notification-list" aria-label="Notifications">
+                  {notifications.map((notification) => (
+                    <button
+                      type="button"
+                      key={notification.id}
+                      className={notification.readAt ? "notification-row" : "notification-row unread"}
+                      onClick={() => void openNotification(notification)}
+                    >
+                      <span className="notification-dot" aria-hidden="true" />
+                      <span className="notification-copy">
+                        <strong>{notification.title}</strong>
+                        <span>{notification.body}</span>
+                        <small>{new Date(notification.createdAt).toLocaleString()} · {notification.type.replaceAll("_", " ")}</small>
+                      </span>
+                      <span className="notification-state">{notification.readAt ? "Read" : "Unread"}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : view === "decisions" ? (
+            <>
+              <div className="title-row">
+                <div><h1>Accepted project decisions</h1><p>Only human-accepted answers appear here as authoritative context.</p></div>
+                <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
+              </div>
+              {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
+              {!referenceDataLoading && decisions.length === 0 ? <div className="empty">No decisions have been accepted for this project.</div> : null}
+              {!referenceDataLoading && decisions.length > 0 ? (
+                <div className="decision-layout">
+                  <div className="question-list" aria-label="Accepted decisions">
+                    {decisions.map((decision) => (
+                      <button
+                        type="button"
+                        key={decision.id}
+                        className={decision.id === selectedDecision?.id ? "question-row selected" : "question-row"}
+                        onClick={() => setSelectedDecisionId(decision.id)}
+                      >
+                        <span className="document-mark" aria-hidden="true">✓</span>
+                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}</small></span>
+                        <span className={`status status-${decision.status}`}>{decision.status}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedDecision ? (
+                    <article className="question-detail">
+                      <div className="detail-heading">
+                        <div><small>{selectedDecision.id} · {selectedDecision.category}</small><h2>{selectedDecision.answer}</h2></div>
+                        <span className={`status status-${selectedDecision.status}`}>{selectedDecision.status}</span>
+                      </div>
+                      <section><h3>Decision rationale</h3><p>{selectedDecision.rationale}</p></section>
+                      <section>
+                        <h3>Authority and review</h3>
+                        <div className="spec-meta">
+                          <span>Accepted by {selectedDecision.ownerId}</span>
+                          <span>Accepted {new Date(selectedDecision.createdAt).toLocaleString()}</span>
+                          <span>Review by {new Date(selectedDecision.reviewAt).toLocaleDateString()}</span>
+                        </div>
+                      </section>
+                      <button
+                        className="secondary"
+                        type="button"
+                        onClick={() => {
+                          setSelectedId(selectedDecision.questionId);
+                          setView("questions");
+                        }}
+                      >Open source question</button>
+                    </article>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : view === "assumptions" ? (
+            <>
+              <div className="title-row">
+                <div><h1>Visible project assumptions</h1><p>Assumptions are temporary premises with explicit risk, expiry, and reversal cost.</p></div>
+                <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
+              </div>
+              {referenceDataLoading ? <div className="empty">Loading assumptions…</div> : null}
+              {!referenceDataLoading && assumptions.length === 0 ? <div className="empty">No assumptions have been recorded for this project.</div> : null}
+              {!referenceDataLoading && assumptions.length > 0 ? (
+                <div className="decision-layout">
+                  <div className="question-list" aria-label="Project assumptions">
+                    {assumptions.map((assumption) => (
+                      <button
+                        type="button"
+                        key={assumption.id}
+                        className={assumption.id === selectedAssumption?.id ? "question-row selected" : "question-row"}
+                        onClick={() => setSelectedAssumptionId(assumption.id)}
+                      >
+                        <span className={`risk risk-${assumption.risk}`} aria-hidden="true" />
+                        <span><strong>{assumption.statement}</strong><small>{assumption.category} · confidence {assumption.confidence}</small></span>
+                        <span className={`status status-${assumption.status}`}>{assumption.status}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedAssumption ? (
+                    <article className="question-detail">
+                      <div className="detail-heading">
+                        <div><small>{selectedAssumption.id} · version {selectedAssumption.version}</small><h2>{selectedAssumption.statement}</h2></div>
+                        <span className={`status status-${selectedAssumption.status}`}>{selectedAssumption.status}</span>
+                      </div>
+                      <section><h3>Rationale</h3><p>{selectedAssumption.rationale}</p></section>
+                      <section>
+                        <h3>Risk and reversibility</h3>
+                        <div className="impact"><strong>Reversal cost:</strong> {selectedAssumption.reversalCost}</div>
+                        <div className="spec-meta">
+                          <span>Risk: {selectedAssumption.risk}</span>
+                          <span>Confidence: {selectedAssumption.confidence}</span>
+                          <span>Expires: {new Date(selectedAssumption.expiresAt).toLocaleString()}</span>
+                          <span>Created by {selectedAssumption.createdById}</span>
+                        </div>
+                      </section>
+                      {selectedAssumption.resolutionRationale ? (
+                        <section><h3>Resolution</h3><p>{selectedAssumption.resolutionRationale}</p></section>
+                      ) : null}
+                      {selectedAssumption.runId ? (
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => {
+                            setSelectedRunId(selectedAssumption.runId);
+                            setView("runs");
+                          }}
+                        >Open source run</button>
+                      ) : null}
+                    </article>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : view === "runs" ? (
+            <>
+              <div className="title-row">
+                <div><h1>Agent runs and durable handoffs</h1><p>Runs link questions, assumptions, context snapshots, specifications, and completion outcomes.</p></div>
+                <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
+              </div>
+              {referenceDataLoading ? <div className="empty">Loading agent runs…</div> : null}
+              {!referenceDataLoading && runs.length === 0 ? <div className="empty">No agent runs have been registered for this project.</div> : null}
+              {!referenceDataLoading && runs.length > 0 ? (
+                <div className="decision-layout">
+                  <div className="question-list" aria-label="Agent runs">
+                    {runs.map((run) => (
+                      <button
+                        type="button"
+                        key={run.id}
+                        className={run.id === selectedRun?.id ? "question-row selected" : "question-row"}
+                        onClick={() => setSelectedRunId(run.id)}
+                      >
+                        <span className="document-mark" aria-hidden="true">↻</span>
+                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · version {run.version}</small></span>
+                        <span className={`status status-${run.status}`}>{run.status.replaceAll("_", " ")}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedRun ? (
+                    <article className="question-detail">
+                      <div className="detail-heading">
+                        <div><small>{selectedRun.id} · {selectedRun.client}</small><h2>{selectedRun.taskSummary}</h2></div>
+                        <span className={`status status-${selectedRun.status}`}>{selectedRun.status.replaceAll("_", " ")}</span>
+                      </div>
+                      <section>
+                        <h3>Run provenance</h3>
+                        <div className="spec-meta">
+                          <span>Agent: {selectedRun.agentId}</span>
+                          <span>Capability: {selectedRun.capability}</span>
+                          <span>Started: {new Date(selectedRun.startedAt).toLocaleString()}</span>
+                          <span>Updated: {new Date(selectedRun.updatedAt).toLocaleString()}</span>
+                        </div>
+                      </section>
+                      <section>
+                        <h3>Linked records</h3>
+                        <div className="spec-meta">
+                          <span>{selectedRun.contextSnapshotIds.length} context snapshots</span>
+                          <span>{selectedRun.questionIds.length} questions</span>
+                          <span>{selectedRun.assumptionIds.length} assumptions</span>
+                          <span>{selectedRun.artifactVersionIds.length} specification versions</span>
+                        </div>
+                      </section>
+                      {selectedRun.summary ? <section><h3>Outcome</h3><p>{selectedRun.summary}</p></section> : null}
+                      {selectedRun.questionIds[0] ? (
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => {
+                            setSelectedId(selectedRun.questionIds[0]);
+                            setView("questions");
+                          }}
+                        >Open linked question</button>
+                      ) : null}
+                    </article>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : view !== "specifications" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>{view === "inbox" ? "Decisions needing your authority" : "All project questions"}</h1>
+                  <p>{view === "inbox"
+                    ? "Agent recommendations remain advisory until a human owner accepts an answer."
+                    : "Shared questions remain visible to the whole project team; use My Inbox for questions routed to you."}</p>
+                </div>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => void Promise.all([loadProjects(), loadQuestions(), loadArtifacts(), loadNotifications()])}
+                >Refresh</button>
+              </div>
+
+              {view === "inbox" ? (
+                <div className="filter-bar" aria-label="Inbox filters">
+                  <label htmlFor="inbox-status">State</label>
+                  <select
+                    id="inbox-status"
+                    value={inboxFilters.status ?? ""}
+                    onChange={(event) => updateInboxFilter("status", event.target.value)}
+                  >
+                    <option value="">All states</option>
+                    <option value="open">Open</option>
+                    <option value="in_discussion">In discussion</option>
+                  </select>
+                  <label htmlFor="inbox-risk">Risk</label>
+                  <select
+                    id="inbox-risk"
+                    value={inboxFilters.risk ?? ""}
+                    onChange={(event) => updateInboxFilter("risk", event.target.value)}
+                  >
+                    <option value="">All risk</option>
+                    <option value="protected">Protected</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <label htmlFor="inbox-category">Category</label>
+                  <select
+                    id="inbox-category"
+                    value={inboxFilters.category ?? ""}
+                    onChange={(event) => updateInboxFilter("category", event.target.value)}
+                  >
+                    <option value="">All categories</option>
+                    {inboxFilterOptions.categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                  </select>
+                  <label htmlFor="inbox-role">Role</label>
+                  <select
+                    id="inbox-role"
+                    value={inboxFilters.role ?? ""}
+                    onChange={(event) => updateInboxFilter("role", event.target.value)}
+                  >
+                    <option value="">All roles</option>
+                    {inboxFilterOptions.roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                  {hasInboxFilters ? (
+                    <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {questionsLoading ? <div className="empty">Loading Bridge questions…</div> : null}
+              {!questionsLoading && visibleQuestions.length === 0 ? (
+                <div className="empty">
+                  {view === "inbox"
+                    ? hasInboxFilters
+                      ? "No questions match these inbox filters. Clear a filter or open Questions to browse the shared project queue."
+                      : "No questions need your authority right now. Open Questions to browse the shared project queue."
+                    : "No questions have been raised for this project."}
+                </div>
+              ) : null}
+
+              {!questionsLoading && visibleQuestions.length > 0 ? (
+                <div className="decision-layout">
+                  <div className="question-list" aria-label="Question inbox">
+                    {visibleQuestions.map((question) => (
+                      <button
+                        type="button"
+                        key={question.id}
+                        className={question.id === selectedId ? "question-row selected" : "question-row"}
+                        onClick={() => setSelectedId(question.id)}
+                      >
+                        <span className={`risk risk-${question.risk}`} aria-hidden="true" />
+                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}</small></span>
+                        <span className={`status status-${question.status}`}>{question.status.replaceAll("_", " ")}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedQuestion ? (
+                    <article className="question-detail">
+                      <div className="detail-heading">
+                        <div><small>{selectedQuestion.id} · {selectedQuestion.category}</small><h2>{selectedQuestion.title}</h2></div>
+                        <span className={`status status-${selectedQuestion.status}`}>{selectedQuestion.status}</span>
+                      </div>
+
+                      <section>
+                        <h3>Context and impact</h3>
+                        <p>{selectedQuestion.context}</p>
+                        <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
+                        {selectedQuestion.ownerRoles.length > 0 ? (
+                          <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
+                        ) : null}
+                        {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
+                          <div className="inbox-reason">
+                            <strong>Inbox routing:</strong> {selectedQuestion.inboxReasons.map((reason) => reason.replaceAll("_", " ")).join(" · ")}
+                            {selectedQuestion.canAccept === false ? " · security review is also required before acceptance" : ""}
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section>
+                        <h3>Options</h3>
+                        <div className="options">
+                          {selectedQuestion.options.map((option) => (
+                            <button
+                              type="button"
+                              className={option.key === selectedOption ? "option selected" : "option"}
+                              key={option.key}
+                              aria-pressed={option.key === selectedOption}
+                              onClick={() => setSelectedOption(option.key)}
+                              disabled={selectedQuestion.status === "accepted"}
+                            >
+                              <strong>{option.label}{option.key === selectedQuestion.recommendationKey ? <em>Agent recommendation</em> : null}</strong>
+                              <span>{option.tradeoffs}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section>
+                        <h3>Team discussion <span className="section-count">{selectedQuestion.responses.length}</span></h3>
+                        {selectedQuestion.responses.length === 0 ? (
+                          <p className="muted-copy">No responses yet. Share your perspective so the decision owner can compare the trade-offs.</p>
+                        ) : (
+                          <div className="response-list">
+                            {selectedQuestion.responses.map((response) => {
+                              const responseOptionLabel = response.optionKey
+                                ? selectedQuestion.options.find((option) => option.key === response.optionKey)?.label
+                                : undefined;
+                              return (
+                                <article className="response-card" key={response.id}>
+                                  <div className="response-heading">
+                                    <strong>{response.authorId}</strong>
+                                    <small>{new Date(response.createdAt).toLocaleString()}</small>
+                                  </div>
+                                  {responseOptionLabel ? <span className="response-option">Selected: {responseOptionLabel}</span> : null}
+                                  <p>{response.answer}</p>
+                                  <div className="response-rationale"><strong>Rationale:</strong> {response.rationale}</div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {selectedQuestion.status !== "accepted" ? (
+                          <div className="response-form">
+                            <label htmlFor="response-option">Optional option</label>
+                            <select
+                              id="response-option"
+                              value={responseOption ?? ""}
+                              onChange={(event) => setResponseOption(event.target.value || undefined)}
+                            >
+                              <option value="">Free-form answer</option>
+                              {selectedQuestion.options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+                            </select>
+                            <label htmlFor="response-answer">Your answer</label>
+                            <textarea
+                              id="response-answer"
+                              value={responseAnswer}
+                              onChange={(event) => setResponseAnswer(event.target.value)}
+                              placeholder="Share the answer you recommend."
+                            />
+                            <label htmlFor="response-rationale">Why</label>
+                            <textarea
+                              id="response-rationale"
+                              value={responseRationale}
+                              onChange={(event) => setResponseRationale(event.target.value)}
+                              placeholder="Explain the trade-off or evidence behind your answer."
+                            />
+                            <button
+                              className="secondary"
+                              type="button"
+                              disabled={submitting || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2}
+                              onClick={() => void proposeAnswer()}
+                            >
+                              {submitting ? "Adding response…" : "Add response"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section>
+                        <h3>Clarifications <span className="section-count">{selectedQuestion.comments.length}</span></h3>
+                        {selectedQuestion.comments.length === 0 ? (
+                          <p className="muted-copy">No clarification thread yet. Ask a focused follow-up so the team can resolve missing context without reopening the agent session.</p>
+                        ) : (
+                          <div className="comment-list">
+                            {selectedQuestion.comments.map((comment) => {
+                              const parent = comment.parentCommentId
+                                ? selectedQuestion.comments.find((candidate) => candidate.id === comment.parentCommentId)
+                                : undefined;
+                              return (
+                                <article className={comment.parentCommentId ? "comment-card comment-reply" : "comment-card"} key={comment.id}>
+                                  <div className="response-heading">
+                                    <strong>{comment.authorId}</strong>
+                                    <small>{new Date(comment.createdAt).toLocaleString()}</small>
+                                  </div>
+                                  {parent ? <small>Reply to {parent.authorId}</small> : null}
+                                  <p>{comment.body}</p>
+                                  {selectedQuestion.status !== "accepted" ? (
+                                    <button className="text-button" type="button" onClick={() => setReplyToCommentId(comment.id)}>
+                                      Reply
+                                    </button>
+                                  ) : null}
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {selectedQuestion.status !== "accepted" ? (
+                          <div className="response-form">
+                            {replyToCommentId ? (
+                              <div className="replying-to">
+                                Replying to {selectedQuestion.comments.find((comment) => comment.id === replyToCommentId)?.authorId ?? "comment"}
+                                <button className="text-button" type="button" onClick={() => setReplyToCommentId(undefined)}>Cancel reply</button>
+                              </div>
+                            ) : null}
+                            <label htmlFor="comment-body">Clarification or comment</label>
+                            <textarea
+                              id="comment-body"
+                              value={commentBody}
+                              onChange={(event) => setCommentBody(event.target.value)}
+                              placeholder="Ask a focused follow-up or add evidence for the decision owner."
+                            />
+                            <button
+                              className="secondary"
+                              type="button"
+                              disabled={submitting || commentBody.trim().length < 2}
+                              onClick={() => void addQuestionComment()}
+                            >
+                              {submitting ? "Posting comment…" : replyToCommentId ? "Post reply" : "Post clarification"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      {selectedQuestion.risk === "protected" ? (
+                        <section>
+                          <h3>Security review <span className="section-count">{selectedQuestion.reviews.length}</span></h3>
+                          {selectedQuestion.reviews.length === 0 ? (
+                            <p className="muted-copy">No security review has been recorded. A separate security reviewer must approve or reject this protected question before the owner can accept it.</p>
+                          ) : (
+                            <div className="response-list">
+                              {selectedQuestion.reviews.map((review) => (
+                                <article className="response-card" key={review.id}>
+                                  <div className="response-heading">
+                                    <strong>{review.reviewerId}</strong>
+                                    <span className={`status status-${review.status}`}>{review.status}</span>
+                                  </div>
+                                  <small>{new Date(review.createdAt).toLocaleString()} · {review.reviewerRole}</small>
+                                  <div className="response-rationale"><strong>Rationale:</strong> {review.rationale}</div>
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                          {selectedQuestion.status !== "accepted" && activePrincipal?.roles.includes("security-reviewer") && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId) ? (
+                            <div className="response-form">
+                              <label htmlFor="review-status">Review outcome</label>
+                              <select
+                                id="review-status"
+                                value={reviewStatus}
+                                onChange={(event) => setReviewStatus(event.target.value as "approved" | "rejected")}
+                              >
+                                <option value="approved">Approve security review</option>
+                                <option value="rejected">Reject security review</option>
+                              </select>
+                              <label htmlFor="review-rationale">Security review rationale</label>
+                              <textarea
+                                id="review-rationale"
+                                value={reviewRationale}
+                                onChange={(event) => setReviewRationale(event.target.value)}
+                                placeholder="Explain the security evidence or gap."
+                              />
+                              <button
+                                className="secondary"
+                                type="button"
+                                disabled={submitting || reviewRationale.trim().length < 10}
+                                onClick={() => void reviewQuestion()}
+                              >
+                                {submitting ? "Recording review…" : "Record security review"}
+                              </button>
+                            </div>
+                          ) : null}
+                        </section>
+                      ) : null}
+
+                      {selectedQuestion.status === "accepted" ? (
+                        <div className="accepted"><strong>Decision accepted.</strong> Future agent context requests can retrieve {selectedQuestion.decisionId}.</div>
+                      ) : !selectedQuestionInboxItem?.canAccept ? (
+                        <div className="owner-routing"><strong>Shared review only.</strong> Add a response here; the configured owner or required security reviewer must accept the decision from My Inbox.</div>
+                      ) : (
+                        <section>
+                          <label htmlFor="rationale"><h3>Required decision rationale</h3></label>
+                          <textarea id="rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} />
+                          <button className="primary" type="button" disabled={submitting || !selectedOption} onClick={() => void acceptDecision()}>
+                            {submitting ? "Creating decision…" : "Accept selected answer"}
+                          </button>
+                        </section>
+                      )}
+                    </article>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="title-row">
+                <div><h1>Review agent-generated specifications</h1><p>Draft bodies are immutable; approval applies to one explicit version.</p></div>
+                <button className="secondary" type="button" onClick={() => void Promise.all([loadArtifacts(), loadNotifications()])}>Refresh</button>
+              </div>
+
+              {artifactsLoading ? <div className="empty">Loading specifications…</div> : null}
+              {!artifactsLoading && artifacts.length === 0 ? <div className="empty">No specifications have been published.</div> : null}
+
+              {!artifactsLoading && artifacts.length > 0 ? (
+                <div className="decision-layout">
+                  <div className="question-list" aria-label="Specification reviews">
+                    {artifacts.map((artifact) => {
+                      const version = currentVersion(artifact);
+                      return (
+                        <button
+                          type="button"
+                          key={artifact.id}
+                          className={artifact.id === selectedArtifactId ? "question-row selected" : "question-row"}
+                          onClick={() => setSelectedArtifactId(artifact.id)}
+                        >
+                          <span className="document-mark" aria-hidden="true">§</span>
+                          <span><strong>{artifact.title}</strong><small>{artifact.type.replaceAll("_", " ")} · version {version?.version ?? "?"}</small></span>
+                          <span className={`status status-${version?.status ?? "draft"}`}>{(version?.status ?? "draft").replaceAll("_", " ")}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedArtifact && selectedArtifactVersion ? (
+                    <article className="question-detail specification-detail">
+                      <div className="detail-heading">
+                        <div><small>{selectedArtifact.id} · {selectedArtifact.type.replaceAll("_", " ")} · version {selectedArtifactVersion.version}</small><h2>{selectedArtifact.title}</h2></div>
+                        <span className={`status status-${selectedArtifactVersion.status}`}>{selectedArtifactVersion.status.replaceAll("_", " ")}</span>
+                      </div>
+
+                      <section>
+                        <h3>Version summary</h3>
+                        <p>{selectedArtifactVersion.summary}</p>
+                        <div className="spec-meta">
+                          <span>Published by {selectedArtifactVersion.createdById}</span>
+                          <span>Reviewers: {selectedArtifact.reviewerIds.join(", ")}</span>
+                          <span>Scope: {selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "project"}</span>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h3>Specification body</h3>
+                        <pre className="spec-body">{selectedArtifactVersion.body}</pre>
+                      </section>
+
+                      <section>
+                        <h3>Version history</h3>
+                        <div className="version-list">
+                          {[...selectedArtifact.versions].reverse().map((version) => (
+                            <div key={version.id}>
+                              <strong>Version {version.version}</strong>
+                              <span className={`status status-${version.status}`}>{version.status.replaceAll("_", " ")}</span>
+                              <small>{version.id}</small>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+
+                      {selectedArtifactVersion.status === "approved" ? (
+                        <div className="accepted">
+                          <strong>Specification approved by {selectedArtifactVersion.approvedById}.</strong>
+                          {selectedArtifactVersion.approvalRationale}
+                        </div>
+                      ) : (
+                        <section>
+                          <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
+                          <textarea
+                            id="approval-rationale"
+                            value={approvalRationale}
+                            onChange={(event) => setApprovalRationale(event.target.value)}
+                          />
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={submitting || approvalRationale.trim().length < 10}
+                            onClick={() => void approveSpecification()}
+                          >
+                            {submitting ? "Approving version…" : `Approve version ${selectedArtifactVersion.version}`}
+                          </button>
+                        </section>
+                      )}
+                    </article>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}

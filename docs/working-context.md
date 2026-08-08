@@ -1,0 +1,1360 @@
+# Bridge — Living Working Context
+
+| Field | Value |
+|---|---|
+| Purpose | Durable handoff context for future implementation sessions and context compaction |
+| Status | Active; update after every meaningful product decision or implementation slice |
+| Last updated | 2026-08-08, Asia/Kolkata |
+| Product | Bridge |
+| Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
+| Current implementation phase | The MVP prototype and GitHub handoff hardening are implemented: fresh-repository bootstrap, shared questions/decisions/specifications, assumptions and run provenance, human review, notifications/outbox, CLI and optional MCP adapters, durable PostgreSQL mode, read-only decision/assumption/run UI views, and contributor guardrails are verified; the next pilot check is real agent adherence to the generated repository instructions |
+| Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
+
+## 1. How to use and maintain this file
+
+This is the canonical short-to-medium-term handoff document for Bridge. Read it before continuing implementation after a long pause, context compaction, or a new agent session.
+
+Update this file whenever any of the following changes:
+
+- The founder makes or overrides a product decision.
+- A workflow becomes implemented, removed, or materially redesigned.
+- A command, REST endpoint, MCP tool, entity, or policy changes.
+- Validation results change.
+- The next implementation slice changes.
+- A new limitation or risk is discovered.
+
+Do not store secrets, credentials, raw agent conversations, hidden reasoning, access tokens, or customer data here. Record decisions and outcomes, not private chain-of-thought.
+
+When this document conflicts with an explicit newer user instruction, follow the user instruction and then update this document.
+
+## 2. Founder direction and collaboration style
+
+The founder originated the product concept and delegated ordinary product and architecture decisions to Codex. Codex should continue autonomously, make reasonable scoped decisions, and explain meaningful trade-offs.
+
+Current explicit founder directives:
+
+1. Build Bridge as a shared place for agent questions, accepted answers, decisions, and specifications.
+2. Do not implement organization onboarding.
+3. Do not implement authentication.
+4. MCP must be optional because some organizations do not approve MCP.
+5. Provide CLI and repository-file workflows for organizations where agents cannot use MCP or initiate network requests.
+6. Only humans may accept decisions or approve specification versions.
+7. UI feedback exists but is deferred; the founder will revisit it later.
+8. Maintain this file as durable context for future sessions.
+9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
+
+Interpret “do not implement authentication or organization onboarding” as an active implementation prohibition until the founder explicitly reopens that scope. Prior Auth0/OAuth research remains reference material only.
+
+## 3. Product concept
+
+### 3.1 Problem
+
+Coding and knowledge-work agents such as Codex, Claude Code, Cursor, and Copilot encounter product, business-analysis, architecture, QA, data, security, and operational questions while implementing work.
+
+Today:
+
+- The person operating the agent may not own the decision.
+- The operator often selects the agent’s default recommendation without understanding the trade-off.
+- Questions and answers remain trapped inside one private session.
+- Other team members cannot see what was asked or answered.
+- Agent-generated plans and specifications are also session-local.
+- Future agents repeat questions because previous decisions are not discoverable.
+- Agent recommendations can be mistaken for organizational approval.
+
+### 3.2 Solution
+
+Bridge is a shared decision and specification control plane for teams using AI agents.
+
+Agents can:
+
+- Register a metadata-only unit of work and receive a durable continuation locator.
+- Retrieve previously approved project context before beginning consequential work.
+- Search existing decisions.
+- Find exact and related unresolved questions or active accepted decisions before interrupting the team again.
+- Record low-risk reversible assumptions with confidence, reversal cost, expiry, scope, and run provenance.
+- Raise structured questions with options, trade-offs, recommendations, scope, risk, and intended owners.
+- Publish typed Markdown specifications for human review.
+- Link retrieved context, questions, and specification versions to their source run.
+- Resolve blockers and start an explicitly linked continuation run in a later session.
+- Retrieve accepted answers and approved specification versions in later runs.
+
+Humans can:
+
+- See questions outside private agent sessions.
+- Receive project-scoped in-app notifications when assignments, discussion, reviews, decisions, or specification changes need attention.
+- Discuss proposed answers.
+- Accept one answer with an explicit rationale.
+- Review and approve a specific immutable specification version.
+- Confirm, reject, expire, or supersede assumptions with a rationale.
+- See provenance, ownership, scope, and review state.
+
+Bridge stores durable project knowledge rather than complete agent transcripts.
+
+### 3.4 Founder-defined MVP acceptance journey
+
+The decisive MVP test is:
+
+1. The founder creates a new source-code folder, such as `hospital-management-system`.
+2. The founder runs one Bridge initialization command in that folder.
+3. Initialization registers a distinct Bridge project and installs or generates the client-recognized repository instructions needed by the selected agent.
+4. In a normal agent chat, the founder asks: “Build a Hospital Management System.” No Bridge-specific sequence should need to be dictated in that prompt.
+5. The agent starts a Bridge run and retrieves project context automatically as part of its repository instructions.
+6. Every meaningful question requiring business, architecture, QA, data, security, or other human authority is submitted to Bridge with intended owners, options, recommendation, risk, scope, and run provenance. Native agent clarification prompts must not silently bypass this workflow.
+7. Generated PRDs, ADRs, API contracts, and test plans are published as immutable Bridge specification versions with run provenance.
+8. The Bridge UI is scoped to the newly registered Hospital Management System project and displays its questions and specifications for human review.
+9. Accepted answers and approved specification versions become context for the current continuation and later agent sessions.
+10. MCP remains optional; the complete acceptance journey must work through the CLI/repository adapter.
+
+“All questions” means all structured questions that require shared human knowledge or authority. Bridge must not capture private chain-of-thought, raw transcripts, or inconsequential implementation chatter.
+
+Current status against this journey: the infrastructure path now passes end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI can drive run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged Hospital Management System simulation produced one protected question and four specifications (PRD, ADR, API contract, and test plan), all visible in the browser. The remaining pilot validation is a real independent agent chat obeying the generated instructions; Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
+
+### 3.3 Product boundary
+
+Bridge is not:
+
+- A full agent chat-history store.
+- A chain-of-thought or hidden-reasoning archive.
+- A replacement for source control or issue tracking.
+- An autonomous approver.
+- Dependent on MCP.
+- Production-secure in its current fixed-principal form.
+
+## 4. Approved product decisions
+
+### 4.1 Positioning and pilot
+
+- Product name: **Bridge** for the private pilot.
+- Initial customer profile: software organizations with approximately 10–250 contributors using multiple coding agents and making cross-role decisions.
+- Initial commercial model: free design-partner pilot for roughly two to five organizations in exchange for workflow feedback and non-confidential learnings.
+- Initial agent focus: Codex first, Claude Code second, while keeping the core vendor-neutral.
+- Session promise: durable continuation through shared context, not universal automatic resumption of the exact prior agent session.
+- Deployment decision recorded in product docs: hosted pilot, while interfaces preserve a possible future dedicated/self-hosted deployment.
+
+### 4.2 Human authority
+
+- Agents and CI principals cannot accept decisions.
+- Agents and CI principals cannot approve specification versions.
+- Human decision owners or project administrators accept ordinary decisions.
+- Protected decisions require the appropriate human reviewer role.
+- Human approval always requires a rationale.
+- An agent recommendation is advisory and must be labeled accordingly.
+
+### 4.3 Protected categories
+
+The prototype elevates these categories to protected behavior:
+
+- Security
+- Privacy
+- Authentication
+- Legal
+- Production deletion
+
+Protected questions:
+
+- Are always blocking.
+- Cannot define an automatic fallback.
+- Require a human security reviewer in the current vertical slice.
+
+The full policy matrix in `docs/pilot-decisions.md` also covers authorization, secrets, regulated data, irreversible migrations, breaking public APIs, security exceptions, compliance interpretation, and recurring infrastructure spend.
+
+### 4.4 Review defaults
+
+- Ordinary active decisions: review after 180 days.
+- Protected decisions: review after 90 days.
+- Low-risk assumptions: default expiry of 7 days and hard maximum of 30 days.
+
+### 4.5 Specifications
+
+First-class specification types:
+
+1. Product requirements document (`prd`)
+2. Architecture decision record (`adr`)
+3. API contract (`api_contract`)
+4. Test plan (`test_plan`)
+
+Specification rules:
+
+- Markdown bodies are immutable per version.
+- Each version receives a SHA-256 content hash.
+- “Latest version” and “currently approved version” are separate concepts.
+- Publishing a newer draft must not hide the previously approved version from agent context.
+- Approving a newer version supersedes the previously approved version.
+- Only the currently approved version participates in agent context and repository export.
+- Draft and in-review bodies must never be represented as approved context.
+
+### 4.6 Data minimization
+
+- Do not capture raw agent sessions by default.
+- Do not store private chain-of-thought.
+- Do not retain repository source code in Bridge during the MVP.
+- Store structured questions, rationales, decisions, specifications, provenance, run metadata, and external links.
+
+## 5. Integration modes
+
+MCP is one adapter, not the core product.
+
+### 5.1 MCP mode
+
+An approved agent client calls remote HTTP MCP tools directly.
+
+```text
+Agent -> Bridge MCP gateway -> Bridge application service -> repository
+```
+
+### 5.2 CLI mode
+
+An agent with terminal access executes `bridge` commands. The CLI calls the same REST API and receives the same policy enforcement as MCP.
+
+```text
+Agent -> Bridge CLI -> Bridge REST API -> Bridge application service -> repository
+```
+
+### 5.3 Repository-sync mode
+
+For agents that cannot make outbound requests, an approved operator or CI process runs `bridge sync` and `bridge spec pull`. The agent reads ordinary repository files afterward.
+
+Generated files contain provenance, snapshot IDs, approval information, freshness timestamps, and content hashes. Local edits do not create Bridge approval.
+
+### 5.4 Manual mode
+
+If no automated integration is permitted, humans can use the web UI and manually exchange structured questions and approved answers with the agent.
+
+## 6. Selected technical architecture
+
+### 6.1 Monorepo
+
+- Language: TypeScript
+- Package manager: pnpm 11
+- Task orchestration: Turborepo
+- Node requirement: Node.js 24+
+- Validation: TypeScript, Vitest, production builds
+
+### 6.2 Application stack
+
+| Concern | Current decision |
+|---|---|
+| Web | Next.js 16 with React 19 |
+| REST API | Fastify 5 |
+| MCP | TypeScript MCP SDK over Streamable HTTP |
+| CLI | Node.js/TypeScript executable package |
+| Contracts | Zod schemas |
+| Default repository | Seeded in-memory implementation when `DATABASE_URL` is absent |
+| Durable repository | PostgreSQL with Drizzle ORM and Postgres.js when `DATABASE_URL` is present |
+| Queue | Typed transactional outbox claim/lease/retry cycle implemented; pg-boss or a scheduled worker runtime remains a deployment choice |
+| Object storage | S3 planned for large/binary artifacts, not implemented |
+| Search | Deterministic ranking now; PostgreSQL text/trigram planned |
+| Authentication | Explicitly deferred and prohibited from active implementation |
+| Organization onboarding | Explicitly deferred and prohibited from active implementation |
+
+### 6.3 Architectural rules
+
+- REST is the canonical external business boundary.
+- MCP and CLI call application services through approved adapters; they do not write directly to storage.
+- Domain policy is transport-independent.
+- Server-side policy overrides agent-provided risk classification.
+- Approved records contain provenance and stable IDs.
+- Agent runs store structured metadata and record IDs, never raw conversations or hidden reasoning.
+- Multi-record application workflows execute through a repository transaction boundary.
+- PostgreSQL workflows use serializable transactions and aggregate-root row locks for concurrency-sensitive run, decision, and approval commands.
+- Database migrations are explicit and never run implicitly during API startup.
+- External effects beyond the current notification delivery intent should use the transactional outbox.
+- No vector database until measured retrieval quality requires it.
+
+## 7. Repository structure
+
+```text
+apps/
+  api/           Fastify REST API and API integration tests
+  cli/           MCP-independent agent/operator CLI
+  mcp/           Remote HTTP MCP server and MCP integration tests
+  web/           Human decision and specification review UI
+  worker/        Background review-reminder and outbox delivery cycle
+
+packages/
+  contracts/     Zod request/response contracts and shared types
+  domain/        Entities, policy checks, and domain errors
+  application/   BridgeService and BridgeRepository interface
+  database/      Drizzle schema, reviewed migrations, PostgreSQL repository, mapping/integration tests
+  test-support/  Fixed local principals, project, and demo fixtures
+
+docs/
+  bridge-prd.md
+  technical-architecture.md
+  mvp-backlog.md
+  pilot-decisions.md
+  working-context.md
+```
+
+## 8. Current prototype identities and fixtures
+
+No login or onboarding exists.
+
+Fixed local project:
+
+- Project ID: `prj_payments`
+- Organization ID carried by domain records: `org_acme`
+- Project name: Payments Platform
+
+Fixed local principals:
+
+| ID | Type | Purpose |
+|---|---|---|
+| `agt_codex` | Agent | Creates questions, retrieves context, publishes specification drafts |
+| `usr_architect` | Human | Project admin, architecture owner, security reviewer, decision/specification approver |
+| `usr_qa_lead` | Human | QA Lead / QA decision owner fixture |
+| `usr_business_analyst` | Human | Business Analyst / BA decision owner fixture |
+| `usr_contributor` | Human | Contributor without decision-owner authority |
+| `usr_outsider` | Human fixture | Different organization used for isolation-policy tests |
+
+The API currently receives the local principal through `x-bridge-principal-id`. This is a development seam, not authentication.
+
+## 9. Implemented domain model
+
+### 9.1 Questions
+
+A question contains:
+
+- Stable ID
+- Organization and project IDs
+- Optional run ID
+- Title, type, and category
+- Context and why-it-matters explanation
+- Risk, reversibility, and blocking state
+- Intended owner IDs
+- Options and trade-offs
+- Optional recommendation
+- Optional fallback, prohibited for protected questions
+- Scope: repository, component, branch, environment, and work item
+- Creator identity/type
+- Status
+- Responses, threaded clarification comments, and protected reviews
+- Accepted response and decision references
+- Optimistic version number
+
+Question statuses:
+
+- `open`
+- `in_discussion`
+- `accepted`
+- `duplicate`
+- `cancelled`
+- `expired`
+
+### 9.2 Decisions
+
+An accepted human answer creates a durable Decision containing:
+
+- Decision ID
+- Source question and accepted response IDs
+- Approved answer and rationale
+- Category and scope
+- Human owner ID
+- Active lifecycle state
+- Created time and review date
+
+Only active decisions participate in context retrieval.
+
+### 9.3 Specifications/artifacts
+
+An Artifact is the logical specification and contains:
+
+- Artifact ID
+- Organization and project IDs
+- Title and one of the four supported types
+- Scope
+- Reviewer IDs
+- Creator identity/type
+- Latest version ID (`currentVersionId`)
+- Currently approved version ID (`approvedVersionId`, optional)
+- Immutable version history
+
+An ArtifactVersion contains:
+
+- Version ID and artifact ID
+- Sequential version number
+- Summary
+- Markdown body
+- SHA-256 content hash
+- Cited decision IDs
+- Optional source run ID
+- Status
+- Creator and created time
+- Optional human approver, approval rationale, and approval time
+
+Artifact version statuses:
+
+- `draft`
+- `in_review`
+- `approved`
+- `superseded`
+
+### 9.4 Notifications
+
+A Notification is a durable human-only pointer to a project event. It contains:
+
+- Notification and organization/project IDs
+- Recipient principal ID
+- Type, title, and body
+- Target type and target ID
+- Created time and optional read time
+
+The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, specification review requests, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
+
+Each notification also creates a `notification.created` outbox event. The notification is the human read model; the outbox record is the retryable downstream-delivery intent.
+
+### 9.5 Context snapshots
+
+Context retrieval:
+
+- Filters to active decisions and currently approved specification versions.
+- Applies category filtering.
+- Scores explicit scope matches.
+- Scores task-token matches.
+- Returns approved items with source URLs and timestamps.
+- Persists a context snapshot ID, optional source run ID, and audit event.
+
+### 9.6 Agent runs and durable continuation
+
+An AgentRun contains metadata only:
+
+- Run, organization, project, and agent identity/type
+- Client: `codex`, `claude_code`, `cursor`, `copilot`, `custom`, or `unknown`
+- Capability: `instructions`, `cli`, `mcp`, `hooks`, or `orchestrated`
+- Concise task summary and scope
+- Status, start/update/end timestamps, and optimistic version
+- Linked context snapshot, assumption, question, and artifact-version IDs
+- External links and result links
+- Optional completion/failure summary
+- Optional preceding run ID for an explicit continuation
+
+Run statuses:
+
+- `running`
+- `waiting_for_human`
+- `completed`
+- `failed`
+- `cancelled`
+
+Starting a run returns a random opaque `resumeContextKey`. The key is stored separately from the public run record and is never returned by ordinary get/list operations. It is a locator, not authentication: the caller must still have project access. In the current prototype it is stored as a value rather than a hash so an identical idempotent start request can replay the original registration response; production credential handling remains outside the unauthenticated prototype.
+
+A linked blocking question atomically moves a running run to `waiting_for_human`. Human acceptance does not auto-resume an agent. Resolving the continuation returns accepted decision IDs and remaining blockers. When every blocker is resolved, a later session starts a new run using both `continuesRunId` and the prior locator. The original waiting run remains historical; Bridge does not claim that the exact vendor session restarted.
+
+Run state uses an explicit `expectedVersion`. Terminal states are immutable. A run cannot return to `running` or report `completed` while a linked blocking question remains unresolved. Failed or cancelled runs may retain unresolved blockers because they do not claim successful task completion.
+
+Bridge intentionally does not store raw prompts, raw outputs, full chat history, or hidden reasoning in a run.
+
+### 9.7 Assumptions
+
+An Assumption contains:
+
+- Stable ID and organization/project scope
+- Required source run ID for non-human creators; optional run for manual human entry
+- Statement, rationale, category, and low risk
+- Confidence: `low`, `medium`, or `high`
+- Required reversibility and explicit reversal cost
+- Repository/component/branch/environment/work-item scope
+- Optional source links
+- Creator identity/type and timestamps
+- Expiry, lifecycle status, and optimistic version
+- Optional human resolution identity/rationale/time
+- Optional confirmed decision or superseding assumption link
+
+Statuses:
+
+- `active`
+- `confirmed`
+- `rejected`
+- `expired`
+- `superseded`
+
+Policy is deliberately narrow:
+
+- Only low-risk and reversible uncertainty is assumption-eligible.
+- Security, privacy, authentication, legal, and production-deletion categories are always blocked and require a human question/decision path.
+- Default expiry is seven days; the maximum is 30 days from creation.
+- An exact-scope premise that duplicates or is a direct textual negation of an active decision is rejected with the decision ID.
+- Agents may record but cannot resolve assumptions.
+- Only a configured decision owner or project administrator may confirm, reject, manually expire, or supersede one.
+- Confirmed assumptions remain visibly distinct from formal accepted decisions.
+- Due active assumptions are durably marked expired when read through assumption/context queries. A pure worker policy identifies due records, but scheduled job infrastructure is not connected yet.
+
+Context ranking gives approved decisions/specifications the highest weight, human-confirmed assumptions a lower weight, and active temporary assumptions the lowest authority weight. Rejected, expired, and superseded assumptions are excluded.
+
+### 9.8 Audit events
+
+Both repository implementations record events for:
+
+- Question creation
+- Response proposal
+- Decision acceptance
+- Context retrieval
+- Specification version publication
+- Specification version approval
+- Run start and status transition
+- Continuation resolution
+- Assumption recording, resolution, and automatic expiry
+
+## 10. Implemented application policies
+
+- Cross-project and cross-organization access is denied by application policy.
+- Run creation is idempotent and limited to agent, CI, or integration principals.
+- Assumption recording is idempotent; non-human assumptions require a non-terminal source run.
+- Assumptions must be low-risk, reversible, non-protected, and expire within 30 days.
+- Exact-scope decision duplication/direct-negation checks prevent approved context from being downgraded or contradicted by assumptions.
+- Assumption resolution is human-only, owner/admin-only, rationale-required, and version-checked.
+- Structured question creation is idempotent.
+- Exact normalized, policy-equivalent questions in the same scope reuse an unresolved question or active accepted decision and link it to the submitting run.
+- Related question matches use deterministic token overlap and are advisory only; they are never auto-merged.
+- Specification publication is idempotent.
+- Reusing an idempotency key with different content returns a conflict.
+- Agents cannot propose human answers.
+- Agents cannot accept decisions.
+- Agents cannot approve specification versions.
+- Only configured decision owners/project administrators accept decisions.
+- Only configured specification reviewers/project administrators approve specification versions.
+- Only the latest specification version can be approved.
+- Approval of a new version supersedes the old approved version.
+- A cited decision must belong to the same project.
+- Protected questions cannot automatically fall back.
+- Context snapshots, assumptions, questions, and specification versions may be linked only by the run principal or a human project administrator and cannot be attached to a terminal run.
+- Linking a blocking question moves its run to `waiting_for_human` in the same transaction.
+- Run status updates require the current expected version; terminal states cannot transition again.
+- An unresolved blocking question prevents both resuming and successfully completing the run.
+- Continuation requires project access, a matching opaque locator, and no unresolved blocking question.
+- Human acceptance is authoritative but does not implicitly restart a vendor agent session.
+- Run creation/provenance/status, assumption creation/resolution/expiry, question creation, response proposal, decision acceptance, specification publication/approval, context snapshots, idempotency records, and their audit events are atomic.
+- The in-memory transaction implementation rolls back failed workflows and serializes concurrent transactions for behavioral parity.
+- The PostgreSQL implementation uses serializable transactions and locks run, question, and artifact roots during concurrency-sensitive commands.
+- A concurrent loser for a newly claimed idempotency key rolls back instead of leaving an unreferenced aggregate.
+
+## 11. Implemented REST API
+
+Health:
+
+- `GET /health`
+
+Projects:
+
+- `POST /v1/projects`
+- `GET /v1/projects`
+- `GET /v1/projects/:projectId`
+
+Reviewer context:
+
+- `GET /v1/principals` (same-organization fixed human summaries for the local reviewer switcher)
+
+Context and decisions:
+
+- `GET /v1/projects/:projectId/context`
+- `GET /v1/projects/:projectId/decisions`
+
+Agent runs:
+
+- `POST /v1/projects/:projectId/runs`
+- `GET /v1/projects/:projectId/runs`
+- `GET /v1/runs/:runId`
+- `PATCH /v1/runs/:runId`
+- `POST /v1/runs/:runId/continuation`
+
+Assumptions:
+
+- `POST /v1/projects/:projectId/assumptions`
+- `GET /v1/projects/:projectId/assumptions`
+- `GET /v1/assumptions/:assumptionId`
+- `POST /v1/assumptions/:assumptionId/resolve`
+
+Questions:
+
+- `POST /v1/projects/:projectId/questions`
+- `POST /v1/projects/:projectId/questions/matches`
+- `GET /v1/projects/:projectId/questions`
+- `GET /v1/projects/:projectId/inbox` (questions requiring the selected human's authority)
+- `GET /v1/questions/:questionId`
+- `POST /v1/questions/:questionId/responses`
+- `POST /v1/questions/:questionId/comments` (threaded clarification comment)
+- `POST /v1/questions/:questionId/reviews` (separate protected security review)
+- `POST /v1/questions/:questionId/accept`
+
+Notifications (human-only):
+
+- `GET /v1/notifications?projectId=&unreadOnly=`
+- `POST /v1/notifications/:notificationId/read`
+- `POST /v1/notifications/read-all`
+
+Specifications:
+
+- `POST /v1/projects/:projectId/artifacts`
+- `GET /v1/projects/:projectId/artifacts`
+- `GET /v1/artifacts/:artifactId`
+- `POST /v1/artifact-versions/:versionId/approve`
+
+All prototype routes resolve one of the fixed local principals using `x-bridge-principal-id`.
+
+## 12. Implemented MCP tools
+
+Run tools:
+
+- `bridge_start_run`
+- `bridge_report_run`
+- `bridge_get_run`
+- `bridge_get_continuation`
+
+Assumption tools:
+
+- `bridge_record_assumption`
+- `bridge_get_assumption`
+- `bridge_list_assumptions`
+
+Decision and question tools:
+
+- `bridge_get_context`
+- `bridge_search_decisions`
+- `bridge_find_question_matches`
+- `bridge_create_question`
+- `bridge_get_question`
+- `bridge_list_pending`
+- `bridge_list_inbox` (filtered reviewer inbox for the current principal)
+
+Specification tools:
+
+- `bridge_publish_artifact`
+- `bridge_get_artifact`
+- `bridge_list_artifacts`
+
+Ordinary agent MCP tools intentionally do not include assumption resolution, decision acceptance, or specification approval.
+
+MCP server local endpoint:
+
+```text
+http://127.0.0.1:4100/mcp
+```
+
+The standalone MCP process requires `DATABASE_URL` and must use the same migrated PostgreSQL database as the API. It refuses to start without that configuration so MCP writes cannot disappear into process-local state that the web UI cannot read. MCP remains optional; the API, CLI, repository snapshots, and web workflow still run without it.
+
+## 13. Implemented CLI
+
+Commands:
+
+```text
+bridge init [project-id] [--name <project-name>] [--client <client>] [--mcp-url <url>] [--dry-run]
+bridge install [--client <client>] [--dry-run]
+bridge doctor
+bridge inbox [project-id] [--status <status>] [--risk <risk>] [--category <category>] [--role <role>]
+bridge run start [project-id] --task <description>
+bridge run get <run-id>
+bridge run list [project-id]
+bridge run continue <run-id> --resume-key <key>
+bridge run report <run-id> --status <status> --version <number>
+bridge context [project-id] --task <description> [--run-id <id>]
+bridge ask [project-id] --file <question.json|->
+bridge question matches [project-id] --file <question.json|->
+bridge question get <question-id>
+bridge wait <question-id>
+bridge pending [project-id]
+bridge assumption add [project-id] --file <assumption.json|->
+bridge assumption get <assumption-id>
+bridge assumption list [project-id]
+bridge assumption resolve <assumption-id> --status <status> --version <number> --rationale <text>
+bridge sync [project-id] [--run-id <id>]
+bridge spec publish [project-id] --file <spec.md> --title <title> --type <type> [--run-id <id>]
+bridge spec get <artifact-id>
+bridge spec pull [project-id]
+```
+
+`bridge init` creates:
+
+```text
+.bridge/project.yaml
+.bridge/agent-instructions.md
+.bridge/question.example.json
+.bridge/assumption.example.json
+```
+
+It also safely creates or updates the selected client's native repository instruction file using a Bridge-owned marked block:
+
+- Codex: `AGENTS.md`
+- Claude Code: `CLAUDE.md`
+- Cursor: `.cursor/rules/bridge.mdc`
+- Copilot: `.github/copilot-instructions.md`
+
+Unrelated existing content is preserved. `bridge init --name` uses the fixed local project-admin principal to register the project; this is a prototype seam, not organization onboarding or authentication. The CLI can be packaged locally with `pnpm cli:pack`, producing `dist/bridge-cli-0.1.0.tgz`.
+
+The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; `BRIDGE_MCP_URL` can override it for diagnostics. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
+`bridge install --client <client>` activates or switches the native adapter for an existing `.bridge/project.yaml` without registering another project. It safely preserves unrelated content, updates only the managed Bridge block, and supports `--dry-run` for a no-mutation preview.
+
+`bridge sync` creates approved repository context:
+
+```text
+.bridge/context.md
+.bridge/context.json
+.bridge/decisions.json
+.bridge/assumptions.json
+.bridge/questions.json
+.bridge/specifications.json
+.bridge/sync-metadata.json
+```
+
+`bridge spec pull` creates:
+
+```text
+.bridge/specs/*.md
+.bridge/specs/manifest.json
+```
+
+The specification manifest contains artifact ID, version ID, version number, approval identity/time, content SHA-256, and local file path.
+
+Only active/confirmed assumptions and approved specifications are synchronized or pulled as current agent context. Active assumptions retain an explicit temporary authority label and expiry. The question snapshot contains only unresolved questions so offline agents can check current interruptions before creating another one.
+
+Stable CLI exit codes:
+
+| Code | Meaning |
+|---:|---|
+| 0 | Success |
+| 2 | Invalid input |
+| 3 | Missing/invalid repository configuration |
+| 4 | Connection/server failure |
+| 10 | Answer still pending after bounded wait |
+| 11 | Forbidden/policy denial |
+| 12 | Record not found |
+| 13 | Conflict |
+| 20 | Unexpected internal error |
+
+CLI errors are machine-readable JSON.
+
+## 14. Implemented web UI
+
+The local web application provides:
+
+- Registered-project loading and project selection.
+- Project-scoped question and specification refresh.
+- Personalized question inbox plus the shared project question list.
+- Question detail with context and impact.
+- Options and trade-offs.
+- Clearly labeled agent recommendation.
+- Role-aware assignment labels for questions (for example, QA Lead or Business Analyst).
+- Shared team discussion: proposed answers, rationale, selected option, author, and timestamp.
+- Threaded clarification comments with parent links, author, timestamp, and optimistic version checks.
+- A response form for human contributors before final owner acceptance.
+- Required human acceptance rationale.
+- Protected-question security review history and review form.
+- Accepted-decision state.
+- Accepted-decision list/detail with rationale, authority, review date, and source-question navigation.
+- Assumption list/detail with status, risk, confidence, expiry, reversal cost, resolution, and source-run navigation.
+- Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
+- Specifications navigation and pending count.
+- Specification detail, immutable Markdown body, reviewer metadata, and version history.
+- Required human approval rationale.
+- Approved specification state.
+- Project-scoped notification feed with unread count, individual mark-read, and mark-all-read controls.
+
+The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations; the web views are inspection surfaces, not additional authority paths.
+
+The founder has additional UI feedback that will be addressed later.
+
+## 15. Current validation state
+
+Full validation command:
+
+```bash
+pnpm check
+```
+
+Current validation result after the role-aware-routing, reviewer-switcher, personalized-inbox, protected-review, threaded-comment, in-app-notification, transactional-outbox, and CLI-diagnostics slices:
+
+- Type-check: passed across all ten TypeScript configurations.
+- Behavioral tests: 47 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Production builds: passed for all nine TypeScript packages plus the Next.js application.
+- Next.js production build and static prerender: passed.
+- PostgreSQL schema, repository adapter, and domain mappers compile.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, legacy-backfill, audit-subject, role-owner, review-array, comment-array, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
+- Packaged in-memory API startup and `GET /health` smoke test passed.
+- Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
+- Packaged run start -> assumption record -> temporary context -> human confirmation -> confirmed context smoke test passed.
+- Packaged question create -> exact match -> existing-question reuse smoke test passed.
+- REST question workflow test: passed.
+- REST run/start/block/continuation/accept/ready workflow test: passed.
+- REST assumption create/agent-denial/human-confirm/context workflow test: passed.
+- REST question matching and exact-reuse workflow test: passed.
+- MCP decision carry-forward and durable continuation test: passed.
+- MCP assumption record/get/context workflow test: passed.
+- MCP exact question-match lookup test: passed.
+- MCP filtered reviewer-inbox routing test: passed; protected review state is visible without exposing human approval commands to ordinary agent principals.
+- REST/application threaded clarification test: passed; human comments are version-checked, parent-linked, and agent-authorship is rejected.
+- REST/application notification test: passed; assignment and clarification events create durable human notifications, agents are denied the feed, and scoped individual/all read state is enforced.
+- Browser verification: a human posted a root clarification, replied to it, and saw the question move to `in_discussion` with both thread entries visible.
+- CLI repository initialization/question/wait/sync and run lifecycle tests: passed.
+- CLI assumption add/get/resolve/sync workflow test: passed.
+- CLI question-match lookup and unresolved-question repository export test: passed.
+- Specification publish/human approve/context test: passed.
+- Specification version supersession test: passed.
+- CLI specification publish/pull test: passed.
+- Packaged live smoke test passed for specification publish -> human approve -> approved Markdown pull.
+- Fresh-project application/API registration, idempotent replay, access-policy, and project-list tests: passed.
+- Packaged CLI initialization from a local tarball, safe `AGENTS.md` preservation, and idempotent managed-block regeneration: passed.
+- Fresh Hospital Management System acceptance simulation passed: project registration -> run -> protected question -> PRD/ADR/API contract/test plan -> project-scoped API reads.
+- In-app browser verification passed for project selection, the Hospital question, and all four Hospital specifications.
+- REST response-proposal regression passed: a contributor can add an answer before the configured owner accepts the decision.
+- In-app browser verification passed for the team discussion card, response author/rationale, and response form.
+- Role-routing regression passed: a QA Lead role can accept a QA-owned question while an ordinary contributor is denied.
+- Prototype reviewer-switcher browser verification passed: the UI lists same-organization fixed human principals, switches from Sarvesh Patil to QA Lead, reloads project-scoped data, and updates the visible role/identity summary.
+- Personalized-inbox browser verification passed: Architect sees the seeded question in **My Inbox**, QA Lead sees an empty routed inbox, and the same question remains visible in shared **Questions**.
+- Inbox-filter browser verification passed: filtering by **In discussion** produces a routed empty state, clearing filters restores the inbox, and shared **Questions** remains unchanged.
+- Protected-review browser verification passed: a security reviewer recorded an approval, the review history rendered, and the routed QA owner retained the final acceptance action.
+- In-app notification browser verification passed: the human reviewer saw the seeded assignment, opened it from the Notifications view, and the unread state changed to Read.
+- Transactional-outbox application, mapper/migration, and worker-cycle tests passed: each notification creates a pending delivery intent, claims acquire a lease and increment attempts, successful handlers complete events, and repeated failures become dead letters.
+- CLI bootstrap diagnostics passed: dry-run registration leaves API/files untouched, while doctor verifies the mapped project and generated client instructions.
+- Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
+- Adapter installation diagnostics passed: `bridge install` switches the selected native instruction adapter without project registration, preserves unrelated content, and leaves the repository untouched during `--dry-run`.
+- Release-hardening browser verification passed for Decisions, Assumptions, and Agent Runs navigation, empty/detail states, run query deep links, question acceptance, and immediate visibility of the newly accepted Decision.
+- All TypeScript package builds and the Next.js production build passed after the role-aware, reviewer-switcher, personalized-inbox, inbox-filter, protected-review, transactional-outbox, and CLI-diagnostics slices.
+
+The temporary smoke-test directory and server processes were cleaned up afterward.
+
+## 16. How to run the prototype
+
+Install and validate:
+
+```bash
+pnpm install
+pnpm check
+```
+
+Start the API and web UI in separate terminals:
+
+```bash
+pnpm dev:api
+pnpm dev:web
+```
+
+Open:
+
+```text
+http://127.0.0.1:3000
+```
+
+Optional durable PostgreSQL mode:
+
+```bash
+export DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5432/bridge
+pnpm db:migrate
+pnpm dev:api
+```
+
+API startup does not run migrations. Without `DATABASE_URL`, the seeded in-memory demo remains the default.
+
+Optional MCP server:
+
+```bash
+export DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5432/bridge
+pnpm db:migrate
+# Start the API with this same DATABASE_URL, then in another terminal:
+pnpm dev:mcp
+```
+
+Fresh-project CLI packaging and initialization:
+
+```bash
+pnpm cli:pack
+# Install dist/bridge-cli-0.1.0.tgz globally or as a tool in the new repository.
+bridge init --name "Hospital Management System" \
+  --client codex \
+  --api-url http://127.0.0.1:4000 \
+  --repository hospital-management-system
+```
+
+See `README.md` for run, continuation, assumption, question, context, synchronization, and specification command examples.
+
+## 17. Current limitations
+
+### 17.1 Persistence
+
+Durable persistence is implemented but opt-in. Without `DATABASE_URL`, the API uses `InMemoryBridgeRepository` and state is lost when it restarts. With `DATABASE_URL`, it uses `PostgresBridgeRepository` after an operator runs the explicit migration.
+
+No local PostgreSQL, Docker, or Podman runtime exists in the current workspace, so the live reconnect integration test has not run here. It runs only when `BRIDGE_TEST_DATABASE_URL` points to an isolated PostgreSQL database.
+
+### 17.2 Transactions and concurrency
+
+Application workflows now use a repository transaction boundary. The in-memory implementation serializes transactions and restores snapshots on failure. The PostgreSQL implementation uses serializable transactions and row locks for run/assumption/question/artifact aggregate roots.
+
+Run status and assumption resolution changes have explicit `expectedVersion` inputs. Question acceptance and specification approval still rely on PostgreSQL isolation, row locks, unique constraints, and state rechecks rather than a client-provided version.
+
+### 17.3 Security
+
+- No authentication.
+- No organization onboarding.
+- No secure sessions or tokens.
+- Fixed local principals only.
+- Application-level organization/project checks exist for policy testing, but this is not production tenant security.
+
+### 17.4 Not yet implemented
+
+- Database row-level security.
+- External outbox adapters, scheduled worker deployment, and operator replay/metrics.
+- Automatic vendor-session resume adapters; current continuation is explicit/manual.
+- Assumption resolution and agent-run lifecycle mutation controls in the web UI; the corresponding list/detail views are read-only by design in the current prototype.
+- Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
+- Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
+- External notification delivery adapters and preference-aware channels.
+- GitHub integration.
+- Slack/email integrations.
+- PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
+- Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
+- Specification comments or multi-reviewer quorum.
+- Binary attachments or S3 storage.
+- Public or organization-registry CLI publishing and a standalone installer; a local installable tarball is available.
+- A conformance guard proving that supported agents route meaningful native clarification questions and generated specification files through Bridge during ordinary prompts.
+- Automated browser regression tests; the current Hospital acceptance view was verified interactively in the in-app browser.
+
+## 18. Git and workspace state
+
+The repository began empty except for `.git`. The reviewed source is now tracked from the canonical local clone at `/Users/patilsarvesh/Repos/Bridge`, whose `origin` is `https://github.com/PatilSarvesh/Bridge.git` on `main`.
+
+Generated build outputs, dependencies, Turbo cache, Next cache, and the local pnpm store are ignored.
+
+Always inspect the current Git status and remote state rather than assuming a later commit or push has completed. Preserve unrelated user work if the worktree changes in a future session.
+
+## 19. Visual prototype
+
+An earlier interactive UI concept exists outside the repository at:
+
+```text
+/Users/patilsarvesh/.codex/visualizations/2026/08/07/019fdc64-0e41-7a71-acae-282bd9b7180c/bridge-pilot-ui.html
+```
+
+The implemented Next.js UI follows the same calm enterprise direction but has evolved to include specification review.
+
+## 20. Implemented PostgreSQL persistence slice
+
+Implemented:
+
+1. `packages/database` with pinned `drizzle-orm` 0.45.2, `drizzle-kit` 0.31.10, and Postgres.js 3.4.9.
+2. Typed schema for projects, agent runs, continuation locators, assumptions, questions, question responses, decisions, artifacts, immutable versions, context snapshots, audit events, and idempotency records.
+3. Generated Drizzle migrations augmented with reviewed SQL constraints for tenant consistency, aggregate references, JSON shapes, hashes, approval metadata, positive versions, one approved version per artifact, run lifecycle, assumption policy/lifecycle, legacy question-run backfill, notification tenancy, and outbox status/type/attempt handling.
+4. `PostgresBridgeRepository` behind the existing application interface.
+5. A generic repository transaction boundary used by every current multi-record workflow.
+6. Row locks for run, assumption, question, and artifact roots during transactional mutations.
+7. Transaction-safe idempotency collision behavior.
+8. API selection: PostgreSQL when `DATABASE_URL` exists, seeded in-memory storage otherwise.
+9. Explicit `db:generate` and `db:migrate` scripts; API startup never migrates automatically.
+10. Pure mapper/migration tests and an opt-in live reconnect integration test.
+11. An additive project-registration audit migration that permits `project` audit subjects without changing existing project storage.
+12. No authentication or organization-onboarding implementation.
+13. Notifications enqueue a typed transactional outbox event in the same repository transaction; the worker exposes a claim/lease/retry/dead-letter cycle for downstream delivery handlers.
+
+Environment facts remain:
+
+- No `psql`, local `postgres`, Docker, or Podman executable is available.
+- Machine architecture is Apple Silicon (`arm64`).
+- Therefore live PostgreSQL migration/reconnect behavior is not yet verified in this workspace; do not claim that gate has passed.
+
+### 20.1 Remaining persistence follow-up
+
+1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
+2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
+3. Connect claimed outbox events to approved email/team-channel adapters after live PostgreSQL validation; add operator metrics, replay controls, and notification preferences with that integration.
+4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
+
+### 20.2 Implemented agent-run and continuation slice
+
+Implemented:
+
+1. Shared Zod contracts and domain types for run clients, capabilities, statuses, start/report requests, and continuation queries.
+2. Metadata-only `AgentRun` aggregates with optimistic versions and links to context snapshots, assumptions, questions, and specification versions.
+3. Idempotent run start that replays the same run and locator for the same principal/key/request.
+4. Random opaque continuation locators stored outside ordinary run records.
+5. Atomic provenance linking from context retrieval, assumption recording, question creation, and specification publication.
+6. Automatic `running` to `waiting_for_human` transition when a linked blocking question is created.
+7. Manual continuation resolution that returns accepted decision IDs, unresolved blockers, and an explicit next-step instruction without auto-restarting a vendor session.
+8. Explicit linked child-run creation after every blocking question is accepted.
+9. Version-checked run state transitions and policy prevention of resume/completion while blockers remain.
+10. Five REST routes, four MCP tools, and five CLI commands for the run lifecycle.
+11. PostgreSQL run/locator tables, scope/lifecycle constraints, legacy question-run backfill, and audit support.
+12. End-to-end application, REST, MCP, CLI, mapper/migration, and conditional live-database coverage.
+
+Deliberate boundaries:
+
+- No raw prompts, model outputs, transcripts, repository code, or hidden reasoning are stored.
+- The locator does not grant access and is not a replacement for future authentication.
+- Human acceptance does not auto-resume work; adapters for vendor-specific automatic continuation remain future work.
+- The web UI does not yet expose run views.
+- Existing persisted demo artifacts retain their historical idempotency request shape during upgrade; legacy question run IDs are preserved through migration when possible.
+
+### 20.3 Implemented assumption lifecycle slice
+
+Implemented:
+
+1. Shared contracts and domain types for confidence, status, record, and human resolution operations.
+2. Idempotent low-risk/reversible assumption creation with seven-day default and 30-day maximum expiry.
+3. Mandatory source-run provenance for non-human creators and atomic run linkage.
+4. Protected-category, risk, reversibility, expiry, project, and non-terminal-run enforcement.
+5. Deterministic exact-scope checks that reject premises matching or directly negating active decisions.
+6. Version-checked human-owner/admin confirmation, rejection, manual expiry, and supersession with required rationale.
+7. Optional confirmation links to an active same-project decision and supersession links to a current same-project assumption.
+8. Lazy durable expiry on authoritative assumption/context reads plus a pure worker expiry-selection policy.
+9. Context ranking and provenance with `approved`, `confirmed`, and `assumption` authority labels.
+10. Current-only repository export in `.bridge/assumptions.json`; rejected, expired, and superseded records are excluded.
+11. Four REST routes, three MCP tools, and four CLI assumption commands.
+12. PostgreSQL table/enums/idempotency kind, run-link column, tenant/run/decision/supersession foreign keys, and database policy/lifecycle constraints.
+13. Application, rollback, REST, MCP, CLI, mapper/migration, worker-policy, and conditional live-database coverage.
+
+Deliberate boundaries:
+
+- Confirmation is a human-reviewed assumption state, not silently fabricated as a formal Decision. It may link an existing active Decision.
+- Semantic contradiction detection is not claimed; the current check recognizes exact normalized duplicates and direct textual negations only.
+- Scheduled expiry processing and proactive notification delivery await a scheduled worker runtime and external adapters; the durable outbox and claim/retry cycle now exist. Reads still prevent overdue assumptions from entering agent context.
+- Artifact versions do not yet carry explicit cited-assumption IDs.
+- Assumption web screens are deferred with the founder's broader UI feedback.
+
+### 20.4 Implemented duplicate-question prevention slice
+
+Implemented:
+
+1. A read-only match query over unresolved questions and accepted questions whose decisions remain active.
+2. Unicode-normalized exact comparison for title, context, category, type, and scope.
+3. Deterministic related ranking from title/context token overlap plus category, type, and exact-scope signals.
+4. Conservative 40-point related-candidate threshold and bounded result count.
+5. Automatic reuse only when the normalized question and scope match and risk, reversibility, and blocking policy are also equal.
+6. Exact unresolved reuse links the existing question to the new run and moves that run to `waiting_for_human` when appropriate.
+7. Exact accepted reuse links the existing active decision path to the new run without creating another interruption.
+8. Explicit `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted` submission dispositions.
+9. Audited `question.reused` events and atomic idempotency/run linkage inside the existing repository transaction.
+10. REST `questions/matches`, MCP `bridge_find_question_matches`, and CLI `question matches` adapters over the same service behavior.
+11. `.bridge/questions.json` export of unresolved questions plus a pending count in sync metadata for agents without MCP or outbound access.
+12. Application, REST, MCP, and CLI regression coverage, including cross-run pending and accepted reuse.
+
+Deliberate boundaries:
+
+- Related results are hints; Bridge never merges them automatically.
+- This is deterministic lexical matching, not a claim of semantic equivalence.
+- The pilot implementation scans project questions in the repository service. PostgreSQL full-text/trigram indexes and scale evaluation remain future work.
+- An exact accepted match is reused only while its Decision is active. Expired, revoked, or superseded decisions do not suppress a new question.
+- Intentionally reopening an unchanged active decision should use a future decision-review/supersession workflow rather than fabricating a duplicate question.
+- That duplicate-prevention slice required no UI change; the later fresh-project slice adds only the functional project selector while broader founder UI feedback remains deferred.
+
+### 20.5 Implemented fresh-project bootstrap acceptance slice
+
+Implemented:
+
+1. Idempotent fixed-principal project registration plus project list/detail application and REST operations.
+2. Same-organization all-project access for the fixed prototype principals, while cross-organization access remains denied.
+3. `bridge init --name <name> --client <client>` registration without requiring a pre-seeded project ID.
+4. Safe managed-block creation/update for Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor rules, and Copilot instructions while preserving unrelated content.
+5. Generated instructions that require run/context preflight, shared-authority question routing, blocking handoff, and greenfield PRD/ADR/API contract/test-plan publication.
+6. A locally installable `bridge` CLI tarball built with `pnpm cli:pack`.
+7. Dynamic project loading and selection in the web UI, with project-scoped question and specification views.
+8. Application, REST, CLI, production-build, packaged-process, and browser acceptance evidence.
+9. A fresh Hospital Management System simulation with one protected privacy question and four in-review specifications visible under the distinct registered project.
+
+Deliberate boundaries:
+
+- Project registration uses the existing fixed development principal; it is not organization onboarding or authentication.
+- MCP is not required for this path.
+- Repository instructions are the Codex-first activation mechanism. Bridge does not claim hard interception of unsupported vendor-native clarification prompts.
+- The packaged simulation proves Bridge mechanics and UI visibility. A real independent Codex chat remains the next conformance/pilot test.
+- Broader UI design feedback remains deferred; only the functional project selector needed by acceptance was added.
+
+### 20.6 Implemented shared question discussion slice
+
+Implemented:
+
+1. The project question payload now exposes immutable proposed responses with author, answer, rationale, selected option, and timestamp.
+2. The web question detail renders all responses in one discussion section before final acceptance.
+3. Human contributors can submit a free-form answer or associate it with one of the agent's original options.
+4. The configured decision owner still performs the authoritative acceptance and creates the Decision; adding a response never grants approval authority.
+5. The API regression proves a contributor response changes the question to `in_discussion`, remains visible to the owner, and can then be accepted.
+6. Browser verification confirms the discussion card and response form render against the running API.
+
+Deliberate boundaries:
+
+- The current prototype UI uses the fixed `usr_architect` browser principal; the REST policy already distinguishes human contributors and decision owners.
+- Responses and comments are append-only in this slice. Editing, deletion, mentions, and notification preferences remain future work.
+- Agent principals cannot submit human responses; agent recommendations remain separate from human discussion and acceptance.
+
+### 20.7 Implemented role-aware question routing slice
+
+Implemented:
+
+1. Question creation accepts normalized `intendedOwnerRoles` such as `QA Lead`, `Business Analyst`, `Architect`, or `Security Reviewer`.
+2. Questions persist canonical `ownerRoles` alongside explicit owner IDs; role-only questions do not silently fall back to the project default owner.
+3. Human acceptance policy allows a principal whose configured role matches an assigned question role, while preserving project-admin override and protected-category security review checks.
+4. REST, MCP, CLI, and web question representations expose the resolved owner roles.
+5. PostgreSQL migration `0004_role_aware_questions.sql` adds the durable `owner_roles` JSON array and shape constraint with a backward-compatible empty default.
+6. Fixed prototype fixtures include QA Lead and Business Analyst principals for policy testing; this does not add authentication or onboarding.
+7. API regression coverage proves QA Lead acceptance and contributor denial for a role-owned question.
+
+Deliberate boundaries:
+
+- Role names are a lightweight policy seam, not a production directory or organization role-management system.
+- The prototype does not yet provide a UI for configuring project role memberships; role configuration remains fixed in development fixtures.
+- Due-date filters, reassignment, route explanations beyond compact labels, and notification preferences remain future work.
+
+### 20.8 Implemented prototype reviewer switcher slice
+
+Implemented:
+
+1. `GET /v1/principals` exposes same-organization human principal summaries (ID, display name, and roles) from the fixed development fixture.
+2. The web UI adds a **Reviewing as** selector for Sarvesh Patil, QA Lead, Business Analyst, and other fixed human principals returned by the API.
+3. Project, question, specification, response, acceptance, and approval requests use the selected local principal header, so role policy can be exercised without pretending to provide authentication.
+4. The UI updates the identity footer and role summary after switching reviewers; browser verification covered the default Architect view and a QA Lead switch.
+
+Deliberate boundaries:
+
+- This is a local testing/reviewer-context switcher, not authentication, session management, organization onboarding, or a production directory.
+- The API only returns human principals in the current principal's organization; fixed fixture membership and permissions remain development-only.
+- Saved/URL-persisted filters, configurable role membership, and real identity propagation remain future work.
+
+### 20.9 Implemented personalized reviewer inbox slice
+
+Implemented:
+
+1. `GET /v1/projects/:projectId/inbox` returns open and in-discussion questions routed to the selected human by direct owner ID, assigned role, project-admin fallback, or protected-review role.
+2. Inbox items include routing reasons and a `canAccept` flag, so the UI can distinguish actionable authority from shared review-only visibility.
+3. Inbox ordering prioritizes protected risk, then other risk levels, blocking questions, active discussion, and newest creation time.
+4. The web UI separates **My Inbox** from the shared **Questions** view; changing the reviewer updates the personalized count and list without hiding shared project questions.
+5. Application/API regressions cover direct, role, admin, protected-review, contributor-denial, and shared-list behavior.
+
+Deliberate boundaries:
+
+- Filters by state, category, risk, and assigned role are implemented; due-date filtering is not yet applicable to questions because the prototype has no question due-date field.
+- Protected review is represented as a routing reason, but the prototype still has no separate multi-person review/approval command.
+- Notification preferences, reassignment, route explanations beyond the compact reason labels, and real identity propagation remain future work.
+
+### 20.10 Implemented inbox filter slice
+
+Implemented:
+
+1. The inbox query contract validates `status`, `risk`, `category`, and assigned `role` filters at the API boundary.
+2. The application applies filters after project/authority routing, so a contributor cannot use filter parameters to discover questions outside their authorized inbox.
+3. The web UI exposes State, Risk, Category, and Role selectors plus a clear-filters action; the shared Questions view is deliberately not filtered by these controls.
+4. API regressions cover valid role/category combinations and invalid risk rejection; browser verification covers empty filtered state and restoration after clearing.
+
+Deliberate boundaries:
+
+- Due dates, saved filters, URL-persisted filter state, and cross-project filtering remain future work.
+- Notification preferences, reassignment, separate multi-reviewer actions, and real identity propagation remain future work.
+
+### 20.11 Implemented protected-question review slice
+
+Implemented:
+
+1. Protected questions now carry append-only `QuestionReview` records with reviewer identity, security-reviewer role, outcome, rationale, timestamp, and question version.
+2. `POST /v1/questions/:questionId/reviews` requires a human security reviewer, an expected question version, and an explicit approved/rejected outcome.
+3. A separate approved security review allows the routed owner to accept a protected question; a rejected or missing review keeps a non-security owner blocked.
+4. The web question detail shows security-review history and provides the review form only to a configured security reviewer.
+5. PostgreSQL migration `0005_question_reviews.sql` persists review history in the question aggregate and extends the JSON shape constraint.
+6. Application/API regressions cover contributor denial, separate approval, duplicate reviewer prevention, rejected review blocking, and final owner acceptance.
+
+Deliberate boundaries:
+
+- This is a single required security-review role seam; configurable quorum, multiple required roles, administrative override, and review reassignment remain future work.
+- Reviews are append-only and one review per fixed reviewer; editing, withdrawal, notification preferences, and a dedicated review object history screen remain future work.
+
+### 20.12 Implemented MCP reviewer-inbox read slice
+
+Implemented:
+
+1. `bridge_list_inbox` exposes the application-level personalized inbox through MCP with the same validated state, risk, category, and assigned-role filters as REST.
+2. The tool returns routed inbox reasons, `canAccept`, responses, and protected-review history for the current principal, so a human-capable MCP session can inspect the same review state as the web UI.
+3. Ordinary agent principals receive no human-authority inbox items, and MCP still exposes no human acceptance or security-review command.
+4. MCP regression coverage verifies role/risk filtering and that a protected QA-owned question remains visible with `canAccept: false` until a security review is recorded.
+
+Deliberate boundaries:
+
+- MCP remains optional and organization approval is still required; CLI/repository snapshots remain the fallback for disconnected environments.
+- Human actions continue through the web/API authority boundary; delegated human MCP actions and inbox pagination remain future work. The notification feed is intentionally REST/web-only so MCP approval is never required.
+
+### 20.13 Implemented threaded clarification comments slice
+
+Implemented:
+
+1. Questions now persist append-only `QuestionComment` records with author identity, body, timestamp, and an optional parent comment ID.
+2. `POST /v1/questions/:questionId/comments` requires a human principal, the current question version, and a valid same-question parent when replying.
+3. A comment moves an open question into `in_discussion`, increments the question version, and emits a dedicated audit event; resolved questions reject new comments.
+4. The web question detail renders clarification threads and supports replies while preserving the separate proposed-answer and acceptance flow.
+5. PostgreSQL migration `0006_question_comments.sql` persists comments in the question aggregate and extends the JSON shape constraint.
+6. Application/API regressions cover agent denial, stale-version conflicts, invalid parents, root comments, replies, and durable retrieval.
+
+Deliberate boundaries:
+
+- Comments are append-only with no edit/delete window, mentions, owner-requested reopen, or due-date escalation yet. Durable notification records now cover the main assignment/discussion/review events; preferences, mentions, and escalation policies remain future work.
+- Thread rendering is intentionally a compact parent/reply view; pagination and deeply nested conversation navigation remain future work.
+
+### 20.14 Implemented durable in-app notifications slice
+
+Implemented:
+
+1. Notifications are first-class durable records with recipient, project, event type, target pointer, created time, and optional read time.
+2. The application emits notifications in the same transaction as question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, specification review requests, and specification approvals.
+3. `GET /v1/notifications` is human-only and supports project and unread filters; individual and project-scoped mark-all read commands enforce organization, recipient, and project access.
+4. PostgreSQL migration `0007_in_app_notifications.sql` adds the notification table, event-type check, project and organization/project foreign keys, and recipient/read indexes; migration `0008_transactional_outbox.sql` adds typed delivery intents, claim indexes, retry state, and the same organization/project boundary; the in-memory repository mirrors both contracts.
+5. The web UI adds a Notifications view with unread count, event details, target navigation, individual mark-read on open, and Mark all read.
+6. Application/API and mapper/migration regressions cover durable assignment/comment notifications, agent denial, scoped read state, and persistence mapping.
+
+Deliberate boundaries:
+
+- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, email/team-channel delivery, preferences, digests, pagination, and operator replay/metrics remain future work. The outbox cycle is deliberately handler-injected and does not choose an external provider.
+- Notifications do not capture raw agent transcripts or private reasoning. MCP remains optional and does not expose the human notification feed to ordinary agents.
+
+### 20.15 Implemented transactional outbox and worker cycle slice
+
+Implemented:
+
+1. `OutboxEvent` is a typed durable record with organization/project scope, notification payload, availability time, lease, attempt count, completion state, and last error.
+2. Every in-app notification is written together with a pending `notification.created` outbox event through the same application repository transaction.
+3. In-memory and PostgreSQL repositories support ordered listing, lease-based claiming, completion, retry scheduling, and dead-letter transitions; expired processing leases can be reclaimed.
+4. `apps/worker/src/index.ts` exports `runOutboxCycle`, an at-least-once handler boundary with bounded exponential backoff and configurable batch/attempt settings while preserving the existing reminder-policy seam.
+5. Worker, application, mapper, and migration regressions cover successful delivery, retry/dead-letter behavior, notification-to-outbox linkage, tenant constraints, and migration metadata.
+
+Deliberate boundaries:
+
+- No email, chat, source-control, or work-item adapter is enabled yet; handlers remain an explicit integration seam.
+- No daemon scheduler, operator replay API, delivery metrics, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database.
+
+### 20.16 Implemented CLI bootstrap safety and diagnostics slice
+
+Implemented:
+
+1. `bridge init --dry-run` previews project registration, Bridge-owned files, and the selected native instruction adapter without making an API request or writing files.
+2. Dry-run plans report `create`, `update`, or `unchanged` actions and use a safe placeholder when a new project ID would be assigned by registration.
+3. `bridge doctor` verifies API health, the configured project mapping, `.bridge/agent-instructions.md`, and the client-specific managed instruction block.
+4. Doctor output reports structured checks, stable failure exit codes, and capability levels: instructions and CLI are available; MCP and hooks are not implicitly claimed unless explicitly configured.
+5. CLI regression coverage proves no mutation during dry-run and successful doctor validation after initialization.
+
+Deliberate boundaries:
+
+- Interactive project selection, human-confirmed diff application, hooks, vendor-native configuration generation, and universal vendor-native interception remain future adapter work.
+- Doctor validates the fixed-principal prototype boundary; it is not an authentication or organization-membership check.
+
+### 20.17 Implemented optional MCP endpoint discovery slice
+
+Implemented:
+
+1. `bridge init --mcp-url <url>` validates an absolute HTTP(S) endpoint and records it as optional `mcp_url` configuration; `--dry-run` previews the same change without mutation.
+2. Re-running `bridge init --force` preserves the existing configured MCP endpoint unless a replacement is supplied.
+3. `BRIDGE_MCP_URL` can override repository configuration for a local doctor run without changing committed files.
+4. `bridge doctor` sends a bounded diagnostic MCP JSON-RPC `initialize` probe only when an endpoint is configured, reports `ready`, `failed`, or `not_configured`, and never exposes the response body.
+5. A healthy endpoint reports capability level `instructions+mcp`; a failed configured endpoint fails doctor with a configuration exit code while preserving the usable instruction/CLI path.
+6. CLI regression coverage verifies endpoint persistence, successful initialization, unavailable-endpoint diagnostics, and the no-MCP fallback.
+
+Deliberate boundaries:
+
+- This slice does not generate vendor-specific MCP config files, negotiate authentication, persist MCP sessions, install hooks, or claim that MCP is approved by an organization.
+- MCP remains an opt-in adapter; repositories without `mcp_url` continue to operate through generated instructions, CLI commands, repository snapshots, and the web UI.
+
+### 20.18 Implemented adapter-only installation slice
+
+Implemented:
+
+1. `bridge install --client <client>` activates or switches Codex, Claude Code, Cursor, or Copilot instructions from an existing `.bridge/project.yaml`.
+2. Adapter installation never registers a project or calls the Bridge API; it updates the repository's selected client and Bridge-owned workflow files only.
+3. Existing unrelated native instruction content is preserved through the same marked-block merge used by `bridge init`.
+4. `bridge install --dry-run` reports create/update/unchanged actions for the project config, generated Bridge files, and adapter path without writing files.
+5. The command preserves optional MCP configuration while changing only the selected client field.
+6. CLI regression coverage proves adapter switching, no duplicate project registration, unrelated-content preservation, and dry-run non-mutation.
+
+Deliberate boundaries:
+
+- This is repository adapter activation, not package installation, authentication, organization onboarding, or vendor-specific MCP configuration generation.
+- Switching clients does not delete the previous client's managed block; cleanup remains an explicit human action so unrelated guidance cannot be removed accidentally.
+
+### 20.19 Added repository collaboration and CI handoff guardrails
+
+Implemented:
+
+1. Root `AGENTS.md` provides concise contributor/agent rules and points to the canonical product context, architecture, and backlog documents.
+2. Root `CLAUDE.md` references the same instructions so Claude-based contributors receive identical scope and validation guidance.
+3. `CONTRIBUTING.md` documents setup, optional PostgreSQL testing, package boundaries, migration expectations, pull-request content, and secret-safety rules.
+4. `.github/pull_request_template.md` captures scope, validation, migration, MCP, identity, and secret-safety checks.
+5. `.github/workflows/ci.yml` runs `pnpm check` on pushes and pull requests with an isolated PostgreSQL 16 service, enabling the opt-in persistence integration test in CI.
+
+Deliberate boundaries:
+
+- The workflow has not been executed by GitHub from this local workspace; it is committed as reproducible CI configuration for the repository owner to verify after publishing.
+- Apache License 2.0 is selected in root `LICENSE` and declared in every workspace package. Packages remain marked private until an intentional registry-publication decision.
+
+### 20.20 Completed GitHub release-readiness hardening
+
+Implemented and verified:
+
+1. Existing-repository `bridge init --dry-run` and `--force` now preserve project identity, repository mapping, selected client, API URL, and optional MCP URL unless the operator explicitly replaces them.
+2. `bridge doctor` parses a real JSON-RPC initialize result, rejects error-shaped or malformed responses, and uses a bounded five-second request timeout.
+3. `bridge inbox` exposes the same role/risk/category/state-filtered human inbox as REST without requiring MCP.
+4. Standalone MCP now shares the API's canonical PostgreSQL repository and fails fast without `DATABASE_URL`, eliminating invisible process-local MCP state.
+5. Context and MCP record links now target implemented project/view query deep links instead of nonexistent routes.
+6. The web application now includes read-only Decisions, Assumptions, and Agent Runs views with source-record navigation and query deep-link selection.
+7. Question acceptance refreshes the Decision view immediately; an interactive regression reproduced the stale state before the fix and verified the accepted Decision afterward.
+8. Node 24 is pinned for common version managers through `.nvmrc`, browser-build configuration is included in Turbo's environment-aware cache key, and runtime environment examples document all local service addresses.
+9. The CLI tarball was rebuilt and smoke-tested from a fresh temporary project; the production dependency audit reported no known vulnerabilities.
+
+Deliberate boundaries:
+
+- Live PostgreSQL execution remains CI/isolated-database dependent because this workstation has no local PostgreSQL, Docker, or Podman runtime.
+- Authentication, organization onboarding, automatic vendor prompt interception, external notification adapters, scheduled worker deployment, and public package publication are intentionally not represented as completed.
+- The repository is licensed under Apache-2.0; ownership-specific copyright or trademark notices can be added later without changing the selected license.
+
+## 21. Important implementation files
+
+- Product requirements: `docs/bridge-prd.md`
+- Contributor/agent rules: `AGENTS.md`, `CLAUDE.md`, and `CONTRIBUTING.md`
+- CI workflow: `.github/workflows/ci.yml`
+- Founder/pilot decisions: `docs/pilot-decisions.md`
+- Technical architecture: `docs/technical-architecture.md`
+- Implementation backlog: `docs/mvp-backlog.md`
+- This living context: `docs/working-context.md`
+- Domain entities/policy: `packages/domain/src/index.ts`
+- Shared schemas: `packages/contracts/src/index.ts`
+- Application service/repository interface: `packages/application/src/index.ts`
+- Database schema: `packages/database/src/schema.ts`
+- PostgreSQL repository: `packages/database/src/repository.ts`
+- Initial migration: `packages/database/drizzle/0000_nice_bulldozer.sql`
+- Agent-run migration: `packages/database/drizzle/0001_early_ricochet.sql`
+- Assumption migration: `packages/database/drizzle/0002_complex_moondragon.sql`
+- Project-registration audit migration: `packages/database/drizzle/0003_project_registration.sql`
+- Role-aware question migration: `packages/database/drizzle/0004_role_aware_questions.sql`
+- Protected-question review migration: `packages/database/drizzle/0005_question_reviews.sql`
+- Threaded question comments migration: `packages/database/drizzle/0006_question_comments.sql`
+- In-app notifications migration: `packages/database/drizzle/0007_in_app_notifications.sql`
+- Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
+- Demo fixtures: `packages/test-support/src/index.ts`
+- REST API: `apps/api/src/app.ts`
+- API bootstrap: `apps/api/src/server.ts`
+- MCP tools: `apps/mcp/src/bridge-server.ts`
+- MCP HTTP bootstrap: `apps/mcp/src/server.ts`
+- CLI: `apps/cli/src/index.ts`
+- Web UI: `apps/web/app/page.tsx`
+- Web styles: `apps/web/app/globals.css`
+- Worker reminder/outbox cycle: `apps/worker/src/index.ts`
+
+## 22. Source references already used in product decisions
+
+These references were previously reviewed and are recorded in the formal decision documents:
+
+- OpenAI/Codex MCP documentation: `https://learn.chatgpt.com/docs/extend/mcp?surface=cli`
+- Claude Code MCP documentation: `https://code.claude.com/docs/en/mcp`
+- Drizzle PostgreSQL documentation: `https://orm.drizzle.team/docs/get-started/postgresql-new`
+- Postgres.js project documentation: `https://github.com/porsager/postgres`
+- Auth0 MCP authorization reference: `https://auth0.com/ai/docs/mcp/get-started/authorization-for-your-mcp-server`
+- Auth0 Organizations reference: `https://auth0.com/docs/manage-users/organizations/organizations-overview`
+
+Auth0 references are retained only as historical research. Identity implementation is currently prohibited by founder direction.
+
+## 23. Continuation checklist
+
+Before continuing work:
+
+1. Read this file.
+2. Read the latest explicit user message.
+3. Check `git status --short` and preserve user changes.
+4. Check whether `AGENTS.md` or other workspace instructions now exist.
+5. Confirm the active slice does not introduce authentication or organization onboarding.
+6. Update the task plan.
+7. Implement through existing contracts/domain/application boundaries.
+8. Add tests proportional to the behavior changed.
+9. Run `pnpm check` when dependencies are available.
+10. Update this file before handing off.
+
+## 24. One-sentence current state
+
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive local checks, and GitHub CI/handoff guardrails; real third-party agent adherence and deployment integrations remain pilot validation, while authentication and organization onboarding remain explicitly out of scope.

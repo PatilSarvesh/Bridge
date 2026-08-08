@@ -1,0 +1,316 @@
+import { readFileSync } from "node:fs";
+
+import type {
+  AgentRun,
+  Assumption,
+  Artifact,
+  Notification,
+  OutboxEvent,
+  Project,
+  Question,
+} from "@bridge/domain";
+import { describe, expect, it } from "vitest";
+
+import {
+  artifactFromRows,
+  assumptionFromRow,
+  assumptionToRow,
+  artifactToRow,
+  artifactVersionToRow,
+  projectFromRow,
+  projectToRow,
+  notificationFromRow,
+  notificationToRow,
+  outboxEventFromRow,
+  outboxEventToRow,
+  questionFromRows,
+  questionToRow,
+  responseToRow,
+  runFromRow,
+  runToRow,
+  type AgentRunRow,
+  type AssumptionRow,
+  type ArtifactRow,
+  type ArtifactVersionRow,
+  type ProjectRow,
+  type QuestionResponseRow,
+  type QuestionRow,
+  type NotificationRow,
+  type OutboxEventRow,
+} from "./mappers.js";
+
+const project: Project = {
+  id: "prj_mapping",
+  organizationId: "org_mapping",
+  name: "Mapping Test",
+  decisionOwnerIds: ["usr_owner"],
+};
+
+const question: Question = {
+  id: "qst_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  runId: "run_mapping",
+  title: "Which persistence strategy should this component use?",
+  type: "decision",
+  category: "architecture",
+  context: "The component needs durable decisions across agent and API restarts.",
+  whyItMatters: "Losing accepted decisions would make later agent sessions repeat questions.",
+  risk: "high",
+  reversible: false,
+  blocking: true,
+  ownerIds: ["usr_owner"],
+  ownerRoles: ["architect"],
+  options: [
+    { key: "postgres", label: "PostgreSQL", tradeoffs: "Operational dependency with strong transactions." },
+    { key: "memory", label: "Memory", tradeoffs: "Simple but state is lost on restart." },
+  ],
+  recommendationKey: "postgres",
+  scope: { repository: "bridge", component: "persistence" },
+  createdById: "agt_codex",
+  createdByType: "agent",
+  createdAt: "2026-08-07T10:00:00.000Z",
+  status: "in_discussion",
+  responses: [
+    {
+      id: "rsp_mapping",
+      questionId: "qst_mapping",
+      authorId: "usr_owner",
+      authorType: "human",
+      answer: "Use PostgreSQL.",
+      rationale: "Atomic durable state is required.",
+      optionKey: "postgres",
+      createdAt: "2026-08-07T10:01:00.000Z",
+    },
+  ],
+  reviews: [
+    {
+      id: "qrv_mapping",
+      questionId: "qst_mapping",
+      reviewerId: "usr_owner",
+      reviewerType: "human",
+      reviewerRole: "security-reviewer",
+      status: "approved",
+      rationale: "The protected persistence choice has the required security review.",
+      createdAt: "2026-08-07T10:01:30.000Z",
+    },
+  ],
+  comments: [
+    {
+      id: "qcm_mapping",
+      questionId: "qst_mapping",
+      authorId: "usr_owner",
+      authorType: "human",
+      body: "Please confirm the migration rollback path before accepting this choice.",
+      createdAt: "2026-08-07T10:01:45.000Z",
+    },
+  ],
+  version: 2,
+};
+
+const run: AgentRun = {
+  id: "run_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  agentId: "agt_codex",
+  agentType: "agent",
+  client: "codex",
+  capability: "cli",
+  taskSummary: "Implement durable persistence mappings",
+  scope: { repository: "bridge", component: "persistence" },
+  status: "running",
+  contextSnapshotIds: ["ctx_mapping"],
+  questionIds: [question.id],
+  artifactVersionIds: ["av_mapping"],
+  assumptionIds: ["asm_mapping"],
+  externalLinks: ["https://example.test/work/42"],
+  resultLinks: [],
+  startedAt: "2026-08-07T09:59:00.000Z",
+  updatedAt: "2026-08-07T10:02:00.000Z",
+  version: 3,
+};
+
+const assumption: Assumption = {
+  id: "asm_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  runId: run.id,
+  statement: "Internal retry metrics may use the existing transfer namespace.",
+  rationale: "The namespace is internal, reversible, and consistent with adjacent metrics.",
+  category: "observability",
+  risk: "low",
+  confidence: "medium",
+  reversible: true,
+  reversalCost: "Rename the metric and update the internal dashboard query.",
+  scope: { repository: "bridge", component: "persistence" },
+  sourceLinks: ["https://example.test/work/42"],
+  status: "active",
+  createdById: "agt_codex",
+  createdByType: "agent",
+  createdAt: "2026-08-07T10:02:00.000Z",
+  expiresAt: "2026-08-14T10:02:00.000Z",
+  version: 1,
+};
+
+const artifact: Artifact = {
+  id: "art_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  title: "Persistence architecture",
+  type: "adr",
+  scope: { repository: "bridge", component: "persistence" },
+  reviewerIds: ["usr_owner"],
+  createdById: "agt_codex",
+  createdByType: "agent",
+  createdAt: "2026-08-07T10:02:00.000Z",
+  currentVersionId: "av_mapping",
+  approvedVersionId: "av_mapping",
+  versions: [
+    {
+      id: "av_mapping",
+      artifactId: "art_mapping",
+      version: 1,
+      summary: "Use PostgreSQL transactions behind the repository boundary.",
+      body: "# Persistence\n\nUse PostgreSQL transactions behind the Bridge repository boundary.",
+      contentSha256: "a".repeat(64),
+      citedDecisionIds: [],
+      status: "approved",
+      createdById: "agt_codex",
+      createdByType: "agent",
+      createdAt: "2026-08-07T10:02:00.000Z",
+      approvedById: "usr_owner",
+      approvalRationale: "This provides the required durability and atomicity.",
+      approvedAt: "2026-08-07T10:03:00.000Z",
+    },
+  ],
+};
+
+const notification: Notification = {
+  id: "ntf_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  recipientId: "usr_owner",
+  type: "question_comment",
+  title: "A clarification needs your attention",
+  body: "A teammate added context to the persistence question.",
+  targetType: "comment",
+  targetId: "qcm_mapping",
+  createdAt: "2026-08-07T10:02:10.000Z",
+};
+
+const outboxEvent: OutboxEvent = {
+  id: "evt_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  type: "notification.created",
+  payload: {
+    notificationId: notification.id,
+    recipientId: notification.recipientId,
+    notificationType: notification.type,
+    targetType: notification.targetType,
+    targetId: notification.targetId,
+  },
+  status: "pending",
+  attempts: 0,
+  availableAt: "2026-08-07T10:02:10.000Z",
+  createdAt: "2026-08-07T10:02:10.000Z",
+};
+
+describe("PostgreSQL domain mappings", () => {
+  it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
+    expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
+    expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
+    expect(assumptionFromRow(assumptionToRow(assumption) as AssumptionRow)).toEqual(assumption);
+
+    const questionRow = questionToRow(question) as QuestionRow;
+    const responseRows = question.responses.map(responseToRow) as QuestionResponseRow[];
+    expect(questionFromRows(questionRow, responseRows)).toEqual(question);
+
+    const artifactRow = artifactToRow(artifact) as ArtifactRow;
+    const versionRows = artifact.versions.map(artifactVersionToRow) as ArtifactVersionRow[];
+    expect(artifactFromRows(artifactRow, versionRows)).toEqual(artifact);
+
+    expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
+    expect(outboxEventFromRow(outboxEventToRow(outboxEvent) as OutboxEventRow)).toEqual(outboxEvent);
+  });
+
+  it("ships reviewed deferred constraints for atomic aggregate references", () => {
+    const migration = readFileSync(
+      new URL("../drizzle/0000_nice_bulldozer.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain("bridge_questions_decision_fk");
+    expect(migration).toContain("bridge_artifacts_current_version_fk");
+    expect(migration.match(/DEFERRABLE INITIALLY DEFERRED/g)).toHaveLength(5);
+    expect(migration).toContain("bridge_artifact_versions_one_approved_idx");
+    expect(migration).toContain("bridge_questions_organization_project_fk");
+
+    const runMigration = readFileSync(
+      new URL("../drizzle/0001_early_ricochet.sql", import.meta.url),
+      "utf8",
+    );
+    expect(runMigration).toContain("bridge_agent_runs_terminal_check");
+    expect(runMigration).toContain("bridge_questions_run_scope_fk");
+    expect(runMigration).toContain("bridge_context_snapshots_run_scope_fk");
+    expect(runMigration).toContain("Imported legacy Bridge run");
+    expect(runMigration).toContain("bridge_run_continuation_locators");
+    expect(runMigration).toContain("'context_snapshot', 'run'");
+
+    const assumptionMigration = readFileSync(
+      new URL("../drizzle/0002_complex_moondragon.sql", import.meta.url),
+      "utf8",
+    );
+    expect(assumptionMigration).toContain("bridge_assumptions_policy_check");
+    expect(assumptionMigration).toContain("bridge_assumptions_time_check");
+    expect(assumptionMigration).toContain("bridge_assumptions_resolution_check");
+    expect(assumptionMigration).toContain("bridge_assumptions_run_scope_fk");
+    expect(assumptionMigration).toContain("'decision', 'assumption', 'artifact'");
+
+    const projectMigration = readFileSync(
+      new URL("../drizzle/0003_project_registration.sql", import.meta.url),
+      "utf8",
+    );
+    expect(projectMigration).toContain("'project', 'question', 'response'");
+
+    const commentMigration = readFileSync(
+      new URL("../drizzle/0006_question_comments.sql", import.meta.url),
+      "utf8",
+    );
+    expect(commentMigration).toContain('ADD COLUMN "comments" jsonb');
+    expect(commentMigration).toContain('jsonb_typeof("comments") = \'array\'');
+
+    const roleMigration = readFileSync(
+      new URL("../drizzle/0004_role_aware_questions.sql", import.meta.url),
+      "utf8",
+    );
+    expect(roleMigration).toContain('"owner_roles" jsonb');
+    expect(roleMigration).toContain('jsonb_typeof("owner_roles") = \'array\'');
+
+    const reviewMigration = readFileSync(
+      new URL("../drizzle/0005_question_reviews.sql", import.meta.url),
+      "utf8",
+    );
+    expect(reviewMigration).toContain('"reviews" jsonb');
+    expect(reviewMigration).toContain('jsonb_typeof("reviews") = \'array\'');
+
+    const notificationMigration = readFileSync(
+      new URL("../drizzle/0007_in_app_notifications.sql", import.meta.url),
+      "utf8",
+    );
+    expect(notificationMigration).toContain("CREATE TABLE \"bridge_notifications\"");
+    expect(notificationMigration).toContain("bridge_notifications_recipient_created_idx");
+    expect(notificationMigration).toContain("bridge_notifications_organization_project_fk");
+
+    const outboxMigration = readFileSync(
+      new URL("../drizzle/0008_transactional_outbox.sql", import.meta.url),
+      "utf8",
+    );
+    expect(outboxMigration).toContain("CREATE TABLE \"bridge_outbox_events\"");
+    expect(outboxMigration).toContain("bridge_outbox_events_status_check");
+    expect(outboxMigration).toContain("bridge_outbox_events_type_check");
+    expect(outboxMigration).toContain("bridge_outbox_status_available_idx");
+    expect(outboxMigration).toContain("bridge_outbox_events_organization_project_fk");
+    expect(notificationMigration).toContain("question_assigned");
+    expect(notificationMigration).toContain("artifact_approved");
+  });
+});
