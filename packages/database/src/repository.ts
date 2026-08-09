@@ -8,6 +8,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  OutboxDelivery,
   OutboxEvent,
   Project,
   Question,
@@ -29,6 +30,8 @@ import {
   decisionToRow,
   notificationFromRow,
   notificationToRow,
+  outboxDeliveryFromRow,
+  outboxDeliveryToRow,
   outboxEventFromRow,
   outboxEventToRow,
   projectFromRow,
@@ -54,6 +57,7 @@ import {
   questions,
   runContinuationLocators,
   notifications,
+  outboxDeliveries,
   outboxEvents,
 } from "./schema.js";
 
@@ -552,6 +556,47 @@ export class PostgresBridgeRepository implements BridgeRepository {
           createdAt: row.createdAt,
           processedAt: row.processedAt,
           lastError: row.lastError,
+        },
+      });
+  }
+
+  async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
+    const rows = await this.database
+      .select()
+      .from(outboxDeliveries)
+      .where(eq(outboxDeliveries.projectId, projectId))
+      .orderBy(asc(outboxDeliveries.updatedAt));
+    return rows.map(outboxDeliveryFromRow);
+  }
+
+  async getOutboxDelivery(
+    eventId: string,
+    channel: OutboxDelivery["channel"],
+  ): Promise<OutboxDelivery | undefined> {
+    const query = this.database
+      .select()
+      .from(outboxDeliveries)
+      .where(and(eq(outboxDeliveries.outboxEventId, eventId), eq(outboxDeliveries.channel, channel)))
+      .limit(1);
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    return rows[0] ? outboxDeliveryFromRow(rows[0]) : undefined;
+  }
+
+  async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
+    const row = outboxDeliveryToRow(delivery);
+    await this.database
+      .insert(outboxDeliveries)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [outboxDeliveries.outboxEventId, outboxDeliveries.channel],
+        set: {
+          destinationHash: row.destinationHash,
+          status: row.status,
+          attemptCount: row.attemptCount,
+          preference: row.preference,
+          providerMessageId: row.providerMessageId,
+          lastError: row.lastError,
+          updatedAt: row.updatedAt,
         },
       });
   }

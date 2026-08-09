@@ -985,6 +985,20 @@ describe("Bridge decision workflow", () => {
       "2026-01-01T00:00:00.000Z",
       true,
     );
+    await repository.saveOutboxDelivery({
+      id: "odl_failed_delivery",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      outboxEventId: pending!.id,
+      channel: "email",
+      destinationHash: "a".repeat(64),
+      status: "failed",
+      attemptCount: 1,
+      preference: "immediate",
+      lastError: "provider unavailable",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
     const failures = await service.inspectProjectOutbox(owner, project.id, {
       status: "dead_letter",
       type: "notification.created",
@@ -993,11 +1007,18 @@ describe("Bridge decision workflow", () => {
     expect(failures).toMatchObject({
       totalMatching: 1,
       items: [expect.objectContaining({ id: pending!.id, attempts: 1, lastError: "provider unavailable" })],
+      deliveries: [expect.objectContaining({
+        outboxEventId: pending!.id,
+        channel: "email",
+        status: "failed",
+        destinationHash: "a".repeat(64),
+      })],
       metrics: {
         failedCount: 1,
         totalAttempts: 1,
         readyCount: 0,
         expiredLeaseCount: 0,
+        deliveryStatusCounts: { delivered: 0, failed: 1, suppressed: 0, deferred: 0 },
       },
     });
     await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 2 }))

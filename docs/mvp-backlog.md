@@ -907,7 +907,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — provider-neutral safe templates, recipient/preference and sender contracts, idempotent handler behavior, durable privacy-minimized delivery receipts, and retry/dead-letter observability are implemented; a live SES sender/directory, digest scheduler, blocking-escalation producer, and authenticated deployment link remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -915,11 +915,11 @@ As a user, I need email notification for important Bridge events so that I do no
 
 Acceptance criteria:
 
-1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist.
-2. Emails contain minimal safe context and a signed-in Bridge link.
-3. Delivery status and provider message ID are recorded without storing secrets.
-4. Ordinary events honor notification preferences.
-5. Retry and permanent failure behavior are observable.
+1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
+2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context and an auth-ready Bridge review URL are implemented; production signed-in behavior awaits the explicitly deferred identity scope.**
+3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
+4. Ordinary events honor notification preferences. **Immediate, muted, and digest outcomes are implemented through an injected directory; digest batching/sending remains. Protected review mail bypasses muting.**
+5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
 
 ### BRG-093 — Integrate one pilot team channel
 

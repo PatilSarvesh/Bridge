@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 
 import type { OutboxEvent } from "@bridge/domain";
 
+export * from "./email.js";
+
 export interface ReviewableDecision {
   readonly id: string;
   readonly status: "active" | "superseded" | "expired" | "revoked";

@@ -18,6 +18,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -442,6 +443,11 @@ export const outboxEvents = pgTable(
   (table) => [
     index("bridge_outbox_status_available_idx").on(table.status, table.availableAt),
     index("bridge_outbox_project_created_idx").on(table.projectId, table.createdAt),
+    unique("bridge_outbox_events_org_project_id_unique").on(
+      table.organizationId,
+      table.projectId,
+      table.id,
+    ),
     foreignKey({
       name: "bridge_outbox_events_project_fk",
       columns: [table.projectId],
@@ -451,6 +457,35 @@ export const outboxEvents = pgTable(
       name: "bridge_outbox_events_organization_project_fk",
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const outboxDeliveries = pgTable(
+  "bridge_outbox_deliveries",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    outboxEventId: text("outbox_event_id").notNull(),
+    channel: text("channel").notNull(),
+    destinationHash: text("destination_hash").notNull(),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull(),
+    preference: text("preference").notNull(),
+    providerMessageId: text("provider_message_id"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
+    index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
+    index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
+    foreignKey({
+      name: "bridge_outbox_deliveries_event_scope_fk",
+      columns: [table.organizationId, table.projectId, table.outboxEventId],
+      foreignColumns: [outboxEvents.organizationId, outboxEvents.projectId, outboxEvents.id],
     }).onDelete("cascade"),
   ],
 );

@@ -131,6 +131,20 @@ describe("Bridge API vertical slice", () => {
       pending!.availableAt,
       true,
     );
+    await runtime.repository.saveOutboxDelivery({
+      id: "odl_api_delivery",
+      organizationId: pending!.organizationId,
+      projectId: pending!.projectId,
+      outboxEventId: pending!.id,
+      channel: "email",
+      destinationHash: "b".repeat(64),
+      status: "failed",
+      attemptCount: 1,
+      preference: "immediate",
+      lastError: "provider unavailable",
+      createdAt: pending!.createdAt,
+      updatedAt: pending!.createdAt,
+    });
 
     const inspection = await app.inject({
       method: "GET",
@@ -141,10 +155,16 @@ describe("Bridge API vertical slice", () => {
     expect(inspection.json()).toMatchObject({
       totalMatching: 1,
       items: [expect.objectContaining({ id: pending!.id, status: "dead_letter", attempts: 1 })],
+      deliveries: [expect.objectContaining({
+        outboxEventId: pending!.id,
+        channel: "email",
+        status: "failed",
+      })],
       metrics: {
         statusCounts: { pending: 0, processing: 0, processed: 0, failed: 0, dead_letter: 1 },
         failedCount: 1,
         totalAttempts: 1,
+        deliveryStatusCounts: { delivered: 0, failed: 1, suppressed: 0, deferred: 0 },
       },
     });
 

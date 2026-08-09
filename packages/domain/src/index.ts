@@ -8,8 +8,11 @@ import type {
   ArtifactReviewStatus,
   ArtifactVersionStatus,
   DecisionStatus,
+  DeliveryChannel,
+  NotificationDeliveryPreference,
   PrincipalType,
   NotificationType,
+  OutboxDeliveryStatus,
   OutboxEventStatus,
   OutboxEventType,
   QuestionReviewStatus,
@@ -19,7 +22,13 @@ import type {
   Scope,
 } from "@bridge/contracts";
 
-export type { OutboxEventStatus, OutboxEventType } from "@bridge/contracts";
+export type {
+  DeliveryChannel,
+  NotificationDeliveryPreference,
+  OutboxDeliveryStatus,
+  OutboxEventStatus,
+  OutboxEventType,
+} from "@bridge/contracts";
 
 export type BridgeErrorCode =
   | "UNAUTHENTICATED"
@@ -199,6 +208,22 @@ export interface OutboxEvent {
   readonly createdAt: string;
   readonly leaseUntil?: string;
   readonly processedAt?: string;
+  readonly lastError?: string;
+}
+
+export interface OutboxDelivery {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly outboxEventId: string;
+  readonly channel: DeliveryChannel;
+  readonly destinationHash: string;
+  readonly status: OutboxDeliveryStatus;
+  readonly attemptCount: number;
+  readonly preference: NotificationDeliveryPreference;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly providerMessageId?: string;
   readonly lastError?: string;
 }
 

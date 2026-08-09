@@ -7,6 +7,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  OutboxDelivery,
   OutboxEvent,
   Project,
   Question,
@@ -29,6 +30,8 @@ import {
   notificationToRow,
   outboxEventFromRow,
   outboxEventToRow,
+  outboxDeliveryFromRow,
+  outboxDeliveryToRow,
   questionFromRows,
   questionToRow,
   responseToRow,
@@ -45,6 +48,7 @@ import {
   type QuestionRow,
   type NotificationRow,
   type OutboxEventRow,
+  type OutboxDeliveryRow,
 } from "./mappers.js";
 
 const project: Project = {
@@ -267,6 +271,21 @@ const outboxEvent: OutboxEvent = {
   createdAt: "2026-08-07T10:02:10.000Z",
 };
 
+const outboxDelivery: OutboxDelivery = {
+  id: "odl_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  outboxEventId: outboxEvent.id,
+  channel: "email",
+  destinationHash: "a".repeat(64),
+  status: "delivered",
+  attemptCount: 1,
+  preference: "immediate",
+  providerMessageId: "provider-message-mapping",
+  createdAt: "2026-08-07T10:02:11.000Z",
+  updatedAt: "2026-08-07T10:02:12.000Z",
+};
+
 describe("PostgreSQL domain mappings", () => {
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
@@ -286,6 +305,8 @@ describe("PostgreSQL domain mappings", () => {
 
     expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
     expect(outboxEventFromRow(outboxEventToRow(outboxEvent) as OutboxEventRow)).toEqual(outboxEvent);
+    expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow))
+      .toEqual(outboxDelivery);
   });
 
   it("ships reviewed deferred constraints for atomic aggregate references", () => {
@@ -405,5 +426,16 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(outboxOperatorMigration).toContain("bridge_audit_events_subject_type_check");
     expect(outboxOperatorMigration).toContain("'outbox_event'");
+
+    const emailDeliveryMigration = readFileSync(
+      new URL("../drizzle/0013_ancient_gwen_stacy.sql", import.meta.url),
+      "utf8",
+    );
+    expect(emailDeliveryMigration).toContain("CREATE TABLE \"bridge_outbox_deliveries\"");
+    expect(emailDeliveryMigration).toContain("bridge_outbox_events_org_project_id_unique");
+    expect(emailDeliveryMigration.indexOf("bridge_outbox_events_org_project_id_unique"))
+      .toBeLessThan(emailDeliveryMigration.indexOf("bridge_outbox_deliveries_event_scope_fk"));
+    expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_result_check");
+    expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_destination_hash_check");
   });
 });

@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-09, Asia/Kolkata |
+| Last updated | 2026-08-10, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decisions/specifications and project-admin outbox inspection, metrics, and replay are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance and external delivery integrations remain pending |
+| Current implementation phase | Governed decisions/specifications, outbox operations, and a provider-neutral privacy-minimized email delivery seam are implemented; Claude Code conformance, live SES/directory wiring, and scheduled delivery remain pending |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -785,14 +785,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the outbox-operations slice:
+Current validation result after the provider-neutral email-delivery slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 59 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 63 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, and email-delivery scope/result/hash constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -834,6 +834,7 @@ Current validation result after the outbox-operations slice:
 - In-app notification browser verification passed: the human reviewer saw the seeded assignment, opened it from the Notifications view, and the unread state changed to Read.
 - Transactional-outbox application, mapper/migration, and worker-cycle tests passed: each notification creates a pending delivery intent, claims acquire a lease and increment attempts, successful handlers complete events, and repeated failures become dead letters.
 - Outbox-operations application/API tests passed: only project administrators can inspect delivery state, metrics report status/failure/ready/lease/age data, stale replay requests conflict, cross-tenant IDs remain hidden, successful replay retains the event ID, and the reset plus audit record commit atomically.
+- Provider-neutral email tests passed: all five essential template families render bounded plain text, subjects resist header injection, immediate sends use stable idempotency keys, duplicate completed delivery is skipped, ordinary muted/digest choices are recorded, protected-review mail bypasses muting, addresses are never persisted, and provider errors are redacted before retry/dead-letter storage.
 - CLI bootstrap diagnostics passed: dry-run registration leaves API/files untouched, while doctor verifies the mapped project and generated client instructions.
 - Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
 - Adapter installation diagnostics passed: `bridge install` switches the selected native instruction adapter without project registration, preserves unrelated content, and leaves the repository untouched during `--dry-run`.
@@ -922,14 +923,14 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 ### 17.4 Not yet implemented
 
 - Database row-level security.
-- External outbox adapters, scheduled worker deployment, jitter, and time-series delivery telemetry/alerts.
+- Live email/team provider implementations, scheduled worker deployment, digest batching, jitter, and time-series delivery telemetry/alerts.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
 - Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
-- External notification delivery adapters and preference-aware channels.
+- A live recipient directory/preferences store, SES sender, digest scheduler, and team channel; the provider-neutral email contracts and preference outcomes are implemented.
 - GitHub integration.
-- Slack/email integrations.
+- Live Slack/SES integrations.
 - PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
 - Configurable specification reviewer/team routing or multi-reviewer quorum; append-only comments and request-changes are implemented.
@@ -985,7 +986,7 @@ Environment facts remain:
 
 1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
 2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
-3. Connect claimed outbox events to approved email/team-channel adapters after live PostgreSQL validation; add destination idempotency, notification preferences, jitter, and telemetry export around the implemented operator controls.
+3. Wire the provider-neutral email handler to an approved SES sender and recipient directory after live PostgreSQL validation; add digest scheduling, a team-channel adapter, jitter, and telemetry export around the implemented receipts/operator controls.
 4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
 
 ### 20.2 Implemented agent-run and continuation slice
@@ -1230,7 +1231,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, email/team-channel delivery, preferences, digests, and pagination remain future work. The outbox cycle is deliberately handler-injected and does not choose an external provider.
+- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, live provider delivery, preference administration, digest sending, and pagination remain future work. The outbox/email handlers are deliberately injected and do not choose an external provider.
 - Notifications do not capture raw agent transcripts or private reasoning. MCP remains optional and does not expose the human notification feed to ordinary agents.
 
 ### 20.15 Implemented transactional outbox and worker cycle slice
@@ -1245,7 +1246,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- No email, chat, source-control, or work-item adapter is enabled yet; handlers remain an explicit integration seam.
+- No live email, chat, source-control, or work-item provider is enabled; the email template/handler seam and durable receipts are implemented without credentials.
 - No daemon scheduler, external adapter, time-series telemetry export, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database. Project-scoped inspection, point-in-time metrics, and audited replay are implemented through REST.
 
 ### 20.16 Implemented CLI bootstrap safety and diagnostics slice
@@ -1462,8 +1463,28 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - The snapshot is an operational API, not a web administration page or a time-series telemetry backend; dashboards and alerts remain BRG-104/BRG-111 work.
-- Replay resets per-cycle attempts because the immutable audit record preserves who replayed the stable event and when. Per-destination delivery history/provider message IDs will be introduced with a real external adapter.
-- The worker remains handler-injected. Email/team adapters, destination idempotency, jitter, scheduling, and notification preferences are still pending and MCP is not required for operator access.
+- Replay resets per-cycle attempts because the immutable audit record preserves who replayed the stable event and when. Email delivery receipts retain each event/channel's current attempt outcome and provider message ID across replay.
+- The worker remains handler-injected. Live provider/directory wiring, team delivery, jitter, digest scheduling, and preference administration are still pending; MCP is not required for operator access.
+
+### 20.29 Implemented a privacy-minimized provider-neutral email delivery seam
+
+Implemented and locally verified:
+
+1. `apps/worker/src/email.ts` defines injected recipient-directory and sender contracts; no provider SDK, credentials, or organization identity flow is embedded in the worker.
+2. Plain-text assignment, clarification, blocking-escalation, accepted-answer, and artifact-review templates contain bounded minimal context plus an HTTP(S) Bridge review link. Subjects remove control characters to prevent header injection.
+3. The notification email handler verifies the notification/outbox pointer envelope before resolving a destination and supplies `${eventId}:email` as the stable provider idempotency key.
+4. Recipient addresses exist only in the in-memory sender request. Durable `OutboxDelivery` records contain an organization-scoped SHA-256 destination fingerprint, channel, resolved preference, attempt count, status, timestamps, sanitized failure, and optional provider message ID.
+5. Ordinary `immediate`, `muted`, and `digest` preferences produce delivered, suppressed, and deferred outcomes respectively. Protected-review notification email is immediate even when the injected preference is muted/digest.
+6. Previously delivered/suppressed/deferred event-channel receipts are not sent twice. A failed receipt can retry only against the same destination fingerprint, preventing silent redirection after failure.
+7. Forward-only migration `0013_ancient_gwen_stacy.sql` creates tenant-consistent delivery receipts, adds the required outbox composite key before its foreign key, and enforces channel/status/preference/attempt/hash/time/result invariants.
+8. Project-admin outbox inspection returns delivery receipts and delivery-status counts without revealing addresses. Worker, application, API, mapper/migration, and opt-in reconnect coverage exercise the seam.
+
+Deliberate boundaries:
+
+- No message leaves the process until a deployment supplies a real recipient directory and sender. SES credentials, email addresses, and customer data are not stored in repository files or outbox payloads.
+- The link is ready for a future signed-in deployment but the fixed-principal prototype has no authentication by explicit founder direction; BRG-092 therefore remains partial rather than claiming a production signed-in email flow.
+- Digest preference is durably deferred but not yet batched or sent. The blocking-escalation template exists, while producing SLA escalation notifications awaits scheduled policy work.
+- Only plain text is generated. HTML rendering, unsubscribe/preference administration, bounce/complaint handling, SES provider implementation, scheduling, jitter, and telemetry export remain deployment slices.
 
 ## 21. Important implementation files
 
@@ -1492,6 +1513,7 @@ Deliberate boundaries:
 - Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
 - Decision full-text search migration: `packages/database/drizzle/0011_keen_galactus.sql`
 - Outbox operator-audit migration: `packages/database/drizzle/0012_outbox_operator_replay.sql`
+- Email delivery-receipt migration: `packages/database/drizzle/0013_ancient_gwen_stacy.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1501,6 +1523,7 @@ Deliberate boundaries:
 - Web UI: `apps/web/app/page.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
+- Provider-neutral notification email handler: `apps/worker/src/email.ts`
 
 ## 22. Source references already used in product decisions
 
@@ -1532,4 +1555,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default weighted decision search, formal specification review/version comparison, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, project-admin outbox metrics/audited replay, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and external deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

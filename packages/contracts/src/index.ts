@@ -38,6 +38,9 @@ export const outboxEventStatusSchema = z.enum([
   "failed",
   "dead_letter",
 ]);
+export const deliveryChannelSchema = z.enum(["email"]);
+export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
+export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest", "muted"]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
@@ -382,6 +385,9 @@ export type QuestionReviewStatus = z.infer<typeof questionReviewStatusSchema>;
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 export type OutboxEventType = z.infer<typeof outboxEventTypeSchema>;
 export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
+export type DeliveryChannel = z.infer<typeof deliveryChannelSchema>;
+export type OutboxDeliveryStatus = z.infer<typeof outboxDeliveryStatusSchema>;
+export type NotificationDeliveryPreference = z.infer<typeof notificationDeliveryPreferenceSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;

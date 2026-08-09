@@ -49,6 +49,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     let questionId: string;
     let replacementQuestionId: string;
     let contextConsumerRunId: string;
+    let deliveryEventId: string;
     try {
       await firstStore.repository.saveProject(project);
       const service = new BridgeService(firstStore.repository);
@@ -178,6 +179,24 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         decision: { status: "superseded", version: 2, replacementDecisionId: replacement.id },
         impact: { artifactIds: [publication.artifact.id], runIds: [runId, contextConsumerRunId] },
       });
+      const deliveryEvent = (await firstStore.repository.listOutboxEvents(project.id))
+        .find((event) => event.type === "notification.created");
+      if (!deliveryEvent) throw new Error("Expected a notification delivery event.");
+      deliveryEventId = deliveryEvent.id;
+      await firstStore.repository.saveOutboxDelivery({
+        id: `odl_${suffix}`,
+        organizationId: project.organizationId,
+        projectId: project.id,
+        outboxEventId: deliveryEvent.id,
+        channel: "email",
+        destinationHash: "c".repeat(64),
+        status: "delivered",
+        attemptCount: 1,
+        preference: "immediate",
+        providerMessageId: `provider-${suffix}`,
+        createdAt: deliveryEvent.createdAt,
+        updatedAt: deliveryEvent.createdAt,
+      });
     } finally {
       await firstStore.close();
     }
@@ -238,6 +257,15 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           payload: expect.objectContaining({ decisionId, replacementDecisionId }),
         }),
       ]));
+      expect(await secondStore.repository.listOutboxDeliveries(project.id)).toEqual([
+        expect.objectContaining({
+          outboxEventId: deliveryEventId,
+          channel: "email",
+          status: "delivered",
+          destinationHash: "c".repeat(64),
+          providerMessageId: `provider-${suffix}`,
+        }),
+      ]);
     } finally {
       await secondStore.close();
     }

@@ -347,6 +347,7 @@ policy_versions
 idempotency_keys
 audit_events
 outbox_events
+outbox_deliveries
 job_failures
 integration_installations
 notification_preferences
@@ -742,7 +743,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, and oldest-ready age. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. Jitter, external destination adapters/idempotency, time-series telemetry, and scheduled runtime wiring remain deployment work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email handler passes a stable event/channel idempotency key to an injected provider and skips an already delivered receipt. Jitter, live provider implementations, time-series telemetry, and scheduled runtime wiring remain deployment work.
 
 ## 17. Notification architecture
 
@@ -751,10 +752,11 @@ Notification generation is separate from delivery:
 1. The application command resolves the current direct owner/reviewer recipients.
 2. In one repository transaction it creates the durable in-app notification and a `notification.created` outbox intent.
 3. The worker claims the intent, applies retry/dead-letter policy, and invokes an injected channel handler.
-4. A future channel adapter can resolve preferences/escalation policy and attempt email or team delivery.
-5. The delivery result remains recorded on the outbox event while the in-app notification remains the canonical human read model.
+4. The provider-neutral email handler resolves the recipient and immediate/digest/muted preference through an injected directory, renders bounded plain text, and calls an injected sender without persisting the address.
+5. `outbox_deliveries` records the destination hash, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
+6. A future scheduled runtime wires a live directory and SES sender; deferred digest receipts become inputs to a digest job rather than credentials or addresses stored in the outbox.
 
-Protected approvals may bypass digests but still honor explicitly supported emergency policies. Ordinary questions support immediate, digest, and muted modes.
+Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest deferral. The actual digest scheduler and administrative preference store are not yet connected.
 
 Team-channel messages should link to Bridge for final acceptance. Accepting a consequential decision directly from chat should be deferred until identity, replay, and confirmation semantics are proven.
 

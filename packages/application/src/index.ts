@@ -57,6 +57,7 @@ import {
   type QuestionReview,
   type QuestionResponse,
   type Notification,
+  type OutboxDelivery,
   type OutboxEvent,
 } from "@bridge/domain";
 
@@ -115,6 +116,9 @@ export interface BridgeRepository {
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
+  listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]>;
+  getOutboxDelivery(eventId: string, channel: OutboxDelivery["channel"]): Promise<OutboxDelivery | undefined>;
+  saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
   completeOutboxEvent(eventId: string, processedAt: string): Promise<void>;
   failOutboxEvent(
@@ -194,10 +198,12 @@ export interface OutboxOperationsMetrics {
   readonly expiredLeaseCount: number;
   readonly oldestReadyAt?: string;
   readonly oldestReadyAgeMs?: number;
+  readonly deliveryStatusCounts: Readonly<Record<OutboxDelivery["status"], number>>;
 }
 
 export interface OutboxOperationsView {
   readonly items: readonly OutboxEvent[];
+  readonly deliveries: readonly OutboxDelivery[];
   readonly totalMatching: number;
   readonly metrics: OutboxOperationsMetrics;
 }
@@ -372,6 +378,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly auditEvents = new Map<string, AuditEvent>();
   private readonly notifications = new Map<string, Notification>();
   private readonly outboxEvents = new Map<string, OutboxEvent>();
+  private readonly outboxDeliveries = new Map<string, OutboxDelivery>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   private readonly artifactIdempotency = new Map<string, ArtifactIdempotencyRecord>();
   private readonly runIdempotency = new Map<string, RunIdempotencyRecord>();
@@ -398,6 +405,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       auditEvents: new Map(this.auditEvents),
       notifications: new Map(this.notifications),
       outboxEvents: new Map(this.outboxEvents),
+      outboxDeliveries: new Map(this.outboxDeliveries),
       idempotency: new Map(this.idempotency),
       artifactIdempotency: new Map(this.artifactIdempotency),
       runIdempotency: new Map(this.runIdempotency),
@@ -418,6 +426,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.auditEvents, snapshot.auditEvents);
       this.restoreMap(this.notifications, snapshot.notifications);
       this.restoreMap(this.outboxEvents, snapshot.outboxEvents);
+      this.restoreMap(this.outboxDeliveries, snapshot.outboxDeliveries);
       this.restoreMap(this.idempotency, snapshot.idempotency);
       this.restoreMap(this.artifactIdempotency, snapshot.artifactIdempotency);
       this.restoreMap(this.runIdempotency, snapshot.runIdempotency);
@@ -675,6 +684,25 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.outboxEvents.set(event.id, event);
   }
 
+  async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
+    return [...this.outboxDeliveries.values()]
+      .filter((delivery) => delivery.projectId === projectId)
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  }
+
+  async getOutboxDelivery(
+    eventId: string,
+    channel: OutboxDelivery["channel"],
+  ): Promise<OutboxDelivery | undefined> {
+    return [...this.outboxDeliveries.values()].find(
+      (delivery) => delivery.outboxEventId === eventId && delivery.channel === channel,
+    );
+  }
+
+  async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
+    this.outboxDeliveries.set(delivery.id, delivery);
+  }
+
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {
     const nowTime = Date.parse(now);
     const candidates = [...this.outboxEvents.values()]
@@ -916,6 +944,7 @@ export class BridgeService {
     await this.requireProject(principal, projectId);
     this.assertProjectOperator(principal, "Inspecting delivery operations");
     const events = await this.repository.listOutboxEvents(projectId);
+    const deliveries = await this.repository.listOutboxDeliveries(projectId);
     const nowTime = this.now().getTime();
     const statusCounts: Record<OutboxEvent["status"], number> = {
       pending: 0,
@@ -924,6 +953,13 @@ export class BridgeService {
       failed: 0,
       dead_letter: 0,
     };
+    const deliveryStatusCounts: Record<OutboxDelivery["status"], number> = {
+      delivered: 0,
+      failed: 0,
+      suppressed: 0,
+      deferred: 0,
+    };
+    for (const delivery of deliveries) deliveryStatusCounts[delivery.status] += 1;
     let totalAttempts = 0;
     let expiredLeaseCount = 0;
     const readyEvents: OutboxEvent[] = [];
@@ -947,6 +983,9 @@ export class BridgeService {
     );
     return {
       items: matching.slice(0, query.limit),
+      deliveries: deliveries.filter((delivery) =>
+        matching.some((event) => event.id === delivery.outboxEventId),
+      ),
       totalMatching: matching.length,
       metrics: {
         total: events.length,
@@ -955,6 +994,7 @@ export class BridgeService {
         totalAttempts,
         readyCount: readyEvents.length,
         expiredLeaseCount,
+        deliveryStatusCounts,
         ...(oldestReadyAt
           ? {
               oldestReadyAt,
