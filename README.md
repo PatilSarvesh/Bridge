@@ -63,13 +63,13 @@ Then open `http://127.0.0.1:3000`. The API seeds one blocking architecture quest
 
 Bridge is a shared service, not an SDK that must be embedded into every agent or application. A team runs the Bridge API and chooses the thinnest adapter its environment permits:
 
-- Install the `bridge` CLI package when agents have terminal and API access. The prototype can produce a local tarball; a public registry release is not available yet.
+- Install the `bridge` CLI package when agents have terminal and API access. A tagged GitHub Release can provide a globally installable, checksummed tarball without requiring an npm organization.
 - Check the generated `.bridge/agent-instructions.md` into each repository so supported agents follow the same workflow.
 - Configure the optional MCP endpoint when the organization approves MCP.
 - Let an operator or CI job run `bridge sync` and `bridge spec pull` when the agent itself cannot access the network.
 - Use the web UI and manually relay structured records when no agent-side integration is approved.
 
-The prototype can package an installable CLI tarball with `pnpm cli:pack`. Publishing it to a public or organization registry remains a later distribution step. No authentication or organization onboarding is being added in this phase.
+The prototype packages an installable CLI tarball with `pnpm cli:pack`; `pnpm check` now installs and executes that artifact under a temporary global prefix. The tagged release workflow and operator steps are documented in [`docs/distribution.md`](docs/distribution.md). Public or organization-registry publication remains a later owner decision. No authentication or organization onboarding is being added in this phase.
 
 After a repository is initialized, use the adapter-only command when changing clients or regenerating the managed instruction block without registering another project:
 
@@ -126,6 +126,14 @@ Build a Hospital Management System.
 ```
 
 The repository instructions require the agent to start a Bridge run, retrieve context, route meaningful shared-authority questions through Bridge, and publish a PRD, ADR, API contract, and test plan. Open `http://127.0.0.1:3000` and select **Hospital Management System** to inspect its questions and specifications.
+
+When the agent reaches the human boundary, verify the observable result from the new repository:
+
+```bash
+pnpm exec bridge conformance --task "Build a Hospital Management System."
+```
+
+Pass means Bridge found a matching task run, a linked context snapshot, at least one complete agent-created blocking question, all four agent-created specification types, matching run provenance, and a run that is waiting for a human or has validly completed. The command exits `10` with named failed checks when evidence is incomplete. Add `--run-id <id>` to target a particular session. If unrelated application dependency policies prevent pnpm from executing an already installed package, use `./node_modules/.bin/bridge` for the same commands without reinstalling dependencies.
 
 This is an instruction-driven adapter, not a universal interception of every vendor's native prompt UI. Meaningful business, architecture, QA, data, privacy, security, and operational questions are in scope; private reasoning, raw transcripts, and trivial implementation chatter are not. MCP is optional: omit `--mcp-url` for the CLI/instruction-only path, or configure it to let `bridge doctor` verify an MCP `initialize` response.
 

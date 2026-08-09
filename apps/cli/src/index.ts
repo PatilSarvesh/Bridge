@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -94,6 +94,7 @@ Usage:
   bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
   bridge install [--client <client>] [--dry-run]
   bridge doctor
+  bridge conformance [project-id] --task <description> [--run-id <id>]
   bridge run start [project-id] --task <description> [--client <name>] [--capability <level>] [--continues <run-id> --resume-key <key>]
   bridge run get <run-id>
   bridge run report <run-id> --status <status> --version <number> [--summary <text>]
@@ -377,7 +378,7 @@ function generatedInstructions(): string {
 
 This repository uses Bridge even when MCP is unavailable.
 
-Command invocation: use \`bridge\` when the CLI is installed globally. When it is installed as this repository's pnpm development dependency, replace \`bridge\` in every command below with \`pnpm exec bridge\`.
+Command invocation: use \`bridge\` when the CLI is installed globally. When it is installed as this repository's pnpm development dependency, replace \`bridge\` in every command below with \`pnpm exec bridge\`. If pnpm refuses to execute because unrelated application dependencies have unapproved install scripts, invoke \`./node_modules/.bin/bridge\` directly; this is the same repository-installed CLI and does not require reinstalling dependencies.
 
 1. Start consequential work with \`bridge run start --task "<current task>"\`; keep the returned run ID and continuation locator outside committed repository files.
 2. Retrieve approved context with \`bridge context --task "<current task>" --run-id <run-id>\`.
@@ -389,9 +390,10 @@ Command invocation: use \`bridge\` when the CLI is installed globally. When it i
 8. Do not continue protected or blocking work until \`bridge wait <question-id>\` returns an accepted answer.
 9. Resolve the durable handoff with \`bridge run continue <run-id> --resume-key <key>\`; start a later run using \`--continues\` and \`--resume-key\`.
 10. Cite Bridge decision and assumption IDs in implementation summaries and specifications.
-11. Before claiming completion, verify required specifications were published and report the run using \`bridge run report <run-id> --status completed --version <version> --summary "<outcome>"\`.
-12. Run \`bridge sync --task "<current task>" --run-id <run-id>\` when the agent cannot make outbound calls; read \`.bridge/context.md\` afterward.
-13. Use \`bridge spec pull\` to materialize only human-approved specification versions.
+11. After routing questions and publishing the required specifications, run \`bridge conformance --task "<current task>" --run-id <run-id>\` and fix every failed observable check.
+12. Before claiming completion, verify required specifications were published and report the run using \`bridge run report <run-id> --status completed --version <version> --summary "<outcome>"\`.
+13. Run \`bridge sync --task "<current task>" --run-id <run-id>\` when the agent cannot make outbound calls; read \`.bridge/context.md\` afterward.
+14. Use \`bridge spec pull\` to materialize only human-approved specification versions.
 
 Generated snapshots are evidence of server-approved context. Local edits do not create or change Bridge decisions.
 `;
@@ -964,6 +966,185 @@ async function runDoctor(
   }
 }
 
+const conformanceSpecificationTypes = ["prd", "adr", "api_contract", "test_plan"] as const;
+
+function normalizedWords(value: unknown): readonly string[] {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0 && !["a", "an", "the"].includes(word));
+}
+
+function taskMatches(candidate: unknown, expected: string): boolean {
+  const candidateWords = new Set(normalizedWords(candidate));
+  const expectedWords = normalizedWords(expected);
+  return expectedWords.length > 0 && expectedWords.every((word) => candidateWords.has(word));
+}
+
+function nonEmptyArray(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined) : [];
+}
+
+function isMeaningfullyRoutedQuestion(value: unknown, runId: string): boolean {
+  const question = asRecord(value);
+  if (!question || question.runId !== runId || question.createdByType !== "agent") return false;
+  const ownerCount = nonEmptyArray(question.ownerIds).length + nonEmptyArray(question.ownerRoles).length;
+  const options = nonEmptyArray(question.options).map(asRecord).filter(Boolean);
+  const recommendationKey = String(question.recommendationKey ?? "");
+  const recommendationIsValid = recommendationKey.length > 0 &&
+    options.some((option) => String(option?.key ?? "") === recommendationKey);
+  const scope = asRecord(question.scope);
+  const riskIsValid = ["low", "medium", "high", "protected"].includes(String(question.risk ?? ""));
+  return String(question.title ?? "").trim().length >= 8 &&
+    String(question.category ?? "").trim().length >= 2 &&
+    String(question.context ?? "").trim().length >= 10 &&
+    String(question.whyItMatters ?? "").trim().length >= 10 &&
+    ownerCount > 0 &&
+    options.length >= 2 &&
+    recommendationIsValid &&
+    riskIsValid &&
+    Boolean(scope && Object.keys(scope).length > 0) &&
+    question.blocking === true;
+}
+
+async function runConformance(
+  args: readonly string[],
+  config: ProjectConfig | undefined,
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const projectId = requireProjectId(firstPositional(args), config);
+  const task = optionValue(args, "--task");
+  if (!task) {
+    throw new CliError(
+      "TASK_REQUIRED",
+      "conformance requires --task so the observed records can be tied to the independent-agent request.",
+      cliExitCodes.usage,
+    );
+  }
+
+  const [runsResponse, questionsResponse, artifactsResponse] = await Promise.all([
+    bridgeFetch(`/v1/projects/${encodeURIComponent(projectId)}/runs`, connection, runtime),
+    bridgeFetch(`/v1/projects/${encodeURIComponent(projectId)}/questions`, connection, runtime),
+    bridgeFetch(`/v1/projects/${encodeURIComponent(projectId)}/artifacts`, connection, runtime),
+  ]);
+  const requestedRunId = optionValue(args, "--run-id");
+  const matchingRuns = itemsFrom(runsResponse)
+    .map(asRecord)
+    .filter((run): run is Readonly<Record<string, unknown>> => Boolean(
+      run &&
+      (!requestedRunId || run.id === requestedRunId) &&
+      taskMatches(run.taskSummary, task),
+    ))
+    .sort((left, right) => String(right.startedAt ?? "").localeCompare(String(left.startedAt ?? "")));
+  const run = matchingRuns[0];
+  const runId = String(run?.id ?? requestedRunId ?? "");
+  const linkedQuestions = itemsFrom(questionsResponse).filter((question) => asRecord(question)?.runId === runId);
+  const routedQuestions = linkedQuestions.filter((question) => isMeaningfullyRoutedQuestion(question, runId));
+  const artifacts = itemsFrom(artifactsResponse).map(asRecord).filter(Boolean);
+  const linkedSpecificationTypes = new Set<string>();
+  const linkedVersionIds = new Set<string>();
+  for (const artifact of artifacts) {
+    if (!artifact) continue;
+    const versions = nonEmptyArray(artifact.versions).map(asRecord).filter(Boolean);
+    const linkedVersions = versions.filter((version) => version?.runId === runId && version.createdByType === "agent");
+    if (linkedVersions.length > 0) {
+      for (const version of linkedVersions) linkedVersionIds.add(String(version?.id ?? ""));
+      linkedSpecificationTypes.add(String(artifact.type ?? ""));
+    }
+  }
+  const missingSpecificationTypes = conformanceSpecificationTypes.filter(
+    (type) => !linkedSpecificationTypes.has(type),
+  );
+  const runQuestionIds = nonEmptyArray(run?.questionIds).map(String);
+  const runArtifactVersionIds = nonEmptyArray(run?.artifactVersionIds).map(String);
+  const checks = [
+    {
+      name: "task-run",
+      status: run ? "pass" : "fail",
+      detail: run
+        ? `Run ${runId} is linked to the requested task.`
+        : requestedRunId
+          ? `Run ${requestedRunId} was not found or its task summary does not match.`
+          : "No run has a task summary matching the requested task.",
+    },
+    {
+      name: "context-retrieval",
+      status: nonEmptyArray(run?.contextSnapshotIds).length > 0 ? "pass" : "fail",
+      detail: nonEmptyArray(run?.contextSnapshotIds).length > 0
+        ? "The run retrieved and linked a Bridge context snapshot."
+        : "The run has no linked context snapshot.",
+    },
+    {
+      name: "routed-question",
+      status: routedQuestions.length > 0 ? "pass" : "fail",
+      detail: routedQuestions.length > 0
+        ? `${routedQuestions.length} agent-created blocking question(s) include owners, options, recommendation, risk context, scope, and run provenance.`
+        : "No agent-created blocking question has complete routing, options, recommendation, scope, and run provenance.",
+    },
+    {
+      name: "run-question-link",
+      status: routedQuestions.some((question) => runQuestionIds.includes(String(asRecord(question)?.id ?? "")))
+        ? "pass"
+        : "fail",
+      detail: routedQuestions.some((question) => runQuestionIds.includes(String(asRecord(question)?.id ?? "")))
+        ? "The conforming question appears in the run's questionIds."
+        : "The conforming question must also appear in the run's questionIds.",
+    },
+    {
+      name: "required-specifications",
+      status: missingSpecificationTypes.length === 0 ? "pass" : "fail",
+      detail: missingSpecificationTypes.length === 0
+        ? "PRD, ADR, API contract, and test plan have agent-created versions linked to the run."
+        : `Missing run-linked specification types: ${missingSpecificationTypes.join(", ")}.`,
+    },
+    {
+      name: "run-specification-links",
+      status: [...linkedVersionIds].filter((versionId) => runArtifactVersionIds.includes(versionId)).length >=
+        conformanceSpecificationTypes.length
+        ? "pass"
+        : "fail",
+      detail: [...linkedVersionIds].filter((versionId) => runArtifactVersionIds.includes(versionId)).length >=
+        conformanceSpecificationTypes.length
+        ? "The run links all four observed agent-created specification versions."
+        : "The run must link at least four observed agent-created specification versions.",
+    },
+    {
+      name: "human-boundary",
+      status: ["waiting_for_human", "completed"].includes(String(run?.status ?? "")) ? "pass" : "fail",
+      detail: run?.status === "waiting_for_human"
+        ? "The run is waiting at the human decision boundary."
+        : run?.status === "completed"
+          ? "The run completed after its Bridge workflow."
+          : `The run status is ${String(run?.status ?? "missing")}; expected waiting_for_human or completed.`,
+    },
+  ] as const;
+  const ok = checks.every((check) => check.status === "pass");
+  const result = {
+    ok,
+    projectId,
+    task,
+    runId: run?.id ?? null,
+    client: run?.client ?? null,
+    runStatus: run?.status ?? null,
+    routedQuestionIds: routedQuestions.map((question) => asRecord(question)?.id),
+    linkedSpecificationTypes: [...linkedSpecificationTypes].sort(),
+    checks,
+    limitation: "This verifies observable Bridge records. It cannot detect a vendor-native clarification prompt that the vendor does not expose.",
+  };
+  output(runtime, result);
+  if (!ok) {
+    throw new CliError(
+      "CONFORMANCE_FAILED",
+      "Independent-agent conformance evidence is incomplete.",
+      cliExitCodes.pending,
+      { projectId, runId: run?.id ?? null, failedChecks: checks.filter((check) => check.status === "fail") },
+    );
+  }
+}
+
 async function executeCli(args: readonly string[], runtime: CliRuntime): Promise<void> {
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     runtime.stdout(`${usage()}\n`);
@@ -985,6 +1166,11 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
 
   if (command === "doctor") {
     await runDoctor(config, connection, runtime);
+    return;
+  }
+
+  if (command === "conformance") {
+    await runConformance(args, config, connection, runtime);
     return;
   }
 
@@ -1669,6 +1855,18 @@ export async function runCli(
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export async function isCliEntrypoint(
+  executablePath: string | undefined = process.argv[1],
+  moduleUrl: string = import.meta.url,
+): Promise<boolean> {
+  if (!executablePath) return false;
+  try {
+    return await realpath(executablePath) === await realpath(new URL(moduleUrl));
+  } catch {
+    return moduleUrl === pathToFileURL(executablePath).href;
+  }
+}
+
+if (await isCliEntrypoint()) {
   process.exitCode = await runCli(process.argv.slice(2));
 }

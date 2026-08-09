@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-08, Asia/Kolkata |
+| Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | The MVP prototype and GitHub handoff hardening are implemented: fresh-repository bootstrap, shared questions/decisions/specifications, assumptions and run provenance, human review, notifications/outbox, CLI and optional MCP adapters, durable PostgreSQL mode, read-only decision/assumption/run UI views, and contributor guardrails are verified; the next pilot check is real agent adherence to the generated repository instructions |
+| Current implementation phase | The MVP prototype, GitHub handoff hardening, and the first real independent Codex fresh-repository conformance run are verified; the next adapter validation is cross-vendor Claude Code conformance, followed by distribution work |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -107,7 +107,7 @@ The decisive MVP test is:
 
 “All questions” means all structured questions that require shared human knowledge or authority. Bridge must not capture private chain-of-thought, raw transcripts, or inconsequential implementation chatter.
 
-Current status against this journey: the infrastructure path now passes end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI can drive run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged Hospital Management System simulation produced one protected question and four specifications (PRD, ADR, API contract, and test plan), all visible in the browser. The remaining pilot validation is a real independent agent chat obeying the generated instructions; Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
+Current status against this journey: the infrastructure path and the first real Codex-first path pass end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI drives run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged simulation produced one protected question and all four specification types, and a separate independent Codex CLI session given only the ordinary Hospital prompt produced the same observable governed records and stopped at `waiting_for_human`. Claude Code remains the second-client validation. Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
 
 ### 3.3 Product boundary
 
@@ -794,6 +794,9 @@ Current validation result after the role-aware-routing, reviewer-switcher, perso
 - Fresh-project application/API registration, idempotent replay, access-policy, and project-list tests: passed.
 - Packaged CLI initialization from a local tarball, safe `AGENTS.md` preservation, and idempotent managed-block regeneration: passed.
 - Fresh Hospital Management System acceptance simulation passed: project registration -> run -> protected question -> PRD/ADR/API contract/test plan -> project-scoped API reads.
+- Real independent Codex CLI conformance passed from a fresh repository using only the ordinary prompt `Build a Hospital Management System.` and no MCP. The resulting run linked a context snapshot, one protected role-routed question, a reversible assumption, and PRD/ADR/API-contract/test-plan versions, then entered `waiting_for_human`.
+- The real-agent run exposed and drove fixes for two adapter defects: packaged execution through pnpm symlinks now resolves the real entrypoint, and generated instructions document the direct repository binary fallback when unrelated dependency install policy blocks `pnpm exec`.
+- `bridge conformance --task [--run-id]` now emits named observable checks and exit code `10` when a task-linked run, context, routed question, specification set, provenance links, or human boundary is incomplete. It intentionally cannot observe vendor-private clarification UI.
 - In-app browser verification passed for project selection, the Hospital question, and all four Hospital specifications.
 - REST response-proposal regression passed: a contributor can add an answer before the configured owner accepts the decision.
 - In-app browser verification passed for the team discussion card, response author/rationale, and response form.
@@ -904,8 +907,9 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
 - Specification comments or multi-reviewer quorum.
 - Binary attachments or S3 storage.
-- Public or organization-registry CLI publishing and a standalone installer; a local installable tarball is available.
-- A conformance guard proving that supported agents route meaningful native clarification questions and generated specification files through Bridge during ordinary prompts.
+- Execution of the first tagged GitHub CLI release and any public/organization-registry publication; the checksummed release workflow, global tarball install path, and local package smoke test are implemented.
+- Claude Code and later-client independent conformance runs; Codex-first observable conformance now passes.
+- A vendor hook or other enforceable signal for private/native clarification prompts; the current guard can verify Bridge outcomes but cannot observe UI that a vendor does not expose.
 - Automated browser regression tests; the current Hospital acceptance view was verified interactively in the in-app browser.
 
 ## 18. Git and workspace state
@@ -1047,13 +1051,17 @@ Implemented:
 7. Dynamic project loading and selection in the web UI, with project-scoped question and specification views.
 8. Application, REST, CLI, production-build, packaged-process, and browser acceptance evidence.
 9. A fresh Hospital Management System simulation with one protected privacy question and four in-review specifications visible under the distinct registered project.
+10. An observable `bridge conformance` command covering task/run matching, context retrieval, complete question routing, run linkage, all four greenfield specification types, specification provenance, and the human boundary.
+11. A real independent Codex CLI run from a separately initialized repository. The ordinary Hospital Management System prompt first failed the new guard because no question had been routed; the agent corrected the omission, submitted a protected question to privacy/security/hospital-operations roles, and the final guard passed with the run in `waiting_for_human`.
+12. Packaged CLI entrypoint resolution through pnpm's symlinked binary, with a regression test and a direct `./node_modules/.bin/bridge` fallback for environments whose package-manager policy blocks execution while application dependencies are changing.
 
 Deliberate boundaries:
 
 - Project registration uses the existing fixed development principal; it is not organization onboarding or authentication.
 - MCP is not required for this path.
 - Repository instructions are the Codex-first activation mechanism. Bridge does not claim hard interception of unsupported vendor-native clarification prompts.
-- The packaged simulation proves Bridge mechanics and UI visibility. A real independent Codex chat remains the next conformance/pilot test.
+- The packaged simulation proves Bridge mechanics and UI visibility, while the independent Codex run proves observable instruction adherence for one Codex CLI/version/environment. Claude Code and other vendor clients still require their own runs.
+- Observable conformance cannot prove that no unexposed vendor-native clarification UI was used; Bridge still does not claim universal interception.
 - Broader UI design feedback remains deferred; only the functional project selector needed by acceptance was added.
 
 ### 20.6 Implemented shared question discussion slice
@@ -1295,6 +1303,24 @@ Deliberate boundaries:
 - Authentication, organization onboarding, automatic vendor prompt interception, external notification adapters, scheduled worker deployment, and public package publication are intentionally not represented as completed.
 - The repository is licensed under Apache-2.0; ownership-specific copyright or trademark notices can be added later without changing the selected license.
 
+### 20.21 Added observable agent conformance and GitHub CLI distribution
+
+Implemented and verified:
+
+1. `bridge conformance --task [--run-id]` verifies the task-linked run, context snapshot, complete agent-created blocking question, question/run linkage, PRD/ADR/API-contract/test-plan versions, exact version/run linkage, and the human boundary.
+2. A separately launched Codex CLI session in a fresh initialized repository received only the ordinary Hospital Management System prompt and passed the final observable conformance check without MCP.
+3. The first failed conformance result correctly identified that the agent had published all specifications but had not routed a question; the agent then created a protected role-owned question and the run moved to `waiting_for_human`.
+4. Packaged execution now recognizes pnpm's symlinked binary through real-path entrypoint comparison, with a regression test.
+5. Generated instructions provide `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated application dependency policy blocks `pnpm exec`.
+6. Root validation now packages the CLI, installs it globally under a temporary prefix, executes the installed command, and verifies a no-mutation bootstrap dry run.
+7. A tag-driven GitHub Actions workflow validates tag/version equality and creates a GitHub Release containing the tarball and SHA-256 checksum. Installation and release-owner steps are documented in `docs/distribution.md`.
+
+Deliberate boundaries:
+
+- Observable conformance cannot detect a vendor-private clarification UI that the vendor does not expose.
+- The Codex result is evidence for one client/version/environment; Claude Code remains the next cross-vendor run.
+- No release tag was pushed and no registry package was published during implementation. The package stays registry-private until the owner selects and controls a namespace.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1358,4 +1384,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive local checks, and GitHub CI/handoff guardrails; real third-party agent adherence and deployment integrations remain pilot validation, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

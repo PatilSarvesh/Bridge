@@ -1,0 +1,58 @@
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate, package, and smoke-test the CLI
+        run: pnpm check
+
+      - name: Verify tag and create checksum
+        shell: bash
+        run: |
+          CLI_VERSION=$(node -p "require('./apps/cli/package.json').version")
+          if [[ "$GITHUB_REF_NAME" != "v$CLI_VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match CLI version $CLI_VERSION." >&2
+            exit 1
+          fi
+          cd dist
+          sha256sum "bridge-cli-$CLI_VERSION.tgz" > "bridge-cli-$CLI_VERSION.tgz.sha256"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          CLI_VERSION=$(node -p "require('./apps/cli/package.json').version")
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/bridge-cli-$CLI_VERSION.tgz" \
+            "dist/bridge-cli-$CLI_VERSION.tgz.sha256" \
+            --verify-tag \
+            --generate-notes \
+            --title "Bridge CLI $CLI_VERSION"

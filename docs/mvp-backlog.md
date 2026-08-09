@@ -716,7 +716,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Implemented for the fixed-principal local prototype
+- **Status:** Implemented and independently validated for the fixed-principal Codex-first local prototype
 - **Dependencies:** BRG-030, BRG-054, BRG-061, BRG-062, BRG-080
 - **PRD references:** Founder-defined fresh-project acceptance journey
 
@@ -729,7 +729,28 @@ Acceptance evidence:
 3. MCP is not required.
 4. The web UI loads registered projects and scopes questions/specifications to the selected project.
 5. A packaged Hospital Management System simulation produced a protected question and PRD, ADR, API contract, and test plan visible in the browser.
-6. Universal hard interception is not claimed; real independent agent adherence remains a pilot conformance test.
+6. A real independent Codex CLI session received only `Build a Hospital Management System.`, linked its context/run/question/specification records without MCP, and finished at `waiting_for_human` with every observable `bridge conformance` check passing.
+7. The conformance command returns named pass/fail evidence and a stable pending exit code; universal hard interception is still not claimed because vendor-private clarification UI may be unobservable.
+8. Claude Code and later-client independent runs remain cross-vendor validation work rather than a blocker for the Codex-first slice.
+
+### BRG-065 — Distribute an immutable CLI release artifact
+
+- **Priority:** P1
+- **Size:** S
+- **Status:** Partial — GitHub Release automation, checksum generation, global tarball installation documentation, and packaged-binary smoke coverage are implemented; the first version tag and any registry publication remain explicit maintainer actions
+- **Dependencies:** BRG-063, BRG-064
+- **PRD references:** CLI distribution and MCP-optional adoption
+
+As a repository maintainer, I need a verified CLI artifact that can be installed without an npm organization so that teams can adopt Bridge in fresh repositories before a registry namespace is selected.
+
+Acceptance criteria:
+
+1. `pnpm check` packages the CLI and executes the globally installed tarball from an isolated temporary prefix. **Implemented.**
+2. The smoke test covers the installed symlinked entrypoint and a no-mutation fresh-project dry run. **Implemented.**
+3. A version tag must match the CLI package version before release creation. **Implemented in the tag workflow.**
+4. The GitHub Release contains the immutable tarball and a SHA-256 checksum. **Implemented in automation; awaits the first maintainer-pushed tag.**
+5. Global and repository-local installation are documented, including the direct local binary fallback. **Implemented.**
+6. Registry publication is not attempted until the owner selects and verifies a controlled package scope. **Preserved as an explicit boundary.**
 
 ## 15. E7 — Assumptions
 

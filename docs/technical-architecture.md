@@ -46,7 +46,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Web application | Next.js with React | Prototype human-review UI, accessible routing, and server rendering |
 | API | Fastify with schema-first routing | Strong request validation and predictable REST endpoints |
 | MCP server | TypeScript MCP SDK over Streamable HTTP | Cross-client agent interface for Codex and Claude Code |
-| CLI | Node.js/TypeScript package; local tarball now, registry later | Provides an MCP-independent adapter over the same API |
+| CLI | Node.js/TypeScript package; local or checksummed GitHub Release tarball, registry later | Provides an MCP-independent adapter over the same API |
 | Database | PostgreSQL | Transactions, relational integrity, JSONB, text search, and row-level security |
 | SQL access | Drizzle ORM plus reviewed SQL migrations | Typed queries with control over constraints and tenant policies |
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
@@ -151,7 +151,7 @@ Responsibilities:
 - Client-native instruction generation with managed-block safe merging.
 - Adapter-only activation/switching through `bridge install` without project registration.
 - Safe `init --dry-run` previews for project registration and adapter files.
-- Local installable tarball packaging; registry publication remains future work.
+- Local tarball packaging, isolated installed-binary smoke coverage, and tag-driven checksummed GitHub Release creation; registry publication remains future work.
 - `doctor` diagnostics for API reachability, project mapping, generated instructions, and adapter markers.
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
@@ -169,7 +169,7 @@ Responsibilities:
 
 Adapters do not own canonical policy. They project policy from `.bridge/` and the server.
 
-The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --dry-run` previews create/update/unchanged actions without API or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
+The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --dry-run` previews create/update/unchanged actions without API or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. Packaged entrypoint detection resolves pnpm symlinks to the real module path, and the generated workflow documents `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated dependency policy blocks `pnpm exec`. `bridge conformance` verifies observable run/context/question/specification provenance and the human boundary. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
 
 ## 6. Repository structure
 
@@ -1051,7 +1051,7 @@ The founder-level choices are resolved in the pilot decision record. Implementat
 9. GitHub metadata access is sufficient for links and direct impact without repository source-content access.
 10. AWS `ap-south-1` satisfies the selected design partners' latency and data-location expectations.
 
-The fresh-repository portion of gate 2 is now validated for the local Codex-first path: an installable CLI tarball registered a Hospital Management System project, created the native instruction file, and the resulting protected question plus PRD, ADR, API contract, and test plan were visible through the project-aware UI. This proves the Bridge transport and presentation mechanics, not universal vendor instruction compliance; a real independent agent chat remains a pilot conformance check.
+The fresh-repository portion of gate 2 is now validated twice for the local Codex-first path. The packaged simulation proved registration, transport, and project-aware presentation. A separate ephemeral Codex CLI session then received only `Build a Hospital Management System.`, used the repository-installed CLI without MCP, linked a context snapshot, published all four required specification types, corrected a missing-question failure reported by `bridge conformance`, routed a protected production-boundary question to human roles, and entered `waiting_for_human`. This proves observable adherence for that Codex client/version/environment, not universal vendor instruction compliance or interception of an unexposed native clarification UI; Claude Code remains the second conformance client.
 
 The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, the configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox now routes direct owners, assigned roles, project administrators, and protected-review principals, with status/risk/category/role filters. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; comment editing, notification preferences, due-date filtering, and reassignment remain future work. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
 
