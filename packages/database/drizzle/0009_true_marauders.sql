@@ -4,7 +4,7 @@ ALTER TABLE "bridge_decisions" ADD COLUMN "lifecycle_changed_at" timestamp with 
 ALTER TABLE "bridge_decisions" ADD COLUMN "replacement_decision_id" text;--> statement-breakpoint
 ALTER TABLE "bridge_decisions" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "bridge_decisions" ADD CONSTRAINT "bridge_decisions_replacement_decision_id_bridge_decisions_id_fk" FOREIGN KEY ("replacement_decision_id") REFERENCES "public"."bridge_decisions"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "bridge_decisions_organization_project_id_unique" ON "bridge_decisions" USING btree ("organization_id","project_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "bridge_decisions_organization_project_id_unique" ON "bridge_decisions" USING btree ("organization_id","project_id","id");--> statement-breakpoint
 ALTER TABLE "bridge_decisions" ADD CONSTRAINT "bridge_decisions_replacement_scope_fk" FOREIGN KEY ("organization_id","project_id","replacement_decision_id") REFERENCES "public"."bridge_decisions"("organization_id","project_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bridge_decisions" ADD CONSTRAINT "bridge_decisions_version_check" CHECK ("version" > 0);--> statement-breakpoint
 ALTER TABLE "bridge_decisions" ADD CONSTRAINT "bridge_decisions_lifecycle_check" CHECK (

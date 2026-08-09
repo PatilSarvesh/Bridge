@@ -318,6 +318,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(assumptionMigration).toContain("bridge_assumptions_time_check");
     expect(assumptionMigration).toContain("bridge_assumptions_resolution_check");
     expect(assumptionMigration).toContain("bridge_assumptions_run_scope_fk");
+    expect(assumptionMigration).toContain(
+      'ADD CONSTRAINT "bridge_decisions_organization_project_id_unique" UNIQUE ("organization_id", "project_id", "id")',
+    );
     expect(assumptionMigration).toContain("'decision', 'assumption', 'artifact'");
 
     const projectMigration = readFileSync(
@@ -375,7 +378,10 @@ describe("PostgreSQL domain mappings", () => {
     expect(decisionLifecycleMigration).toContain("bridge_decisions_replacement_scope_fk");
     expect(decisionLifecycleMigration).toContain("decision_lifecycle");
     expect(decisionLifecycleMigration).toContain("decision.lifecycle_changed");
-    expect(decisionLifecycleMigration.indexOf("CREATE UNIQUE INDEX \"bridge_decisions_organization_project_id_unique\""))
+    const guardedDecisionScopeIndex =
+      "CREATE UNIQUE INDEX IF NOT EXISTS \"bridge_decisions_organization_project_id_unique\"";
+    expect(decisionLifecycleMigration).toContain(guardedDecisionScopeIndex);
+    expect(decisionLifecycleMigration.indexOf(guardedDecisionScopeIndex))
       .toBeLessThan(decisionLifecycleMigration.indexOf("ADD CONSTRAINT \"bridge_decisions_replacement_scope_fk\""));
 
     const artifactReviewMigration = readFileSync(

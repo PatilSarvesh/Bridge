@@ -778,7 +778,7 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the specification-review-feedback slice:
+Current validation result after the decision-history-filter slice:
 
 - Type-check: passed across all ten TypeScript configurations.
 - Behavioral tests: 56 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
@@ -1398,6 +1398,10 @@ Deliberate boundaries:
 - Full-text relevance search remains a PostgreSQL-backed follow-up in BRG-041; the current agent search stays deterministic and authorized.
 - The first UI surface exposes component scope because it is the most common narrowing dimension; REST already supports every defined scope dimension.
 - Filters are local view state, not saved preferences or shareable query parameters.
+
+### 20.25 Corrected the decision-lifecycle migration for the full PostgreSQL chain
+
+GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement.
 
 ## 21. Important implementation files
 
