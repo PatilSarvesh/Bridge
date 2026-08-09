@@ -19,9 +19,11 @@
     "cli:pack": "pnpm --filter @bridge/cli pack:local",
     "db:generate": "pnpm --filter @bridge/database db:generate",
     "db:migrate": "pnpm --filter @bridge/database db:migrate",
+    "cli:smoke": "node scripts/smoke-cli-package.mjs",
+    "distribution:check": "pnpm cli:pack && pnpm cli:smoke",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm distribution:check"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

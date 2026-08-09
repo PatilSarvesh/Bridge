@@ -24,6 +24,7 @@ import {
   auditEventFromRow,
   auditEventToRow,
   contextSnapshotToRow,
+  contextSnapshotFromRow,
   decisionFromRow,
   decisionToRow,
   notificationFromRow,
@@ -309,7 +310,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async getDecision(decisionId: string): Promise<Decision | undefined> {
-    const [row] = await this.database.select().from(decisions).where(eq(decisions.id, decisionId)).limit(1);
+    const query = this.database.select().from(decisions).where(eq(decisions.id, decisionId)).limit(1);
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    const row = rows[0];
     return row ? decisionFromRow(row) : undefined;
   }
 
@@ -327,7 +330,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     await this.database
       .insert(decisions)
       .values(row)
-      .onConflictDoUpdate({ target: decisions.id, set: { status: row.status } });
+      .onConflictDoUpdate({
+        target: decisions.id,
+        set: {
+          status: row.status,
+          lifecycleRationale: row.lifecycleRationale,
+          lifecycleChangedById: row.lifecycleChangedById,
+          lifecycleChangedAt: row.lifecycleChangedAt,
+          replacementDecisionId: row.replacementDecisionId,
+          version: row.version,
+        },
+      });
   }
 
   async getArtifact(artifactId: string): Promise<Artifact | undefined> {
@@ -392,6 +405,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
           target: artifactVersions.id,
           set: {
             status: versionRow.status,
+            reviews: versionRow.reviews,
             approvedById: versionRow.approvedById,
             approvalRationale: versionRow.approvalRationale,
             approvedAt: versionRow.approvedAt,
@@ -421,6 +435,15 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .insert(contextSnapshots)
       .values(contextSnapshotToRow(snapshot))
       .onConflictDoNothing({ target: contextSnapshots.id });
+  }
+
+  async listContextSnapshots(projectId: string): Promise<readonly ContextSnapshot[]> {
+    const rows = await this.database
+      .select()
+      .from(contextSnapshots)
+      .where(eq(contextSnapshots.projectId, projectId))
+      .orderBy(desc(contextSnapshots.createdAt));
+    return rows.map(contextSnapshotFromRow);
   }
 
   async saveAuditEvent(event: AuditEvent): Promise<void> {

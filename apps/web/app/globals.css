@@ -19,7 +19,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--text); }
-button, textarea, select { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 210px minmax(0, 1fr); }
@@ -51,7 +51,7 @@ h3 { font-size: 1rem; }
 .title-row p, .detail-heading small { color: var(--muted); }
 .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .filter-bar label { color: var(--muted); font-size: .82rem; font-weight: 650; }
-.filter-bar select { min-width: 108px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); color: var(--text); }
+.filter-bar select, .filter-bar input { min-width: 108px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); color: var(--text); }
 .filter-bar .secondary { margin-left: auto; padding: 6px 9px; font-size: .85rem; }
 .secondary, .primary { padding: 9px 12px; border-radius: 8px; font-weight: 650; }
 .secondary { border: 1px solid var(--border); background: var(--surface); color: var(--text); }
@@ -70,6 +70,8 @@ h3 { font-size: 1rem; }
 .status-accepted { color: var(--success); }
 .status-approved { color: var(--success); }
 .status-rejected { color: var(--danger); }
+.status-changes_requested { color: var(--danger); }
+.status-commented { color: var(--action); }
 .status-superseded { color: var(--muted); }
 .question-detail { padding: 20px; }
 .detail-heading { display: flex; justify-content: space-between; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }

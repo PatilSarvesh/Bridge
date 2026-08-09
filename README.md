@@ -39,7 +39,7 @@ pnpm dev:api
 
 Migrations are explicit; API startup does not modify the schema. With `DATABASE_URL` set, the same fixed demo project and sample records are seeded idempotently into PostgreSQL. The standalone MCP server requires this durable mode so MCP writes and the web/API read the same canonical state. Without `DATABASE_URL`, the API/web and CLI path remains dependency-free and resets when the API restarts.
 
-The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used by runs, assumptions, decisions, approvals, and outbox claims take row locks inside those transactions. The worker's delivery handler is injectable; external email/team adapters are not enabled yet.
+The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance/lifecycle transitions, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used by runs, assumptions, decisions, approvals, and outbox claims take row locks inside those transactions. The worker's delivery handler is injectable; external email/team adapters are not enabled yet.
 
 Run the live persistence integration test only against an isolated database:
 
@@ -63,13 +63,13 @@ Then open `http://127.0.0.1:3000`. The API seeds one blocking architecture quest
 
 Bridge is a shared service, not an SDK that must be embedded into every agent or application. A team runs the Bridge API and chooses the thinnest adapter its environment permits:
 
-- Install the `bridge` CLI package when agents have terminal and API access. The prototype can produce a local tarball; a public registry release is not available yet.
+- Install the `bridge` CLI package when agents have terminal and API access. A tagged GitHub Release can provide a globally installable, checksummed tarball without requiring an npm organization.
 - Check the generated `.bridge/agent-instructions.md` into each repository so supported agents follow the same workflow.
 - Configure the optional MCP endpoint when the organization approves MCP.
 - Let an operator or CI job run `bridge sync` and `bridge spec pull` when the agent itself cannot access the network.
 - Use the web UI and manually relay structured records when no agent-side integration is approved.
 
-The prototype can package an installable CLI tarball with `pnpm cli:pack`. Publishing it to a public or organization registry remains a later distribution step. No authentication or organization onboarding is being added in this phase.
+The prototype packages an installable CLI tarball with `pnpm cli:pack`; `pnpm check` now installs and executes that artifact under a temporary global prefix. The tagged release workflow and operator steps are documented in [`docs/distribution.md`](docs/distribution.md). Public or organization-registry publication remains a later owner decision. No authentication or organization onboarding is being added in this phase.
 
 After a repository is initialized, use the adapter-only command when changing clients or regenerating the managed instruction block without registering another project:
 
@@ -127,9 +127,21 @@ Build a Hospital Management System.
 
 The repository instructions require the agent to start a Bridge run, retrieve context, route meaningful shared-authority questions through Bridge, and publish a PRD, ADR, API contract, and test plan. Open `http://127.0.0.1:3000` and select **Hospital Management System** to inspect its questions and specifications.
 
+When the agent reaches the human boundary, verify the observable result from the new repository:
+
+```bash
+pnpm exec bridge conformance --task "Build a Hospital Management System."
+```
+
+Pass means Bridge found a matching task run, a linked context snapshot, at least one complete agent-created blocking question, all four agent-created specification types, matching run provenance, and a run that is waiting for a human or has validly completed. The command exits `10` with named failed checks when evidence is incomplete. Add `--run-id <id>` to target a particular session. If unrelated application dependency policies prevent pnpm from executing an already installed package, use `./node_modules/.bin/bridge` for the same commands without reinstalling dependencies.
+
 This is an instruction-driven adapter, not a universal interception of every vendor's native prompt UI. Meaningful business, architecture, QA, data, privacy, security, and operational questions are in scope; private reasoning, raw transcripts, and trivial implementation chatter are not. MCP is optional: omit `--mcp-url` for the CLI/instruction-only path, or configure it to let `bridge doctor` verify an MCP `initialize` response.
 
 On each question detail page, human contributors can add an answer with an optional selected option and rationale, or post a version-checked clarification comment/reply. Bridge keeps those responses and threads visible to the configured decision owner, who alone can accept the authoritative answer and create the Decision. The current prototype UI uses the fixed local `usr_architect` browser identity; the REST policy still distinguishes contributor discussion from owner acceptance.
+
+On the **Decisions** page, active decisions are shown by default. Human project members can explicitly include history and filter by lifecycle state, category, owner, creation date, or exact component scope. The decision owner, a configured project decision owner, or a project administrator can supersede, expire, or revoke an active decision with a rationale. Supersession selects another active decision in the same category and exact scope. Bridge preserves the original answer, records lifecycle provenance, removes retired decisions from default agent context, and reports directly linked specifications, assumptions, runs, and work items that may need review. Direct links and lifecycle notifications automatically include history so retired records remain reachable.
+
+On the **Specifications** page, configured reviewers and project administrators can add formal comments or request changes on the current immutable version. A change request blocks approval of that exact version; the author must publish a new version that addresses the feedback. The previous approved version, if any, remains the agent-facing authority until the replacement version is approved.
 
 Agents can target a question to role names with `intendedOwnerRoles` in the structured question payload, for example `['QA Lead']`, `['Business Analyst']`, or `['Security Reviewer']`. Bridge normalizes those names and permits a matching human role to accept the decision. This is a fixed-principal policy seam for the prototype, not organization role administration.
 
@@ -137,9 +149,9 @@ For local policy testing, the web UI exposes a **Reviewing as** selector backed 
 
 The UI separates **My Inbox** from shared **Questions**. The inbox is personalized by direct owner, assigned role, project-admin fallback, and protected-review role, with State, Risk, Category, and Role filters; the shared Questions view remains available to every authorized project participant so contributors can read and propose responses.
 
-The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, and specification review/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
+The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, and specification review-feedback/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
 
-The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. They provide read-only detail and source-record navigation; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
+The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. Decisions include governed human lifecycle actions and direct impact counts; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
 
 Protected questions also have a separate security-review step. A configured security reviewer records an approval or rejection with rationale, then the routed owner can finalize the decision only after an approval exists.
 
@@ -190,7 +202,7 @@ pnpm --filter @bridge/cli dev -- ask --file .bridge/question.example.json
 pnpm --filter @bridge/cli dev -- wait qst_example --timeout 60
 
 # A human operator can inspect the routed inbox using a fixed local principal.
-BRIDGE_PRINCIPAL_ID=usr_architect pnpm --filter @bridge/cli dev -- inbox
+BRIDGE_PRINCIPAL_ID=usr_architect pnpm --filter @bridge/cli dev -- inbox --output human
 
 # Inspect the durable handoff. It reports accepted decision IDs and blockers.
 pnpm --filter @bridge/cli dev -- run continue <run-id> \
@@ -230,7 +242,7 @@ pnpm --filter @bridge/cli dev -- run report <run-id> \
 
 `bridge question matches` returns deterministic exact or related candidates. Creating a policy-equivalent exact match reuses the existing unresolved question or active accepted decision and links it to the new run; related matches are suggestions only and are never auto-merged. The response field `submissionDisposition` tells the caller whether Bridge created, replayed, or reused the question.
 
-`bridge sync` writes current context and provenance to `.bridge/context.md`, `.bridge/context.json`, `.bridge/decisions.json`, `.bridge/assumptions.json`, `.bridge/questions.json`, `.bridge/specifications.json`, and `.bridge/sync-metadata.json`. The questions snapshot contains unresolved questions so offline agents can avoid repeating them. Active assumptions are clearly labeled as temporary and lower-authority than accepted decisions; confirmed assumptions remain distinct from formal decisions. Rejected, expired, and superseded assumptions are not exported as current agent context. `bridge spec pull` writes approved Markdown bodies plus a checksum manifest under `.bridge/specs/`. Draft and in-review specification bodies are never exported as approved repository context. CLI errors are JSON and use stable exit codes so agents and CI jobs can react deterministically.
+`bridge sync` writes current context and provenance to `.bridge/context.md`, `.bridge/context.json`, `.bridge/decisions.json`, `.bridge/assumptions.json`, `.bridge/questions.json`, `.bridge/specifications.json`, and `.bridge/sync-metadata.json`. The questions snapshot contains unresolved questions so offline agents can avoid repeating them. Active assumptions are clearly labeled as temporary and lower-authority than accepted decisions; confirmed assumptions remain distinct from formal decisions. Rejected, expired, and superseded assumptions are not exported as current agent context. `bridge spec pull` writes approved Markdown bodies plus a checksum manifest under `.bridge/specs/`. Draft and in-review specification bodies are never exported as approved repository context. Successful command output defaults to stable JSON for agents and CI; human operators can add `--output human`. Errors remain JSON with stable exit codes in both modes so automation can react deterministically.
 
 A blocking question atomically changes its linked run to `waiting_for_human`. Accepting the answer does not silently restart an agent session. `run continue` reports whether work can continue and which decisions were accepted; a later session explicitly creates a new linked run. The resume-context key is an opaque locator, not an authorization credential—project access is still required—and the current unauthenticated prototype must not be exposed as a production service.
 

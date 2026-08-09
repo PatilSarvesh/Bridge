@@ -347,6 +347,117 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("exposes version-checked decision lifecycle routes and affected-record evidence", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const questionInput = (idempotencyKey: string, title: string, context: string) => ({
+      idempotencyKey,
+      title,
+      type: "decision" as const,
+      category: "architecture",
+      context,
+      whyItMatters: "The active decision must remain traceable when production evidence requires replacement.",
+      intendedOwnerIds: [demoPrincipals.architect.id],
+      intendedOwnerRoles: [],
+      risk: "high" as const,
+      reversible: false,
+      blocking: true,
+      options: [
+        { key: "bounded", label: "Use bounded retries", tradeoffs: "Limits retry loops while retaining recovery." },
+        { key: "none", label: "Do not retry", tradeoffs: "Avoids loops but discards transient recovery." },
+      ],
+      recommendationKey: "bounded",
+      scope: { component: "settlement", workItem: "PAY-77" },
+    });
+    const originalQuestion = await runtime.service.createQuestion(
+      demoPrincipals.agent,
+      demoProject.id,
+      questionInput(
+        "api-decision-lifecycle-original",
+        "Which settlement retry policy should be authoritative?",
+        "Settlement failures need one authoritative initial retry policy for production processing.",
+      ),
+    );
+    const original = await runtime.service.acceptAnswer(demoPrincipals.architect, originalQuestion.id, {
+      optionKey: "bounded",
+      rationale: "Bounded retries recover transient settlement failures without creating an unlimited loop.",
+    });
+    const replacementQuestion = await runtime.service.createQuestion(
+      demoPrincipals.agent,
+      demoProject.id,
+      questionInput(
+        "api-decision-lifecycle-replacement",
+        "Which revised settlement retry policy should replace the first?",
+        "Production evidence now supports a more precise bounded settlement retry policy.",
+      ),
+    );
+    const replacement = await runtime.service.acceptAnswer(demoPrincipals.architect, replacementQuestion.id, {
+      answer: "Retry settlement failures once, then dead-letter.",
+      rationale: "One retry matches observed recovery while preventing repeated settlement processing.",
+    });
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${original.id}/supersede`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: original.version,
+        rationale: "A contributor cannot supersede the authoritative settlement decision.",
+        replacementDecisionId: replacement.id,
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const changed = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${original.id}/supersede`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: original.version,
+        rationale: "Production evidence requires the newer, more precise settlement retry decision.",
+        replacementDecisionId: replacement.id,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      decision: { id: original.id, status: "superseded", replacementDecisionId: replacement.id, version: 2 },
+      impact: { artifactIds: [], assumptionIds: [], runIds: [], workItems: ["PAY-77"] },
+    });
+
+    const active = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(active.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: replacement.id }),
+    ]);
+
+    const history = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(history.json<{ items: Array<{ id: string; status: string }> }>().items).toEqual([
+      expect.objectContaining({ id: original.id, status: "superseded" }),
+    ]);
+
+    const invalidDates = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?createdFrom=2026-08-10T00%3A00%3A00.000Z&createdTo=2026-08-09T00%3A00%3A00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidDates.statusCode).toBe(400);
+
+    const invalidHistoryFlag = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=yes`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidHistoryFlag.statusCode).toBe(400);
+  });
+
   it("routes role-owned questions to a matching fixed human principal", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
@@ -920,5 +1031,67 @@ describe("Bridge API vertical slice", () => {
     expect(contextResponse.json<{ items: Array<{ id: string; type: string }> }>().items).toEqual([
       expect.objectContaining({ id: publication.version.id, type: "artifact" }),
     ]);
+  });
+
+  it("records reviewer comments and blocks approval after requested specification changes", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const published = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/artifacts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-artifact-review-feedback-001",
+        title: "Settlement retry contract",
+        type: "adr",
+        summary: "Defines retry and dead-letter behavior for settlement processing.",
+        body: "# Settlement retry contract\n\nRetry transient settlement failures with bounded backoff.",
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "settlement" },
+      },
+    });
+    const publication = published.json<{ artifact: { id: string }; version: { id: string } }>();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: { status: "commented", body: "A non-reviewer cannot submit formal feedback." },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        status: "changes_requested",
+        body: "Add the dead-letter threshold and the required settlement failure metrics.",
+      },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({
+      review: { reviewerId: demoPrincipals.architect.id, status: "changes_requested" },
+      version: { reviews: [expect.objectContaining({ status: "changes_requested" })] },
+    });
+
+    const blockedApproval = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { rationale: "This exact version must remain blocked until requested changes are published." },
+    });
+    expect(blockedApproval.statusCode).toBe(409);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(detail.json<{ versions: Array<{ reviews: Array<{ status: string }> }> }>().versions[0]?.reviews)
+      .toEqual([expect.objectContaining({ status: "changes_requested" })]);
   });
 });

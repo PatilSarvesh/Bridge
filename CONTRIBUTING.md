@@ -46,6 +46,8 @@ Never use a shared or production database for tests.
 6. Update the living context and backlog when behavior, decisions, validation, or limitations change.
 7. Run `pnpm check` before opening a pull request.
 
+`pnpm check` also packages the CLI, installs the tarball into an isolated temporary prefix, executes the installed binary, and verifies a fresh-project dry run. Release maintainers should follow `docs/distribution.md`; pushing a version tag is an intentional publication action, not part of an ordinary contribution.
+
 ## Pull requests
 
 Describe:

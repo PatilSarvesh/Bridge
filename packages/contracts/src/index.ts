@@ -25,12 +25,15 @@ export const notificationTypeSchema = z.enum([
   "question_comment",
   "question_review",
   "question_accepted",
+  "decision_lifecycle",
   "artifact_review_requested",
+  "artifact_review_feedback",
   "artifact_approved",
 ]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
+export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested"]);
 export const agentRunClientSchema = z.enum([
   "codex",
   "claude_code",
@@ -162,6 +165,30 @@ export const acceptAnswerInputSchema = z
     message: "Either optionKey or answer is required.",
   });
 
+export const changeDecisionLifecycleInputSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    status: z.enum(["superseded", "expired", "revoked"]),
+    rationale: z.string().trim().min(10).max(5_000),
+    replacementDecisionId: z.string().trim().min(1).max(100).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.status === "superseded" && !value.replacementDecisionId) {
+      context.addIssue({
+        code: "custom",
+        message: "A superseded decision requires replacementDecisionId.",
+        path: ["replacementDecisionId"],
+      });
+    }
+    if (value.status !== "superseded" && value.replacementDecisionId) {
+      context.addIssue({
+        code: "custom",
+        message: "replacementDecisionId is valid only for a superseded decision.",
+        path: ["replacementDecisionId"],
+      });
+    }
+  });
+
 export const questionReviewInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
   status: questionReviewStatusSchema,
@@ -191,6 +218,26 @@ export const contextQuerySchema = z.object({
   maxItems: z.number().int().min(1).max(50).default(20),
 });
 
+export const decisionListQuerySchema = z
+  .object({
+    includeHistory: z.boolean().default(false),
+    status: decisionStatusSchema.optional(),
+    category: z.string().trim().min(2).max(100).optional(),
+    ownerId: z.string().trim().min(1).max(100).optional(),
+    createdFrom: z.string().datetime({ offset: true }).optional(),
+    createdTo: z.string().datetime({ offset: true }).optional(),
+    scope: scopeSchema.default({}),
+  })
+  .superRefine((value, context) => {
+    if (value.createdFrom && value.createdTo && Date.parse(value.createdFrom) > Date.parse(value.createdTo)) {
+      context.addIssue({
+        code: "custom",
+        message: "createdFrom must not be after createdTo.",
+        path: ["createdFrom"],
+      });
+    }
+  });
+
 export const publishArtifactInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   artifactId: z.string().trim().min(1).max(100).optional(),
@@ -208,6 +255,21 @@ export const publishArtifactInputSchema = z.object({
 export const approveArtifactVersionInputSchema = z.object({
   rationale: z.string().trim().min(10).max(5_000),
 });
+
+export const artifactReviewInputSchema = z
+  .object({
+    status: artifactReviewStatusSchema,
+    body: z.string().trim().min(2).max(5_000),
+  })
+  .superRefine((value, context) => {
+    if (value.status === "changes_requested" && value.body.length < 10) {
+      context.addIssue({
+        code: "custom",
+        message: "A change request requires at least 10 characters of actionable feedback.",
+        path: ["body"],
+      });
+    }
+  });
 
 export const startAgentRunInputSchema = z
   .object({
@@ -297,6 +359,7 @@ export type NotificationType = z.infer<typeof notificationTypeSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
+export type ArtifactReviewStatus = z.infer<typeof artifactReviewStatusSchema>;
 export type AgentRunClient = z.infer<typeof agentRunClientSchema>;
 export type AgentRunCapability = z.infer<typeof agentRunCapabilitySchema>;
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
@@ -311,13 +374,16 @@ export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
+export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycleInputSchema>;
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
+export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
+export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;
 export type StartAgentRunInput = z.infer<typeof startAgentRunInputSchema>;
 export type ReportAgentRunInput = z.infer<typeof reportAgentRunInputSchema>;
 export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;

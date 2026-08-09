@@ -3,7 +3,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type {
   AcceptAnswerInput,
   ApproveArtifactVersionInput,
+  ArtifactReviewInput,
+  ChangeDecisionLifecycleInput,
   ContextQuery,
+  DecisionListQuery,
   CreateQuestionInput,
   FindQuestionMatchesInput,
   PublishArtifactInput,
@@ -23,6 +26,7 @@ import type {
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
+  assertCanReviewArtifact,
   assertCanAccept,
   assertHuman,
   assertProjectAccess,
@@ -35,6 +39,7 @@ import {
   type Assumption,
   type AuditEvent,
   type Artifact,
+  type ArtifactReview,
   type ArtifactVersion,
   type ContextItem,
   type ContextSnapshot,
@@ -90,6 +95,7 @@ export interface BridgeRepository {
     requestHash: string,
   ): Promise<void>;
   saveContextSnapshot(snapshot: ContextSnapshot): Promise<void>;
+  listContextSnapshots(projectId: string): Promise<readonly ContextSnapshot[]>;
   saveAuditEvent(event: AuditEvent): Promise<void>;
   listAuditEvents(projectId: string): Promise<readonly AuditEvent[]>;
   getNotification(notificationId: string): Promise<Notification | undefined>;
@@ -137,6 +143,10 @@ export interface ArtifactPublication {
   readonly version: ArtifactVersion;
 }
 
+export interface ArtifactReviewResult extends ArtifactPublication {
+  readonly review: ArtifactReview;
+}
+
 export interface RunRegistration {
   readonly run: AgentRun;
   readonly resumeContextKey: string;
@@ -154,6 +164,18 @@ export interface ContinuationDescriptor {
   readonly remainingQuestionIds: readonly string[];
   readonly canContinue: boolean;
   readonly continueInstruction: string;
+}
+
+export interface DecisionLifecycleImpact {
+  readonly artifactIds: readonly string[];
+  readonly assumptionIds: readonly string[];
+  readonly runIds: readonly string[];
+  readonly workItems: readonly string[];
+}
+
+export interface DecisionLifecycleChange {
+  readonly decision: Decision;
+  readonly impact: DecisionLifecycleImpact;
 }
 
 export interface QuestionMatch {
@@ -413,6 +435,12 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveContextSnapshot(snapshot: ContextSnapshot): Promise<void> {
     this.contextSnapshots.set(snapshot.id, snapshot);
+  }
+
+  async listContextSnapshots(projectId: string): Promise<readonly ContextSnapshot[]> {
+    return [...this.contextSnapshots.values()]
+      .filter((snapshot) => snapshot.projectId === projectId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   async saveAuditEvent(event: AuditEvent): Promise<void> {
@@ -1747,6 +1775,7 @@ export class BridgeService {
       status: "active",
       createdAt: timestamp,
       reviewAt: reviewDateFor(question.risk, timestampDate),
+      version: 1,
     };
 
     await repository.saveDecision(decision);
@@ -1779,9 +1808,176 @@ export class BridgeService {
     return decision;
   }
 
-  async listDecisions(principal: Principal, projectId: string): Promise<readonly Decision[]> {
+  async listDecisions(
+    principal: Principal,
+    projectId: string,
+    query: DecisionListQuery = { includeHistory: false, scope: {} },
+  ): Promise<readonly Decision[]> {
     await this.requireProject(principal, projectId);
-    return this.repository.listDecisions(projectId);
+    const category = query.category?.toLocaleLowerCase("en");
+    const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+    return (await this.repository.listDecisions(projectId)).filter((decision) => {
+      if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
+        return false;
+      }
+      if (category && decision.category.toLocaleLowerCase("en") !== category) return false;
+      if (query.ownerId && decision.ownerId !== query.ownerId) return false;
+      if (query.createdFrom && Date.parse(decision.createdAt) < Date.parse(query.createdFrom)) return false;
+      if (query.createdTo && Date.parse(decision.createdAt) > Date.parse(query.createdTo)) return false;
+      return scopeEntries.every(([key, value]) => decision.scope[key] === value);
+    });
+  }
+
+  async changeDecisionLifecycle(
+    principal: Principal,
+    decisionId: string,
+    input: ChangeDecisionLifecycleInput,
+  ): Promise<DecisionLifecycleChange> {
+    return this.repository.transaction((repository) =>
+      this.changeDecisionLifecycleInTransaction(repository, principal, decisionId, input),
+    );
+  }
+
+  private async changeDecisionLifecycleInTransaction(
+    repository: BridgeRepository,
+    principal: Principal,
+    decisionId: string,
+    input: ChangeDecisionLifecycleInput,
+  ): Promise<DecisionLifecycleChange> {
+    const decision = await this.requireDecision(principal, decisionId, repository);
+    assertHuman(principal, "Changing a decision lifecycle");
+    const project = await this.requireProject(principal, decision.projectId, repository);
+    const mayManage = decision.ownerId === principal.id ||
+      project.decisionOwnerIds.includes(principal.id) ||
+      principal.roles.some((role) => normalizeRoleName(role) === "project-admin");
+    if (!mayManage) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Only the decision owner, a configured project decision owner, or a project administrator can retire this decision.",
+        403,
+      );
+    }
+    if (decision.status !== "active") {
+      throw new BridgeError("CONFLICT", "Only an active decision can change lifecycle state.", 409);
+    }
+    if (decision.version !== input.expectedVersion) {
+      throw new BridgeError("CONFLICT", "The decision changed before this lifecycle action was applied.", 409, {
+        currentVersion: decision.version,
+      });
+    }
+
+    if (input.replacementDecisionId) {
+      if (input.replacementDecisionId === decision.id) {
+        throw new BridgeError("VALIDATION_FAILED", "A decision cannot replace itself.", 422);
+      }
+      const replacement = await this.requireDecision(principal, input.replacementDecisionId, repository);
+      if (
+        replacement.projectId !== decision.projectId ||
+        replacement.status !== "active" ||
+        replacement.category !== decision.category ||
+        !this.scopesEqual(replacement.scope, decision.scope)
+      ) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "A replacement decision must be active and have the same project, category, and exact scope.",
+          422,
+        );
+      }
+    }
+
+    const timestamp = this.now().toISOString();
+    const changed: Decision = {
+      ...decision,
+      status: input.status,
+      lifecycleRationale: input.rationale,
+      lifecycleChangedById: principal.id,
+      lifecycleChangedAt: timestamp,
+      ...(input.replacementDecisionId
+        ? { replacementDecisionId: input.replacementDecisionId }
+        : {}),
+      version: decision.version + 1,
+    };
+    await repository.saveDecision(changed);
+
+    const [artifacts, assumptions, sourceQuestion, contextSnapshots] = await Promise.all([
+      repository.listArtifacts(decision.projectId),
+      repository.listAssumptions(decision.projectId),
+      repository.getQuestion(decision.questionId),
+      repository.listContextSnapshots(decision.projectId),
+    ]);
+    const affectedArtifacts = artifacts.filter((artifact) =>
+      artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
+    );
+    const affectedAssumptions = assumptions.filter(
+      (assumption) => assumption.confirmedDecisionId === decision.id,
+    );
+    const impact: DecisionLifecycleImpact = {
+      artifactIds: affectedArtifacts.map((artifact) => artifact.id),
+      assumptionIds: affectedAssumptions.map((assumption) => assumption.id),
+      runIds: [...new Set([
+        ...(sourceQuestion?.runId ? [sourceQuestion.runId] : []),
+        ...affectedArtifacts.flatMap((artifact) =>
+          artifact.versions.flatMap((version) => version.runId ? [version.runId] : []),
+        ),
+        ...affectedAssumptions.flatMap((assumption) => assumption.runId ? [assumption.runId] : []),
+        ...contextSnapshots.flatMap((snapshot) =>
+          snapshot.runId && snapshot.itemIds.includes(decision.id) ? [snapshot.runId] : [],
+        ),
+      ])],
+      workItems: decision.scope.workItem ? [decision.scope.workItem] : [],
+    };
+
+    await this.audit(
+      repository,
+      principal,
+      decision.projectId,
+      `decision.${input.status}`,
+      "decision",
+      decision.id,
+      timestamp,
+    );
+    await repository.saveOutboxEvent({
+      id: `evt_${this.id()}`,
+      organizationId: decision.organizationId,
+      projectId: decision.projectId,
+      type: "decision.lifecycle_changed",
+      payload: {
+        decisionId: decision.id,
+        status: input.status,
+        changedById: principal.id,
+        ...(input.replacementDecisionId
+          ? { replacementDecisionId: input.replacementDecisionId }
+          : {}),
+      },
+      status: "pending",
+      attempts: 0,
+      availableAt: timestamp,
+      createdAt: timestamp,
+    });
+    await this.notify(
+      repository,
+      principal,
+      decision.projectId,
+      [
+        ...project.decisionOwnerIds,
+        ...(sourceQuestion
+          ? [
+              sourceQuestion.createdById,
+              ...sourceQuestion.ownerIds,
+              ...sourceQuestion.responses.map((response) => response.authorId),
+              ...sourceQuestion.comments.map((comment) => comment.authorId),
+            ]
+          : []),
+      ],
+      {
+        type: "decision_lifecycle",
+        title: `Decision ${input.status}`,
+        body: `The decision “${decision.answer}” was ${input.status}.`,
+        targetType: "decision",
+        targetId: decision.id,
+      },
+    );
+    return { decision: changed, impact };
   }
 
   async publishArtifact(
@@ -1860,6 +2056,7 @@ export class BridgeService {
       createdById: principal.id,
       createdByType: principal.type,
       createdAt: timestamp,
+      reviews: [],
       ...(input.runId ? { runId: input.runId } : {}),
     };
     const artifact: Artifact = existingArtifact
@@ -1946,6 +2143,81 @@ export class BridgeService {
     return artifact;
   }
 
+  async reviewArtifactVersion(
+    principal: Principal,
+    versionId: string,
+    input: ArtifactReviewInput,
+  ): Promise<ArtifactReviewResult> {
+    return this.repository.transaction((repository) =>
+      this.reviewArtifactVersionInTransaction(repository, principal, versionId, input),
+    );
+  }
+
+  private async reviewArtifactVersionInTransaction(
+    repository: BridgeRepository,
+    principal: Principal,
+    versionId: string,
+    input: ArtifactReviewInput,
+  ): Promise<ArtifactReviewResult> {
+    const artifact = await repository.getArtifactByVersionId(versionId);
+    if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    await this.requireProject(principal, artifact.projectId, repository);
+    assertCanReviewArtifact(principal, artifact);
+    const target = artifact.versions.find((version) => version.id === versionId);
+    if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    if (artifact.currentVersionId !== versionId) {
+      throw new BridgeError("CONFLICT", "Review feedback can be added only to the current specification version.", 409);
+    }
+    if (["approved", "superseded"].includes(target.status)) {
+      throw new BridgeError("CONFLICT", "Approved or superseded specification versions no longer accept review feedback.", 409);
+    }
+
+    const timestamp = this.now().toISOString();
+    const review: ArtifactReview = {
+      id: `arv_${this.id()}`,
+      artifactVersionId: versionId,
+      reviewerId: principal.id,
+      reviewerType: principal.type,
+      status: input.status,
+      body: input.body,
+      createdAt: timestamp,
+    };
+    const reviewedVersion: ArtifactVersion = {
+      ...target,
+      reviews: [...target.reviews, review],
+    };
+    const updatedArtifact: Artifact = {
+      ...artifact,
+      versions: artifact.versions.map((version) => version.id === versionId ? reviewedVersion : version),
+    };
+    await repository.saveArtifact(updatedArtifact);
+    await this.audit(
+      repository,
+      principal,
+      artifact.projectId,
+      input.status === "changes_requested"
+        ? "artifact.version_changes_requested"
+        : "artifact.version_commented",
+      "artifact_version",
+      versionId,
+      timestamp,
+    );
+    await this.notify(
+      repository,
+      principal,
+      artifact.projectId,
+      [artifact.createdById, ...artifact.reviewerIds],
+      {
+        type: "artifact_review_feedback",
+        title: input.status === "changes_requested" ? "Specification changes requested" : "Specification review comment",
+        body: `${principal.displayName} ${input.status === "changes_requested" ? "requested changes to" : "commented on"} “${artifact.title}”.`,
+        targetType: "artifact_version",
+        targetId: versionId,
+      },
+    );
+    return { artifact: updatedArtifact, version: reviewedVersion, review };
+  }
+
   async approveArtifactVersion(
     principal: Principal,
     versionId: string,
@@ -1973,6 +2245,13 @@ export class BridgeService {
     }
     if (!["draft", "in_review"].includes(target.status)) {
       throw new BridgeError("CONFLICT", "This specification version cannot be approved again.", 409);
+    }
+    if (target.reviews.some((review) => review.status === "changes_requested")) {
+      throw new BridgeError(
+        "CONFLICT",
+        "This specification version has requested changes; publish a new version before approval.",
+        409,
+      );
     }
 
     const timestamp = this.now().toISOString();
@@ -2181,6 +2460,17 @@ export class BridgeService {
     if (!assumption) throw new BridgeError("ASSUMPTION_NOT_FOUND", "Assumption not found.", 404);
     await this.requireProject(principal, assumption.projectId, repository);
     return assumption;
+  }
+
+  private async requireDecision(
+    principal: Principal,
+    decisionId: string,
+    repository: BridgeRepository,
+  ): Promise<Decision> {
+    const decision = await repository.getDecision(decisionId);
+    if (!decision) throw new BridgeError("DECISION_NOT_FOUND", "Decision not found.", 404);
+    await this.requireProject(principal, decision.projectId, repository);
+    return decision;
   }
 
   private async expireAssumptionIfDue(

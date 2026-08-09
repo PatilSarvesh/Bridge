@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
@@ -75,6 +75,8 @@ interface Question {
 
 type InboxFilterKey = "status" | "risk" | "category" | "role";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
+type DecisionFilterKey = "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
+type DecisionFilters = Partial<Record<DecisionFilterKey, string>> & { readonly includeHistory?: boolean };
 
 interface ArtifactVersion {
   readonly id: string;
@@ -84,9 +86,18 @@ interface ArtifactVersion {
   readonly status: "draft" | "in_review" | "approved" | "superseded";
   readonly createdById: string;
   readonly createdAt: string;
+  readonly reviews: readonly ArtifactReview[];
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+interface ArtifactReview {
+  readonly id: string;
+  readonly reviewerId: string;
+  readonly status: "commented" | "changes_requested";
+  readonly body: string;
+  readonly createdAt: string;
 }
 
 interface Artifact {
@@ -110,7 +121,9 @@ interface Notification {
     | "question_comment"
     | "question_review"
     | "question_accepted"
+    | "decision_lifecycle"
     | "artifact_review_requested"
+    | "artifact_review_feedback"
     | "artifact_approved";
   readonly title: string;
   readonly body: string;
@@ -131,6 +144,18 @@ interface Decision {
   readonly status: "active" | "superseded" | "expired" | "revoked";
   readonly createdAt: string;
   readonly reviewAt: string;
+  readonly lifecycleRationale?: string;
+  readonly lifecycleChangedById?: string;
+  readonly lifecycleChangedAt?: string;
+  readonly replacementDecisionId?: string;
+  readonly version: number;
+}
+
+interface DecisionLifecycleImpact {
+  readonly artifactIds: readonly string[];
+  readonly assumptionIds: readonly string[];
+  readonly runIds: readonly string[];
+  readonly workItems: readonly string[];
 }
 
 interface Assumption {
@@ -211,7 +236,19 @@ function currentVersion(artifact: Artifact | undefined): ArtifactVersion | undef
   return artifact?.versions.find((version) => version.id === artifact.currentVersionId);
 }
 
+function displayedArtifactStatus(version: ArtifactVersion | undefined): string {
+  return version?.reviews.some((review) => review.status === "changes_requested")
+    ? "changes_requested"
+    : version?.status ?? "draft";
+}
+
+function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => left[key] === right[key]);
+}
+
 export default function Home() {
+  const requestedDecisionIdRef = useRef<string | undefined>(undefined);
   const [view, setView] = useState<View>("inbox");
   const [principals, setPrincipals] = useState<readonly Principal[]>([]);
   const [activePrincipalId, setActivePrincipalId] = useState(defaultPrincipalId);
@@ -220,6 +257,7 @@ export default function Home() {
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
+  const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
@@ -244,6 +282,12 @@ export default function Home() {
   const [approvalRationale, setApprovalRationale] = useState(
     "The specification accurately records the accepted approach and its operational constraints.",
   );
+  const [artifactReviewStatus, setArtifactReviewStatus] = useState<"commented" | "changes_requested">("commented");
+  const [artifactReviewBody, setArtifactReviewBody] = useState("");
+  const [decisionLifecycleStatus, setDecisionLifecycleStatus] = useState<"superseded" | "expired" | "revoked">("revoked");
+  const [replacementDecisionId, setReplacementDecisionId] = useState("");
+  const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
+  const [decisionLifecycleImpact, setDecisionLifecycleImpact] = useState<DecisionLifecycleImpact>();
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
@@ -263,6 +307,8 @@ export default function Home() {
     roles: [...new Set(questions.flatMap((question) => question.ownerRoles))].sort((left, right) => left.localeCompare(right)),
   }), [questions]);
   const hasInboxFilters = Object.values(inboxFilters).some(Boolean);
+  const hasDecisionFilters = Boolean(decisionFilters.includeHistory) ||
+    Object.entries(decisionFilters).some(([key, value]) => key !== "includeHistory" && Boolean(value));
 
   const loadPrincipals = useCallback(async () => {
     setPrincipalsLoading(true);
@@ -407,9 +453,18 @@ export default function Home() {
     setReferenceDataLoading(true);
     setError(undefined);
     try {
+      const decisionParameters = new URLSearchParams();
+      if (decisionFilters.includeHistory) decisionParameters.set("includeHistory", "true");
+      if (decisionFilters.status) decisionParameters.set("status", decisionFilters.status);
+      if (decisionFilters.category) decisionParameters.set("category", decisionFilters.category);
+      if (decisionFilters.ownerId) decisionParameters.set("ownerId", decisionFilters.ownerId);
+      if (decisionFilters.component) decisionParameters.set("component", decisionFilters.component);
+      if (decisionFilters.createdFrom) decisionParameters.set("createdFrom", `${decisionFilters.createdFrom}T00:00:00.000Z`);
+      if (decisionFilters.createdTo) decisionParameters.set("createdTo", `${decisionFilters.createdTo}T23:59:59.999Z`);
+      const decisionQuery = decisionParameters.toString();
       const [decisionResponse, assumptionResponse, runResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Decision[] }>(
-          `/v1/projects/${selectedProjectId}/decisions`,
+          `/v1/projects/${selectedProjectId}/decisions${decisionQuery ? `?${decisionQuery}` : ""}`,
           undefined,
           activePrincipalId,
         ),
@@ -427,11 +482,20 @@ export default function Home() {
       setDecisions(decisionResponse.items);
       setAssumptions(assumptionResponse.items);
       setRuns(runResponse.items);
-      setSelectedDecisionId((current) =>
-        current && decisionResponse.items.some((decision) => decision.id === current)
+      setSelectedDecisionId((current) => {
+        const requested = requestedDecisionIdRef.current;
+        if (requested) {
+          if (decisionResponse.items.some((decision) => decision.id === requested)) {
+            requestedDecisionIdRef.current = undefined;
+            return requested;
+          }
+          if (!decisionFilters.includeHistory) return requested;
+          requestedDecisionIdRef.current = undefined;
+        }
+        return current && decisionResponse.items.some((decision) => decision.id === current)
           ? current
-          : decisionResponse.items[0]?.id,
-      );
+          : decisionResponse.items[0]?.id;
+      });
       setSelectedAssumptionId((current) =>
         current && assumptionResponse.items.some((assumption) => assumption.id === current)
           ? current
@@ -447,7 +511,7 @@ export default function Home() {
     } finally {
       setReferenceDataLoading(false);
     }
-  }, [activePrincipalId, selectedProjectId]);
+  }, [activePrincipalId, decisionFilters, selectedProjectId]);
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -464,7 +528,11 @@ export default function Home() {
     if (projectId) setSelectedProjectId(projectId);
     if (questionId) setSelectedId(questionId);
     if (artifactId) setSelectedArtifactId(artifactId);
-    if (decisionId) setSelectedDecisionId(decisionId);
+    if (decisionId) {
+      requestedDecisionIdRef.current = decisionId;
+      setSelectedDecisionId(decisionId);
+      setDecisionFilters((current) => ({ ...current, includeHistory: true }));
+    }
     if (assumptionId) setSelectedAssumptionId(assumptionId);
     if (runId) setSelectedRunId(runId);
   }, []);
@@ -521,6 +589,13 @@ export default function Home() {
     [artifacts, selectedArtifactId],
   );
   const selectedArtifactVersion = currentVersion(selectedArtifact);
+  const canReviewSelectedArtifact = Boolean(
+    selectedArtifact && activePrincipal &&
+    (selectedArtifact.reviewerIds.includes(activePrincipalId) || activePrincipal.roles.includes("project-admin")),
+  );
+  const selectedArtifactHasChangesRequested = Boolean(
+    selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
+  );
   const selectedDecision = useMemo(
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
@@ -555,6 +630,18 @@ export default function Home() {
       setReviewRationale("");
     }
   }, [selectedQuestion]);
+
+  useEffect(() => {
+    setDecisionLifecycleStatus("revoked");
+    setReplacementDecisionId("");
+    setDecisionLifecycleRationale("");
+    setDecisionLifecycleImpact(undefined);
+  }, [selectedDecision?.id]);
+
+  useEffect(() => {
+    setArtifactReviewStatus("commented");
+    setArtifactReviewBody("");
+  }, [selectedArtifactVersion?.id]);
 
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
@@ -659,8 +746,69 @@ export default function Home() {
     }
   };
 
+  const reviewSpecification = async () => {
+    if (
+      !selectedArtifactVersion ||
+      !canReviewSelectedArtifact ||
+      artifactReviewBody.trim().length < (artifactReviewStatus === "changes_requested" ? 10 : 2)
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/artifact-versions/${selectedArtifactVersion.id}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({ status: artifactReviewStatus, body: artifactReviewBody }),
+      }, activePrincipalId);
+      setArtifactReviewStatus("commented");
+      setArtifactReviewBody("");
+      await Promise.all([loadArtifacts(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to record specification feedback.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const changeDecisionLifecycle = async () => {
+    if (
+      !selectedDecision ||
+      selectedDecision.status !== "active" ||
+      decisionLifecycleRationale.trim().length < 10 ||
+      (decisionLifecycleStatus === "superseded" && !replacementDecisionId)
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ decision: Decision; impact: DecisionLifecycleImpact }>(
+        `/v1/decisions/${selectedDecision.id}/${decisionLifecycleStatus === "superseded" ? "supersede" : decisionLifecycleStatus === "expired" ? "expire" : "revoke"}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: selectedDecision.version,
+            rationale: decisionLifecycleRationale,
+            ...(decisionLifecycleStatus === "superseded" ? { replacementDecisionId } : {}),
+          }),
+        },
+        activePrincipalId,
+      );
+      setDecisionLifecycleImpact(response.impact);
+      await Promise.all([loadReferenceData(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to change the decision lifecycle.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const updateInboxFilter = (key: InboxFilterKey, value: string) => {
     setInboxFilters((current) => ({
+      ...current,
+      ...(value ? { [key]: value } : { [key]: undefined }),
+    }));
+  };
+
+  const updateDecisionFilter = (key: DecisionFilterKey, value: string) => {
+    setDecisionFilters((current) => ({
       ...current,
       ...(value ? { [key]: value } : { [key]: undefined }),
     }));
@@ -676,7 +824,12 @@ export default function Home() {
     setError(undefined);
     try {
       await markNotificationRead(notification.id);
-      if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
+      if (notification.targetType === "decision") {
+        setView("decisions");
+        requestedDecisionIdRef.current = notification.targetId;
+        setDecisionFilters((current) => ({ ...current, includeHistory: true }));
+        setSelectedDecisionId(notification.targetId);
+      } else if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
         setView("specifications");
         const artifact = notification.targetType === "artifact"
           ? artifacts.find((candidate) => candidate.id === notification.targetId)
@@ -825,6 +978,82 @@ export default function Home() {
                 <div><h1>Accepted project decisions</h1><p>Only human-accepted answers appear here as authoritative context.</p></div>
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
               </div>
+              <div className="filter-bar" aria-label="Decision filters">
+                <label htmlFor="decision-history">View</label>
+                <select
+                  id="decision-history"
+                  value={decisionFilters.includeHistory ? "history" : "active"}
+                  onChange={(event) => {
+                    const includeHistory = event.target.value === "history";
+                    setDecisionFilters((current) => {
+                      const { status: _status, ...withoutStatus } = current;
+                      return includeHistory
+                        ? { ...current, includeHistory: true }
+                        : { ...withoutStatus, includeHistory: false };
+                    });
+                  }}
+                >
+                  <option value="active">Active only</option>
+                  <option value="history">Include history</option>
+                </select>
+                <label htmlFor="decision-status">Status</label>
+                <select
+                  id="decision-status"
+                  value={decisionFilters.status ?? ""}
+                  disabled={!decisionFilters.includeHistory}
+                  onChange={(event) => updateDecisionFilter("status", event.target.value)}
+                >
+                  <option value="">Any status</option>
+                  <option value="active">Active</option>
+                  <option value="superseded">Superseded</option>
+                  <option value="expired">Expired</option>
+                  <option value="revoked">Revoked</option>
+                </select>
+                <label htmlFor="decision-category">Category</label>
+                <select
+                  id="decision-category"
+                  value={decisionFilters.category ?? ""}
+                  onChange={(event) => updateDecisionFilter("category", event.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {[...new Set(questions.map((question) => question.category))].sort().map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+                <label htmlFor="decision-owner">Owner</label>
+                <select
+                  id="decision-owner"
+                  value={decisionFilters.ownerId ?? ""}
+                  onChange={(event) => updateDecisionFilter("ownerId", event.target.value)}
+                >
+                  <option value="">All owners</option>
+                  {principals.map((principal) => <option key={principal.id} value={principal.id}>{principal.displayName}</option>)}
+                </select>
+                <label htmlFor="decision-component">Component</label>
+                <input
+                  id="decision-component"
+                  value={decisionFilters.component ?? ""}
+                  placeholder="Exact component"
+                  onChange={(event) => updateDecisionFilter("component", event.target.value)}
+                />
+                <label htmlFor="decision-from">From</label>
+                <input
+                  id="decision-from"
+                  type="date"
+                  value={decisionFilters.createdFrom ?? ""}
+                  onChange={(event) => updateDecisionFilter("createdFrom", event.target.value)}
+                />
+                <label htmlFor="decision-to">To</label>
+                <input
+                  id="decision-to"
+                  type="date"
+                  value={decisionFilters.createdTo ?? ""}
+                  onChange={(event) => updateDecisionFilter("createdTo", event.target.value)}
+                />
+                {hasDecisionFilters ? (
+                  <button className="secondary" type="button" onClick={() => setDecisionFilters({})}>Clear</button>
+                ) : null}
+              </div>
               {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
               {!referenceDataLoading && decisions.length === 0 ? <div className="empty">No decisions have been accepted for this project.</div> : null}
               {!referenceDataLoading && decisions.length > 0 ? (
@@ -858,6 +1087,73 @@ export default function Home() {
                           <span>Review by {new Date(selectedDecision.reviewAt).toLocaleDateString()}</span>
                         </div>
                       </section>
+                      {selectedDecision.lifecycleChangedAt ? (
+                        <section>
+                          <h3>Lifecycle history</h3>
+                          <p>{selectedDecision.lifecycleRationale}</p>
+                          <div className="spec-meta">
+                            <span>Changed by {selectedDecision.lifecycleChangedById}</span>
+                            <span>{new Date(selectedDecision.lifecycleChangedAt).toLocaleString()}</span>
+                            {selectedDecision.replacementDecisionId ? <span>Replacement {selectedDecision.replacementDecisionId}</span> : null}
+                          </div>
+                        </section>
+                      ) : null}
+                      {selectedDecision.status === "active" ? (
+                        <section className="response-form">
+                          <h3>Retire this decision</h3>
+                          <label htmlFor="decision-lifecycle-status">Lifecycle action</label>
+                          <select
+                            id="decision-lifecycle-status"
+                            value={decisionLifecycleStatus}
+                            onChange={(event) => setDecisionLifecycleStatus(event.target.value as typeof decisionLifecycleStatus)}
+                          >
+                            <option value="revoked">Revoke</option>
+                            <option value="expired">Expire</option>
+                            <option value="superseded">Supersede with replacement</option>
+                          </select>
+                          {decisionLifecycleStatus === "superseded" ? (
+                            <>
+                              <label htmlFor="replacement-decision">Active replacement</label>
+                              <select
+                                id="replacement-decision"
+                                value={replacementDecisionId}
+                                onChange={(event) => setReplacementDecisionId(event.target.value)}
+                              >
+                                <option value="">Select a replacement decision</option>
+                                {decisions.filter((candidate) =>
+                                  candidate.id !== selectedDecision.id &&
+                                  candidate.status === "active" &&
+                                  candidate.category === selectedDecision.category &&
+                                  sameScope(candidate.scope, selectedDecision.scope)
+                                ).map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>{candidate.answer}</option>
+                                ))}
+                              </select>
+                            </>
+                          ) : null}
+                          <label htmlFor="decision-lifecycle-rationale">Rationale</label>
+                          <textarea
+                            id="decision-lifecycle-rationale"
+                            value={decisionLifecycleRationale}
+                            placeholder="Explain why this decision is no longer authoritative."
+                            onChange={(event) => setDecisionLifecycleRationale(event.target.value)}
+                          />
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={submitting || decisionLifecycleRationale.trim().length < 10 || (decisionLifecycleStatus === "superseded" && !replacementDecisionId)}
+                            onClick={() => void changeDecisionLifecycle()}
+                          >Apply lifecycle change</button>
+                        </section>
+                      ) : null}
+                      {decisionLifecycleImpact ? (
+                        <section>
+                          <h3>Potentially affected records</h3>
+                          <p className="impact">
+                            {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
+                          </p>
+                        </section>
+                      ) : null}
                       <button
                         className="secondary"
                         type="button"
@@ -1326,6 +1622,7 @@ export default function Home() {
                   <div className="question-list" aria-label="Specification reviews">
                     {artifacts.map((artifact) => {
                       const version = currentVersion(artifact);
+                      const displayedStatus = displayedArtifactStatus(version);
                       return (
                         <button
                           type="button"
@@ -1335,7 +1632,7 @@ export default function Home() {
                         >
                           <span className="document-mark" aria-hidden="true">§</span>
                           <span><strong>{artifact.title}</strong><small>{artifact.type.replaceAll("_", " ")} · version {version?.version ?? "?"}</small></span>
-                          <span className={`status status-${version?.status ?? "draft"}`}>{(version?.status ?? "draft").replaceAll("_", " ")}</span>
+                          <span className={`status status-${displayedStatus}`}>{displayedStatus.replaceAll("_", " ")}</span>
                         </button>
                       );
                     })}
@@ -1345,7 +1642,7 @@ export default function Home() {
                     <article className="question-detail specification-detail">
                       <div className="detail-heading">
                         <div><small>{selectedArtifact.id} · {selectedArtifact.type.replaceAll("_", " ")} · version {selectedArtifactVersion.version}</small><h2>{selectedArtifact.title}</h2></div>
-                        <span className={`status status-${selectedArtifactVersion.status}`}>{selectedArtifactVersion.status.replaceAll("_", " ")}</span>
+                        <span className={`status status-${displayedArtifactStatus(selectedArtifactVersion)}`}>{displayedArtifactStatus(selectedArtifactVersion).replaceAll("_", " ")}</span>
                       </div>
 
                       <section>
@@ -1364,12 +1661,58 @@ export default function Home() {
                       </section>
 
                       <section>
+                        <h3>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></h3>
+                        {selectedArtifactVersion.reviews.length === 0 ? (
+                          <p className="muted-copy">No reviewer feedback has been recorded for this version.</p>
+                        ) : (
+                          <div className="response-list">
+                            {selectedArtifactVersion.reviews.map((review) => (
+                              <article className="response-card" key={review.id}>
+                                <div className="response-heading">
+                                  <strong>{review.reviewerId}</strong>
+                                  <span className={`status status-${review.status}`}>{review.status.replaceAll("_", " ")}</span>
+                                </div>
+                                <small>{new Date(review.createdAt).toLocaleString()}</small>
+                                <p>{review.body}</p>
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                        {canReviewSelectedArtifact && ["draft", "in_review"].includes(selectedArtifactVersion.status) ? (
+                          <div className="response-form">
+                            <label htmlFor="artifact-review-status">Review action</label>
+                            <select
+                              id="artifact-review-status"
+                              value={artifactReviewStatus}
+                              onChange={(event) => setArtifactReviewStatus(event.target.value as typeof artifactReviewStatus)}
+                            >
+                              <option value="commented">Add review comment</option>
+                              <option value="changes_requested">Request changes</option>
+                            </select>
+                            <label htmlFor="artifact-review-body">Feedback</label>
+                            <textarea
+                              id="artifact-review-body"
+                              value={artifactReviewBody}
+                              onChange={(event) => setArtifactReviewBody(event.target.value)}
+                              placeholder="Add evidence or describe an actionable specification change."
+                            />
+                            <button
+                              className="secondary"
+                              type="button"
+                              disabled={submitting || artifactReviewBody.trim().length < (artifactReviewStatus === "changes_requested" ? 10 : 2)}
+                              onClick={() => void reviewSpecification()}
+                            >{submitting ? "Recording feedback…" : artifactReviewStatus === "changes_requested" ? "Request changes" : "Post review comment"}</button>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section>
                         <h3>Version history</h3>
                         <div className="version-list">
                           {[...selectedArtifact.versions].reverse().map((version) => (
                             <div key={version.id}>
                               <strong>Version {version.version}</strong>
-                              <span className={`status status-${version.status}`}>{version.status.replaceAll("_", " ")}</span>
+                              <span className={`status status-${displayedArtifactStatus(version)}`}>{displayedArtifactStatus(version).replaceAll("_", " ")}</span>
                               <small>{version.id}</small>
                             </div>
                           ))}
@@ -1381,7 +1724,11 @@ export default function Home() {
                           <strong>Specification approved by {selectedArtifactVersion.approvedById}.</strong>
                           {selectedArtifactVersion.approvalRationale}
                         </div>
-                      ) : (
+                      ) : selectedArtifactHasChangesRequested ? (
+                        <div className="impact">
+                          <strong>Changes requested.</strong> This immutable version cannot be approved. Publish a new version that addresses the feedback.
+                        </div>
+                      ) : canReviewSelectedArtifact ? (
                         <section>
                           <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
                           <textarea
@@ -1398,6 +1745,8 @@ export default function Home() {
                             {submitting ? "Approving version…" : `Approve version ${selectedArtifactVersion.version}`}
                           </button>
                         </section>
+                      ) : (
+                        <div className="owner-routing"><strong>Shared review only.</strong> A configured specification reviewer or project administrator must approve this version.</div>
                       )}
                     </article>
                   ) : null}

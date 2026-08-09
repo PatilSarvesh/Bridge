@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-08, Asia/Kolkata |
+| Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | The MVP prototype and GitHub handoff hardening are implemented: fresh-repository bootstrap, shared questions/decisions/specifications, assumptions and run provenance, human review, notifications/outbox, CLI and optional MCP adapters, durable PostgreSQL mode, read-only decision/assumption/run UI views, and contributor guardrails are verified; the next pilot check is real agent adherence to the generated repository instructions |
+| Current implementation phase | Governed decision retirement, active-by-default decision browsing/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -107,7 +107,7 @@ The decisive MVP test is:
 
 “All questions” means all structured questions that require shared human knowledge or authority. Bridge must not capture private chain-of-thought, raw transcripts, or inconsequential implementation chatter.
 
-Current status against this journey: the infrastructure path now passes end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI can drive run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged Hospital Management System simulation produced one protected question and four specifications (PRD, ADR, API contract, and test plan), all visible in the browser. The remaining pilot validation is a real independent agent chat obeying the generated instructions; Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
+Current status against this journey: the infrastructure path and the first real Codex-first path pass end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI drives run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged simulation produced one protected question and all four specification types, and a separate independent Codex CLI session given only the ordinary Hospital prompt produced the same observable governed records and stopped at `waiting_for_human`. Claude Code remains the second-client validation. Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
 
 ### 3.3 Product boundary
 
@@ -136,6 +136,7 @@ Bridge is not:
 - Agents and CI principals cannot accept decisions.
 - Agents and CI principals cannot approve specification versions.
 - Human decision owners or project administrators accept ordinary decisions.
+- A decision owner, configured project decision owner, or project administrator may supersede, expire, or revoke an active decision with an optimistic version and rationale.
 - Protected decisions require the appropriate human reviewer role.
 - Human approval always requires a rationale.
 - An agent recommendation is advisory and must be labeled accordingly.
@@ -182,6 +183,8 @@ Specification rules:
 - Approving a newer version supersedes the previously approved version.
 - Only the currently approved version participates in agent context and repository export.
 - Draft and in-review bodies must never be represented as approved context.
+- Configured human reviewers may append formal comments or request changes on the current version.
+- A change request permanently blocks approval of that exact immutable version; the author must publish a new version with a clean review history.
 
 ### 4.6 Data minimization
 
@@ -352,8 +355,10 @@ An accepted human answer creates a durable Decision containing:
 - Human owner ID
 - Active lifecycle state
 - Created time and review date
+- Lifecycle version
+- Optional retirement rationale, human actor, timestamp, and same-project replacement link
 
-Only active decisions participate in context retrieval.
+Only active decisions participate in context retrieval. Human browsing is active-only by default, with explicit lifecycle history plus category, owner, created-time, and exact-scope filtering.
 
 ### 9.3 Specifications/artifacts
 
@@ -399,7 +404,7 @@ A Notification is a durable human-only pointer to a project event. It contains:
 - Target type and target ID
 - Created time and optional read time
 
-The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, specification review requests, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
+The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, decision lifecycle changes, specification review requests/feedback, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
 
 Each notification also creates a `notification.created` outbox event. The notification is the human read model; the outbox record is the retryable downstream-delivery intent.
 
@@ -488,8 +493,10 @@ Both repository implementations record events for:
 - Question creation
 - Response proposal
 - Decision acceptance
+- Decision supersession, expiry, and revocation
 - Context retrieval
 - Specification version publication
+- Specification review comment and change request
 - Specification version approval
 - Run start and status transition
 - Continuation resolution
@@ -512,7 +519,10 @@ Both repository implementations record events for:
 - Agents cannot accept decisions.
 - Agents cannot approve specification versions.
 - Only configured decision owners/project administrators accept decisions.
+- Only the decision owner, configured project decision owner, or project administrator can retire an active decision; every transition is version-checked and rationale-required.
+- A superseding decision must be active in the same project, category, and exact scope, and retired decisions are excluded from context.
 - Only configured specification reviewers/project administrators approve specification versions.
+- Only configured specification reviewers/project administrators append formal specification feedback; a requested change blocks approval of that version.
 - Only the latest specification version can be approved.
 - Approval of a new version supersedes the old approved version.
 - A cited decision must belong to the same project.
@@ -523,7 +533,7 @@ Both repository implementations record events for:
 - An unresolved blocking question prevents both resuming and successfully completing the run.
 - Continuation requires project access, a matching opaque locator, and no unresolved blocking question.
 - Human acceptance is authoritative but does not implicitly restart a vendor agent session.
-- Run creation/provenance/status, assumption creation/resolution/expiry, question creation, response proposal, decision acceptance, specification publication/approval, context snapshots, idempotency records, and their audit events are atomic.
+- Run creation/provenance/status, assumption creation/resolution/expiry, question creation, response proposal, decision acceptance/lifecycle transition, specification publication/approval, context snapshots, idempotency records, and their audit events are atomic.
 - The in-memory transaction implementation rolls back failed workflows and serializes concurrent transactions for behavioral parity.
 - The PostgreSQL implementation uses serializable transactions and locks run, question, and artifact roots during concurrency-sensitive commands.
 - A concurrent loser for a newly claimed idempotency key rolls back instead of leaving an unreferenced aggregate.
@@ -547,7 +557,11 @@ Reviewer context:
 Context and decisions:
 
 - `GET /v1/projects/:projectId/context`
-- `GET /v1/projects/:projectId/decisions`
+- `GET /v1/projects/:projectId/decisions` (active by default; supports explicit history/status plus category, owner, creation-time, and exact-scope filters)
+- `POST /v1/decisions/:decisionId/lifecycle`
+- `POST /v1/decisions/:decisionId/supersede`
+- `POST /v1/decisions/:decisionId/expire`
+- `POST /v1/decisions/:decisionId/revoke`
 
 Agent runs:
 
@@ -587,6 +601,7 @@ Specifications:
 - `POST /v1/projects/:projectId/artifacts`
 - `GET /v1/projects/:projectId/artifacts`
 - `GET /v1/artifacts/:artifactId`
+- `POST /v1/artifact-versions/:versionId/reviews`
 - `POST /v1/artifact-versions/:versionId/approve`
 
 All prototype routes resolve one of the fixed local principals using `x-bridge-principal-id`.
@@ -739,16 +754,19 @@ The local web application provides:
 - Required human acceptance rationale.
 - Protected-question security review history and review form.
 - Accepted-decision state.
-- Accepted-decision list/detail with rationale, authority, review date, and source-question navigation.
+- Accepted-decision list/detail with rationale, authority, review date, lifecycle provenance, source-question navigation, and owner-authorized supersede/expire/revoke controls.
+- Potentially affected specification, assumption, run, and work-item counts after a decision lifecycle change.
 - Assumption list/detail with status, risk, confidence, expiry, reversal cost, resolution, and source-run navigation.
 - Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
 - Specifications navigation and pending count.
 - Specification detail, immutable Markdown body, reviewer metadata, and version history.
+- Append-only formal review comments and request-changes controls for authorized specification reviewers.
+- A visible changes-requested state that directs the author to publish a new immutable version.
 - Required human approval rationale.
 - Approved specification state.
 - Project-scoped notification feed with unread count, individual mark-read, and mark-all-read controls.
 
-The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations; the web views are inspection surfaces, not additional authority paths.
+The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Decision lifecycle changes now use the same application authority path from the web UI. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations.
 
 The founder has additional UI feedback that will be addressed later.
 
@@ -760,14 +778,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the role-aware-routing, reviewer-switcher, personalized-inbox, protected-review, threaded-comment, in-app-notification, transactional-outbox, and CLI-diagnostics slices:
+Current validation result after the decision-history-filter slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 47 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 56 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, legacy-backfill, audit-subject, role-owner, review-array, comment-array, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject, role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -794,6 +812,10 @@ Current validation result after the role-aware-routing, reviewer-switcher, perso
 - Fresh-project application/API registration, idempotent replay, access-policy, and project-list tests: passed.
 - Packaged CLI initialization from a local tarball, safe `AGENTS.md` preservation, and idempotent managed-block regeneration: passed.
 - Fresh Hospital Management System acceptance simulation passed: project registration -> run -> protected question -> PRD/ADR/API contract/test plan -> project-scoped API reads.
+- Real independent Codex CLI conformance passed from a fresh repository using only the ordinary prompt `Build a Hospital Management System.` and no MCP. The resulting run linked a context snapshot, one protected role-routed question, a reversible assumption, and PRD/ADR/API-contract/test-plan versions, then entered `waiting_for_human`.
+- The real-agent run exposed and drove fixes for two adapter defects: packaged execution through pnpm symlinks now resolves the real entrypoint, and generated instructions document the direct repository binary fallback when unrelated dependency install policy blocks `pnpm exec`.
+- `bridge conformance --task [--run-id]` now emits named observable checks and exit code `10` when a task-linked run, context, routed question, specification set, provenance links, or human boundary is incomplete. It intentionally cannot observe vendor-private clarification UI.
+- CLI success output now defaults to stable JSON but supports `--output human` across commands; errors remain machine-readable JSON with the existing stable exit codes in either mode.
 - In-app browser verification passed for project selection, the Hospital question, and all four Hospital specifications.
 - REST response-proposal regression passed: a contributor can add an answer before the configured owner accepts the decision.
 - In-app browser verification passed for the team discussion card, response author/rationale, and response form.
@@ -894,7 +916,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Database row-level security.
 - External outbox adapters, scheduled worker deployment, and operator replay/metrics.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
-- Assumption resolution and agent-run lifecycle mutation controls in the web UI; the corresponding list/detail views are read-only by design in the current prototype.
+- Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
 - External notification delivery adapters and preference-aware channels.
@@ -902,10 +924,11 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Slack/email integrations.
 - PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
-- Specification comments or multi-reviewer quorum.
+- Configurable specification reviewer/team routing or multi-reviewer quorum; append-only comments and request-changes are implemented.
 - Binary attachments or S3 storage.
-- Public or organization-registry CLI publishing and a standalone installer; a local installable tarball is available.
-- A conformance guard proving that supported agents route meaningful native clarification questions and generated specification files through Bridge during ordinary prompts.
+- Execution of the first tagged GitHub CLI release and any public/organization-registry publication; the checksummed release workflow, global tarball install path, and local package smoke test are implemented.
+- Claude Code and later-client independent conformance runs; Codex-first observable conformance now passes.
+- A vendor hook or other enforceable signal for private/native clarification prompts; the current guard can verify Bridge outcomes but cannot observe UI that a vendor does not expose.
 - Automated browser regression tests; the current Hospital acceptance view was verified interactively in the in-app browser.
 
 ## 18. Git and workspace state
@@ -1047,13 +1070,17 @@ Implemented:
 7. Dynamic project loading and selection in the web UI, with project-scoped question and specification views.
 8. Application, REST, CLI, production-build, packaged-process, and browser acceptance evidence.
 9. A fresh Hospital Management System simulation with one protected privacy question and four in-review specifications visible under the distinct registered project.
+10. An observable `bridge conformance` command covering task/run matching, context retrieval, complete question routing, run linkage, all four greenfield specification types, specification provenance, and the human boundary.
+11. A real independent Codex CLI run from a separately initialized repository. The ordinary Hospital Management System prompt first failed the new guard because no question had been routed; the agent corrected the omission, submitted a protected question to privacy/security/hospital-operations roles, and the final guard passed with the run in `waiting_for_human`.
+12. Packaged CLI entrypoint resolution through pnpm's symlinked binary, with a regression test and a direct `./node_modules/.bin/bridge` fallback for environments whose package-manager policy blocks execution while application dependencies are changing.
 
 Deliberate boundaries:
 
 - Project registration uses the existing fixed development principal; it is not organization onboarding or authentication.
 - MCP is not required for this path.
 - Repository instructions are the Codex-first activation mechanism. Bridge does not claim hard interception of unsupported vendor-native clarification prompts.
-- The packaged simulation proves Bridge mechanics and UI visibility. A real independent Codex chat remains the next conformance/pilot test.
+- The packaged simulation proves Bridge mechanics and UI visibility, while the independent Codex run proves observable instruction adherence for one Codex CLI/version/environment. Claude Code and other vendor clients still require their own runs.
+- Observable conformance cannot prove that no unexposed vendor-native clarification UI was used; Bridge still does not claim universal interception.
 - Broader UI design feedback remains deferred; only the functional project selector needed by acceptance was added.
 
 ### 20.6 Implemented shared question discussion slice
@@ -1284,7 +1311,7 @@ Implemented and verified:
 3. `bridge inbox` exposes the same role/risk/category/state-filtered human inbox as REST without requiring MCP.
 4. Standalone MCP now shares the API's canonical PostgreSQL repository and fails fast without `DATABASE_URL`, eliminating invisible process-local MCP state.
 5. Context and MCP record links now target implemented project/view query deep links instead of nonexistent routes.
-6. The web application now includes read-only Decisions, Assumptions, and Agent Runs views with source-record navigation and query deep-link selection.
+6. The web application now includes Decisions, Assumptions, and Agent Runs views with source-record navigation and query deep-link selection; Decisions gained governed lifecycle actions in the later decision-lifecycle slice.
 7. Question acceptance refreshes the Decision view immediately; an interactive regression reproduced the stale state before the fix and verified the accepted Decision afterward.
 8. Node 24 is pinned for common version managers through `.nvmrc`, browser-build configuration is included in Turbo's environment-aware cache key, and runtime environment examples document all local service addresses.
 9. The CLI tarball was rebuilt and smoke-tested from a fresh temporary project; the production dependency audit reported no known vulnerabilities.
@@ -1294,6 +1321,87 @@ Deliberate boundaries:
 - Live PostgreSQL execution remains CI/isolated-database dependent because this workstation has no local PostgreSQL, Docker, or Podman runtime.
 - Authentication, organization onboarding, automatic vendor prompt interception, external notification adapters, scheduled worker deployment, and public package publication are intentionally not represented as completed.
 - The repository is licensed under Apache-2.0; ownership-specific copyright or trademark notices can be added later without changing the selected license.
+
+### 20.21 Added observable agent conformance and GitHub CLI distribution
+
+Implemented and verified:
+
+1. `bridge conformance --task [--run-id]` verifies the task-linked run, context snapshot, complete agent-created blocking question, question/run linkage, PRD/ADR/API-contract/test-plan versions, exact version/run linkage, and the human boundary.
+2. A separately launched Codex CLI session in a fresh initialized repository received only the ordinary Hospital Management System prompt and passed the final observable conformance check without MCP.
+3. The first failed conformance result correctly identified that the agent had published all specifications but had not routed a question; the agent then created a protected role-owned question and the run moved to `waiting_for_human`.
+4. Packaged execution now recognizes pnpm's symlinked binary through real-path entrypoint comparison, with a regression test.
+5. Generated instructions provide `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated application dependency policy blocks `pnpm exec`.
+6. Root validation now packages the CLI, installs it globally under a temporary prefix, executes the installed command, and verifies a no-mutation bootstrap dry run.
+7. A tag-driven GitHub Actions workflow validates tag/version equality and creates a GitHub Release containing the tarball and SHA-256 checksum. Installation and release-owner steps are documented in `docs/distribution.md`.
+8. `--output human|json` provides a generic readable rendering for successful commands while preserving JSON as the agent/CI default and for all error envelopes.
+
+Deliberate boundaries:
+
+- Observable conformance cannot detect a vendor-private clarification UI that the vendor does not expose.
+- The Codex result is evidence for one client/version/environment; Claude Code remains the next cross-vendor run.
+- No release tag was pushed and no registry package was published during implementation. The package stays registry-private until the owner selects and controls a namespace.
+
+### 20.22 Implemented decision lifecycle and direct impact reporting
+
+Implemented and verified:
+
+1. Human decision owners, configured project decision owners, and project administrators can supersede, expire, or revoke an active decision with an expected version and required rationale.
+2. Supersession requires a different active replacement in the same project, category, and exact scope; database foreign keys also prevent cross-project replacement references.
+3. Accepted answer content remains immutable. The original row records only lifecycle state, actor, rationale, timestamp, replacement link, and incremented version.
+4. Retired decisions disappear from default context but remain visible in decision history and retain source-question navigation.
+5. Each transition returns directly linked specification IDs, decision-confirmed assumption IDs, source/provenance run IDs, later run IDs whose context snapshots consumed the decision, and the decision's scoped work-item ID as potentially affected records.
+6. Lifecycle transitions, audit events, dedicated `decision.lifecycle_changed` outbox events, and any durable recipient notifications plus delivery intents commit through the application transaction boundary.
+7. REST provides generic and explicit lifecycle routes, while the Decisions UI exposes the action, replacement selection, lifecycle history, and impact counts.
+8. Forward-only migration `0009_true_marauders.sql` adds lifecycle provenance, optimistic versioning, same-project replacement constraints, lifecycle invariants, and the `decision_lifecycle` notification type.
+9. Application, API, mapper, migration-structure, type-check, test, build, and packaged-CLI validation pass. The PostgreSQL integration test now exercises supersession when CI supplies its isolated database.
+
+Deliberate boundaries:
+
+- Impact is direct and deterministic; deeper transitive dependency analysis remains BRG-123.
+- PostgreSQL full-text decision search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
+- No agent, CLI, or MCP path can perform a human decision lifecycle action.
+
+### 20.23 Implemented specification review feedback and request changes
+
+Implemented and verified:
+
+1. Configured human reviewers and project administrators can append formal `commented` or `changes_requested` feedback to the current draft/in-review specification version.
+2. Agents, ordinary contributors, and cross-project principals cannot submit formal review feedback.
+3. Review records preserve reviewer identity/type, exact version ID, outcome, body, and timestamp without modifying the version's Markdown body or content hash.
+4. Any change request permanently blocks approval of that exact immutable version. The author must publish a new version, which starts with an empty review history.
+5. A previously approved version remains current agent context while a newer version receives feedback; only explicit approval changes agent-facing authority.
+6. Feedback, audit events, durable notifications, and notification outbox intents commit through the application transaction boundary.
+7. REST and the Specifications UI expose review history, comments, request-changes controls, an explicit changes-requested state, and the new-version requirement.
+8. Forward-only migration `0010_safe_white_queen.sql` adds the review array with a JSON-shape constraint and extends the notification type constraint.
+9. Application/API behavior, PostgreSQL mappers and opt-in integration coverage, type-checks, tests, production builds, and packaged CLI smoke validation pass.
+
+Deliberate boundaries:
+
+- Feedback is append-only; edit/delete windows, inline Markdown anchors, mentions, configurable teams, quorum, and reviewer reassignment remain future work.
+- A change request is resolved by publishing a new immutable version, not by mutating or reopening the reviewed body.
+- Human review actions remain REST/web-only and do not require MCP approval.
+
+### 20.24 Implemented active-by-default decision browsing and explicit history filters
+
+Implemented and verified:
+
+1. Decision collection reads return active records by default, matching the existing rule that only active authority enters agent context.
+2. An authorized caller can explicitly include lifecycle history or select one lifecycle status, then narrow results by exact case-insensitive category, owner, inclusive creation-time range, or supplied exact repository/component/branch/environment/work-item scope dimensions.
+3. The shared query contract rejects invalid timestamps and reversed creation-time ranges at the REST boundary.
+4. Filtering occurs after tenant/project authorization, so query parameters cannot expose records outside the caller's project access.
+5. The Decisions UI exposes active/history mode, lifecycle state, category, owner, component, and creation-date controls with a single clear action.
+6. Direct decision links and lifecycle notifications automatically enable history, preserving navigation to retired records without changing the normal active-only view.
+7. Application and API regressions cover active defaults, explicit superseded history, combined filters, and invalid date ranges; the PostgreSQL integration path explicitly requests history when verifying retired rows.
+
+Deliberate boundaries:
+
+- Full-text relevance search remains a PostgreSQL-backed follow-up in BRG-041; the current agent search stays deterministic and authorized.
+- The first UI surface exposes component scope because it is the most common narrowing dimension; REST already supports every defined scope dimension.
+- Filters are local view state, not saved preferences or shareable query parameters.
+
+### 20.25 Corrected the decision-lifecycle migration for the full PostgreSQL chain
+
+GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement. The next PostgreSQL run `31326475659` proved that the full migration chain proceeded, then exposed a stale reconnect assertion added with the lifecycle scenario: the run correctly persisted both its original and replacement question IDs. The integration test now asserts those exact provenance IDs instead of expecting only one question.
 
 ## 21. Important implementation files
 
@@ -1318,6 +1426,8 @@ Deliberate boundaries:
 - Threaded question comments migration: `packages/database/drizzle/0006_question_comments.sql`
 - In-app notifications migration: `packages/database/drizzle/0007_in_app_notifications.sql`
 - Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
+- Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
+- Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1358,4 +1468,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive local checks, and GitHub CI/handoff guardrails; real third-party agent adherence and deployment integrations remain pilot validation, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default decision browsing with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance, PostgreSQL full-text decision search, and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

@@ -2,9 +2,12 @@ import cors from "@fastify/cors";
 import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
+  artifactReviewInputSchema,
+  changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
   createQuestionInputSchema,
+  decisionListQuerySchema,
   findQuestionMatchesInputSchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
@@ -208,6 +211,30 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.post<{ Params: { decisionId: string }; Body: unknown }>(
+    "/v1/decisions/:decisionId/lifecycle",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = changeDecisionLifecycleInputSchema.parse(request.body);
+      return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
+    },
+  );
+
+  for (const status of ["superseded", "expired", "revoked"] as const) {
+    const action = status === "superseded" ? "supersede" : status === "expired" ? "expire" : "revoke";
+    app.post<{ Params: { decisionId: string }; Body: unknown }>(
+      `/v1/decisions/:decisionId/${action}`,
+      async (request) => {
+        const principal = resolvePrincipal(request, options.principals);
+        const body = typeof request.body === "object" && request.body !== null
+          ? request.body as Record<string, unknown>
+          : {};
+        const input = changeDecisionLifecycleInputSchema.parse({ ...body, status });
+        return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
+      },
+    );
+  }
+
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/questions",
     async (request, reply) => {
@@ -342,11 +369,32 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/decisions",
     async (request) => {
       const principal = resolvePrincipal(request, options.principals);
-      return { items: await options.service.listDecisions(principal, request.params.projectId) };
+      const query = decisionListQuerySchema.parse({
+        includeHistory: request.query.includeHistory === undefined
+          ? undefined
+          : request.query.includeHistory === "true"
+            ? true
+            : request.query.includeHistory === "false"
+              ? false
+              : request.query.includeHistory,
+        status: request.query.status,
+        category: request.query.category,
+        ownerId: request.query.ownerId,
+        createdFrom: request.query.createdFrom,
+        createdTo: request.query.createdTo,
+        scope: {
+          ...(request.query.repository ? { repository: request.query.repository } : {}),
+          ...(request.query.component ? { component: request.query.component } : {}),
+          ...(request.query.branch ? { branch: request.query.branch } : {}),
+          ...(request.query.environment ? { environment: request.query.environment } : {}),
+          ...(request.query.workItem ? { workItem: request.query.workItem } : {}),
+        },
+      });
+      return { items: await options.service.listDecisions(principal, request.params.projectId, query) };
     },
   );
 
@@ -372,6 +420,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = resolvePrincipal(request, options.principals);
     return options.service.getArtifact(principal, request.params.artifactId);
   });
+
+  app.post<{ Params: { versionId: string }; Body: unknown }>(
+    "/v1/artifact-versions/:versionId/reviews",
+    async (request, reply) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = artifactReviewInputSchema.parse(request.body);
+      const result = await options.service.reviewArtifactVersion(principal, request.params.versionId, input);
+      return reply.status(201).send(result);
+    },
+  );
 
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/approve",

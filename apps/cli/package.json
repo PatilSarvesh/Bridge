@@ -1,8 +1,18 @@
 {
   "name": "@bridge/cli",
   "version": "0.1.0",
+  "description": "MCP-optional repository adapter for the Bridge decision and specification control plane",
   "private": true,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PatilSarvesh/Bridge.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/PatilSarvesh/Bridge#readme",
+  "bugs": {
+    "url": "https://github.com/PatilSarvesh/Bridge/issues"
+  },
   "type": "module",
   "bin": {
     "bridge": "dist/index.js"

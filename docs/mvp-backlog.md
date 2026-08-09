@@ -476,7 +476,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — deterministic authorized search plus read-only list/detail UI and source navigation are implemented; the full filter/history surface and PostgreSQL full-text search remain
+- **Status:** Partial — authorized active-by-default browsing, explicit lifecycle history, deterministic category/owner/date/exact-scope filters, detail/source navigation, and deterministic agent search are implemented; PostgreSQL full-text search remains
 - **Dependencies:** BRG-040
 - **PRD references:** DEC-04
 
@@ -494,7 +494,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Ready
+- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, report directly linked impact, and write audit plus notification/outbox records; deeper transitive impact analysis remains BRG-123
 - **Dependencies:** BRG-040, BRG-041
 - **PRD references:** DEC-03, DEC-06
 
@@ -699,7 +699,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — context, filtered inbox, question, assumption, specification, and bounded-wait commands plus stable JSON errors/exit codes are implemented; a separate human-formatted output mode remains
+- **Status:** Implemented for the essential prototype commands, including opt-in human-readable success output and stable JSON automation/error behavior
 - **Dependencies:** BRG-061
 - **PRD references:** CLI contract
 
@@ -708,7 +708,7 @@ As an operator, I need CLI access to context, inbox, questions, assumptions, spe
 Acceptance criteria:
 
 1. Commands implement context, inbox, question get, ask, assumption add, spec publish, and wait.
-2. Human and JSON output modes are supported.
+2. Human and JSON output modes are supported. **Implemented globally through `--output human|json`, with JSON remaining the default.**
 3. Wait is bounded, interruptible, and does not busy-poll.
 4. Exit codes distinguish success, invalid input, configuration, connection failure, unresolved wait, policy denial, not found, and conflict.
 
@@ -716,7 +716,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Implemented for the fixed-principal local prototype
+- **Status:** Implemented and independently validated for the fixed-principal Codex-first local prototype
 - **Dependencies:** BRG-030, BRG-054, BRG-061, BRG-062, BRG-080
 - **PRD references:** Founder-defined fresh-project acceptance journey
 
@@ -729,7 +729,28 @@ Acceptance evidence:
 3. MCP is not required.
 4. The web UI loads registered projects and scopes questions/specifications to the selected project.
 5. A packaged Hospital Management System simulation produced a protected question and PRD, ADR, API contract, and test plan visible in the browser.
-6. Universal hard interception is not claimed; real independent agent adherence remains a pilot conformance test.
+6. A real independent Codex CLI session received only `Build a Hospital Management System.`, linked its context/run/question/specification records without MCP, and finished at `waiting_for_human` with every observable `bridge conformance` check passing.
+7. The conformance command returns named pass/fail evidence and a stable pending exit code; universal hard interception is still not claimed because vendor-private clarification UI may be unobservable.
+8. Claude Code and later-client independent runs remain cross-vendor validation work rather than a blocker for the Codex-first slice.
+
+### BRG-065 — Distribute an immutable CLI release artifact
+
+- **Priority:** P1
+- **Size:** S
+- **Status:** Partial — GitHub Release automation, checksum generation, global tarball installation documentation, and packaged-binary smoke coverage are implemented; the first version tag and any registry publication remain explicit maintainer actions
+- **Dependencies:** BRG-063, BRG-064
+- **PRD references:** CLI distribution and MCP-optional adoption
+
+As a repository maintainer, I need a verified CLI artifact that can be installed without an npm organization so that teams can adopt Bridge in fresh repositories before a registry namespace is selected.
+
+Acceptance criteria:
+
+1. `pnpm check` packages the CLI and executes the globally installed tarball from an isolated temporary prefix. **Implemented.**
+2. The smoke test covers the installed symlinked entrypoint and a no-mutation fresh-project dry run. **Implemented.**
+3. A version tag must match the CLI package version before release creation. **Implemented in the tag workflow.**
+4. The GitHub Release contains the immutable tarball and a SHA-256 checksum. **Implemented in automation; awaits the first maintainer-pushed tag.**
+5. Global and repository-local installation are documented, including the direct local binary fallback. **Implemented.**
+6. Registry publication is not attempted until the owner selects and verifies a controlled package scope. **Preserved as an explicit boundary.**
 
 ## 15. E7 — Assumptions
 
@@ -793,7 +814,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — authority-checked approval, immutable versions, single current approval, audit/outbox, and web approval are implemented; comments, request-changes, and configurable reviewer/team workflow remain
+- **Status:** Partial — authority-checked append-only review comments, request-changes, immutable versions, single current approval, audit/outbox, and web review/approval are implemented; configurable team workflow and multi-reviewer quorum remain
 - **Dependencies:** BRG-021, BRG-080
 - **PRD references:** ART-03, ART-04
 

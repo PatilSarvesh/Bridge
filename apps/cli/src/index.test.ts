@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { cliExitCodes, runCli, type CliRuntime } from "./index.js";
+import { cliExitCodes, isCliEntrypoint, runCli, type CliRuntime } from "./index.js";
 
 interface MockState {
   question: Record<string, unknown>;
@@ -200,6 +201,19 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
 }
 
 describe("Bridge CLI fallback adapter", () => {
+  it("recognizes a pnpm-style symlink as the executable entrypoint", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-entrypoint-"));
+    const target = join(cwd, "package", "dist", "index.js");
+    const link = join(cwd, "node_modules", ".bin", "bridge");
+    await mkdir(join(cwd, "package", "dist"), { recursive: true });
+    await mkdir(join(cwd, "node_modules", ".bin"), { recursive: true });
+    await writeFile(target, "// packaged Bridge CLI\n", "utf8");
+    await symlink(target, link);
+
+    expect(await isCliEntrypoint(link, pathToFileURL(target).href)).toBe(true);
+    expect(await isCliEntrypoint(join(cwd, "unrelated.js"), pathToFileURL(target).href)).toBe(false);
+  });
+
   it("registers a fresh project and safely activates Codex instructions", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-fresh-project-"));
     const stdout: string[] = [];
@@ -225,6 +239,8 @@ describe("Bridge CLI fallback adapter", () => {
     const config = await readFile(join(cwd, ".bridge", "project.yaml"), "utf8");
     expect(config).toContain('project_id: "prj_hospital"');
     expect(config).toContain('client: "codex"');
+    expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
+      .toContain("./node_modules/.bin/bridge");
     const firstInstructions = await readFile(join(cwd, "AGENTS.md"), "utf8");
     expect(firstInstructions).toContain("Keep this content.");
     expect(firstInstructions).toContain(".bridge/agent-instructions.md");
@@ -403,6 +419,176 @@ describe("Bridge CLI fallback adapter", () => {
       "Implemented bounded transient retries",
     ], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain('"status": "completed"');
+  });
+
+  it("verifies observable independent-agent conformance for a greenfield task", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-conformance-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const runId = "run_cli_hospital";
+    const state: MockState = {
+      question: {
+        id: "qst_cli_patient_identity",
+        runId,
+        title: "Which patient identity policy should the hospital use?",
+        type: "decision",
+        category: "privacy",
+        context: "Patient matching must be consistent across hospital registration and clinical workflows.",
+        whyItMatters: "A wrong match could merge records or expose protected patient information.",
+        risk: "protected",
+        blocking: true,
+        ownerIds: [],
+        ownerRoles: ["business-analyst", "security-reviewer"],
+        options: [
+          { key: "enterprise-mrn", label: "Enterprise MRN", tradeoffs: "Central governance." },
+          { key: "facility-mrn", label: "Facility MRN", tradeoffs: "Local autonomy." },
+        ],
+        recommendationKey: "enterprise-mrn",
+        scope: { repository: "hospital-management-system", component: "patient-registry" },
+        createdByType: "agent",
+        status: "open",
+      },
+      artifacts: (["prd", "adr", "api_contract", "test_plan"] as const).map((type, index) => ({
+        id: `art_cli_hospital_${type}`,
+        type,
+        versions: [{
+          id: `av_cli_hospital_${index + 1}`,
+          runId,
+          createdByType: "agent",
+          status: "in_review",
+        }],
+      })),
+      assumptions: [],
+      run: {
+        id: runId,
+        client: "codex",
+        taskSummary: "Build a production-ready Hospital Management System",
+        status: "waiting_for_human",
+        contextSnapshotIds: ["ctx_cli_hospital"],
+        questionIds: ["qst_cli_patient_identity"],
+        artifactVersionIds: [
+          "av_cli_hospital_1",
+          "av_cli_hospital_2",
+          "av_cli_hospital_3",
+          "av_cli_hospital_4",
+        ],
+      },
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+
+    expect(await runCli([
+      "conformance",
+      "--task",
+      "Build a Hospital Management System.",
+      "--run-id",
+      runId,
+    ], runtime)).toBe(cliExitCodes.success);
+    expect(JSON.parse(stdout.at(-1) ?? "{}")).toMatchObject({
+      ok: true,
+      runId,
+      linkedSpecificationTypes: ["adr", "api_contract", "prd", "test_plan"],
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: "context-retrieval", status: "pass" }),
+        expect.objectContaining({ name: "routed-question", status: "pass" }),
+        expect.objectContaining({ name: "required-specifications", status: "pass" }),
+      ]),
+    });
+    expect(stderr).toEqual([]);
+  });
+
+  it("returns pending conformance evidence when an agent omits governed records", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-conformance-failed-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = {
+      question: {},
+      artifacts: [],
+      assumptions: [],
+      run: {
+        id: "run_cli_incomplete",
+        client: "codex",
+        taskSummary: "Build a Hospital Management System",
+        status: "running",
+        contextSnapshotIds: [],
+        questionIds: [],
+        artifactVersionIds: [],
+      },
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+
+    expect(await runCli([
+      "conformance",
+      "--task",
+      "Build a Hospital Management System.",
+    ], runtime)).toBe(cliExitCodes.pending);
+    expect(JSON.parse(stdout.at(-1) ?? "{}")).toMatchObject({
+      ok: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: "routed-question", status: "fail" }),
+        expect.objectContaining({ name: "required-specifications", status: "fail" }),
+      ]),
+    });
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "CONFORMANCE_FAILED",
+      exitCode: cliExitCodes.pending,
+    });
+  });
+
+  it("renders human-readable output without changing the JSON default", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-human-output-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [], projects: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+
+    expect(await runCli([
+      "init",
+      "--name",
+      "Hospital Management System",
+      "--client",
+      "codex",
+      "--api-url",
+      "http://bridge.test",
+      "--output",
+      "human",
+    ], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain("Status: OK");
+    expect(stdout.at(-1)).toContain("Project ID: prj_hospital");
+    expect(stdout.at(-1)).toContain("Files:");
+    expect(stdout.at(-1)).not.toContain('"projectId"');
+
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions"');
+    expect(stderr).toEqual([]);
+  });
+
+  it("rejects an unsupported output mode with the stable usage exit code", async () => {
+    const stderr: string[] = [];
+    expect(await runCli(["doctor", "--output", "yaml"], {
+      cwd: await mkdtemp(join(tmpdir(), "bridge-cli-invalid-output-")),
+      stderr: (text) => stderr.push(text),
+    })).toBe(cliExitCodes.usage);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "INVALID_OUTPUT_MODE",
+      exitCode: cliExitCodes.usage,
+    });
   });
 
   it("initializes a repository, asks a question, reads its answer, and synchronizes context", async () => {

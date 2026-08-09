@@ -351,6 +351,11 @@ export function decisionToRow(decision: Decision): typeof decisions.$inferInsert
     status: decision.status,
     createdAt: decision.createdAt,
     reviewAt: decision.reviewAt,
+    lifecycleRationale: decision.lifecycleRationale ?? null,
+    lifecycleChangedById: decision.lifecycleChangedById ?? null,
+    lifecycleChangedAt: decision.lifecycleChangedAt ?? null,
+    replacementDecisionId: decision.replacementDecisionId ?? null,
+    version: decision.version,
   };
 }
 
@@ -369,6 +374,11 @@ export function decisionFromRow(row: DecisionRow): Decision {
     status: row.status,
     createdAt: row.createdAt,
     reviewAt: row.reviewAt,
+    ...(row.lifecycleRationale === null ? {} : { lifecycleRationale: row.lifecycleRationale }),
+    ...(row.lifecycleChangedById === null ? {} : { lifecycleChangedById: row.lifecycleChangedById }),
+    ...(row.lifecycleChangedAt === null ? {} : { lifecycleChangedAt: row.lifecycleChangedAt }),
+    ...(row.replacementDecisionId === null ? {} : { replacementDecisionId: row.replacementDecisionId }),
+    version: row.version,
   };
 }
 
@@ -404,6 +414,7 @@ export function artifactVersionToRow(
     createdById: version.createdById,
     createdByType: version.createdByType,
     createdAt: version.createdAt,
+    reviews: version.reviews,
     runId: version.runId ?? null,
     approvedById: version.approvedById ?? null,
     approvalRationale: version.approvalRationale ?? null,
@@ -424,6 +435,7 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
     createdById: row.createdById,
     createdByType: row.createdByType,
     createdAt: row.createdAt,
+    reviews: row.reviews,
     ...(row.runId === null ? {} : { runId: row.runId }),
     ...(row.approvedById === null ? {} : { approvedById: row.approvedById }),
     ...(row.approvalRationale === null ? {} : { approvalRationale: row.approvalRationale }),
@@ -467,6 +479,19 @@ export function contextSnapshotToRow(
     task: snapshot.task,
     itemIds: snapshot.itemIds,
     createdAt: snapshot.createdAt,
+  };
+}
+
+export function contextSnapshotFromRow(row: ContextSnapshotRow): ContextSnapshot {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    principalId: row.principalId,
+    ...(row.runId === null ? {} : { runId: row.runId }),
+    task: row.task,
+    itemIds: row.itemIds,
+    createdAt: row.createdAt,
   };
 }
 

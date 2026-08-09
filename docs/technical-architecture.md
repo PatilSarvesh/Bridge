@@ -46,7 +46,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Web application | Next.js with React | Prototype human-review UI, accessible routing, and server rendering |
 | API | Fastify with schema-first routing | Strong request validation and predictable REST endpoints |
 | MCP server | TypeScript MCP SDK over Streamable HTTP | Cross-client agent interface for Codex and Claude Code |
-| CLI | Node.js/TypeScript package; local tarball now, registry later | Provides an MCP-independent adapter over the same API |
+| CLI | Node.js/TypeScript package; local or checksummed GitHub Release tarball, registry later | Provides an MCP-independent adapter over the same API |
 | Database | PostgreSQL | Transactions, relational integrity, JSONB, text search, and row-level security |
 | SQL access | Drizzle ORM plus reviewed SQL migrations | Typed queries with control over constraints and tenant policies |
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
@@ -63,9 +63,9 @@ The prototype now ships two implementations of the application-owned `BridgeRepo
 - A seeded in-memory repository used when `DATABASE_URL` is absent.
 - A PostgreSQL repository using Drizzle ORM and Postgres.js when `DATABASE_URL` is present.
 
-The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions, context snapshots, audit events, idempotency records, durable in-app notifications, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, and outbox delivery state.
+The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions and their append-only review feedback, context snapshots, audit events, idempotency records, durable in-app notifications, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, outbox delivery state, versioned decision-lifecycle provenance with same-project replacement links, and specification review comments/change requests.
 
-Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
+Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
 Row-level security, production database roles, external delivery adapters, and a real PostgreSQL runtime validation remain future work. The current fixed-principal prototype is not a production tenant-security implementation.
 
@@ -151,12 +151,12 @@ Responsibilities:
 - Client-native instruction generation with managed-block safe merging.
 - Adapter-only activation/switching through `bridge install` without project registration.
 - Safe `init --dry-run` previews for project registration and adapter files.
-- Local installable tarball packaging; registry publication remains future work.
+- Local tarball packaging, isolated installed-binary smoke coverage, and tag-driven checksummed GitHub Release creation; registry publication remains future work.
 - `doctor` diagnostics for API reachability, project mapping, generated instructions, and adapter markers.
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
-- JSON output, stable exit codes, and repository snapshots for CI and restricted environments.
+- Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.
 
 ### 5.6 Agent adapters
 
@@ -169,7 +169,7 @@ Responsibilities:
 
 Adapters do not own canonical policy. They project policy from `.bridge/` and the server.
 
-The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --dry-run` previews create/update/unchanged actions without API or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
+The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --dry-run` previews create/update/unchanged actions without API or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. Packaged entrypoint detection resolves pnpm symlinks to the real module path, and the generated workflow documents `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated dependency policy blocks `pnpm exec`. `bridge conformance` verifies observable run/context/question/specification provenance and the human boundary. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
 
 ## 6. Repository structure
 
@@ -445,15 +445,27 @@ If any step fails, no partial acceptance is visible.
 
 ### 11.2 Approve artifact version
 
-1. Lock/version-check artifact and proposed version.
-2. Confirm review and approval requirements.
+1. Lock the artifact and proposed current version.
+2. Confirm review and approval requirements, including that no append-only `changes_requested` review exists on this exact version.
 3. Confirm approver authority.
 4. Mark the previous current approved version superseded when appropriate.
 5. Mark the proposed version approved/current.
 6. Record cited decisions and assumptions.
 7. Write audit and outbox events.
 
-### 11.3 Record assumption
+Formal specification reviewers may first append `commented` or `changes_requested` feedback to the current draft/in-review version. A change request never edits the Markdown body and permanently blocks approval of that exact version; the author publishes a new version with an empty review history, while any previously approved version remains authoritative until a replacement is approved.
+
+### 11.3 Change decision lifecycle
+
+1. Lock and version-check the active decision.
+2. Require its human owner, a configured project decision owner, or a project administrator.
+3. For supersession, require a different active replacement with the same project, category, and exact scope.
+4. Change only lifecycle metadata; the accepted answer, rationale, source question, and response remain immutable.
+5. Collect directly cited artifacts, decision-confirmed assumptions, source/provenance runs, later runs whose context snapshots consumed the decision, and scoped work-item identifiers as potentially affected records.
+6. Persist the transition, audit event, `decision.lifecycle_changed` outbox event, and any recipient notifications plus `notification.created` delivery intents in one transaction.
+7. Exclude the retired decision from subsequent default context while preserving it in history reads.
+
+### 11.4 Record assumption
 
 1. Validate scope, risk, reversibility, expiry, and source run.
 2. Apply server policy; reject assumptions for protected categories.
@@ -508,7 +520,9 @@ POST   /v1/questions/:questionId/duplicate
 GET    /v1/projects/:projectId/decisions
 GET    /v1/decisions/:decisionId
 POST   /v1/decisions/:decisionId/supersede
-POST   /v1/decisions/:decisionId/review
+POST   /v1/decisions/:decisionId/expire
+POST   /v1/decisions/:decisionId/revoke
+POST   /v1/decisions/:decisionId/lifecycle
 
 POST   /v1/projects/:projectId/assumptions
 GET    /v1/projects/:projectId/assumptions
@@ -534,6 +548,8 @@ POST   /v1/notifications/read-all
 GET    /v1/projects/:projectId/search
 GET    /v1/projects/:projectId/audit-events
 ```
+
+Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. Authorized callers can additionally filter by exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. These filters execute after tenant/project authorization and do not weaken record access. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only.
 
 Administrative endpoints are separated under `/v1/admin` and require explicit scopes.
 
@@ -690,7 +706,7 @@ Event envelope:
 
 Avoid placing complete artifact bodies, secrets, or raw tokens in events.
 
-The implemented prototype currently persists one typed event, `notification.created`, for each durable in-app notification. Its payload contains the notification ID, recipient, notification type, and target pointer; the full notification body remains in the canonical notification table. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary.
+The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, and target pointer; the full notification body remains in the canonical notification table. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; the additive lifecycle migration extends its type constraint.
 
 ### 16.2 Initial event types
 
@@ -1051,7 +1067,7 @@ The founder-level choices are resolved in the pilot decision record. Implementat
 9. GitHub metadata access is sufficient for links and direct impact without repository source-content access.
 10. AWS `ap-south-1` satisfies the selected design partners' latency and data-location expectations.
 
-The fresh-repository portion of gate 2 is now validated for the local Codex-first path: an installable CLI tarball registered a Hospital Management System project, created the native instruction file, and the resulting protected question plus PRD, ADR, API contract, and test plan were visible through the project-aware UI. This proves the Bridge transport and presentation mechanics, not universal vendor instruction compliance; a real independent agent chat remains a pilot conformance check.
+The fresh-repository portion of gate 2 is now validated twice for the local Codex-first path. The packaged simulation proved registration, transport, and project-aware presentation. A separate ephemeral Codex CLI session then received only `Build a Hospital Management System.`, used the repository-installed CLI without MCP, linked a context snapshot, published all four required specification types, corrected a missing-question failure reported by `bridge conformance`, routed a protected production-boundary question to human roles, and entered `waiting_for_human`. This proves observable adherence for that Codex client/version/environment, not universal vendor instruction compliance or interception of an unexposed native clarification UI; Claude Code remains the second conformance client.
 
 The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, the configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox now routes direct owners, assigned roles, project administrators, and protected-review principals, with status/risk/category/role filters. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; comment editing, notification preferences, due-date filtering, and reassignment remain future work. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
 
