@@ -476,7 +476,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — authorized active-by-default browsing, explicit lifecycle history, deterministic category/owner/date/exact-scope filters, detail/source navigation, and deterministic agent search are implemented; PostgreSQL full-text search remains
+- **Status:** Implemented for the MVP — authorized active-by-default browsing, weighted PostgreSQL full-text search with deterministic local fallback, explicit lifecycle history, category/owner/date/exact-scope filters, detail/source navigation, and shared REST/MCP query semantics are implemented
 - **Dependencies:** BRG-040
 - **PRD references:** DEC-04
 
@@ -851,7 +851,7 @@ Acceptance criteria:
 
 - **Priority:** P1
 - **Size:** M
-- **Status:** Ready
+- **Status:** Implemented for MVP — authorized REST/application comparison and the Specifications UI render exact or bounded line diffs without mutating stored versions
 - **Dependencies:** BRG-082
 - **PRD references:** ART-06
 
@@ -870,7 +870,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed notification outbox schema, same-transaction enqueueing, PostgreSQL/in-memory claim leases, bounded retry, and dead-letter handling are implemented; external adapters, operator replay/metrics, and scheduled runtime wiring remain
+- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, and optimistic audited replay are implemented; external adapters, destination idempotency, jitter, telemetry export, and scheduled runtime wiring remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -882,8 +882,8 @@ Acceptance criteria:
 2. Worker claims and processes events at least once. **Implemented through the injected `runOutboxCycle` handler boundary.**
 3. Handlers are idempotent by event and destination. **Event IDs are stable for handler-side idempotency; destination adapters remain.**
 4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempt and backoff settings.**
-5. Operators can inspect and safely replay failed jobs.
-6. Queue lag and failure metrics are available.
+5. Operators can inspect and safely replay failed jobs. **Implemented through project-admin REST operations; replay preserves the event ID and requires the last observed attempt count.**
+6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot; time-series export and alerts remain BRG-104 work.**
 
 ### BRG-091 — Provide durable in-app notifications
 
@@ -907,7 +907,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — provider-neutral safe templates, recipient/preference and sender contracts, idempotent handler behavior, durable privacy-minimized delivery receipts, and retry/dead-letter observability are implemented; a live SES sender/directory, digest scheduler, blocking-escalation producer, and authenticated deployment link remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -915,11 +915,11 @@ As a user, I need email notification for important Bridge events so that I do no
 
 Acceptance criteria:
 
-1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist.
-2. Emails contain minimal safe context and a signed-in Bridge link.
-3. Delivery status and provider message ID are recorded without storing secrets.
-4. Ordinary events honor notification preferences.
-5. Retry and permanent failure behavior are observable.
+1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
+2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context and an auth-ready Bridge review URL are implemented; production signed-in behavior awaits the explicitly deferred identity scope.**
+3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
+4. Ordinary events honor notification preferences. **Immediate, muted, and digest outcomes are implemented through an injected directory; digest batching/sending remains. Protected review mail bypasses muting.**
+5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
 
 ### BRG-093 — Integrate one pilot team channel
 
@@ -1000,7 +1000,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — API/MCP liveness and repository-backed readiness, a read-only restore verifier, and the required incident/restore runbooks are implemented; production PITR/object-storage controls and a dated isolated restore exercise remain deployment evidence
 - **Dependencies:** BRG-003, BRG-090
 - **PRD references:** Non-functional requirements
 
@@ -1018,7 +1018,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP Prometheus export, request/auth/context/database/outbox/notification metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, worker export, PostgreSQL pool saturation, MCP tool/session metrics, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
@@ -1032,13 +1032,15 @@ Acceptance criteria:
 4. Alerts cover sustained API failure, MCP failure, database exhaustion, and outbox backlog.
 5. Initial service objectives and alert thresholds are documented.
 
+Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
+
 ## 19. E11 — Pilot operations and analytics
 
 ### BRG-110 — Capture product analytics without raw conversations
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Implemented — project-admin run cohorts derive privacy-safe context/question/routing/response/decision-reuse/assumption/specification counts, rates, durations, client breakdowns, guardrails, and an in-product dashboard without a duplicate content store
 - **Dependencies:** BRG-050, BRG-100
 - **PRD references:** Success metrics
 
@@ -1051,6 +1053,8 @@ Acceptance criteria:
 3. Tenant administrators can understand what usage data is collected.
 4. Metrics can be filtered by project and agent client without exposing user content.
 5. Pilot dashboard reports the PRD's primary product and guardrail metrics that are technically available.
+
+Implementation note: project and controlled-client filtering, lifecycle attribution, the administrator collection notice, REST policy tests, and the web dashboard are implemented. Routing coverage measures owner/role presence rather than subjective correctness; rework, question-quality, unsubscribe, and secret-detection metrics remain unavailable and are not inferred.
 
 ### BRG-111 — Provide pilot administration and support view
 

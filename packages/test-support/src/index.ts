@@ -104,7 +104,7 @@ export interface DemoRuntimeOptions {
 export async function createDemoRuntime(
   options: DemoRuntimeOptions = {},
 ): Promise<DemoRuntime> {
-  const repository = new InMemoryBridgeRepository();
+  const repository = new InMemoryBridgeRepository(options.serviceOptions?.metrics);
   return createDemoRuntimeWithRepository(repository, options);
 }
 

@@ -13,7 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@bridge/domain": "workspace:*"
+    "@bridge/domain": "workspace:*",
+    "@bridge/observability": "workspace:*"
   },
   "devDependencies": {
     "tsx": "4.23.11"

@@ -8,13 +8,26 @@ import type {
   ArtifactReviewStatus,
   ArtifactVersionStatus,
   DecisionStatus,
+  DeliveryChannel,
+  NotificationDeliveryPreference,
   PrincipalType,
   NotificationType,
+  OutboxDeliveryStatus,
+  OutboxEventStatus,
+  OutboxEventType,
   QuestionReviewStatus,
   QuestionStatus,
   QuestionType,
   Risk,
   Scope,
+} from "@bridge/contracts";
+
+export type {
+  DeliveryChannel,
+  NotificationDeliveryPreference,
+  OutboxDeliveryStatus,
+  OutboxEventStatus,
+  OutboxEventType,
 } from "@bridge/contracts";
 
 export type BridgeErrorCode =
@@ -27,6 +40,7 @@ export type BridgeErrorCode =
   | "RUN_NOT_FOUND"
   | "ASSUMPTION_NOT_FOUND"
   | "NOTIFICATION_NOT_FOUND"
+  | "OUTBOX_EVENT_NOT_FOUND"
   | "CONTINUATION_INVALID"
   | "VALIDATION_FAILED"
   | "POLICY_BLOCKED"
@@ -165,9 +179,6 @@ export interface Notification {
   readonly readAt?: string;
 }
 
-export type OutboxEventType = "notification.created" | "decision.lifecycle_changed";
-export type OutboxEventStatus = "pending" | "processing" | "processed" | "failed" | "dead_letter";
-
 export interface NotificationOutboxPayload {
   readonly notificationId: string;
   readonly recipientId: string;
@@ -187,6 +198,7 @@ export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxP
 
 export interface OutboxEvent {
   readonly id: string;
+  readonly correlationId: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly type: OutboxEventType;
@@ -197,6 +209,22 @@ export interface OutboxEvent {
   readonly createdAt: string;
   readonly leaseUntil?: string;
   readonly processedAt?: string;
+  readonly lastError?: string;
+}
+
+export interface OutboxDelivery {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly outboxEventId: string;
+  readonly channel: DeliveryChannel;
+  readonly destinationHash: string;
+  readonly status: OutboxDeliveryStatus;
+  readonly attemptCount: number;
+  readonly preference: NotificationDeliveryPreference;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly providerMessageId?: string;
   readonly lastError?: string;
 }
 
@@ -329,12 +357,13 @@ export interface ContextSnapshot {
 
 export interface AuditEvent {
   readonly id: string;
+  readonly correlationId: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run";
+  readonly subjectType: "project" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event";
   readonly subjectId: string;
   readonly createdAt: string;
 }

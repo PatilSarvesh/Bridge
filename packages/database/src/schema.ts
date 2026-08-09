@@ -6,6 +6,7 @@ import type {
   QuestionOption,
   QuestionReview,
 } from "@bridge/domain";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   type AnyPgColumn,
@@ -17,6 +18,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -244,6 +246,14 @@ export const decisions = pgTable(
       table.id,
     ),
     index("bridge_decisions_project_status_idx").on(table.projectId, table.status),
+    index("bridge_decisions_full_text_idx").using(
+      "gin",
+      sql`(
+        setweight(to_tsvector('simple', coalesce(${table.answer}, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(${table.rationale}, '')), 'B') ||
+        setweight(to_tsvector('simple', coalesce(${table.category}, '')), 'C')
+      )`,
+    ),
     foreignKey({
       name: "bridge_decisions_replacement_scope_fk",
       columns: [table.organizationId, table.projectId, table.replacementDecisionId],
@@ -367,6 +377,7 @@ export const auditEvents = pgTable(
   "bridge_audit_events",
   {
     id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
       .notNull()
@@ -378,7 +389,10 @@ export const auditEvents = pgTable(
     subjectId: text("subject_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt)],
+  (table) => [
+    index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
+    index("bridge_audit_events_correlation_idx").on(table.correlationId),
+  ],
 );
 
 export const notifications = pgTable(
@@ -417,6 +431,7 @@ export const outboxEvents = pgTable(
   "bridge_outbox_events",
   {
     id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
       .notNull(),
@@ -433,6 +448,12 @@ export const outboxEvents = pgTable(
   (table) => [
     index("bridge_outbox_status_available_idx").on(table.status, table.availableAt),
     index("bridge_outbox_project_created_idx").on(table.projectId, table.createdAt),
+    index("bridge_outbox_correlation_idx").on(table.correlationId),
+    unique("bridge_outbox_events_org_project_id_unique").on(
+      table.organizationId,
+      table.projectId,
+      table.id,
+    ),
     foreignKey({
       name: "bridge_outbox_events_project_fk",
       columns: [table.projectId],
@@ -442,6 +463,35 @@ export const outboxEvents = pgTable(
       name: "bridge_outbox_events_organization_project_fk",
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const outboxDeliveries = pgTable(
+  "bridge_outbox_deliveries",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    outboxEventId: text("outbox_event_id").notNull(),
+    channel: text("channel").notNull(),
+    destinationHash: text("destination_hash").notNull(),
+    status: text("status").notNull(),
+    attemptCount: integer("attempt_count").notNull(),
+    preference: text("preference").notNull(),
+    providerMessageId: text("provider_message_id"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
+    index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
+    index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
+    foreignKey({
+      name: "bridge_outbox_deliveries_event_scope_fk",
+      columns: [table.organizationId, table.projectId, table.outboxEventId],
+      foreignColumns: [outboxEvents.organizationId, outboxEvents.projectId, outboxEvents.id],
     }).onDelete("cascade"),
   ],
 );

@@ -1,6 +1,14 @@
 import { pathToFileURL } from "node:url";
 
 import type { OutboxEvent } from "@bridge/domain";
+import {
+  type BridgeMetrics,
+  createSafeLogger,
+  runWithCorrelationContext,
+  type SafeLogger,
+} from "@bridge/observability";
+
+export * from "./email.js";
 
 export interface ReviewableDecision {
   readonly id: string;
@@ -32,6 +40,8 @@ export interface OutboxCycleOptions {
   readonly batchSize?: number;
   readonly maxAttempts?: number;
   readonly baseBackoffMs?: number;
+  readonly logger?: SafeLogger;
+  readonly metrics?: BridgeMetrics;
 }
 
 export interface OutboxCycleResult {
@@ -51,31 +61,63 @@ export async function runOutboxCycle(
   const maxAttempts = options.maxAttempts ?? 5;
   const baseBackoffMs = options.baseBackoffMs ?? 1_000;
   const events = await store.claimOutboxEvents(currentTime.toISOString(), options.batchSize ?? 25);
+  const oldestClaimedAgeMs = events.length === 0
+    ? 0
+    : Math.max(
+        0,
+        currentTime.getTime() - Math.min(...events.map((event) => new Date(event.createdAt).getTime())),
+      );
   let processed = 0;
   let retried = 0;
   let deadLettered = 0;
 
   for (const event of events) {
-    try {
-      await handler(event);
-      await store.completeOutboxEvent(event.id, now().toISOString());
-      processed += 1;
-    } catch (error) {
-      const lastError = error instanceof Error ? error.message : String(error);
-      const deadLetter = event.attempts >= maxAttempts;
-      const delay = deadLetter ? 0 : baseBackoffMs * 2 ** Math.max(0, event.attempts - 1);
-      await store.failOutboxEvent(
-        event.id,
-        lastError,
-        new Date(currentTime.getTime() + delay).toISOString(),
-        deadLetter,
-      );
-      if (deadLetter) deadLettered += 1;
-      else retried += 1;
-    }
+    await runWithCorrelationContext(
+      { correlationId: event.correlationId, source: "worker" },
+      async () => {
+        try {
+          await handler(event);
+          await store.completeOutboxEvent(event.id, now().toISOString());
+          options.logger?.info("outbox.processed", {
+            eventId: event.id,
+            projectId: event.projectId,
+            type: event.type,
+            attempts: event.attempts,
+            status: "processed",
+          });
+          processed += 1;
+        } catch (error) {
+          const lastError = error instanceof Error ? error.message : String(error);
+          const deadLetter = event.attempts >= maxAttempts;
+          const delay = deadLetter ? 0 : baseBackoffMs * 2 ** Math.max(0, event.attempts - 1);
+          await store.failOutboxEvent(
+            event.id,
+            lastError,
+            new Date(currentTime.getTime() + delay).toISOString(),
+            deadLetter,
+          );
+          options.logger?.error("outbox.failed", {
+            eventId: event.id,
+            projectId: event.projectId,
+            type: event.type,
+            attempts: event.attempts,
+            status: deadLetter ? "dead_letter" : "retry_scheduled",
+            error,
+          });
+          if (deadLetter) deadLettered += 1;
+          else retried += 1;
+        }
+      },
+    );
   }
 
-  return { claimed: events.length, processed, retried, deadLettered };
+  const result = { claimed: events.length, processed, retried, deadLettered };
+  options.metrics?.recordOutboxCycle({
+    ...result,
+    oldestClaimedAgeMs,
+    observedAtMs: currentTime.getTime(),
+  });
+  return result;
 }
 
 export function decisionsDueForReview(
@@ -109,8 +151,9 @@ export async function runReviewReminderCycle(): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const logger = createSafeLogger({ service: "bridge-worker" });
   runReviewReminderCycle().catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    logger.error("service.failed", { error });
     process.exitCode = 1;
   });
 }

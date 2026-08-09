@@ -347,6 +347,7 @@ policy_versions
 idempotency_keys
 audit_events
 outbox_events
+outbox_deliveries
 job_failures
 integration_installations
 notification_preferences
@@ -531,6 +532,7 @@ POST   /v1/assumptions/:assumptionId/reject
 
 POST   /v1/projects/:projectId/artifacts
 GET    /v1/artifacts/:artifactId
+GET    /v1/artifacts/:artifactId/diff?fromVersionId=&toVersionId=
 POST   /v1/artifacts/:artifactId/versions
 POST   /v1/artifact-versions/:versionId/reviews
 POST   /v1/artifact-versions/:versionId/approve
@@ -547,11 +549,16 @@ POST   /v1/notifications/:notificationId/read
 POST   /v1/notifications/read-all
 GET    /v1/projects/:projectId/search
 GET    /v1/projects/:projectId/audit-events
+GET    /v1/admin/projects/:projectId/outbox?status=&type=&limit=
+POST   /v1/admin/outbox/:eventId/replay
+GET    /v1/admin/projects/:projectId/analytics?client=&startedFrom=&startedTo=
 ```
 
-Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. Authorized callers can additionally filter by exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. These filters execute after tenant/project authorization and do not weaken record access. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only.
+Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
 
-Administrative endpoints are separated under `/v1/admin` and require explicit scopes.
+Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
+
+Administrative endpoints are separated under `/v1/admin`. In the fixed-principal prototype, outbox operations and project analytics require a human project administrator with project access; production token scopes remain deferred with authentication.
 
 The prototype `GET /v1/principals` route is intentionally limited to same-organization human summaries from fixed development fixtures. The web **Reviewing as** selector uses those summaries to exercise role-aware policy; it is a reviewer-context switcher, not authentication or organization onboarding. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
@@ -737,7 +744,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice now implements the first four guarantees for injected handlers: claims increment attempts and acquire a lease, successes are marked processed, failures are rescheduled with bounded exponential backoff, and events reaching the configured attempt budget become dead letters. Operator replay, metrics, jitter, and external adapter idempotency remain deployment work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email handler passes a stable event/channel idempotency key to an injected provider and skips an already delivered receipt. Jitter, live provider implementations, time-series telemetry, and scheduled runtime wiring remain deployment work.
 
 ## 17. Notification architecture
 
@@ -746,10 +753,11 @@ Notification generation is separate from delivery:
 1. The application command resolves the current direct owner/reviewer recipients.
 2. In one repository transaction it creates the durable in-app notification and a `notification.created` outbox intent.
 3. The worker claims the intent, applies retry/dead-letter policy, and invokes an injected channel handler.
-4. A future channel adapter can resolve preferences/escalation policy and attempt email or team delivery.
-5. The delivery result remains recorded on the outbox event while the in-app notification remains the canonical human read model.
+4. The provider-neutral email handler resolves the recipient and immediate/digest/muted preference through an injected directory, renders bounded plain text, and calls an injected sender without persisting the address.
+5. `outbox_deliveries` records the destination hash, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
+6. A future scheduled runtime wires a live directory and SES sender; deferred digest receipts become inputs to a digest job rather than credentials or addresses stored in the outbox.
 
-Protected approvals may bypass digests but still honor explicitly supported emergency policies. Ordinary questions support immediate, digest, and muted modes.
+Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest deferral. The actual digest scheduler and administrative preference store are not yet connected.
 
 Team-channel messages should link to Bridge for final acceptance. Accepting a consequential decision directly from chat should be deferred until identity, replay, and confirmation semantics are proven.
 
@@ -805,7 +813,7 @@ The prototype implements the manual continuation baseline across the application
 - The locator is stored separately from the public run record. It is currently stored as a value to allow exact replay of an idempotent start response; hashing or encryption at rest belongs to a future production identity/security slice.
 - The implementation never persists raw prompts, full outputs, transcripts, repository source, or hidden reasoning.
 
-Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; external channels, preferences, and operator replay remain future work.
+Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; external channels, preferences, scheduled delivery, and telemetry export remain future work.
 
 ## 19. Audit design
 
@@ -882,11 +890,13 @@ Propagate one correlation ID across:
 agent/client -> MCP/API -> application command -> database/outbox -> worker -> integration
 ```
 
+The current vendor-neutral implementation validates or generates `x-bridge-correlation-id` at web/CLI/API/MCP boundaries, establishes async request context, creates a context at the repository transaction boundary for direct application use, persists the ID on audit/outbox rows, restores it per worker event, and supplies it explicitly to the email integration seam. Correlation is diagnostic metadata and never replaces principal or tenant authorization.
+
 ### 22.2 Metrics
 
 Initial technical metrics:
 
-- Request count, latency, and error rate by endpoint/tool.
+- Request count, latency, and error rate by bounded endpoint/tool operation.
 - Authentication and authorization failures.
 - Database pool usage and transaction latency.
 - Context retrieval candidate count, latency, and result size.
@@ -896,9 +906,25 @@ Initial technical metrics:
 - Idempotency hits and conflicts.
 - Cross-tenant test and policy-denial counts.
 
+`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; in-memory test/runtime paths use the same transaction instrumentation. Outbox and email handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are route templates, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
+
+The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email handling outcomes/duration. Database pool utilization, MCP tool-name/session counts, idempotency/conflict counters, and a durable worker exporter remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
+
+Provider-neutral operational assets are `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`, and `docs/service-objectives.md`. They are initial definitions requiring a real metrics backend, rule evaluator, notification route, and pilot calibration; repository presence is not evidence that production monitoring is active.
+
 ### 22.3 Logging
 
 Use structured logs with record IDs and correlation IDs. Redact tokens, secrets, authorization headers, artifact bodies, and free-form content by default. Production log access is role-restricted and audited.
+
+`@bridge/observability` implements the local safe JSON logger with an operational-field allowlist, recursive sensitive-key redaction, exception-message removal, and an injectable sink. Standalone API/MCP runtimes avoid framework-default request logging. Production export, access control, retention, dashboard hosting, and alert delivery remain deployment work.
+
+### 22.4 Product analytics
+
+`GET /v1/admin/projects/:projectId/analytics` computes privacy-conscious pilot outcomes from the existing repository boundary. The mandatory path scope plus optional controlled client and inclusive run-start timestamps define a run cohort. The application then aggregates linked context snapshots, questions, responses, decisions, assumptions, and artifact versions. The response contains only counts, rates, durations, controlled client enums, and a collection/exclusion notice; it never returns stored task or record content.
+
+The web **Analytics** view is the pilot product dashboard for the technically available PRD metrics. It shows context compliance, question creation/reuse/routing coverage, response and acceptance activity, later-run decision reuse, assumption resolution, specification approval, question-volume/context-size guardrails, and client breakdowns. This read-time approach adds no schema or duplicate analytics store and works with in-memory or PostgreSQL repositories without MCP.
+
+Routing coverage is owner/role presence, not a claim that the assigned expert was correct. Decision retrieval proves that Bridge returned approved context, not that an agent followed it. Cohorts select runs by start time and report current outcomes rather than immutable historical as-of state. The full definitions, exclusions, and later materialization boundary are in `docs/product-analytics.md`.
 
 ## 23. Reliability and performance
 
@@ -927,11 +953,19 @@ These are implementation defaults, not product SLAs, and must be tuned from pilo
 
 ### 23.3 Backups and recovery
 
-- Automated PostgreSQL backups with point-in-time recovery.
-- Versioned object storage with lifecycle controls.
-- Regular restore tests in an isolated environment.
-- Documented recovery point and recovery time objectives before production pilot.
-- Audit and outbox integrity checks after restoration.
+- Production must use automated encrypted PostgreSQL backups with point-in-time recovery and deployment-owned evidence; repository code cannot assert that an external provider control is enabled.
+- Current specification bodies live in PostgreSQL and are covered by the same recovery boundary. If object storage is introduced, it must use versioning or equivalent immutable recovery plus lifecycle controls.
+- Restores must occur in a new isolated database with workers and external delivery adapters disabled. `pnpm restore:verify` performs read-only schema, migration-history, row-count, artifact-hash, tenant-scope, and artifact-pointer checks.
+- Recovery point and recovery time objectives, retention, a dated restore exercise, and exceptions must be documented before the production pilot.
+- The canonical operator procedure is `docs/runbooks/backup-restore.md`; repository validation is not a substitute for an actual restore.
+
+### 23.4 Health semantics
+
+- `GET /health/live` reports only that the API or MCP HTTP process can serve a request. The API's legacy `GET /health` remains a liveness alias.
+- `GET /health/ready` calls the application repository health boundary. It returns `200` when the dependency responds and a sanitized `503` when it does not.
+- Liveness must not depend on PostgreSQL, because restarting a healthy process does not repair a database outage. Traffic routing and rollout gates use readiness.
+- Notification-provider failure is degraded delivery, not core API unavailability while canonical PostgreSQL state remains writable. Queue/provider telemetry belongs to BRG-104.
+- Worker and CLI are command/process surfaces rather than HTTP services; long-running worker health reporting remains deployment/observability work.
 
 ## 24. Environment and deployment model
 

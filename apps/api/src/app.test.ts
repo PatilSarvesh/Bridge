@@ -1,3 +1,5 @@
+import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
+import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,6 +10,67 @@ describe("Bridge API vertical slice", () => {
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
+  });
+
+  it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
+    const metrics = new BridgeMetrics();
+    const runtime = await createDemoRuntime({ serviceOptions: { metrics } });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, metrics });
+    apps.push(app);
+
+    const compatibility = await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: { "x-bridge-correlation-id": "web_health-001" },
+    });
+    const live = await app.inject({
+      method: "GET",
+      url: "/health/live",
+      headers: { "x-bridge-correlation-id": "x".repeat(200) },
+    });
+    const ready = await app.inject({ method: "GET", url: "/health/ready" });
+    expect(compatibility).toMatchObject({ statusCode: 200 });
+    expect(compatibility.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(compatibility.headers["x-bridge-correlation-id"]).toBe("web_health-001");
+    expect(live.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(live.headers["x-bridge-correlation-id"]).toMatch(/^cor_[0-9a-f]{32}$/);
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({
+      service: "bridge-api",
+      status: "ready",
+      checks: [{ name: "repository", status: "ready", backend: "memory" }],
+    });
+
+    const denied = await app.inject({ method: "GET", url: "/v1/principals" });
+    expect(denied.statusCode).toBe(401);
+    const scrape = await app.inject({ method: "GET", url: "/metrics" });
+    expect(scrape.statusCode).toBe(200);
+    expect(scrape.headers["content-type"]).toContain("text/plain");
+    expect(scrape.body).toContain('bridge_authorization_denials_total{operation="/v1/principals",service="api",status="401"} 1');
+    expect(scrape.body).not.toContain(demoProject.id);
+
+    class UnavailableRepository extends InMemoryBridgeRepository {
+      override async checkHealth(): Promise<{ readonly backend: string }> {
+        throw new Error("SENSITIVE_INTERNAL_DETAIL");
+      }
+    }
+    const unavailableApp = await buildApp({
+      service: new BridgeService(new UnavailableRepository()),
+      principals: runtime.principals,
+    });
+    apps.push(unavailableApp);
+    const unavailable = await unavailableApp.inject({ method: "GET", url: "/health/ready" });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json()).toEqual({
+      service: "bridge-api",
+      status: "not_ready",
+      checks: [{
+        name: "repository",
+        status: "failed",
+        message: "Repository dependency is unavailable.",
+      }],
+    });
+    expect(unavailable.body).not.toContain("SENSITIVE_INTERNAL_DETAIL");
   });
 
   it("lists same-organization fixed human principals for the prototype reviewer switcher", async () => {
@@ -39,7 +102,10 @@ describe("Bridge API vertical slice", () => {
     const created = await app.inject({
       method: "POST",
       url: `/v1/projects/${demoProject.id}/questions`,
-      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      headers: {
+        "x-bridge-principal-id": demoPrincipals.agent.id,
+        "x-bridge-correlation-id": "cli_question-001",
+      },
       payload: {
         idempotencyKey: "api-notification-question-001",
         title: "Which audit evidence should block the release?",
@@ -60,7 +126,25 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(created.statusCode).toBe(201);
+    expect(created.headers["x-bridge-correlation-id"]).toBe("cli_question-001");
     const question = created.json<{ id: string }>();
+    expect(await runtime.repository.listAuditEvents(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subjectId: question.id,
+          action: "question.created",
+          correlationId: "cli_question-001",
+        }),
+      ]),
+    );
+    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          correlationId: "cli_question-001",
+          payload: expect.objectContaining({ targetId: question.id }),
+        }),
+      ]),
+    );
 
     const notifications = await app.inject({
       method: "GET",
@@ -93,6 +177,157 @@ describe("Bridge API vertical slice", () => {
     });
     expect(unread.statusCode).toBe(200);
     expect(unread.json<{ items: unknown[]; unreadCount: number }>()).toMatchObject({ items: [], unreadCount: 0 });
+  });
+
+  it("exposes project-admin delivery metrics and optimistic dead-letter replay", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-outbox-operations-001",
+        title: "Which delivery retry threshold should notify operators?",
+        type: "decision",
+        category: "operations",
+        context: "The notification delivery queue requires an operator-visible retry threshold.",
+        whyItMatters: "Unbounded retries hide permanent failures while premature dead letters lose notifications.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "three", label: "Three attempts", tradeoffs: "Surfaces failures quickly but tolerates fewer transient outages." },
+          { key: "five", label: "Five attempts", tradeoffs: "Tolerates longer outages but delays operator action." },
+        ],
+        recommendationKey: "five",
+        scope: { component: "notification-worker" },
+      },
+    });
+    const [pending] = await runtime.repository.listOutboxEvents(demoProject.id);
+    expect(pending).toBeDefined();
+    await runtime.repository.claimOutboxEvents(pending!.availableAt, 1);
+    await runtime.repository.failOutboxEvent(
+      pending!.id,
+      "provider unavailable",
+      pending!.availableAt,
+      true,
+    );
+    await runtime.repository.saveOutboxDelivery({
+      id: "odl_api_delivery",
+      organizationId: pending!.organizationId,
+      projectId: pending!.projectId,
+      outboxEventId: pending!.id,
+      channel: "email",
+      destinationHash: "b".repeat(64),
+      status: "failed",
+      attemptCount: 1,
+      preference: "immediate",
+      lastError: "provider unavailable",
+      createdAt: pending!.createdAt,
+      updatedAt: pending!.createdAt,
+    });
+
+    const inspection = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox?status=dead_letter&limit=10`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(inspection.statusCode).toBe(200);
+    expect(inspection.json()).toMatchObject({
+      totalMatching: 1,
+      items: [expect.objectContaining({ id: pending!.id, status: "dead_letter", attempts: 1 })],
+      deliveries: [expect.objectContaining({
+        outboxEventId: pending!.id,
+        channel: "email",
+        status: "failed",
+      })],
+      metrics: {
+        statusCounts: { pending: 0, processing: 0, processed: 0, failed: 0, dead_letter: 1 },
+        failedCount: 1,
+        totalAttempts: 1,
+        deliveryStatusCounts: { delivered: 0, failed: 1, suppressed: 0, deferred: 0 },
+      },
+    });
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox?status=stuck`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const conflict = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/${pending!.id}/replay`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedAttempts: 2 },
+    });
+    expect(conflict.statusCode).toBe(409);
+    const replayed = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/${pending!.id}/replay`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedAttempts: 1 },
+    });
+    expect(replayed.statusCode).toBe(200);
+    expect(replayed.json()).toMatchObject({ id: pending!.id, status: "pending", attempts: 0 });
+  });
+
+  it("exposes privacy-safe project analytics only to project administrators", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true, seedArtifact: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics?client=codex&startedFrom=2025-01-01T00:00:00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      projectId: demoProject.id,
+      cohort: { client: "codex", runCount: 1, startedFrom: "2025-01-01T00:00:00.000Z" },
+      activity: {
+        questionSubmissions: 1,
+        questionsCreated: 1,
+        specificationVersionsPublished: 0,
+      },
+      byClient: [expect.objectContaining({ client: "codex", runCount: 1 })],
+      privacy: {
+        derivedFrom: expect.any(Array),
+        excluded: expect.arrayContaining([expect.stringContaining("raw prompts")]),
+      },
+    });
+    expect(response.body).not.toContain("Which transfer failures should trigger an automatic retry?");
+    expect(response.body).not.toContain("Retry transient failures with bounded exponential backoff");
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+    const agentDenied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(agentDenied.statusCode).toBe(403);
+    const invalidRange = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics?startedFrom=2026-02-01T00:00:00.000Z&startedTo=2026-01-01T00:00:00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidRange.statusCode).toBe(400);
   });
 
   it("returns a personalized question inbox while keeping the shared question list available", async () => {
@@ -434,9 +669,19 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ id: replacement.id }),
     ]);
 
+    const searched = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?search=dead-letter+settlement`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(searched.statusCode).toBe(200);
+    expect(searched.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: replacement.id }),
+    ]);
+
     const history = await app.inject({
       method: "GET",
-      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&search=bounded+retries&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
     });
     expect(history.json<{ items: Array<{ id: string; status: string }> }>().items).toEqual([
@@ -456,6 +701,13 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
     });
     expect(invalidHistoryFlag.statusCode).toBe(400);
+
+    const invalidSearch = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?search=x`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidSearch.statusCode).toBe(400);
   });
 
   it("routes role-owned questions to a matching fixed human principal", async () => {
@@ -1004,7 +1256,7 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(publishResponse.statusCode).toBe(201);
-    const publication = publishResponse.json<{ version: { id: string } }>();
+    const publication = publishResponse.json<{ artifact: { id: string }; version: { id: string } }>();
 
     const deniedResponse = await app.inject({
       method: "POST",
@@ -1031,6 +1283,61 @@ describe("Bridge API vertical slice", () => {
     expect(contextResponse.json<{ items: Array<{ id: string; type: string }> }>().items).toEqual([
       expect.objectContaining({ id: publication.version.id, type: "artifact" }),
     ]);
+
+    const replacementResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/artifacts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-artifact-test-002",
+        artifactId: publication.artifact.id,
+        title: "Transfer retry policy",
+        type: "adr",
+        summary: "Adds jitter and a maximum attempt count to bounded transfer retry behavior.",
+        body: "# Transfer retry policy\n\nRetry transient failures using bounded exponential backoff, jitter, and five attempts.",
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "transfers" },
+      },
+    });
+    expect(replacementResponse.statusCode).toBe(201);
+    const replacement = replacementResponse.json<{ version: { id: string } }>();
+
+    const diffResponse = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}&toVersionId=${replacement.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(diffResponse.statusCode).toBe(200);
+    expect(diffResponse.json()).toMatchObject({
+      artifactId: publication.artifact.id,
+      from: { id: publication.version.id, version: 1 },
+      to: { id: replacement.version.id, version: 2 },
+      counts: { unchanged: 2, removed: 1, added: 1 },
+      exact: true,
+      truncated: false,
+      lines: [
+        expect.objectContaining({ kind: "unchanged" }),
+        expect.objectContaining({ kind: "unchanged" }),
+        expect.objectContaining({ kind: "removed" }),
+        expect.objectContaining({ kind: "added" }),
+      ],
+    });
+
+    const deniedDiff = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}&toVersionId=${replacement.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(deniedDiff.statusCode).toBe(403);
+
+    const invalidDiff = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidDiff.statusCode).toBe(400);
   });
 
   it("records reviewer comments and blocks approval after requested specification changes", async () => {

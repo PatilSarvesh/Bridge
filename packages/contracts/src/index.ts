@@ -30,6 +30,17 @@ export const notificationTypeSchema = z.enum([
   "artifact_review_feedback",
   "artifact_approved",
 ]);
+export const outboxEventTypeSchema = z.enum(["notification.created", "decision.lifecycle_changed"]);
+export const outboxEventStatusSchema = z.enum([
+  "pending",
+  "processing",
+  "processed",
+  "failed",
+  "dead_letter",
+]);
+export const deliveryChannelSchema = z.enum(["email"]);
+export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
+export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest", "muted"]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
@@ -210,6 +221,32 @@ export const notificationReadAllInputSchema = z.object({
   projectId: z.string().trim().min(1).max(100).optional(),
 });
 
+export const outboxOperationsQuerySchema = z.object({
+  status: outboxEventStatusSchema.optional(),
+  type: outboxEventTypeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+export const projectAnalyticsQuerySchema = z
+  .object({
+    client: agentRunClientSchema.optional(),
+    startedFrom: z.string().datetime({ offset: true }).optional(),
+    startedTo: z.string().datetime({ offset: true }).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.startedFrom && value.startedTo && Date.parse(value.startedFrom) > Date.parse(value.startedTo)) {
+      context.addIssue({
+        code: "custom",
+        message: "startedFrom must not be after startedTo.",
+        path: ["startedFrom"],
+      });
+    }
+  });
+
+export const replayOutboxEventInputSchema = z.object({
+  expectedAttempts: z.number().int().nonnegative(),
+});
+
 export const contextQuerySchema = z.object({
   runId: z.string().trim().min(1).max(100).optional(),
   task: z.string().trim().min(3).max(2_000),
@@ -221,6 +258,7 @@ export const contextQuerySchema = z.object({
 export const decisionListQuerySchema = z
   .object({
     includeHistory: z.boolean().default(false),
+    search: z.string().trim().min(2).max(200).optional(),
     status: decisionStatusSchema.optional(),
     category: z.string().trim().min(2).max(100).optional(),
     ownerId: z.string().trim().min(1).max(100).optional(),
@@ -270,6 +308,11 @@ export const artifactReviewInputSchema = z
       });
     }
   });
+
+export const artifactVersionDiffQuerySchema = z.object({
+  fromVersionId: z.string().trim().min(1).max(100),
+  toVersionId: z.string().trim().min(1).max(100),
+});
 
 export const startAgentRunInputSchema = z
   .object({
@@ -356,6 +399,11 @@ export type Risk = z.infer<typeof riskSchema>;
 export type QuestionStatus = z.infer<typeof questionStatusSchema>;
 export type QuestionReviewStatus = z.infer<typeof questionReviewStatusSchema>;
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
+export type OutboxEventType = z.infer<typeof outboxEventTypeSchema>;
+export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
+export type DeliveryChannel = z.infer<typeof deliveryChannelSchema>;
+export type OutboxDeliveryStatus = z.infer<typeof outboxDeliveryStatusSchema>;
+export type NotificationDeliveryPreference = z.infer<typeof notificationDeliveryPreferenceSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
@@ -379,13 +427,49 @@ export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
+export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
+export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
+export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
 export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;
+export type ArtifactVersionDiffQuery = z.infer<typeof artifactVersionDiffQuerySchema>;
 export type StartAgentRunInput = z.infer<typeof startAgentRunInputSchema>;
 export type ReportAgentRunInput = z.infer<typeof reportAgentRunInputSchema>;
 export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;
 export type RecordAssumptionInput = z.infer<typeof recordAssumptionInputSchema>;
 export type ResolveAssumptionInput = z.infer<typeof resolveAssumptionInputSchema>;
+
+export interface ArtifactDiffVersion {
+  readonly id: string;
+  readonly version: number;
+  readonly summary: string;
+  readonly status: ArtifactVersionStatus;
+  readonly createdById: string;
+  readonly createdAt: string;
+  readonly contentSha256: string;
+}
+
+export interface ArtifactDiffLine {
+  readonly kind: "unchanged" | "added" | "removed";
+  readonly text: string;
+  readonly oldLineNumber?: number;
+  readonly newLineNumber?: number;
+}
+
+export interface ArtifactVersionDiff {
+  readonly artifactId: string;
+  readonly from: ArtifactDiffVersion;
+  readonly to: ArtifactDiffVersion;
+  readonly lines: readonly ArtifactDiffLine[];
+  readonly counts: {
+    readonly unchanged: number;
+    readonly added: number;
+    readonly removed: number;
+  };
+  readonly exact: boolean;
+  readonly truncated: boolean;
+  readonly totalLines: number;
+}

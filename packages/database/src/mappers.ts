@@ -7,6 +7,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  OutboxDelivery,
   OutboxEvent,
   Project,
   Question,
@@ -25,6 +26,7 @@ import {
   questionResponses,
   questions,
   notifications,
+  outboxDeliveries,
   outboxEvents,
 } from "./schema.js";
 
@@ -40,6 +42,7 @@ export type ContextSnapshotRow = typeof contextSnapshots.$inferSelect;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
+export type OutboxDeliveryRow = typeof outboxDeliveries.$inferSelect;
 
 export function projectToRow(project: Project): typeof projects.$inferInsert {
   return {
@@ -85,6 +88,7 @@ export function notificationFromRow(row: NotificationRow): Notification {
 export function outboxEventToRow(event: OutboxEvent): typeof outboxEvents.$inferInsert {
   return {
     id: event.id,
+    correlationId: event.correlationId,
     organizationId: event.organizationId,
     projectId: event.projectId,
     type: event.type,
@@ -102,6 +106,7 @@ export function outboxEventToRow(event: OutboxEvent): typeof outboxEvents.$infer
 export function outboxEventFromRow(row: OutboxEventRow): OutboxEvent {
   return {
     id: row.id,
+    correlationId: row.correlationId,
     organizationId: row.organizationId,
     projectId: row.projectId,
     type: row.type as OutboxEvent["type"],
@@ -112,6 +117,42 @@ export function outboxEventFromRow(row: OutboxEventRow): OutboxEvent {
     createdAt: row.createdAt,
     ...(row.leaseUntil === null ? {} : { leaseUntil: row.leaseUntil }),
     ...(row.processedAt === null ? {} : { processedAt: row.processedAt }),
+    ...(row.lastError === null ? {} : { lastError: row.lastError }),
+  };
+}
+
+export function outboxDeliveryToRow(delivery: OutboxDelivery): typeof outboxDeliveries.$inferInsert {
+  return {
+    id: delivery.id,
+    organizationId: delivery.organizationId,
+    projectId: delivery.projectId,
+    outboxEventId: delivery.outboxEventId,
+    channel: delivery.channel,
+    destinationHash: delivery.destinationHash,
+    status: delivery.status,
+    attemptCount: delivery.attemptCount,
+    preference: delivery.preference,
+    providerMessageId: delivery.providerMessageId ?? null,
+    lastError: delivery.lastError ?? null,
+    createdAt: delivery.createdAt,
+    updatedAt: delivery.updatedAt,
+  };
+}
+
+export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    outboxEventId: row.outboxEventId,
+    channel: row.channel as OutboxDelivery["channel"],
+    destinationHash: row.destinationHash,
+    status: row.status as OutboxDelivery["status"],
+    attemptCount: row.attemptCount,
+    preference: row.preference as OutboxDelivery["preference"],
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ...(row.providerMessageId === null ? {} : { providerMessageId: row.providerMessageId }),
     ...(row.lastError === null ? {} : { lastError: row.lastError }),
   };
 }
@@ -498,6 +539,7 @@ export function contextSnapshotFromRow(row: ContextSnapshotRow): ContextSnapshot
 export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferInsert {
   return {
     id: event.id,
+    correlationId: event.correlationId,
     organizationId: event.organizationId,
     projectId: event.projectId,
     actorId: event.actorId,
@@ -512,6 +554,7 @@ export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferIns
 export function auditEventFromRow(row: AuditEventRow): AuditEvent {
   return {
     id: row.id,
+    correlationId: row.correlationId,
     organizationId: row.organizationId,
     projectId: row.projectId,
     actorId: row.actorId,

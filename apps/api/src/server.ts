@@ -1,23 +1,30 @@
 import { createPostgresBridgeStore } from "@bridge/database";
+import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, createDemoRuntimeWithRepository } from "@bridge/test-support";
 
 import { buildApp } from "./app.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const publicWebUrl = process.env.BRIDGE_PUBLIC_WEB_URL ?? "http://127.0.0.1:3000";
-const postgresStore = databaseUrl ? createPostgresBridgeStore(databaseUrl) : undefined;
+const metrics = new BridgeMetrics();
+const postgresStore = databaseUrl ? createPostgresBridgeStore(databaseUrl, { metrics }) : undefined;
 const runtime = postgresStore
   ? await createDemoRuntimeWithRepository(postgresStore.repository, {
       seedQuestion: true,
       seedArtifact: true,
-      serviceOptions: { publicBaseUrl: publicWebUrl },
+      serviceOptions: { publicBaseUrl: publicWebUrl, metrics },
     })
   : await createDemoRuntime({
       seedQuestion: true,
       seedArtifact: true,
-      serviceOptions: { publicBaseUrl: publicWebUrl },
+      serviceOptions: { publicBaseUrl: publicWebUrl, metrics },
     });
-const app = await buildApp({ service: runtime.service, principals: runtime.principals, logger: true });
+const app = await buildApp({
+  service: runtime.service,
+  principals: runtime.principals,
+  logger: true,
+  metrics,
+});
 
 if (postgresStore) {
   app.addHook("onClose", async () => postgresStore.close());

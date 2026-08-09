@@ -1,0 +1,147 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Request rate by service and operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (service, operation) (rate(bridge_http_requests_total[5m]))",
+          "legendFormat": "{{service}} {{operation}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "HTTP p95 latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, service, operation) (rate(bridge_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{service}} {{operation}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Server error ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(bridge_http_requests_total{outcome=\"server_error\"}[5m])) / clamp_min(sum by (service) (rate(bridge_http_requests_total[5m])), 0.001)",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Authorization denials",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (service, operation, status) (increase(bridge_authorization_denials_total[15m]))",
+          "legendFormat": "{{service}} {{operation}} {{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Database transaction p95 and errors",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, backend) (rate(bridge_database_transaction_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{backend}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (backend) (rate(bridge_database_transactions_total{outcome=\"error\"}[5m]))",
+          "legendFormat": "errors {{backend}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Context retrieval performance",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(bridge_context_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 seconds {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(bridge_context_candidate_count_sum[5m]) / clamp_min(rate(bridge_context_candidate_count_count[5m]), 0.001)",
+          "legendFormat": "average candidates",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(bridge_context_result_count_sum[5m]) / clamp_min(rate(bridge_context_result_count_count[5m]), 0.001)",
+          "legendFormat": "average results",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Oldest claimed outbox event",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "max(bridge_outbox_oldest_claimed_age_seconds)",
+          "legendFormat": "oldest age",
+          "refId": "A"
+        },
+        {
+          "expr": "time() - max(bridge_outbox_last_cycle_timestamp_seconds)",
+          "legendFormat": "worker cycle staleness",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Outbox outcomes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(bridge_outbox_events_total[15m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Notification outcomes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum by (channel, outcome) (increase(bridge_notification_deliveries_total[15m]))",
+          "legendFormat": "{{channel}} {{outcome}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["bridge", "pilot"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "Bridge pilot operations",
+  "uid": "bridge-pilot-operations",
+  "version": 1
+}

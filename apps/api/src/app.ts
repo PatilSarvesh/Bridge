@@ -3,6 +3,7 @@ import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
   artifactReviewInputSchema,
+  artifactVersionDiffQuerySchema,
   changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
@@ -14,16 +15,26 @@ import {
   questionCommentInputSchema,
   notificationListQuerySchema,
   notificationReadAllInputSchema,
+  outboxOperationsQuerySchema,
+  projectAnalyticsQuerySchema,
   questionReviewInputSchema,
   questionInboxQuerySchema,
   recordAssumptionInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
   resolveAssumptionInputSchema,
+  replayOutboxEventInputSchema,
   startAgentRunInputSchema,
 } from "@bridge/contracts";
 import { BridgeError, type Principal } from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
+import {
+  BridgeMetrics,
+  correlationIdHeader,
+  createSafeLogger,
+  resolveCorrelationId,
+  runWithCorrelationContext,
+} from "@bridge/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -31,6 +42,7 @@ export interface BuildAppOptions {
   readonly service: BridgeService;
   readonly principals: Readonly<Record<string, Principal>>;
   readonly logger?: boolean;
+  readonly metrics?: BridgeMetrics;
 }
 
 function resolvePrincipal(
@@ -53,13 +65,51 @@ function resolvePrincipal(
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({ logger: false });
+  const metrics = options.metrics ?? new BridgeMetrics();
+  const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
+  const requestStartedAt = new WeakMap<FastifyRequest, number>();
   await app.register(cors, {
     origin: true,
-    allowedHeaders: ["content-type", "x-bridge-principal-id"],
+    allowedHeaders: ["content-type", "x-bridge-principal-id", correlationIdHeader],
+    exposedHeaders: [correlationIdHeader],
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.addHook("onRequest", (request, reply, done) => {
+    const supplied = request.headers[correlationIdHeader];
+    const correlationId = resolveCorrelationId(typeof supplied === "string" ? supplied : undefined);
+    reply.header(correlationIdHeader, correlationId);
+    requestStartedAt.set(request, performance.now());
+    runWithCorrelationContext({ correlationId, source: "api" }, done);
+  });
+
+  app.addHook("onResponse", (request, reply, done) => {
+    const durationMs = Math.max(0, performance.now() - (requestStartedAt.get(request) ?? performance.now()));
+    const operation = request.routeOptions.url || "unmatched";
+    metrics.recordHttpRequest({
+      service: "api",
+      operation,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
+    safeLogger?.info("request.completed", {
+      method: request.method,
+      route: operation,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
+    done();
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    safeLogger?.error("request.failed", {
+      method: request.method,
+      route: request.routeOptions.url,
+      statusCode: error instanceof BridgeError
+        ? error.statusCode
+        : error instanceof ZodError ? 400 : 500,
+      error,
+    });
     if (error instanceof BridgeError) {
       return reply.status(error.statusCode).send({
         code: error.code,
@@ -80,7 +130,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     });
   });
 
-  app.get("/health", async () => ({ status: "ok", service: "bridge-api" }));
+  const liveness = async () => ({ status: "ok", service: "bridge-api" });
+  app.get("/health", liveness);
+  app.get("/health/live", liveness);
+  app.get("/metrics", async (_request, reply) => reply
+    .type("text/plain; version=0.0.4; charset=utf-8")
+    .send(metrics.renderPrometheus()));
+  app.get("/health/ready", async (_request, reply) => {
+    const readiness = await options.service.checkReadiness();
+    return reply
+      .status(readiness.status === "ready" ? 200 : 503)
+      .send({ service: "bridge-api", ...readiness });
+  });
 
   app.get<{ Querystring: Record<string, string | undefined> }>(
     "/v1/notifications",
@@ -109,6 +170,33 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = resolvePrincipal(request, options.principals);
       const input = notificationReadAllInputSchema.parse(request.body ?? {});
       return options.service.markAllNotificationsRead(principal, input);
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/admin/projects/:projectId/outbox", async (request) => {
+    const principal = resolvePrincipal(request, options.principals);
+    const query = outboxOperationsQuerySchema.parse(request.query);
+    return options.service.inspectProjectOutbox(principal, request.params.projectId, query);
+  });
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/admin/projects/:projectId/analytics", async (request) => {
+    const principal = resolvePrincipal(request, options.principals);
+    const query = projectAnalyticsQuerySchema.parse(request.query);
+    return options.service.getProjectAnalytics(principal, request.params.projectId, query);
+  });
+
+  app.post<{ Params: { eventId: string }; Body: unknown }>(
+    "/v1/admin/outbox/:eventId/replay",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = replayOutboxEventInputSchema.parse(request.body);
+      return options.service.replayOutboxEvent(principal, request.params.eventId, input);
     },
   );
 
@@ -381,6 +469,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
             : request.query.includeHistory === "false"
               ? false
               : request.query.includeHistory,
+        search: request.query.search,
         status: request.query.status,
         category: request.query.category,
         ownerId: request.query.ownerId,
@@ -420,6 +509,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = resolvePrincipal(request, options.principals);
     return options.service.getArtifact(principal, request.params.artifactId);
   });
+
+  app.get<{ Params: { artifactId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/artifacts/:artifactId/diff",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const query = artifactVersionDiffQuerySchema.parse(request.query);
+      return options.service.diffArtifactVersions(principal, request.params.artifactId, query);
+    },
+  );
 
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/reviews",

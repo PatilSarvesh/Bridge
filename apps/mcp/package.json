@@ -17,6 +17,7 @@
     "@bridge/contracts": "workspace:*",
     "@bridge/database": "workspace:*",
     "@bridge/domain": "workspace:*",
+    "@bridge/observability": "workspace:*",
     "@bridge/test-support": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0",
     "zod": "4.4.3"

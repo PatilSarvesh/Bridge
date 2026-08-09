@@ -3,7 +3,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type {
   AcceptAnswerInput,
   ApproveArtifactVersionInput,
+  ArtifactDiffLine,
   ArtifactReviewInput,
+  ArtifactVersionDiff,
+  ArtifactVersionDiffQuery,
   ChangeDecisionLifecycleInput,
   ContextQuery,
   DecisionListQuery,
@@ -20,9 +23,12 @@ import type {
   StartAgentRunInput,
   NotificationListQuery,
   NotificationReadAllInput,
+  OutboxOperationsQuery,
+  ProjectAnalyticsQuery,
   QuestionReviewInput,
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
+  ReplayOutboxEventInput,
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
@@ -52,10 +58,18 @@ import {
   type QuestionReview,
   type QuestionResponse,
   type Notification,
+  type OutboxDelivery,
   type OutboxEvent,
 } from "@bridge/domain";
+import {
+  type BridgeMetrics,
+  createCorrelationId,
+  currentCorrelationId,
+  runWithCorrelationContextIfAbsent,
+} from "@bridge/observability";
 
 export interface BridgeRepository {
+  checkHealth(): Promise<{ readonly backend: string }>;
   transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T>;
   getProject(projectId: string): Promise<Project | undefined>;
   listProjects(organizationId: string): Promise<readonly Project[]>;
@@ -82,6 +96,7 @@ export interface BridgeRepository {
   getIdempotentRequestHash(key: string): Promise<string | undefined>;
   getDecision(decisionId: string): Promise<Decision | undefined>;
   listDecisions(projectId: string): Promise<readonly Decision[]>;
+  searchDecisions(projectId: string, search: string): Promise<readonly Decision[]>;
   saveDecision(decision: Decision): Promise<void>;
   getArtifact(artifactId: string): Promise<Artifact | undefined>;
   getArtifactByVersionId(versionId: string): Promise<Artifact | undefined>;
@@ -107,7 +122,11 @@ export interface BridgeRepository {
   ): Promise<readonly Notification[]>;
   saveNotification(notification: Notification): Promise<void>;
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
+  getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
+  listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]>;
+  getOutboxDelivery(eventId: string, channel: OutboxDelivery["channel"]): Promise<OutboxDelivery | undefined>;
+  saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
   completeOutboxEvent(eventId: string, processedAt: string): Promise<void>;
   failOutboxEvent(
@@ -178,6 +197,234 @@ export interface DecisionLifecycleChange {
   readonly impact: DecisionLifecycleImpact;
 }
 
+export interface OutboxOperationsMetrics {
+  readonly total: number;
+  readonly statusCounts: Readonly<Record<OutboxEvent["status"], number>>;
+  readonly failedCount: number;
+  readonly totalAttempts: number;
+  readonly readyCount: number;
+  readonly expiredLeaseCount: number;
+  readonly oldestReadyAt?: string;
+  readonly oldestReadyAgeMs?: number;
+  readonly deliveryStatusCounts: Readonly<Record<OutboxDelivery["status"], number>>;
+}
+
+export interface OutboxOperationsView {
+  readonly items: readonly OutboxEvent[];
+  readonly deliveries: readonly OutboxDelivery[];
+  readonly totalMatching: number;
+  readonly metrics: OutboxOperationsMetrics;
+}
+
+export interface ProjectAnalyticsActivity {
+  readonly contextRetrievals: number;
+  readonly questionSubmissions: number;
+  readonly questionsCreated: number;
+  readonly questionsReused: number;
+  readonly questionsRoutedOnCreation: number;
+  readonly responsesProposed: number;
+  readonly decisionsAccepted: number;
+  readonly decisionReuseOccurrences: number;
+  readonly assumptionsRecorded: number;
+  readonly assumptionsResolved: number;
+  readonly specificationVersionsPublished: number;
+  readonly specificationVersionsApproved: number;
+}
+
+export interface ProjectAnalyticsOutcomes {
+  readonly runsWithContextRate: number;
+  readonly questionReuseRate: number;
+  readonly firstAssignmentRoutingRate: number;
+  readonly decisionAcceptanceRate: number;
+  readonly acceptedDecisionReuseCount: number;
+  readonly assumptionResolutionRate: number;
+  readonly assumptionStatusCounts: Readonly<Record<Assumption["status"], number>>;
+  readonly specificationApprovalRate: number;
+  readonly medianQuestionResolutionMs?: number;
+  readonly medianSpecificationApprovalMs?: number;
+}
+
+export interface ProjectAnalyticsGuardrails {
+  readonly questionsPerRun: number;
+  readonly blockingQuestions: number;
+  readonly unroutedBlockingQuestions: number;
+  readonly contextItemsReturned: number;
+  readonly contextItemsPerRetrieval: number;
+}
+
+export interface ProjectAnalyticsClientBreakdown {
+  readonly client: AgentRun["client"];
+  readonly runCount: number;
+  readonly contextRetrievals: number;
+  readonly questionSubmissions: number;
+  readonly questionsReused: number;
+  readonly decisionsAccepted: number;
+  readonly decisionReuseOccurrences: number;
+  readonly assumptionsRecorded: number;
+}
+
+export interface ProjectAnalyticsView {
+  readonly projectId: string;
+  readonly generatedAt: string;
+  readonly cohort: {
+    readonly runCount: number;
+    readonly client?: AgentRun["client"];
+    readonly startedFrom?: string;
+    readonly startedTo?: string;
+  };
+  readonly activity: ProjectAnalyticsActivity;
+  readonly outcomes: ProjectAnalyticsOutcomes;
+  readonly guardrails: ProjectAnalyticsGuardrails;
+  readonly byClient: readonly ProjectAnalyticsClientBreakdown[];
+  readonly privacy: {
+    readonly derivedFrom: readonly string[];
+    readonly excluded: readonly string[];
+  };
+}
+
+interface AnalyticsSource {
+  readonly snapshots: readonly ContextSnapshot[];
+  readonly questions: readonly Question[];
+  readonly decisions: readonly Decision[];
+  readonly assumptions: readonly Assumption[];
+  readonly artifacts: readonly Artifact[];
+}
+
+interface AnalyticsCohort {
+  readonly activity: ProjectAnalyticsActivity;
+  readonly outcomes: ProjectAnalyticsOutcomes;
+  readonly guardrails: ProjectAnalyticsGuardrails;
+}
+
+function analyticsRate(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : numerator / denominator;
+}
+
+function medianDuration(values: readonly number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1]! + sorted[middle]!) / 2
+    : sorted[middle];
+}
+
+function calculateAnalyticsCohort(
+  runs: readonly AgentRun[],
+  source: AnalyticsSource,
+): AnalyticsCohort {
+  const runIds = new Set(runs.map((run) => run.id));
+  const questionsById = new Map(source.questions.map((question) => [question.id, question]));
+  const decisionsById = new Map(source.decisions.map((decision) => [decision.id, decision]));
+  const questionPairs: Array<{ readonly run: AgentRun; readonly question: Question }> = [];
+  for (const run of runs) {
+    for (const questionId of run.questionIds) {
+      const question = questionsById.get(questionId);
+      if (question) questionPairs.push({ run, question });
+    }
+  }
+  const createdQuestions = [...new Map(
+    questionPairs
+      .filter(({ run, question }) => question.runId === run.id)
+      .map(({ question }) => [question.id, question]),
+  ).values()];
+  const reusedQuestionPairs = questionPairs.filter(({ run, question }) => question.runId !== run.id);
+  const snapshots = source.snapshots.filter((snapshot) => snapshot.runId && runIds.has(snapshot.runId));
+  const assumptions = source.assumptions.filter((assumption) => assumption.runId && runIds.has(assumption.runId));
+  const versions = source.artifacts.flatMap((artifact) =>
+    artifact.versions.filter((version) => version.runId && runIds.has(version.runId)),
+  );
+  const approvedVersions = versions.filter((version) => version.approvedAt !== undefined);
+  const routedQuestions = createdQuestions.filter(
+    (question) => question.ownerIds.length > 0 || question.ownerRoles.length > 0,
+  );
+  const acceptedQuestions = createdQuestions.filter(
+    (question) => question.decisionId && decisionsById.has(question.decisionId),
+  );
+  const reusedDecisionIds = new Set<string>();
+  let decisionReuseOccurrences = 0;
+  for (const snapshot of snapshots) {
+    for (const itemId of snapshot.itemIds) {
+      const decision = decisionsById.get(itemId);
+      if (!decision || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt)) continue;
+      const originQuestion = questionsById.get(decision.questionId);
+      if (originQuestion?.runId === snapshot.runId) continue;
+      reusedDecisionIds.add(decision.id);
+      decisionReuseOccurrences += 1;
+    }
+  }
+  const assumptionStatusCounts: Record<Assumption["status"], number> = {
+    active: 0,
+    confirmed: 0,
+    rejected: 0,
+    expired: 0,
+    superseded: 0,
+  };
+  for (const assumption of assumptions) assumptionStatusCounts[assumption.status] += 1;
+  const resolvedAssumptions = assumptions.filter((assumption) => assumption.status !== "active");
+  const questionResolutionDurations = acceptedQuestions.flatMap((question) => {
+    const decision = question.decisionId ? decisionsById.get(question.decisionId) : undefined;
+    if (!decision) return [];
+    return [Math.max(0, Date.parse(decision.createdAt) - Date.parse(question.createdAt))];
+  });
+  const approvalDurations = approvedVersions.flatMap((version) => version.approvedAt
+    ? [Math.max(0, Date.parse(version.approvedAt) - Date.parse(version.createdAt))]
+    : []);
+  const medianQuestionResolutionMs = medianDuration(questionResolutionDurations);
+  const medianSpecificationApprovalMs = medianDuration(approvalDurations);
+  const blockingQuestions = createdQuestions.filter((question) => question.blocking);
+  const unroutedBlockingQuestions = blockingQuestions.filter(
+    (question) => question.ownerIds.length === 0 && question.ownerRoles.length === 0,
+  );
+  const contextItemsReturned = snapshots.reduce((total, snapshot) => total + snapshot.itemIds.length, 0);
+  const activity: ProjectAnalyticsActivity = {
+    contextRetrievals: snapshots.length,
+    questionSubmissions: questionPairs.length,
+    questionsCreated: createdQuestions.length,
+    questionsReused: reusedQuestionPairs.length,
+    questionsRoutedOnCreation: routedQuestions.length,
+    responsesProposed: createdQuestions.reduce((total, question) => total + question.responses.length, 0),
+    decisionsAccepted: acceptedQuestions.length,
+    decisionReuseOccurrences,
+    assumptionsRecorded: assumptions.length,
+    assumptionsResolved: resolvedAssumptions.length,
+    specificationVersionsPublished: versions.length,
+    specificationVersionsApproved: approvedVersions.length,
+  };
+  return {
+    activity,
+    outcomes: {
+      runsWithContextRate: analyticsRate(
+        runs.filter((run) => run.contextSnapshotIds.length > 0).length,
+        runs.length,
+      ),
+      questionReuseRate: analyticsRate(activity.questionsReused, activity.questionSubmissions),
+      firstAssignmentRoutingRate: analyticsRate(activity.questionsRoutedOnCreation, activity.questionsCreated),
+      decisionAcceptanceRate: analyticsRate(activity.decisionsAccepted, activity.questionsCreated),
+      acceptedDecisionReuseCount: reusedDecisionIds.size,
+      assumptionResolutionRate: analyticsRate(activity.assumptionsResolved, activity.assumptionsRecorded),
+      assumptionStatusCounts,
+      specificationApprovalRate: analyticsRate(
+        activity.specificationVersionsApproved,
+        activity.specificationVersionsPublished,
+      ),
+      ...(medianQuestionResolutionMs !== undefined
+        ? { medianQuestionResolutionMs }
+        : {}),
+      ...(medianSpecificationApprovalMs !== undefined
+        ? { medianSpecificationApprovalMs }
+        : {}),
+    },
+    guardrails: {
+      questionsPerRun: analyticsRate(activity.questionSubmissions, runs.length),
+      blockingQuestions: blockingQuestions.length,
+      unroutedBlockingQuestions: unroutedBlockingQuestions.length,
+      contextItemsReturned,
+      contextItemsPerRetrieval: analyticsRate(contextItemsReturned, activity.contextRetrievals),
+    },
+  };
+}
+
 export interface QuestionMatch {
   readonly questionId: string;
   readonly title: string;
@@ -203,6 +450,140 @@ export type QuestionSubmission = Question & {
   readonly submissionDisposition: QuestionSubmissionDisposition;
 };
 
+type RawArtifactDiffLine = Pick<ArtifactDiffLine, "kind" | "text">;
+
+const MAX_EXACT_DIFF_CELLS = 1_000_000;
+const MAX_EXACT_DIFF_DIMENSION = 5_000;
+const MAX_RENDERED_DIFF_LINES = 2_000;
+
+function splitMarkdownLines(body: string): readonly string[] {
+  return body.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+}
+
+function exactLineDiff(fromLines: readonly string[], toLines: readonly string[]): readonly RawArtifactDiffLine[] {
+  const matrix = Array.from(
+    { length: fromLines.length + 1 },
+    () => new Uint32Array(toLines.length + 1),
+  );
+  for (let fromIndex = 1; fromIndex <= fromLines.length; fromIndex += 1) {
+    for (let toIndex = 1; toIndex <= toLines.length; toIndex += 1) {
+      matrix[fromIndex]![toIndex] = fromLines[fromIndex - 1] === toLines[toIndex - 1]
+        ? matrix[fromIndex - 1]![toIndex - 1]! + 1
+        : Math.max(matrix[fromIndex - 1]![toIndex]!, matrix[fromIndex]![toIndex - 1]!);
+    }
+  }
+
+  const reversed: RawArtifactDiffLine[] = [];
+  let fromIndex = fromLines.length;
+  let toIndex = toLines.length;
+  while (fromIndex > 0 || toIndex > 0) {
+    if (
+      fromIndex > 0 &&
+      toIndex > 0 &&
+      fromLines[fromIndex - 1] === toLines[toIndex - 1]
+    ) {
+      reversed.push({ kind: "unchanged", text: fromLines[fromIndex - 1]! });
+      fromIndex -= 1;
+      toIndex -= 1;
+    } else if (
+      toIndex > 0 &&
+      (fromIndex === 0 || matrix[fromIndex]![toIndex - 1]! >= matrix[fromIndex - 1]![toIndex]!)
+    ) {
+      reversed.push({ kind: "added", text: toLines[toIndex - 1]! });
+      toIndex -= 1;
+    } else {
+      reversed.push({ kind: "removed", text: fromLines[fromIndex - 1]! });
+      fromIndex -= 1;
+    }
+  }
+  return reversed.reverse();
+}
+
+function buildArtifactVersionDiff(
+  artifactId: string,
+  fromVersion: ArtifactVersion,
+  toVersion: ArtifactVersion,
+): ArtifactVersionDiff {
+  const fromLines = splitMarkdownLines(fromVersion.body);
+  const toLines = splitMarkdownLines(toVersion.body);
+  let prefixLength = 0;
+  while (
+    prefixLength < fromLines.length &&
+    prefixLength < toLines.length &&
+    fromLines[prefixLength] === toLines[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength < fromLines.length - prefixLength &&
+    suffixLength < toLines.length - prefixLength &&
+    fromLines[fromLines.length - suffixLength - 1] === toLines[toLines.length - suffixLength - 1]
+  ) {
+    suffixLength += 1;
+  }
+
+  const fromMiddle = fromLines.slice(prefixLength, fromLines.length - suffixLength);
+  const toMiddle = toLines.slice(prefixLength, toLines.length - suffixLength);
+  const exact = fromMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
+    toMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
+    fromMiddle.length * toMiddle.length <= MAX_EXACT_DIFF_CELLS;
+  const lines: ArtifactDiffLine[] = [];
+  const counts = { unchanged: 0, added: 0, removed: 0 };
+  let oldLineNumber = 1;
+  let newLineNumber = 1;
+  let totalLines = 0;
+  const append = (kind: ArtifactDiffLine["kind"], text: string) => {
+    const oldNumber = kind === "added" ? undefined : oldLineNumber;
+    const newNumber = kind === "removed" ? undefined : newLineNumber;
+    counts[kind] += 1;
+    totalLines += 1;
+    if (lines.length < MAX_RENDERED_DIFF_LINES) {
+      lines.push({
+        kind,
+        text,
+        ...(oldNumber === undefined ? {} : { oldLineNumber: oldNumber }),
+        ...(newNumber === undefined ? {} : { newLineNumber: newNumber }),
+      });
+    }
+    if (kind !== "added") oldLineNumber += 1;
+    if (kind !== "removed") newLineNumber += 1;
+  };
+
+  for (let index = 0; index < prefixLength; index += 1) {
+    append("unchanged", fromLines[index]!);
+  }
+  if (exact) {
+    for (const line of exactLineDiff(fromMiddle, toMiddle)) append(line.kind, line.text);
+  } else {
+    for (const line of fromMiddle) append("removed", line);
+    for (const line of toMiddle) append("added", line);
+  }
+  for (let index = suffixLength; index > 0; index -= 1) {
+    append("unchanged", fromLines[fromLines.length - index]!);
+  }
+
+  const versionMetadata = (version: ArtifactVersion) => ({
+    id: version.id,
+    version: version.version,
+    summary: version.summary,
+    status: version.status,
+    createdById: version.createdById,
+    createdAt: version.createdAt,
+    contentSha256: version.contentSha256,
+  });
+  return {
+    artifactId,
+    from: versionMetadata(fromVersion),
+    to: versionMetadata(toVersion),
+    lines,
+    counts,
+    exact,
+    truncated: totalLines > lines.length,
+    totalLines,
+  };
+}
+
 export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projects = new Map<string, Project>();
   private readonly runs = new Map<string, AgentRun>();
@@ -214,6 +595,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly auditEvents = new Map<string, AuditEvent>();
   private readonly notifications = new Map<string, Notification>();
   private readonly outboxEvents = new Map<string, OutboxEvent>();
+  private readonly outboxDeliveries = new Map<string, OutboxDelivery>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   private readonly artifactIdempotency = new Map<string, ArtifactIdempotencyRecord>();
   private readonly runIdempotency = new Map<string, RunIdempotencyRecord>();
@@ -221,7 +603,18 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly runContinuationKeys = new Map<string, string>();
   private transactionTail: Promise<void> = Promise.resolve();
 
+  constructor(private readonly metrics?: BridgeMetrics) {}
+
+  async checkHealth(): Promise<{ readonly backend: string }> {
+    return { backend: "memory" };
+  }
+
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+    if (!currentCorrelationId()) {
+      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
+    }
+    const startedAt = performance.now();
+    let outcome: "success" | "error" = "success";
     let release!: () => void;
     const previous = this.transactionTail;
     this.transactionTail = new Promise<void>((resolve) => {
@@ -240,6 +633,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       auditEvents: new Map(this.auditEvents),
       notifications: new Map(this.notifications),
       outboxEvents: new Map(this.outboxEvents),
+      outboxDeliveries: new Map(this.outboxDeliveries),
       idempotency: new Map(this.idempotency),
       artifactIdempotency: new Map(this.artifactIdempotency),
       runIdempotency: new Map(this.runIdempotency),
@@ -250,6 +644,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     try {
       return await work(this);
     } catch (error) {
+      outcome = "error";
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -260,6 +655,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.auditEvents, snapshot.auditEvents);
       this.restoreMap(this.notifications, snapshot.notifications);
       this.restoreMap(this.outboxEvents, snapshot.outboxEvents);
+      this.restoreMap(this.outboxDeliveries, snapshot.outboxDeliveries);
       this.restoreMap(this.idempotency, snapshot.idempotency);
       this.restoreMap(this.artifactIdempotency, snapshot.artifactIdempotency);
       this.restoreMap(this.runIdempotency, snapshot.runIdempotency);
@@ -268,6 +664,11 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       throw error;
     } finally {
       release();
+      this.metrics?.recordDatabaseTransaction({
+        backend: "memory",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
     }
   }
 
@@ -393,6 +794,38 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  async searchDecisions(projectId: string, search: string): Promise<readonly Decision[]> {
+    const tokenize = (value: string): readonly string[] =>
+      value.toLocaleLowerCase("en").match(/[\p{L}\p{N}]+/gu) ?? [];
+    const searchTokens = [...new Set(tokenize(search))];
+    if (searchTokens.length === 0) return [];
+
+    return (await this.listDecisions(projectId))
+      .map((decision) => {
+        const answerTokens = new Set(tokenize(decision.answer));
+        const rationaleTokens = new Set(tokenize(decision.rationale));
+        const categoryTokens = new Set(tokenize(decision.category));
+        const matches = searchTokens.every((token) =>
+          answerTokens.has(token) || rationaleTokens.has(token) || categoryTokens.has(token),
+        );
+        const score = matches
+          ? searchTokens.reduce(
+            (total, token) => total +
+              (answerTokens.has(token) ? 4 : 0) +
+              (rationaleTokens.has(token) ? 2 : 0) +
+              (categoryTokens.has(token) ? 1 : 0),
+            0,
+          )
+          : 0;
+        return { decision, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((left, right) =>
+        right.score - left.score || right.decision.createdAt.localeCompare(left.decision.createdAt),
+      )
+      .map(({ decision }) => decision);
+  }
+
   async saveDecision(decision: Decision): Promise<void> {
     this.decisions.set(decision.id, decision);
   }
@@ -477,8 +910,31 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
+  async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
+    return this.outboxEvents.get(eventId);
+  }
+
   async saveOutboxEvent(event: OutboxEvent): Promise<void> {
     this.outboxEvents.set(event.id, event);
+  }
+
+  async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
+    return [...this.outboxDeliveries.values()]
+      .filter((delivery) => delivery.projectId === projectId)
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  }
+
+  async getOutboxDelivery(
+    eventId: string,
+    channel: OutboxDelivery["channel"],
+  ): Promise<OutboxDelivery | undefined> {
+    return [...this.outboxDeliveries.values()].find(
+      (delivery) => delivery.outboxEventId === eventId && delivery.channel === channel,
+    );
+  }
+
+  async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
+    this.outboxDeliveries.set(delivery.id, delivery);
   }
 
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {
@@ -539,6 +995,17 @@ export interface BridgeServiceOptions {
   readonly now?: () => Date;
   readonly id?: () => string;
   readonly resumeKey?: () => string;
+  readonly metrics?: BridgeMetrics;
+}
+
+export interface BridgeReadiness {
+  readonly status: "ready" | "not_ready";
+  readonly checks: readonly [{
+    readonly name: "repository";
+    readonly status: "ready" | "failed";
+    readonly backend?: string;
+    readonly message?: string;
+  }];
 }
 
 export class BridgeService {
@@ -546,6 +1013,7 @@ export class BridgeService {
   private readonly now: () => Date;
   private readonly id: () => string;
   private readonly resumeKey: () => string;
+  private readonly metrics: BridgeMetrics | undefined;
 
   constructor(
     private readonly repository: BridgeRepository,
@@ -555,12 +1023,32 @@ export class BridgeService {
     this.now = options.now ?? (() => new Date());
     this.id = options.id ?? randomUUID;
     this.resumeKey = options.resumeKey ?? (() => randomBytes(32).toString("base64url"));
+    this.metrics = options.metrics;
   }
 
   private recordUrl(parameters: Readonly<Record<string, string>>): string {
     const url = new URL(this.publicBaseUrl);
     for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
     return url.toString();
+  }
+
+  async checkReadiness(): Promise<BridgeReadiness> {
+    try {
+      const health = await this.repository.checkHealth();
+      return {
+        status: "ready",
+        checks: [{ name: "repository", status: "ready", backend: health.backend }],
+      };
+    } catch {
+      return {
+        status: "not_ready",
+        checks: [{
+          name: "repository",
+          status: "failed",
+          message: "Repository dependency is unavailable.",
+        }],
+      };
+    }
   }
 
   async registerProject(
@@ -711,6 +1199,189 @@ export class BridgeService {
         await repository.saveNotification({ ...notification, readAt });
       }
       return { markedCount: notificationsToMark.length };
+    });
+  }
+
+  async inspectProjectOutbox(
+    principal: Principal,
+    projectId: string,
+    query: OutboxOperationsQuery,
+  ): Promise<OutboxOperationsView> {
+    await this.requireProject(principal, projectId);
+    this.assertProjectOperator(principal, "Inspecting delivery operations");
+    const events = await this.repository.listOutboxEvents(projectId);
+    const deliveries = await this.repository.listOutboxDeliveries(projectId);
+    const nowTime = this.now().getTime();
+    const statusCounts: Record<OutboxEvent["status"], number> = {
+      pending: 0,
+      processing: 0,
+      processed: 0,
+      failed: 0,
+      dead_letter: 0,
+    };
+    const deliveryStatusCounts: Record<OutboxDelivery["status"], number> = {
+      delivered: 0,
+      failed: 0,
+      suppressed: 0,
+      deferred: 0,
+    };
+    for (const delivery of deliveries) deliveryStatusCounts[delivery.status] += 1;
+    let totalAttempts = 0;
+    let expiredLeaseCount = 0;
+    const readyEvents: OutboxEvent[] = [];
+    for (const event of events) {
+      statusCounts[event.status] += 1;
+      totalAttempts += event.attempts;
+      const leaseExpired = event.status === "processing" &&
+        Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowTime;
+      if (leaseExpired) expiredLeaseCount += 1;
+      const processingReady = event.status === "processing" &&
+        (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime);
+      const retryable = event.status === "pending" || event.status === "failed" || processingReady;
+      if (retryable && Date.parse(event.availableAt) <= nowTime) readyEvents.push(event);
+    }
+    const oldestReadyAt = readyEvents
+      .map((event) => event.availableAt)
+      .sort((left, right) => left.localeCompare(right))[0];
+    const matching = events.filter((event) =>
+      (!query.status || event.status === query.status) &&
+      (!query.type || event.type === query.type),
+    );
+    return {
+      items: matching.slice(0, query.limit),
+      deliveries: deliveries.filter((delivery) =>
+        matching.some((event) => event.id === delivery.outboxEventId),
+      ),
+      totalMatching: matching.length,
+      metrics: {
+        total: events.length,
+        statusCounts,
+        failedCount: statusCounts.failed + statusCounts.dead_letter,
+        totalAttempts,
+        readyCount: readyEvents.length,
+        expiredLeaseCount,
+        deliveryStatusCounts,
+        ...(oldestReadyAt
+          ? {
+              oldestReadyAt,
+              oldestReadyAgeMs: Math.max(0, nowTime - Date.parse(oldestReadyAt)),
+            }
+          : {}),
+      },
+    };
+  }
+
+  async getProjectAnalytics(
+    principal: Principal,
+    projectId: string,
+    query: ProjectAnalyticsQuery,
+  ): Promise<ProjectAnalyticsView> {
+    await this.requireProject(principal, projectId);
+    this.assertProjectOperator(principal, "Reading project analytics");
+    const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
+      this.repository.listRuns(projectId),
+      this.repository.listContextSnapshots(projectId),
+      this.repository.listQuestions(projectId),
+      this.repository.listDecisions(projectId),
+      this.repository.listAssumptions(projectId),
+      this.repository.listArtifacts(projectId),
+    ]);
+    const runs = allRuns.filter((run) =>
+      (!query.client || run.client === query.client) &&
+      (!query.startedFrom || Date.parse(run.startedAt) >= Date.parse(query.startedFrom)) &&
+      (!query.startedTo || Date.parse(run.startedAt) <= Date.parse(query.startedTo)),
+    );
+    const source: AnalyticsSource = { snapshots, questions, decisions, assumptions, artifacts };
+    const cohort = calculateAnalyticsCohort(runs, source);
+    const clients = [...new Set(runs.map((run) => run.client))].sort((left, right) => left.localeCompare(right));
+    const byClient = clients.map((client): ProjectAnalyticsClientBreakdown => {
+      const clientRuns = runs.filter((run) => run.client === client);
+      const clientCohort = calculateAnalyticsCohort(clientRuns, source);
+      return {
+        client,
+        runCount: clientRuns.length,
+        contextRetrievals: clientCohort.activity.contextRetrievals,
+        questionSubmissions: clientCohort.activity.questionSubmissions,
+        questionsReused: clientCohort.activity.questionsReused,
+        decisionsAccepted: clientCohort.activity.decisionsAccepted,
+        decisionReuseOccurrences: clientCohort.activity.decisionReuseOccurrences,
+        assumptionsRecorded: clientCohort.activity.assumptionsRecorded,
+      };
+    });
+    return {
+      projectId,
+      generatedAt: this.now().toISOString(),
+      cohort: {
+        runCount: runs.length,
+        ...(query.client ? { client: query.client } : {}),
+        ...(query.startedFrom ? { startedFrom: query.startedFrom } : {}),
+        ...(query.startedTo ? { startedTo: query.startedTo } : {}),
+      },
+      ...cohort,
+      byClient,
+      privacy: {
+        derivedFrom: [
+          "agent run client, capability, status, timestamps, and linked record identifiers",
+          "context snapshot timestamps and returned record identifiers",
+          "question routing, lifecycle, response, and accepted-decision metadata",
+          "assumption lifecycle and specification version approval metadata",
+        ],
+        excluded: [
+          "raw prompts, agent outputs, transcripts, and hidden reasoning",
+          "task summaries, question text, responses, comments, decision text, and assumption text",
+          "specification titles, summaries, bodies, hashes, and review text",
+          "principal names, notification content, external links, secrets, and credentials",
+        ],
+      },
+    };
+  }
+
+  async replayOutboxEvent(
+    principal: Principal,
+    eventId: string,
+    input: ReplayOutboxEventInput,
+  ): Promise<OutboxEvent> {
+    return this.repository.transaction(async (repository) => {
+      this.assertProjectOperator(principal, "Replaying a delivery event");
+      const event = await repository.getOutboxEvent(eventId);
+      if (!event || event.organizationId !== principal.organizationId) {
+        throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Delivery event not found.", 404);
+      }
+      await this.requireProject(principal, event.projectId, repository);
+      if (event.status !== "failed" && event.status !== "dead_letter") {
+        throw new BridgeError(
+          "CONFLICT",
+          "Only failed or dead-letter delivery events can be replayed.",
+          409,
+          { currentStatus: event.status, currentAttempts: event.attempts },
+        );
+      }
+      if (event.attempts !== input.expectedAttempts) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The delivery event changed before replay; refresh and try again.",
+          409,
+          { currentStatus: event.status, currentAttempts: event.attempts },
+        );
+      }
+      const { leaseUntil: _leaseUntil, processedAt: _processedAt, lastError: _lastError, ...base } = event;
+      const replayed: OutboxEvent = {
+        ...base,
+        status: "pending",
+        attempts: 0,
+        availableAt: this.now().toISOString(),
+      };
+      await repository.saveOutboxEvent(replayed);
+      await this.audit(
+        repository,
+        principal,
+        event.projectId,
+        "outbox.replayed",
+        "outbox_event",
+        event.id,
+        this.now().toISOString(),
+      );
+      return replayed;
     });
   }
 
@@ -1816,7 +2487,10 @@ export class BridgeService {
     await this.requireProject(principal, projectId);
     const category = query.category?.toLocaleLowerCase("en");
     const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
-    return (await this.repository.listDecisions(projectId)).filter((decision) => {
+    const candidates = query.search
+      ? await this.repository.searchDecisions(projectId, query.search)
+      : await this.repository.listDecisions(projectId);
+    return candidates.filter((decision) => {
       if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
         return false;
       }
@@ -1938,6 +2612,7 @@ export class BridgeService {
     );
     await repository.saveOutboxEvent({
       id: `evt_${this.id()}`,
+      correlationId: currentCorrelationId() ?? createCorrelationId(),
       organizationId: decision.organizationId,
       projectId: decision.projectId,
       type: "decision.lifecycle_changed",
@@ -2132,6 +2807,24 @@ export class BridgeService {
     return this.requireArtifact(principal, artifactId, this.repository);
   }
 
+  async diffArtifactVersions(
+    principal: Principal,
+    artifactId: string,
+    query: ArtifactVersionDiffQuery,
+  ): Promise<ArtifactVersionDiff> {
+    const artifact = await this.requireArtifact(principal, artifactId, this.repository);
+    const fromVersion = artifact.versions.find((version) => version.id === query.fromVersionId);
+    const toVersion = artifact.versions.find((version) => version.id === query.toVersionId);
+    if (!fromVersion || !toVersion) {
+      throw new BridgeError(
+        "ARTIFACT_NOT_FOUND",
+        "Both specification versions must belong to the requested specification.",
+        404,
+      );
+    }
+    return buildArtifactVersionDiff(artifact.id, fromVersion, toVersion);
+  }
+
   private async requireArtifact(
     principal: Principal,
     artifactId: string,
@@ -2293,9 +2986,25 @@ export class BridgeService {
     projectId: string,
     query: ContextQuery,
   ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
-    return this.repository.transaction((repository) =>
-      this.getContextInTransaction(repository, principal, projectId, query),
-    );
+    const startedAt = performance.now();
+    try {
+      const { candidateCount, ...result } = await this.repository.transaction((repository) =>
+        this.getContextInTransaction(repository, principal, projectId, query),
+      );
+      this.metrics?.recordContextRetrieval({
+        outcome: "success",
+        durationMs: Math.max(0, performance.now() - startedAt),
+        resultCount: result.items.length,
+        candidateCount,
+      });
+      return result;
+    } catch (error) {
+      this.metrics?.recordContextRetrieval({
+        outcome: "error",
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      throw error;
+    }
   }
 
   private async getContextInTransaction(
@@ -2303,7 +3012,12 @@ export class BridgeService {
     principal: Principal,
     projectId: string,
     query: ContextQuery,
-  ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
+  ): Promise<{
+    readonly contextSnapshotId: string;
+    readonly items: readonly ContextItem[];
+    readonly truncated: boolean;
+    readonly candidateCount: number;
+  }> {
     await this.requireProject(principal, projectId, repository);
     const sourceRun = query.runId
       ? await this.requireLinkableRun(principal, query.runId, repository)
@@ -2437,7 +3151,12 @@ export class BridgeService {
       snapshot.id,
       snapshot.createdAt,
     );
-    return { contextSnapshotId: snapshot.id, items, truncated: scored.length > items.length };
+    return {
+      contextSnapshotId: snapshot.id,
+      items,
+      truncated: scored.length > items.length,
+      candidateCount: scored.length,
+    };
   }
 
   private async requireRun(
@@ -2587,6 +3306,13 @@ export class BridgeService {
     return project;
   }
 
+  private assertProjectOperator(principal: Principal, action: string): void {
+    assertHuman(principal, action);
+    if (!principal.roles.some((role) => normalizeRoleName(role) === "project-admin")) {
+      throw new BridgeError("FORBIDDEN", `${action} requires a project administrator.`, 403);
+    }
+  }
+
   private async audit(
     repository: BridgeRepository,
     principal: Principal,
@@ -2598,6 +3324,7 @@ export class BridgeService {
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
+      correlationId: currentCorrelationId() ?? createCorrelationId(),
       organizationId: principal.organizationId,
       projectId,
       actorId: principal.id,
@@ -2634,6 +3361,7 @@ export class BridgeService {
       });
       await repository.saveOutboxEvent({
         id: `evt_${this.id()}`,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
         organizationId: principal.organizationId,
         projectId,
         type: "notification.created",

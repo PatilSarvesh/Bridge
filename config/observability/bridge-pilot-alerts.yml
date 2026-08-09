@@ -1,0 +1,89 @@
+groups:
+  - name: bridge-pilot-service
+    interval: 30s
+    rules:
+      - alert: BridgeApiSustainedFailure
+        expr: |
+          (
+            sum(rate(bridge_http_requests_total{service="api",outcome="server_error"}[5m]))
+            /
+            clamp_min(sum(rate(bridge_http_requests_total{service="api"}[5m])), 0.001)
+          ) > 0.05
+          and sum(rate(bridge_http_requests_total{service="api"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: page
+          service: bridge-api
+        annotations:
+          summary: Bridge API server-error ratio is above five percent
+          runbook: docs/runbooks/incidents.md
+
+      - alert: BridgeMcpSustainedFailure
+        expr: |
+          (
+            sum(rate(bridge_http_requests_total{service="mcp",outcome="server_error"}[5m]))
+            /
+            clamp_min(sum(rate(bridge_http_requests_total{service="mcp"}[5m])), 0.001)
+          ) > 0.05
+          and sum(rate(bridge_http_requests_total{service="mcp"}[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: page
+          service: bridge-mcp
+        annotations:
+          summary: Bridge MCP server-error ratio is above five percent
+          runbook: docs/runbooks/incidents.md
+
+      - alert: BridgeDatabaseAvailabilityRisk
+        expr: |
+          (
+            sum(rate(bridge_database_transactions_total{backend="postgresql",outcome="error"}[5m]))
+            /
+            clamp_min(sum(rate(bridge_database_transactions_total{backend="postgresql"}[5m])), 0.001)
+          ) > 0.05
+          or sum(rate(bridge_http_requests_total{operation="/health/ready",outcome="server_error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: page
+          service: bridge-database
+        annotations:
+          summary: PostgreSQL transactions or readiness indicate exhaustion or unavailability
+          runbook: docs/runbooks/incidents.md
+
+      - alert: BridgeOutboxBacklog
+        expr: |
+          max(bridge_outbox_oldest_claimed_age_seconds) > 300
+          or (time() - max(bridge_outbox_last_cycle_timestamp_seconds)) > 300
+        for: 10m
+        labels:
+          severity: ticket
+          service: bridge-worker
+        annotations:
+          summary: Bridge outbox work or the worker cycle is more than five minutes stale
+          runbook: docs/runbooks/incidents.md
+
+      - alert: BridgeOutboxDeadLetter
+        expr: sum(increase(bridge_outbox_events_total{outcome="dead_lettered"}[15m])) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          service: bridge-worker
+        annotations:
+          summary: Bridge created at least one outbox dead letter
+          runbook: docs/runbooks/incidents.md
+
+      - alert: BridgeNotificationDeliveryFailures
+        expr: |
+          (
+            sum(increase(bridge_notification_deliveries_total{outcome="failed"}[15m]))
+            /
+            clamp_min(sum(increase(bridge_notification_deliveries_total[15m])), 1)
+          ) > 0.10
+          and sum(increase(bridge_notification_deliveries_total[15m])) >= 10
+        for: 15m
+        labels:
+          severity: ticket
+          service: bridge-worker
+        annotations:
+          summary: Bridge notification failure ratio is above ten percent
+          runbook: docs/runbooks/incidents.md

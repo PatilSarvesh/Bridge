@@ -4,6 +4,7 @@ import type {
   RecordAssumptionInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
+import { BridgeMetrics } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
 import { BridgeService, InMemoryBridgeRepository } from "./index.js";
@@ -136,13 +137,14 @@ function assumptionInput(overrides: Partial<RecordAssumptionInput> = {}): Record
   };
 }
 
-async function runtime(): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
-  const repository = new InMemoryBridgeRepository();
+async function runtime(metrics?: BridgeMetrics): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
+  const repository = new InMemoryBridgeRepository(metrics);
   await repository.saveProject(project);
   return {
     repository,
     service: new BridgeService(repository, {
       publicBaseUrl: "http://bridge.test/review",
+      ...(metrics ? { metrics } : {}),
       now: () => new Date("2026-01-01T00:00:00.000Z"),
       id: (() => {
         let next = 0;
@@ -203,7 +205,8 @@ describe("Bridge decision workflow", () => {
   });
 
   it("records, ranks, expires, and human-resolves visible assumptions", async () => {
-    const { repository, service } = await runtime();
+    const metrics = new BridgeMetrics();
+    const { repository, service } = await runtime(metrics);
     const registration = await service.startRun(agent, project.id, {
       idempotencyKey: "assumption-run-001",
       client: "codex",
@@ -241,6 +244,21 @@ describe("Bridge decision workflow", () => {
       }),
     ]);
     expect(new URL(context.items[0]!.sourceUrl).searchParams.get("assumptionId")).toBe(assumption.id);
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_context_requests_total",
+        labels: { outcome: "success" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_database_transactions_total",
+        labels: { backend: "memory", outcome: "success" },
+      }),
+    ]));
+    expect(metrics.snapshot().histograms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bridge_context_result_count", count: 1, sum: 1 }),
+      expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 1 }),
+    ]));
     await expect(
       service.resolveAssumption(agent, assumption.id, {
         expectedVersion: 1,
@@ -705,6 +723,11 @@ describe("Bridge decision workflow", () => {
       answer: "Retry transient failures once before dead-lettering.",
       rationale: "Production evidence shows that one bounded retry prevents loops while preserving recovery.",
     });
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      search: "transient failures",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([original.id, replacement.id]);
     const publication = await service.publishArtifact(agent, project.id, artifactInput({
       idempotencyKey: "decision-lifecycle-artifact",
       citedDecisionIds: [original.id],
@@ -757,6 +780,26 @@ describe("Bridge decision workflow", () => {
     expect((await service.listDecisions(owner, project.id)).map((decision) => decision.id)).toEqual([
       replacement.id,
     ]);
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: false,
+      search: "production evidence",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([replacement.id]);
+    expect(await service.listDecisions(owner, project.id, {
+      includeHistory: false,
+      search: "initially retried",
+      scope: {},
+    })).toEqual([]);
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      search: "initially retried",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([original.id]);
+    await expect(service.listDecisions(outsider, project.id, {
+      includeHistory: true,
+      search: "transient failures",
+      scope: {},
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect((await service.listDecisions(owner, project.id, {
       includeHistory: true,
       scope: {},
@@ -922,6 +965,104 @@ describe("Bridge decision workflow", () => {
     await repository.saveNotification(inaccessibleNotification);
     expect(await service.listNotifications(limitedOwner)).toEqual([]);
     expect(await service.markAllNotificationsRead(limitedOwner)).toEqual({ markedCount: 0 });
+  });
+
+  it("lets project administrators inspect delivery metrics and safely replay dead letters", async () => {
+    const { repository, service } = await runtime();
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-outbox-operations-001",
+    }));
+    const [pending] = await repository.listOutboxEvents(project.id);
+    expect(pending).toBeDefined();
+
+    const initial = await service.inspectProjectOutbox(owner, project.id, { limit: 50 });
+    expect(initial).toMatchObject({
+      totalMatching: 1,
+      metrics: {
+        total: 1,
+        statusCounts: { pending: 1, processing: 0, processed: 0, failed: 0, dead_letter: 0 },
+        failedCount: 0,
+        totalAttempts: 0,
+        readyCount: 1,
+        expiredLeaseCount: 0,
+        oldestReadyAgeMs: 0,
+      },
+    });
+    await expect(service.inspectProjectOutbox(contributor, project.id, { limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.inspectProjectOutbox(agent, project.id, { limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 0 }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+
+    const [claimed] = await repository.claimOutboxEvents("2026-01-01T00:00:00.000Z", 1);
+    expect(claimed).toMatchObject({ id: pending!.id, status: "processing", attempts: 1 });
+    await repository.failOutboxEvent(
+      pending!.id,
+      "provider unavailable",
+      "2026-01-01T00:00:00.000Z",
+      true,
+    );
+    await repository.saveOutboxDelivery({
+      id: "odl_failed_delivery",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      outboxEventId: pending!.id,
+      channel: "email",
+      destinationHash: "a".repeat(64),
+      status: "failed",
+      attemptCount: 1,
+      preference: "immediate",
+      lastError: "provider unavailable",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const failures = await service.inspectProjectOutbox(owner, project.id, {
+      status: "dead_letter",
+      type: "notification.created",
+      limit: 10,
+    });
+    expect(failures).toMatchObject({
+      totalMatching: 1,
+      items: [expect.objectContaining({ id: pending!.id, attempts: 1, lastError: "provider unavailable" })],
+      deliveries: [expect.objectContaining({
+        outboxEventId: pending!.id,
+        channel: "email",
+        status: "failed",
+        destinationHash: "a".repeat(64),
+      })],
+      metrics: {
+        failedCount: 1,
+        totalAttempts: 1,
+        readyCount: 0,
+        expiredLeaseCount: 0,
+        deliveryStatusCounts: { delivered: 0, failed: 1, suppressed: 0, deferred: 0 },
+      },
+    });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 2 }))
+      .rejects.toMatchObject({ code: "CONFLICT", details: { currentAttempts: 1 } });
+    await expect(service.replayOutboxEvent(outsider, pending!.id, { expectedAttempts: 1 }))
+      .rejects.toMatchObject({ code: "OUTBOX_EVENT_NOT_FOUND" });
+
+    const replayed = await service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 });
+    expect(replayed).toEqual({
+      ...pending,
+      status: "pending",
+      attempts: 0,
+      availableAt: "2026-01-01T00:00:00.000Z",
+    });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: owner.id,
+          action: "outbox.replayed",
+          subjectType: "outbox_event",
+          subjectId: pending!.id,
+        }),
+      ]),
+    );
   });
 
   it("elevates security questions and prevents cross-tenant access", async () => {
@@ -1113,11 +1254,73 @@ describe("Bridge decision workflow", () => {
     await service.approveArtifactVersion(owner, second.version.id, {
       rationale: "Jitter and a fixed attempt limit reduce synchronized load and bound execution time.",
     });
+    const diff = await service.diffArtifactVersions(owner, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    });
+    expect(diff).toMatchObject({
+      artifactId: first.artifact.id,
+      from: { id: first.version.id, version: 1, status: "superseded" },
+      to: { id: second.version.id, version: 2, status: "approved" },
+      counts: { unchanged: 2, added: 1, removed: 1 },
+      exact: true,
+      truncated: false,
+      totalLines: 4,
+    });
+    expect(diff.lines).toEqual([
+      expect.objectContaining({ kind: "unchanged", oldLineNumber: 1, newLineNumber: 1, text: "# Transfer retry policy" }),
+      expect.objectContaining({ kind: "unchanged", oldLineNumber: 2, newLineNumber: 2, text: "" }),
+      expect.objectContaining({ kind: "removed", oldLineNumber: 3, text: expect.stringContaining("idempotency keys") }),
+      expect.objectContaining({ kind: "added", newLineNumber: 3, text: expect.stringContaining("five attempts") }),
+    ]);
+    await expect(service.diffArtifactVersions(outsider, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
     const artifact = await service.getArtifact(agent, first.artifact.id);
     expect(artifact.versions).toEqual([
-      expect.objectContaining({ id: first.version.id, status: "superseded" }),
-      expect.objectContaining({ id: second.version.id, status: "approved" }),
+      expect.objectContaining({
+        id: first.version.id,
+        status: "superseded",
+        body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff and idempotency keys.",
+      }),
+      expect.objectContaining({
+        id: second.version.id,
+        status: "approved",
+        body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
+      }),
     ]);
+  });
+
+  it("bounds large specification diffs without changing immutable content", async () => {
+    const { service } = await runtime();
+    const oldBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `old-line-${index}`)].join("\n");
+    const newBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `new-line-${index}`)].join("\n");
+    const first = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-large-diff-001",
+      summary: "Defines the original large generated specification for bounded diff verification.",
+      body: oldBody,
+    }));
+    const second = await service.publishArtifact(agent, project.id, artifactInput({
+      artifactId: first.artifact.id,
+      idempotencyKey: "artifact-large-diff-002",
+      summary: "Defines the replacement large generated specification for bounded diff verification.",
+      body: newBody,
+    }));
+
+    const diff = await service.diffArtifactVersions(owner, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    });
+    expect(diff).toMatchObject({
+      counts: { unchanged: 1, removed: 1_100, added: 1_100 },
+      exact: false,
+      truncated: true,
+      totalLines: 2_201,
+    });
+    expect(diff.lines).toHaveLength(2_000);
+    const artifact = await service.getArtifact(owner, first.artifact.id);
+    expect(artifact.versions.map((version) => version.body)).toEqual([oldBody, newBody]);
   });
 
   it("records specification feedback and requires a new version after requested changes", async () => {
@@ -1187,5 +1390,153 @@ describe("Bridge decision workflow", () => {
         }),
       }),
     ]));
+  });
+
+  it("derives project-admin analytics by run cohort without returning stored content", async () => {
+    const { service } = await runtime();
+    const firstRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-codex-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Create the transfer retry policy",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    await service.getContext(agent, project.id, {
+      runId: firstRun.run.id,
+      task: "Find existing transfer retry policy",
+      scope: { component: "transfers" },
+      categories: [],
+      maxItems: 20,
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "analytics-question-001",
+      runId: firstRun.run.id,
+    }));
+    await service.proposeAnswer(contributor, question.id, {
+      answer: "Retry only failures classified as transient.",
+      rationale: "Permanent failures need operator review rather than repeated execution.",
+      optionKey: "transient",
+    });
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Bounded retries for transient failures avoid duplicate work and retry loops.",
+    });
+    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "analytics-assumption-001",
+      runId: firstRun.run.id,
+    }));
+    await service.resolveAssumption(owner, assumption.id, {
+      expectedVersion: assumption.version,
+      status: "rejected",
+      rationale: "The proposed namespace conflicts with the existing production metric contract.",
+    });
+    const artifact = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "analytics-artifact-001",
+      runId: firstRun.run.id,
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, artifact.version.id, {
+      rationale: "The specification follows the accepted retry decision and remains operationally bounded.",
+    });
+
+    const secondRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-codex-002",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Reuse the approved transfer retry policy",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    await service.getContext(agent, project.id, {
+      runId: secondRun.run.id,
+      task: "Apply the approved transfer retry policy",
+      scope: { component: "transfers" },
+      categories: [],
+      maxItems: 20,
+    });
+    const reused = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "analytics-question-reuse-001",
+      runId: secondRun.run.id,
+    }));
+    expect(reused.submissionDisposition).toBe("reused_accepted");
+    await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-claude-001",
+      client: "claude_code",
+      capability: "instructions",
+      taskSummary: "Observe the governed project context",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+
+    const analytics = await service.getProjectAnalytics(owner, project.id, {});
+    expect(analytics).toMatchObject({
+      projectId: project.id,
+      cohort: { runCount: 3 },
+      activity: {
+        contextRetrievals: 2,
+        questionSubmissions: 2,
+        questionsCreated: 1,
+        questionsReused: 1,
+        questionsRoutedOnCreation: 1,
+        responsesProposed: 2,
+        decisionsAccepted: 1,
+        decisionReuseOccurrences: 1,
+        assumptionsRecorded: 1,
+        assumptionsResolved: 1,
+        specificationVersionsPublished: 1,
+        specificationVersionsApproved: 1,
+      },
+      outcomes: {
+        runsWithContextRate: 2 / 3,
+        questionReuseRate: 0.5,
+        firstAssignmentRoutingRate: 1,
+        decisionAcceptanceRate: 1,
+        acceptedDecisionReuseCount: 1,
+        assumptionResolutionRate: 1,
+        assumptionStatusCounts: { active: 0, confirmed: 0, rejected: 1, expired: 0, superseded: 0 },
+        specificationApprovalRate: 1,
+        medianQuestionResolutionMs: 0,
+        medianSpecificationApprovalMs: 0,
+      },
+      guardrails: {
+        questionsPerRun: 2 / 3,
+        blockingQuestions: 1,
+        unroutedBlockingQuestions: 0,
+        contextItemsReturned: 2,
+        contextItemsPerRetrieval: 1,
+      },
+      byClient: [
+        expect.objectContaining({ client: "claude_code", runCount: 1, contextRetrievals: 0 }),
+        expect.objectContaining({
+          client: "codex",
+          runCount: 2,
+          contextRetrievals: 2,
+          questionsReused: 1,
+          decisionReuseOccurrences: 1,
+        }),
+      ],
+    });
+    const serialized = JSON.stringify(analytics);
+    expect(serialized).not.toContain(question.title);
+    expect(serialized).not.toContain(artifact.version.body);
+    expect(serialized).not.toContain(firstRun.run.taskSummary);
+    expect(analytics.privacy.excluded).toEqual(expect.arrayContaining([
+      expect.stringContaining("hidden reasoning"),
+      expect.stringContaining("specification titles"),
+    ]));
+
+    const claudeOnly = await service.getProjectAnalytics(owner, project.id, { client: "claude_code" });
+    expect(claudeOnly).toMatchObject({
+      cohort: { runCount: 1, client: "claude_code" },
+      activity: { contextRetrievals: 0, questionSubmissions: 0, decisionsAccepted: 0 },
+      byClient: [expect.objectContaining({ client: "claude_code", runCount: 1 })],
+    });
+    await expect(service.getProjectAnalytics(contributor, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(agent, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(outsider, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

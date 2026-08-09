@@ -1,5 +1,10 @@
 import type { BridgeRepository } from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
+import {
+  type BridgeMetrics,
+  currentCorrelationId,
+  runWithCorrelationContextIfAbsent,
+} from "@bridge/observability";
 import type {
   AgentRun,
   Assumption,
@@ -8,11 +13,12 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  OutboxDelivery,
   OutboxEvent,
   Project,
   Question,
 } from "@bridge/domain";
-import { and, asc, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import {
@@ -29,6 +35,8 @@ import {
   decisionToRow,
   notificationFromRow,
   notificationToRow,
+  outboxDeliveryFromRow,
+  outboxDeliveryToRow,
   outboxEventFromRow,
   outboxEventToRow,
   projectFromRow,
@@ -54,6 +62,7 @@ import {
   questions,
   runContinuationLocators,
   notifications,
+  outboxDeliveries,
   outboxEvents,
 } from "./schema.js";
 
@@ -70,17 +79,30 @@ export class PostgresBridgeRepository implements BridgeRepository {
   constructor(
     private readonly database: BridgeDatabase,
     private readonly lockAggregateReads = false,
+    private readonly metrics?: BridgeMetrics,
   ) {}
 
+  async checkHealth(): Promise<{ readonly backend: string }> {
+    await this.database.execute(sql`select 1`);
+    return { backend: "postgresql" };
+  }
+
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+    if (!currentCorrelationId()) {
+      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
+    }
     if (this.lockAggregateReads) return work(this);
+
+    const startedAt = performance.now();
+    let outcome: "success" | "error" = "success";
 
     try {
       return await this.database.transaction(async (transaction) =>
-        work(new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true)),
+        work(new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true, this.metrics)),
         { isolationLevel: "serializable" },
       );
     } catch (error) {
+      outcome = "error";
       const code = databaseErrorCode(error);
       if (code === "23505") {
         throw new BridgeError("CONFLICT", "A concurrent operation already created this record.", 409);
@@ -89,6 +111,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
         throw new BridgeError("CONFLICT", "The operation conflicted with another update; retry it.", 409);
       }
       throw error;
+    } finally {
+      this.metrics?.recordDatabaseTransaction({
+        backend: "postgresql",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
     }
   }
 
@@ -325,6 +353,21 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(decisionFromRow);
   }
 
+  async searchDecisions(projectId: string, search: string): Promise<readonly Decision[]> {
+    const document = sql`(
+      setweight(to_tsvector('simple', coalesce(${decisions.answer}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${decisions.rationale}, '')), 'B') ||
+      setweight(to_tsvector('simple', coalesce(${decisions.category}, '')), 'C')
+    )`;
+    const query = sql`websearch_to_tsquery('simple', ${search})`;
+    const rows = await this.database
+      .select()
+      .from(decisions)
+      .where(and(eq(decisions.projectId, projectId), sql`${document} @@ ${query}`))
+      .orderBy(desc(sql<number>`ts_rank_cd(${document}, ${query})`), desc(decisions.createdAt));
+    return rows.map(decisionFromRow);
+  }
+
   async saveDecision(decision: Decision): Promise<void> {
     const row = decisionToRow(decision);
     await this.database
@@ -508,6 +551,16 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(outboxEventFromRow);
   }
 
+  async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
+    const query = this.database
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.id, eventId))
+      .limit(1);
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    return rows[0] ? outboxEventFromRow(rows[0]) : undefined;
+  }
+
   async saveOutboxEvent(event: OutboxEvent): Promise<void> {
     const row = outboxEventToRow(event);
     await this.database
@@ -516,6 +569,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .onConflictDoUpdate({
         target: outboxEvents.id,
         set: {
+          correlationId: row.correlationId,
           organizationId: row.organizationId,
           projectId: row.projectId,
           type: row.type,
@@ -527,6 +581,47 @@ export class PostgresBridgeRepository implements BridgeRepository {
           createdAt: row.createdAt,
           processedAt: row.processedAt,
           lastError: row.lastError,
+        },
+      });
+  }
+
+  async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
+    const rows = await this.database
+      .select()
+      .from(outboxDeliveries)
+      .where(eq(outboxDeliveries.projectId, projectId))
+      .orderBy(asc(outboxDeliveries.updatedAt));
+    return rows.map(outboxDeliveryFromRow);
+  }
+
+  async getOutboxDelivery(
+    eventId: string,
+    channel: OutboxDelivery["channel"],
+  ): Promise<OutboxDelivery | undefined> {
+    const query = this.database
+      .select()
+      .from(outboxDeliveries)
+      .where(and(eq(outboxDeliveries.outboxEventId, eventId), eq(outboxDeliveries.channel, channel)))
+      .limit(1);
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    return rows[0] ? outboxDeliveryFromRow(rows[0]) : undefined;
+  }
+
+  async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
+    const row = outboxDeliveryToRow(delivery);
+    await this.database
+      .insert(outboxDeliveries)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [outboxDeliveries.outboxEventId, outboxDeliveries.channel],
+        set: {
+          destinationHash: row.destinationHash,
+          status: row.status,
+          attemptCount: row.attemptCount,
+          preference: row.preference,
+          providerMessageId: row.providerMessageId,
+          lastError: row.lastError,
+          updatedAt: row.updatedAt,
         },
       });
   }

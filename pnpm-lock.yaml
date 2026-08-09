@@ -35,6 +35,9 @@ importers:
       '@bridge/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bridge/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@bridge/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -72,6 +75,9 @@ importers:
       '@bridge/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bridge/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@bridge/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -113,6 +119,9 @@ importers:
       '@bridge/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bridge/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
     devDependencies:
       tsx:
         specifier: 4.23.11
@@ -126,6 +135,9 @@ importers:
       '@bridge/domain':
         specifier: workspace:*
         version: link:../domain
+      '@bridge/observability':
+        specifier: workspace:*
+        version: link:../observability
 
   packages/contracts:
     dependencies:
@@ -144,6 +156,9 @@ importers:
       '@bridge/domain':
         specifier: workspace:*
         version: link:../domain
+      '@bridge/observability':
+        specifier: workspace:*
+        version: link:../observability
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -163,6 +178,8 @@ importers:
       '@bridge/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/observability: {}
 
   packages/test-support:
     dependencies:

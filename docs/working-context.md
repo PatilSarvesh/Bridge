@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-09, Asia/Kolkata |
+| Last updated | 2026-08-10, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decision retirement, active-by-default decision browsing/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
+| Current implementation phase | Governed decisions/specifications, outbox operations, and a provider-neutral privacy-minimized email delivery seam are implemented; Claude Code conformance, live SES/directory wiring, and scheduled delivery remain pending |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -596,11 +596,17 @@ Notifications (human-only):
 - `POST /v1/notifications/:notificationId/read`
 - `POST /v1/notifications/read-all`
 
+Delivery operations (human project administrators only):
+
+- `GET /v1/admin/projects/:projectId/outbox?status=&type=&limit=`
+- `POST /v1/admin/outbox/:eventId/replay` with the last observed `expectedAttempts`
+
 Specifications:
 
 - `POST /v1/projects/:projectId/artifacts`
 - `GET /v1/projects/:projectId/artifacts`
 - `GET /v1/artifacts/:artifactId`
+- `GET /v1/artifacts/:artifactId/diff?fromVersionId=&toVersionId=`
 - `POST /v1/artifact-versions/:versionId/reviews`
 - `POST /v1/artifact-versions/:versionId/approve`
 
@@ -760,6 +766,7 @@ The local web application provides:
 - Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
 - Specifications navigation and pending count.
 - Specification detail, immutable Markdown body, reviewer metadata, and version history.
+- Authorized comparison of any two immutable versions with safe added/removed line rendering, provenance, and bounded large-document behavior.
 - Append-only formal review comments and request-changes controls for authorized specification reviewers.
 - A visible changes-requested state that directs the author to publish a new immutable version.
 - Required human approval rationale.
@@ -778,14 +785,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the decision-history-filter slice:
+Current validation result after the privacy-conscious product-analytics slice:
 
-- Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 56 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
-- Production builds: passed for all nine TypeScript packages plus the Next.js application.
+- Type-check: passed across all eleven TypeScript configurations.
+- Behavioral tests: 72 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Production builds: passed for all ten TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject, role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy/correlation backfills, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, correlation format/indexes, and email-delivery scope/result/hash constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -826,6 +833,8 @@ Current validation result after the decision-history-filter slice:
 - Protected-review browser verification passed: a security reviewer recorded an approval, the review history rendered, and the routed QA owner retained the final acceptance action.
 - In-app notification browser verification passed: the human reviewer saw the seeded assignment, opened it from the Notifications view, and the unread state changed to Read.
 - Transactional-outbox application, mapper/migration, and worker-cycle tests passed: each notification creates a pending delivery intent, claims acquire a lease and increment attempts, successful handlers complete events, and repeated failures become dead letters.
+- Outbox-operations application/API tests passed: only project administrators can inspect delivery state, metrics report status/failure/ready/lease/age data, stale replay requests conflict, cross-tenant IDs remain hidden, successful replay retains the event ID, and the reset plus audit record commit atomically.
+- Provider-neutral email tests passed: all five essential template families render bounded plain text, subjects resist header injection, immediate sends use stable idempotency keys, duplicate completed delivery is skipped, ordinary muted/digest choices are recorded, protected-review mail bypasses muting, addresses are never persisted, and provider errors are redacted before retry/dead-letter storage.
 - CLI bootstrap diagnostics passed: dry-run registration leaves API/files untouched, while doctor verifies the mapped project and generated client instructions.
 - Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
 - Adapter installation diagnostics passed: `bridge install` switches the selected native instruction adapter without project registration, preserves unrelated content, and leaves the repository untouched during `--dry-run`.
@@ -914,14 +923,14 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 ### 17.4 Not yet implemented
 
 - Database row-level security.
-- External outbox adapters, scheduled worker deployment, and operator replay/metrics.
+- Live email/team provider implementations, scheduled worker deployment, digest batching, jitter, and time-series delivery telemetry/alerts.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
 - Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
-- External notification delivery adapters and preference-aware channels.
+- A live recipient directory/preferences store, SES sender, digest scheduler, and team channel; the provider-neutral email contracts and preference outcomes are implemented.
 - GitHub integration.
-- Slack/email integrations.
+- Live Slack/SES integrations.
 - PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
 - Configurable specification reviewer/team routing or multi-reviewer quorum; append-only comments and request-changes are implemented.
@@ -977,7 +986,7 @@ Environment facts remain:
 
 1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
 2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
-3. Connect claimed outbox events to approved email/team-channel adapters after live PostgreSQL validation; add operator metrics, replay controls, and notification preferences with that integration.
+3. Wire the provider-neutral email handler to an approved SES sender and recipient directory after live PostgreSQL validation; add digest scheduling, a team-channel adapter, jitter, and telemetry export around the implemented receipts/operator controls.
 4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
 
 ### 20.2 Implemented agent-run and continuation slice
@@ -1222,7 +1231,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, email/team-channel delivery, preferences, digests, pagination, and operator replay/metrics remain future work. The outbox cycle is deliberately handler-injected and does not choose an external provider.
+- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, live provider delivery, preference administration, digest sending, and pagination remain future work. The outbox/email handlers are deliberately injected and do not choose an external provider.
 - Notifications do not capture raw agent transcripts or private reasoning. MCP remains optional and does not expose the human notification feed to ordinary agents.
 
 ### 20.15 Implemented transactional outbox and worker cycle slice
@@ -1237,8 +1246,8 @@ Implemented:
 
 Deliberate boundaries:
 
-- No email, chat, source-control, or work-item adapter is enabled yet; handlers remain an explicit integration seam.
-- No daemon scheduler, operator replay API, delivery metrics, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database.
+- No live email, chat, source-control, or work-item provider is enabled; the email template/handler seam and durable receipts are implemented without credentials.
+- No daemon scheduler, external adapter, time-series telemetry export, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database. Project-scoped inspection, point-in-time metrics, and audited replay are implemented through REST.
 
 ### 20.16 Implemented CLI bootstrap safety and diagnostics slice
 
@@ -1358,7 +1367,7 @@ Implemented and verified:
 Deliberate boundaries:
 
 - Impact is direct and deterministic; deeper transitive dependency analysis remains BRG-123.
-- PostgreSQL full-text decision search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
+- Automatic review-date expiry and scheduled lifecycle automation remain future work.
 - No agent, CLI, or MCP path can perform a human decision lifecycle action.
 
 ### 20.23 Implemented specification review feedback and request changes
@@ -1395,13 +1404,166 @@ Implemented and verified:
 
 Deliberate boundaries:
 
-- Full-text relevance search remains a PostgreSQL-backed follow-up in BRG-041; the current agent search stays deterministic and authorized.
 - The first UI surface exposes component scope because it is the most common narrowing dimension; REST already supports every defined scope dimension.
 - Filters are local view state, not saved preferences or shareable query parameters.
 
 ### 20.25 Corrected the decision-lifecycle migration for the full PostgreSQL chain
 
-GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement. The next PostgreSQL run `31326475659` proved that the full migration chain proceeded, then exposed a stale reconnect assertion added with the lifecycle scenario: the run correctly persisted both its original and replacement question IDs. The integration test now asserts those exact provenance IDs instead of expecting only one question.
+GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement. The next PostgreSQL run `31326475659` proved that the full migration chain proceeded, then exposed a stale reconnect assertion added with the lifecycle scenario: the run correctly persisted both its original and replacement question IDs. The integration test now asserts those exact provenance IDs instead of expecting only one question. GitHub Actions run `31326716422` then passed the complete isolated-PostgreSQL CI gate for commit `665d83a`.
+
+### 20.26 Implemented authorized full-text decision search
+
+Implemented and locally verified:
+
+1. The decision-list query contract accepts a trimmed two-to-200-character search expression and composes it with active/history, lifecycle status, category, owner, creation-time, and exact-scope filters.
+2. Application authorization resolves the project before invoking repository search, preventing search input from weakening tenant/project access.
+3. PostgreSQL searches weighted `simple` text-search vectors across answer, rationale, and category, ranks answer matches above rationale and category matches, and preserves creation-time ordering for equal ranks.
+4. Forward-only migration `0011_keen_galactus.sql` creates the matching GIN expression index; the schema, Drizzle snapshot/journal, and migration regression describe the same index.
+5. Dependency-free in-memory mode implements deterministic Unicode token matching and the same answer/rationale/category field weights, so REST, web, CLI-backed API access, and optional MCP remain usable without PostgreSQL or MCP approval.
+6. The MCP `bridge_search_decisions` tool delegates to the same active-only application query instead of maintaining its former substring implementation.
+7. The Decisions UI provides an explicit search control and search-specific empty state; a one-character query is not submitted, and clearing filters also clears the draft.
+8. Application/API/MCP regressions cover active search, explicit retired-history search, combined filters, invalid input, and cross-organization denial. The opt-in PostgreSQL reconnect test covers active and retired full-text results when CI supplies its isolated database.
+
+Deliberate boundaries:
+
+- The `simple` configuration provides predictable language-neutral token matching without extensions; stemming, fuzzy/trigram matching, synonyms, and semantic/vector retrieval remain separate evaluated enhancements.
+- Search relevance scores affect ordering but are not exposed as organizational authority or confidence.
+- The GIN index is created normally rather than concurrently because migrations run explicitly before service startup; a large production deployment should revisit online index rollout.
+
+### 20.27 Implemented bounded immutable specification version diffs
+
+Implemented and locally verified:
+
+1. `GET /v1/artifacts/:artifactId/diff` delegates to one application query that authorizes artifact access and requires both requested versions to belong to that artifact.
+2. The derived response includes from/to version provenance, stable old/new line numbers, added/removed/unchanged kinds, complete counts, and exact/truncated metadata.
+3. Normal documents use a deterministic longest-common-subsequence line comparison bounded to one million comparison cells and 5,000 lines on either side.
+4. Larger generated documents fall back to deterministic removed/added regions and every response caps rendered lines at 2,000, preventing unbounded browser rendering while retaining complete counts.
+5. The Specifications UI lets a reviewer choose any two versions, safely renders text through React, and represents changed text as adjacent removed and added lines.
+6. Comparison only normalizes line endings in derived input. Stored Markdown, hashes, versions, approval state, audits, and outbox records remain untouched, so no schema migration was required.
+7. Application and API regressions cover exact changes, metadata and line numbers, cross-project denial, invalid input, large-diff fallback/truncation, and byte-for-byte preservation of immutable bodies.
+
+Deliberate boundaries:
+
+- This is a line diff rather than a word-level or semantic Markdown diff; its output is predictable and does not execute or render embedded Markdown/HTML.
+- A truncated response shows its retained prefix and complete aggregate counts, not a pageable diff. Server-side pagination or downloadable patches can be evaluated if real pilot artifacts require them.
+- No MCP-specific diff tool was added. Human review uses the canonical REST/web path, while agents retain existing artifact-version retrieval and MCP remains optional.
+
+### 20.28 Implemented project-scoped outbox operations and replay
+
+Implemented and locally verified:
+
+1. `GET /v1/admin/projects/:projectId/outbox` is a human project-admin-only application/REST query with optional status/type filters and a bounded 1–200 item response.
+2. Every response includes project-wide point-in-time metrics: counts by state, cumulative attempts, failed/dead-letter count, ready work, expired processing leases, and oldest-ready age.
+3. `POST /v1/admin/outbox/:eventId/replay` accepts only failed or dead-letter work and requires the operator's last observed attempt count, preventing stale or concurrent replay.
+4. Replay retains the stable event ID and safe pointer-only payload, clears lease/error/completion state, resets the retry budget, and makes the event immediately available to the existing worker.
+5. The replay mutation and immutable `outbox.replayed` audit event commit in one repository transaction. Forward-only migration `0012_outbox_operator_replay.sql` adds the matching `outbox_event` audit subject.
+6. Cross-organization event IDs return not found; project members without project-admin authority and all agent principals are denied.
+7. Application/API/migration regressions cover metrics, filters, invalid input, authority boundaries, invalid states, optimistic conflicts, successful replay, event-ID preservation, and audit provenance.
+
+Deliberate boundaries:
+
+- The snapshot is an operational API, not a web administration page or a time-series telemetry backend; dashboards and alerts remain BRG-104/BRG-111 work.
+- Replay resets per-cycle attempts because the immutable audit record preserves who replayed the stable event and when. Email delivery receipts retain each event/channel's current attempt outcome and provider message ID across replay.
+- The worker remains handler-injected. Live provider/directory wiring, team delivery, jitter, digest scheduling, and preference administration are still pending; MCP is not required for operator access.
+
+### 20.29 Implemented a privacy-minimized provider-neutral email delivery seam
+
+Implemented and locally verified:
+
+1. `apps/worker/src/email.ts` defines injected recipient-directory and sender contracts; no provider SDK, credentials, or organization identity flow is embedded in the worker.
+2. Plain-text assignment, clarification, blocking-escalation, accepted-answer, and artifact-review templates contain bounded minimal context plus an HTTP(S) Bridge review link. Subjects remove control characters to prevent header injection.
+3. The notification email handler verifies the notification/outbox pointer envelope before resolving a destination and supplies `${eventId}:email` as the stable provider idempotency key.
+4. Recipient addresses exist only in the in-memory sender request. Durable `OutboxDelivery` records contain an organization-scoped SHA-256 destination fingerprint, channel, resolved preference, attempt count, status, timestamps, sanitized failure, and optional provider message ID.
+5. Ordinary `immediate`, `muted`, and `digest` preferences produce delivered, suppressed, and deferred outcomes respectively. Protected-review notification email is immediate even when the injected preference is muted/digest.
+6. Previously delivered/suppressed/deferred event-channel receipts are not sent twice. A failed receipt can retry only against the same destination fingerprint, preventing silent redirection after failure.
+7. Forward-only migration `0013_ancient_gwen_stacy.sql` creates tenant-consistent delivery receipts, adds the required outbox composite key before its foreign key, and enforces channel/status/preference/attempt/hash/time/result invariants.
+8. Project-admin outbox inspection returns delivery receipts and delivery-status counts without revealing addresses. Worker, application, API, mapper/migration, and opt-in reconnect coverage exercise the seam.
+
+Deliberate boundaries:
+
+- No message leaves the process until a deployment supplies a real recipient directory and sender. SES credentials, email addresses, and customer data are not stored in repository files or outbox payloads.
+- The link is ready for a future signed-in deployment but the fixed-principal prototype has no authentication by explicit founder direction; BRG-092 therefore remains partial rather than claiming a production signed-in email flow.
+- Digest preference is durably deferred but not yet batched or sent. The blocking-escalation template exists, while producing SLA escalation notifications awaits scheduled policy work.
+- Only plain text is generated. HTML rendering, unsubscribe/preference administration, bounce/complaint handling, SES provider implementation, scheduling, jitter, and telemetry export remain deployment slices.
+
+### 20.30 Implemented operational health and restore-verification foundations
+
+Implemented and locally verified:
+
+1. API and standalone MCP HTTP surfaces expose separate liveness and readiness routes; the API preserves its legacy `/health` liveness response.
+2. Readiness crosses the application repository boundary. In-memory development reports its backend, PostgreSQL executes a minimal dependency query, and failures return a sanitized `503` without connection details.
+3. `pnpm restore:verify` is a read-only verifier for an already restored isolated PostgreSQL database. It checks required tables, migration history, core row counts, immutable artifact SHA-256 values, tenant-scope consistency, delivery scope, and artifact current/approved-version pointers.
+4. The verifier refuses an obvious production-target mistake when `BRIDGE_RESTORE_DATABASE_URL` identifies the same database as `DATABASE_URL`, never prints artifact bodies or connection strings, and exits nonzero on failed checks.
+5. `docs/runbooks/backup-restore.md` documents safe dump/restore separation, disabled workers, verification, evidence, and recovery activation without destructive cleanup commands.
+6. `docs/runbooks/incidents.md` covers queue backlog/dead letters, failed migrations, the explicitly deferred identity dependency, and notification-provider outages while preserving human authority and MCP-independent paths.
+7. Application, API, database verifier, MCP, type-check, test, build, and packaged-CLI validation pass without adding a schema migration or production identity/provider dependency.
+
+Deliberate boundaries:
+
+- No repository change can configure or prove managed PostgreSQL PITR, backup retention, object-storage versioning, alerting, or a real isolated restore. BRG-103 remains partial until deployment owners attach dated external evidence.
+- Current artifact bodies live in PostgreSQL; object-storage recovery becomes mandatory when the runtime begins storing objects outside that database.
+- Readiness covers the canonical repository dependency only. Provider/queue degradation belongs to operational telemetry, and future identity readiness requires the product owner to reopen identity scope.
+
+### 20.31 Implemented end-to-end correlation and safe structured-logging foundations
+
+Implemented and locally verified:
+
+1. Web and CLI callers generate a bounded `x-bridge-correlation-id`; API and MCP validate or replace inbound values and return the effective value on every response.
+2. Async request context crosses the transport/application boundary without adding correlation parameters to domain commands. Direct application calls receive a generated context at the repository transaction boundary.
+3. Audit and outbox events persist the operation correlation ID. Forward-only migration `0014_first_jane_foster.sql` backfills deterministic legacy IDs before setting non-null constraints, adds format checks, and indexes both durable lookup paths.
+4. The worker restores each claimed event's persisted context before handling it. The email sender request receives that ID explicitly with the existing stable event/channel idempotency key.
+5. Replayed delivery work keeps its original causal correlation ID while the operator replay audit uses the new request correlation ID.
+6. `@bridge/observability` provides context helpers and a JSON logger with bounded event/service names, an operational-field allowlist, recursive sensitive-key removal, unknown free-form redaction, and exception-message suppression.
+7. Standalone API/MCP runtimes use safe logging instead of framework-default request/error logs; worker cycle logs are injectable and correlated.
+8. Observability, API, application, worker, database mapper/migration, MCP, CLI, web, type-check, test, build, and packaged-distribution validation pass.
+
+Deliberate boundaries:
+
+- This slice provides correlation and safe logs, not distributed tracing export, metrics, dashboards, alert delivery, or deployment log-access controls. BRG-104 remains partial.
+- Correlation IDs are untrusted diagnostic metadata. They never confer identity, tenant access, approval authority, or idempotency.
+- The logger intentionally sacrifices arbitrary message text for privacy; diagnostic code should add stable event names, safe machine codes, record IDs, enums, and numeric measurements instead of free-form content.
+
+### 20.32 Implemented portable metrics, dashboard, alerts, and initial service objectives
+
+Implemented and locally verified:
+
+1. `@bridge/observability` now includes a dependency-free process-local `BridgeMetrics` registry with fixed counters, gauges, histograms, deterministic snapshots, and Prometheus text rendering.
+2. API and standalone MCP runtimes share a registry with their application service and PostgreSQL repository, record bounded route/outcome/duration series, and expose `GET /metrics`. `401`/`403` authorization denials are counted separately.
+3. Metrics never add tenant, project, principal, record, prompt, answer, specification, or other content labels. API operations use framework route templates and both HTTP surfaces collapse unmatched paths to `unmatched`.
+4. Context retrieval records success/error, end-to-end latency, result count, and pre-truncation candidate count without changing the public context contract.
+5. In-memory and PostgreSQL repository transactions record backend/outcome/duration at the outer transaction boundary. The current driver does not expose a stable pool-utilization metric, so provider/exporter saturation telemetry remains explicit deployment work.
+6. Outbox cycles record their completion timestamp, claimed count, oldest claimed age, and processed/retried/dead-lettered outcomes; notification email handling records delivered/failed/suppressed/deferred/skipped outcomes and duration.
+7. `config/observability/bridge-pilot-dashboard.json` provides request, latency, error, authorization, database, context, queue, and notification PromQL panels. `config/observability/bridge-pilot-alerts.yml` provides sustained API/MCP failure, database availability-risk, outbox backlog/dead-letter, and notification-failure rules.
+8. `docs/service-objectives.md` defines the measurement boundary, initial non-contractual pilot objectives, error-budget interpretation, thresholds, response class, ownership, and calibration process.
+9. Observability, application, API, and worker regressions cover rendering/privacy, authorization denial, context/database wiring, queue outcomes/age, and email delivery/idempotent-skip metrics.
+
+Deliberate boundaries:
+
+- Metrics are process-local and reset on restart. Multi-instance collection, storage, dashboard hosting, rule evaluation, paging routes, and monitoring-network access control belong to the deployment.
+- The worker exposes injection seams rather than a long-running metrics server because its scheduled durable runtime remains incomplete. Queue/provider panels become live only after that deployment host exports the shared registry.
+- MCP is represented by its bounded HTTP operation; per-tool/session metrics remain follow-up work. Database pool saturation requires provider/exporter telemetry.
+- The included objectives and thresholds are starting hypotheses. BRG-104 remains partial until representative pilot telemetry validates them and external alert delivery is exercised.
+
+### 20.33 Implemented privacy-conscious product analytics
+
+Implemented and locally verified:
+
+1. `GET /v1/admin/projects/:projectId/analytics` defines a mandatory project scope and optional controlled agent-client plus inclusive run-start cohort filters through the shared contract layer.
+2. The application requires a human project administrator after ordinary project access checks. Agents and non-admin humans cannot retrieve analytics, and no support-style cross-tenant bypass exists.
+3. Read-time aggregation uses existing run links to count context retrieval, question creation/reuse/routing coverage, responses, decision acceptance/later-run reuse, assumption resolution, and specification publication/approval.
+4. Outcomes include context compliance, reuse/routing/acceptance/resolution/approval rates, distinct reused decisions, median decision/specification approval times, assumption status counts, question-volume and context-size guardrails, and per-client breakdowns.
+5. The endpoint and web view return only counts, rates, durations, timestamps, and controlled client values. They include a human-readable collection/exclusion notice and do not return task summaries, record text, specification content, principal names, external links, prompts, outputs, transcripts, hidden reasoning, secrets, or credentials.
+6. The web **Analytics** view supports client/date filters, summary cards, governed activity, guardrails, client comparison, loading/empty/denied behavior, and the same privacy notice.
+7. No migration or external analytics service was added. Both in-memory and PostgreSQL modes use the canonical repository/application boundary, and MCP remains optional.
+8. Application and REST regressions prove calculations, exact question/decision reuse, client filtering, content exclusion, invalid-range validation, and project-admin authority. The complete typecheck/test/build/distribution gate passes.
+
+Deliberate boundaries:
+
+- Cohorts select runs by start time and report the current outcome of linked records; this is not an immutable historical as-of warehouse.
+- Routing coverage means an owner or role was present. Subjective first-owner correctness requires configured ownership evidence or pilot feedback.
+- Retrieving a decision proves Bridge supplied approved context, not that a model followed it or avoided rework.
+- User-reported rework, question-quality judgments, mute/unsubscribe behavior, and secret-detection events are not technically available and are not guessed.
+- A future materialized analytics store requires a separate privacy/schema/retention review; the MVP intentionally calculates in place.
 
 ## 21. Important implementation files
 
@@ -1428,6 +1590,10 @@ GitHub Actions run `31326190863` exposed a migration-chain defect that local in-
 - Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
 - Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
 - Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
+- Decision full-text search migration: `packages/database/drizzle/0011_keen_galactus.sql`
+- Outbox operator-audit migration: `packages/database/drizzle/0012_outbox_operator_replay.sql`
+- Email delivery-receipt migration: `packages/database/drizzle/0013_ancient_gwen_stacy.sql`
+- Correlation propagation migration: `packages/database/drizzle/0014_first_jane_foster.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1437,6 +1603,16 @@ GitHub Actions run `31326190863` exposed a migration-chain defect that local in-
 - Web UI: `apps/web/app/page.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
+- Provider-neutral notification email handler: `apps/worker/src/email.ts`
+- Correlation and safe structured logging: `packages/observability/src/index.ts`
+- Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
+- Observability behavior and boundaries: `docs/observability.md`
+- Product analytics definitions and privacy boundary: `docs/product-analytics.md`
+- Pilot service objectives: `docs/service-objectives.md`
+- Portable dashboard and alert definitions: `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`
+- Read-only restore verifier: `packages/database/src/verify-restore.ts`
+- Backup/restore runbook: `docs/runbooks/backup-restore.md`
+- Incident runbook: `docs/runbooks/incidents.md`
 
 ## 22. Source references already used in product decisions
 
@@ -1468,4 +1644,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default decision browsing with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance, PostgreSQL full-text decision search, and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, privacy-conscious project/client analytics, durable optional PostgreSQL and MCP paths, end-to-end correlation, safe structured logs, portable bounded metrics with dashboard/alert/SLO definitions, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production telemetry activation/calibration and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
