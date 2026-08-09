@@ -546,6 +546,51 @@ describe("Bridge CLI fallback adapter", () => {
     });
   });
 
+  it("renders human-readable output without changing the JSON default", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-human-output-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [], projects: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+
+    expect(await runCli([
+      "init",
+      "--name",
+      "Hospital Management System",
+      "--client",
+      "codex",
+      "--api-url",
+      "http://bridge.test",
+      "--output",
+      "human",
+    ], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain("Status: OK");
+    expect(stdout.at(-1)).toContain("Project ID: prj_hospital");
+    expect(stdout.at(-1)).toContain("Files:");
+    expect(stdout.at(-1)).not.toContain('"projectId"');
+
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions"');
+    expect(stderr).toEqual([]);
+  });
+
+  it("rejects an unsupported output mode with the stable usage exit code", async () => {
+    const stderr: string[] = [];
+    expect(await runCli(["doctor", "--output", "yaml"], {
+      cwd: await mkdtemp(join(tmpdir(), "bridge-cli-invalid-output-")),
+      stderr: (text) => stderr.push(text),
+    })).toBe(cliExitCodes.usage);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "INVALID_OUTPUT_MODE",
+      exitCode: cliExitCodes.usage,
+    });
+  });
+
   it("initializes a repository, asks a question, reads its answer, and synchronizes context", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-"));
     const stdout: string[] = [];

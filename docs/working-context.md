@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | The MVP prototype, GitHub handoff hardening, and the first real independent Codex fresh-repository conformance run are verified; the next adapter validation is cross-vendor Claude Code conformance, followed by distribution work |
+| Current implementation phase | Codex-first independent conformance, checksummed GitHub CLI release automation, globally installed package smoke coverage, and human-readable CLI success output are implemented; Claude Code conformance awaits an available client, while product workflow work continues |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -797,6 +797,7 @@ Current validation result after the role-aware-routing, reviewer-switcher, perso
 - Real independent Codex CLI conformance passed from a fresh repository using only the ordinary prompt `Build a Hospital Management System.` and no MCP. The resulting run linked a context snapshot, one protected role-routed question, a reversible assumption, and PRD/ADR/API-contract/test-plan versions, then entered `waiting_for_human`.
 - The real-agent run exposed and drove fixes for two adapter defects: packaged execution through pnpm symlinks now resolves the real entrypoint, and generated instructions document the direct repository binary fallback when unrelated dependency install policy blocks `pnpm exec`.
 - `bridge conformance --task [--run-id]` now emits named observable checks and exit code `10` when a task-linked run, context, routed question, specification set, provenance links, or human boundary is incomplete. It intentionally cannot observe vendor-private clarification UI.
+- CLI success output now defaults to stable JSON but supports `--output human` across commands; errors remain machine-readable JSON with the existing stable exit codes in either mode.
 - In-app browser verification passed for project selection, the Hospital question, and all four Hospital specifications.
 - REST response-proposal regression passed: a contributor can add an answer before the configured owner accepts the decision.
 - In-app browser verification passed for the team discussion card, response author/rationale, and response form.
@@ -1314,6 +1315,7 @@ Implemented and verified:
 5. Generated instructions provide `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated application dependency policy blocks `pnpm exec`.
 6. Root validation now packages the CLI, installs it globally under a temporary prefix, executes the installed command, and verifies a no-mutation bootstrap dry run.
 7. A tag-driven GitHub Actions workflow validates tag/version equality and creates a GitHub Release containing the tarball and SHA-256 checksum. Installation and release-owner steps are documented in `docs/distribution.md`.
+8. `--output human|json` provides a generic readable rendering for successful commands while preserving JSON as the agent/CI default and for all error envelopes.
 
 Deliberate boundaries:
 

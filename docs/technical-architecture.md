@@ -156,7 +156,7 @@ Responsibilities:
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
-- JSON output, stable exit codes, and repository snapshots for CI and restricted environments.
+- Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.
 
 ### 5.6 Agent adapters
 

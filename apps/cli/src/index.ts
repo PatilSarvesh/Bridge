@@ -22,6 +22,7 @@ type FetchFunction = (input: string | URL | Request, init?: RequestInit) => Prom
 export interface CliRuntime {
   readonly cwd: string;
   readonly environment: NodeJS.ProcessEnv;
+  readonly outputMode: "json" | "human";
   readonly fetch: FetchFunction;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
@@ -62,6 +63,7 @@ function defaultRuntime(): CliRuntime {
   return {
     cwd: process.cwd(),
     environment: process.env,
+    outputMode: "json",
     fetch: (input, init) => fetch(input, init),
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
@@ -115,6 +117,9 @@ Usage:
   bridge spec publish [project-id] --file <spec.md> --title <title> --type <prd|adr|api_contract|test_plan> [--run-id <id>]
   bridge spec get <artifact-id>
   bridge spec pull [project-id] [--out <directory>]
+
+Output:
+  --output <json|human>  JSON is the stable default for agents and automation.
 
 Configuration:
   bridge init --name <name> registers a project and activates repository instructions for the selected client.
@@ -309,8 +314,88 @@ async function bridgeFetch(
   return body;
 }
 
+function humanLabel(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const acronyms = new Set(["api", "cli", "id", "mcp", "url"]);
+  return words.length > 0
+    ? words.map((word) => acronyms.has(word.toLowerCase())
+      ? word.toUpperCase()
+      : `${word[0]?.toUpperCase()}${word.slice(1)}`).join(" ")
+    : key;
+}
+
+function humanScalar(value: string | number | boolean | null): string {
+  if (value === null) return "none";
+  return typeof value === "boolean" ? (value ? "yes" : "no") : String(value);
+}
+
+function renderHumanFields(record: Readonly<Record<string, unknown>>, indentation = 0): string[] {
+  const prefix = " ".repeat(indentation);
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "ok") continue;
+    const label = humanLabel(key);
+    if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+      lines.push(`${prefix}${label}: ${humanScalar(value as string | number | boolean | null)}`);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      lines.push(`${prefix}${label}:`);
+      if (value.length === 0) {
+        lines.push(`${prefix}  (none)`);
+        continue;
+      }
+      for (const item of value) {
+        const itemRecord = asRecord(item);
+        if (!itemRecord) {
+          lines.push(`${prefix}  - ${humanScalar(item as string | number | boolean | null)}`);
+          continue;
+        }
+        if (key === "checks") {
+          const status = String(itemRecord.status ?? "unknown").toUpperCase();
+          const name = String(itemRecord.name ?? "check");
+          const detail = String(itemRecord.detail ?? "");
+          lines.push(`${prefix}  [${status}] ${name}${detail ? ` — ${detail}` : ""}`);
+          continue;
+        }
+        lines.push(`${prefix}  -`);
+        lines.push(...renderHumanFields(itemRecord, indentation + 4));
+      }
+      continue;
+    }
+    const nested = asRecord(value);
+    if (nested) {
+      lines.push(`${prefix}${label}:`);
+      lines.push(...renderHumanFields(nested, indentation + 2));
+    }
+  }
+  return lines;
+}
+
+function renderHumanOutput(value: unknown): string {
+  const record = asRecord(value);
+  if (!record) {
+    if (Array.isArray(value)) {
+      return value.map((item) => `- ${String(item)}`).join("\n");
+    }
+    return String(value ?? "");
+  }
+  const lines = typeof record.ok === "boolean"
+    ? [`Status: ${record.ok ? "OK" : "FAILED"}`]
+    : [];
+  lines.push(...renderHumanFields(record));
+  return `${lines.join("\n")}\n`;
+}
+
 function output(runtime: CliRuntime, value: unknown): void {
-  runtime.stdout(`${JSON.stringify(value, null, 2)}\n`);
+  runtime.stdout(runtime.outputMode === "human"
+    ? renderHumanOutput(value)
+    : `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -1150,6 +1235,16 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
     runtime.stdout(`${usage()}\n`);
     return;
   }
+
+  const requestedOutput = optionValue(args, "--output") ?? "json";
+  if (requestedOutput !== "json" && requestedOutput !== "human") {
+    throw new CliError(
+      "INVALID_OUTPUT_MODE",
+      "--output must be json or human.",
+      cliExitCodes.usage,
+    );
+  }
+  runtime = { ...runtime, outputMode: requestedOutput };
 
   const command = args[0];
   if (command === "init") {

@@ -699,7 +699,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — context, filtered inbox, question, assumption, specification, and bounded-wait commands plus stable JSON errors/exit codes are implemented; a separate human-formatted output mode remains
+- **Status:** Implemented for the essential prototype commands, including opt-in human-readable success output and stable JSON automation/error behavior
 - **Dependencies:** BRG-061
 - **PRD references:** CLI contract
 
@@ -708,7 +708,7 @@ As an operator, I need CLI access to context, inbox, questions, assumptions, spe
 Acceptance criteria:
 
 1. Commands implement context, inbox, question get, ask, assumption add, spec publish, and wait.
-2. Human and JSON output modes are supported.
+2. Human and JSON output modes are supported. **Implemented globally through `--output human|json`, with JSON remaining the default.**
 3. Wait is bounded, interruptible, and does not busy-poll.
 4. Exit codes distinguish success, invalid input, configuration, connection failure, unresolved wait, policy denial, not found, and conflict.
 
