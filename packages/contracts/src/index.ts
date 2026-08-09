@@ -25,6 +25,7 @@ export const notificationTypeSchema = z.enum([
   "question_comment",
   "question_review",
   "question_accepted",
+  "decision_lifecycle",
   "artifact_review_requested",
   "artifact_approved",
 ]);
@@ -160,6 +161,30 @@ export const acceptAnswerInputSchema = z
   })
   .refine((value) => Boolean(value.optionKey || value.answer), {
     message: "Either optionKey or answer is required.",
+  });
+
+export const changeDecisionLifecycleInputSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    status: z.enum(["superseded", "expired", "revoked"]),
+    rationale: z.string().trim().min(10).max(5_000),
+    replacementDecisionId: z.string().trim().min(1).max(100).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.status === "superseded" && !value.replacementDecisionId) {
+      context.addIssue({
+        code: "custom",
+        message: "A superseded decision requires replacementDecisionId.",
+        path: ["replacementDecisionId"],
+      });
+    }
+    if (value.status !== "superseded" && value.replacementDecisionId) {
+      context.addIssue({
+        code: "custom",
+        message: "replacementDecisionId is valid only for a superseded decision.",
+        path: ["replacementDecisionId"],
+      });
+    }
   });
 
 export const questionReviewInputSchema = z.object({
@@ -311,6 +336,7 @@ export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
+export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycleInputSchema>;
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;

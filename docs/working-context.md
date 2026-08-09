@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Codex-first independent conformance, checksummed GitHub CLI release automation, globally installed package smoke coverage, and human-readable CLI success output are implemented; Claude Code conformance awaits an available client, while product workflow work continues |
+| Current implementation phase | Decision supersession/expiry/revocation with impact reporting is implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -136,6 +136,7 @@ Bridge is not:
 - Agents and CI principals cannot accept decisions.
 - Agents and CI principals cannot approve specification versions.
 - Human decision owners or project administrators accept ordinary decisions.
+- A decision owner, configured project decision owner, or project administrator may supersede, expire, or revoke an active decision with an optimistic version and rationale.
 - Protected decisions require the appropriate human reviewer role.
 - Human approval always requires a rationale.
 - An agent recommendation is advisory and must be labeled accordingly.
@@ -352,6 +353,8 @@ An accepted human answer creates a durable Decision containing:
 - Human owner ID
 - Active lifecycle state
 - Created time and review date
+- Lifecycle version
+- Optional retirement rationale, human actor, timestamp, and same-project replacement link
 
 Only active decisions participate in context retrieval.
 
@@ -399,7 +402,7 @@ A Notification is a durable human-only pointer to a project event. It contains:
 - Target type and target ID
 - Created time and optional read time
 
-The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, specification review requests, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
+The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, decision lifecycle changes, specification review requests, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
 
 Each notification also creates a `notification.created` outbox event. The notification is the human read model; the outbox record is the retryable downstream-delivery intent.
 
@@ -488,6 +491,7 @@ Both repository implementations record events for:
 - Question creation
 - Response proposal
 - Decision acceptance
+- Decision supersession, expiry, and revocation
 - Context retrieval
 - Specification version publication
 - Specification version approval
@@ -512,6 +516,8 @@ Both repository implementations record events for:
 - Agents cannot accept decisions.
 - Agents cannot approve specification versions.
 - Only configured decision owners/project administrators accept decisions.
+- Only the decision owner, configured project decision owner, or project administrator can retire an active decision; every transition is version-checked and rationale-required.
+- A superseding decision must be active in the same project, category, and exact scope, and retired decisions are excluded from context.
 - Only configured specification reviewers/project administrators approve specification versions.
 - Only the latest specification version can be approved.
 - Approval of a new version supersedes the old approved version.
@@ -523,7 +529,7 @@ Both repository implementations record events for:
 - An unresolved blocking question prevents both resuming and successfully completing the run.
 - Continuation requires project access, a matching opaque locator, and no unresolved blocking question.
 - Human acceptance is authoritative but does not implicitly restart a vendor agent session.
-- Run creation/provenance/status, assumption creation/resolution/expiry, question creation, response proposal, decision acceptance, specification publication/approval, context snapshots, idempotency records, and their audit events are atomic.
+- Run creation/provenance/status, assumption creation/resolution/expiry, question creation, response proposal, decision acceptance/lifecycle transition, specification publication/approval, context snapshots, idempotency records, and their audit events are atomic.
 - The in-memory transaction implementation rolls back failed workflows and serializes concurrent transactions for behavioral parity.
 - The PostgreSQL implementation uses serializable transactions and locks run, question, and artifact roots during concurrency-sensitive commands.
 - A concurrent loser for a newly claimed idempotency key rolls back instead of leaving an unreferenced aggregate.
@@ -548,6 +554,10 @@ Context and decisions:
 
 - `GET /v1/projects/:projectId/context`
 - `GET /v1/projects/:projectId/decisions`
+- `POST /v1/decisions/:decisionId/lifecycle`
+- `POST /v1/decisions/:decisionId/supersede`
+- `POST /v1/decisions/:decisionId/expire`
+- `POST /v1/decisions/:decisionId/revoke`
 
 Agent runs:
 
@@ -739,7 +749,8 @@ The local web application provides:
 - Required human acceptance rationale.
 - Protected-question security review history and review form.
 - Accepted-decision state.
-- Accepted-decision list/detail with rationale, authority, review date, and source-question navigation.
+- Accepted-decision list/detail with rationale, authority, review date, lifecycle provenance, source-question navigation, and owner-authorized supersede/expire/revoke controls.
+- Potentially affected specification, assumption, run, and work-item counts after a decision lifecycle change.
 - Assumption list/detail with status, risk, confidence, expiry, reversal cost, resolution, and source-run navigation.
 - Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
 - Specifications navigation and pending count.
@@ -748,7 +759,7 @@ The local web application provides:
 - Approved specification state.
 - Project-scoped notification feed with unread count, individual mark-read, and mark-all-read controls.
 
-The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations; the web views are inspection surfaces, not additional authority paths.
+The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Decision lifecycle changes now use the same application authority path from the web UI. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations.
 
 The founder has additional UI feedback that will be addressed later.
 
@@ -760,14 +771,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the role-aware-routing, reviewer-switcher, personalized-inbox, protected-review, threaded-comment, in-app-notification, transactional-outbox, and CLI-diagnostics slices:
+Current validation result after the decision-lifecycle slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 47 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 54 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, legacy-backfill, audit-subject, role-owner, review-array, comment-array, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, legacy-backfill, audit-subject, role-owner, review-array, comment-array, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -898,7 +909,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Database row-level security.
 - External outbox adapters, scheduled worker deployment, and operator replay/metrics.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
-- Assumption resolution and agent-run lifecycle mutation controls in the web UI; the corresponding list/detail views are read-only by design in the current prototype.
+- Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
 - External notification delivery adapters and preference-aware channels.
@@ -1293,7 +1304,7 @@ Implemented and verified:
 3. `bridge inbox` exposes the same role/risk/category/state-filtered human inbox as REST without requiring MCP.
 4. Standalone MCP now shares the API's canonical PostgreSQL repository and fails fast without `DATABASE_URL`, eliminating invisible process-local MCP state.
 5. Context and MCP record links now target implemented project/view query deep links instead of nonexistent routes.
-6. The web application now includes read-only Decisions, Assumptions, and Agent Runs views with source-record navigation and query deep-link selection.
+6. The web application now includes Decisions, Assumptions, and Agent Runs views with source-record navigation and query deep-link selection; Decisions gained governed lifecycle actions in the later decision-lifecycle slice.
 7. Question acceptance refreshes the Decision view immediately; an interactive regression reproduced the stale state before the fix and verified the accepted Decision afterward.
 8. Node 24 is pinned for common version managers through `.nvmrc`, browser-build configuration is included in Turbo's environment-aware cache key, and runtime environment examples document all local service addresses.
 9. The CLI tarball was rebuilt and smoke-tested from a fresh temporary project; the production dependency audit reported no known vulnerabilities.
@@ -1323,6 +1334,26 @@ Deliberate boundaries:
 - The Codex result is evidence for one client/version/environment; Claude Code remains the next cross-vendor run.
 - No release tag was pushed and no registry package was published during implementation. The package stays registry-private until the owner selects and controls a namespace.
 
+### 20.22 Implemented decision lifecycle and direct impact reporting
+
+Implemented and verified:
+
+1. Human decision owners, configured project decision owners, and project administrators can supersede, expire, or revoke an active decision with an expected version and required rationale.
+2. Supersession requires a different active replacement in the same project, category, and exact scope; database foreign keys also prevent cross-project replacement references.
+3. Accepted answer content remains immutable. The original row records only lifecycle state, actor, rationale, timestamp, replacement link, and incremented version.
+4. Retired decisions disappear from default context but remain visible in decision history and retain source-question navigation.
+5. Each transition returns directly linked specification IDs, decision-confirmed assumption IDs, source/provenance run IDs, later run IDs whose context snapshots consumed the decision, and the decision's scoped work-item ID as potentially affected records.
+6. Lifecycle transitions, audit events, dedicated `decision.lifecycle_changed` outbox events, and any durable recipient notifications plus delivery intents commit through the application transaction boundary.
+7. REST provides generic and explicit lifecycle routes, while the Decisions UI exposes the action, replacement selection, lifecycle history, and impact counts.
+8. Forward-only migration `0009_true_marauders.sql` adds lifecycle provenance, optimistic versioning, same-project replacement constraints, lifecycle invariants, and the `decision_lifecycle` notification type.
+9. Application, API, mapper, migration-structure, type-check, test, build, and packaged-CLI validation pass. The PostgreSQL integration test now exercises supersession when CI supplies its isolated database.
+
+Deliberate boundaries:
+
+- Impact is direct and deterministic; deeper transitive dependency analysis remains BRG-123.
+- Decision list filtering/history search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
+- No agent, CLI, or MCP path can perform a human decision lifecycle action.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1346,6 +1377,7 @@ Deliberate boundaries:
 - Threaded question comments migration: `packages/database/drizzle/0006_question_comments.sql`
 - In-app notifications migration: `packages/database/drizzle/0007_in_app_notifications.sql`
 - Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
+- Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1386,4 +1418,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement and impact reporting, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

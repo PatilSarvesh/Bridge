@@ -110,6 +110,7 @@ interface Notification {
     | "question_comment"
     | "question_review"
     | "question_accepted"
+    | "decision_lifecycle"
     | "artifact_review_requested"
     | "artifact_approved";
   readonly title: string;
@@ -131,6 +132,18 @@ interface Decision {
   readonly status: "active" | "superseded" | "expired" | "revoked";
   readonly createdAt: string;
   readonly reviewAt: string;
+  readonly lifecycleRationale?: string;
+  readonly lifecycleChangedById?: string;
+  readonly lifecycleChangedAt?: string;
+  readonly replacementDecisionId?: string;
+  readonly version: number;
+}
+
+interface DecisionLifecycleImpact {
+  readonly artifactIds: readonly string[];
+  readonly assumptionIds: readonly string[];
+  readonly runIds: readonly string[];
+  readonly workItems: readonly string[];
 }
 
 interface Assumption {
@@ -211,6 +224,11 @@ function currentVersion(artifact: Artifact | undefined): ArtifactVersion | undef
   return artifact?.versions.find((version) => version.id === artifact.currentVersionId);
 }
 
+function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => left[key] === right[key]);
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("inbox");
   const [principals, setPrincipals] = useState<readonly Principal[]>([]);
@@ -244,6 +262,10 @@ export default function Home() {
   const [approvalRationale, setApprovalRationale] = useState(
     "The specification accurately records the accepted approach and its operational constraints.",
   );
+  const [decisionLifecycleStatus, setDecisionLifecycleStatus] = useState<"superseded" | "expired" | "revoked">("revoked");
+  const [replacementDecisionId, setReplacementDecisionId] = useState("");
+  const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
+  const [decisionLifecycleImpact, setDecisionLifecycleImpact] = useState<DecisionLifecycleImpact>();
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
@@ -556,6 +578,13 @@ export default function Home() {
     }
   }, [selectedQuestion]);
 
+  useEffect(() => {
+    setDecisionLifecycleStatus("revoked");
+    setReplacementDecisionId("");
+    setDecisionLifecycleRationale("");
+    setDecisionLifecycleImpact(undefined);
+  }, [selectedDecision?.id]);
+
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
     setSubmitting(true);
@@ -659,6 +688,37 @@ export default function Home() {
     }
   };
 
+  const changeDecisionLifecycle = async () => {
+    if (
+      !selectedDecision ||
+      selectedDecision.status !== "active" ||
+      decisionLifecycleRationale.trim().length < 10 ||
+      (decisionLifecycleStatus === "superseded" && !replacementDecisionId)
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ decision: Decision; impact: DecisionLifecycleImpact }>(
+        `/v1/decisions/${selectedDecision.id}/${decisionLifecycleStatus === "superseded" ? "supersede" : decisionLifecycleStatus === "expired" ? "expire" : "revoke"}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: selectedDecision.version,
+            rationale: decisionLifecycleRationale,
+            ...(decisionLifecycleStatus === "superseded" ? { replacementDecisionId } : {}),
+          }),
+        },
+        activePrincipalId,
+      );
+      setDecisionLifecycleImpact(response.impact);
+      await Promise.all([loadReferenceData(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to change the decision lifecycle.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const updateInboxFilter = (key: InboxFilterKey, value: string) => {
     setInboxFilters((current) => ({
       ...current,
@@ -676,7 +736,10 @@ export default function Home() {
     setError(undefined);
     try {
       await markNotificationRead(notification.id);
-      if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
+      if (notification.targetType === "decision") {
+        setView("decisions");
+        setSelectedDecisionId(notification.targetId);
+      } else if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
         setView("specifications");
         const artifact = notification.targetType === "artifact"
           ? artifacts.find((candidate) => candidate.id === notification.targetId)
@@ -858,6 +921,73 @@ export default function Home() {
                           <span>Review by {new Date(selectedDecision.reviewAt).toLocaleDateString()}</span>
                         </div>
                       </section>
+                      {selectedDecision.lifecycleChangedAt ? (
+                        <section>
+                          <h3>Lifecycle history</h3>
+                          <p>{selectedDecision.lifecycleRationale}</p>
+                          <div className="spec-meta">
+                            <span>Changed by {selectedDecision.lifecycleChangedById}</span>
+                            <span>{new Date(selectedDecision.lifecycleChangedAt).toLocaleString()}</span>
+                            {selectedDecision.replacementDecisionId ? <span>Replacement {selectedDecision.replacementDecisionId}</span> : null}
+                          </div>
+                        </section>
+                      ) : null}
+                      {selectedDecision.status === "active" ? (
+                        <section className="response-form">
+                          <h3>Retire this decision</h3>
+                          <label htmlFor="decision-lifecycle-status">Lifecycle action</label>
+                          <select
+                            id="decision-lifecycle-status"
+                            value={decisionLifecycleStatus}
+                            onChange={(event) => setDecisionLifecycleStatus(event.target.value as typeof decisionLifecycleStatus)}
+                          >
+                            <option value="revoked">Revoke</option>
+                            <option value="expired">Expire</option>
+                            <option value="superseded">Supersede with replacement</option>
+                          </select>
+                          {decisionLifecycleStatus === "superseded" ? (
+                            <>
+                              <label htmlFor="replacement-decision">Active replacement</label>
+                              <select
+                                id="replacement-decision"
+                                value={replacementDecisionId}
+                                onChange={(event) => setReplacementDecisionId(event.target.value)}
+                              >
+                                <option value="">Select a replacement decision</option>
+                                {decisions.filter((candidate) =>
+                                  candidate.id !== selectedDecision.id &&
+                                  candidate.status === "active" &&
+                                  candidate.category === selectedDecision.category &&
+                                  sameScope(candidate.scope, selectedDecision.scope)
+                                ).map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>{candidate.answer}</option>
+                                ))}
+                              </select>
+                            </>
+                          ) : null}
+                          <label htmlFor="decision-lifecycle-rationale">Rationale</label>
+                          <textarea
+                            id="decision-lifecycle-rationale"
+                            value={decisionLifecycleRationale}
+                            placeholder="Explain why this decision is no longer authoritative."
+                            onChange={(event) => setDecisionLifecycleRationale(event.target.value)}
+                          />
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={submitting || decisionLifecycleRationale.trim().length < 10 || (decisionLifecycleStatus === "superseded" && !replacementDecisionId)}
+                            onClick={() => void changeDecisionLifecycle()}
+                          >Apply lifecycle change</button>
+                        </section>
+                      ) : null}
+                      {decisionLifecycleImpact ? (
+                        <section>
+                          <h3>Potentially affected records</h3>
+                          <p className="impact">
+                            {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
+                          </p>
+                        </section>
+                      ) : null}
                       <button
                         className="secondary"
                         type="button"

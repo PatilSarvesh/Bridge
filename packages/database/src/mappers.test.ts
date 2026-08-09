@@ -4,6 +4,8 @@ import type {
   AgentRun,
   Assumption,
   Artifact,
+  ContextSnapshot,
+  Decision,
   Notification,
   OutboxEvent,
   Project,
@@ -17,6 +19,10 @@ import {
   assumptionToRow,
   artifactToRow,
   artifactVersionToRow,
+  decisionFromRow,
+  decisionToRow,
+  contextSnapshotFromRow,
+  contextSnapshotToRow,
   projectFromRow,
   projectToRow,
   notificationFromRow,
@@ -32,6 +38,8 @@ import {
   type AssumptionRow,
   type ArtifactRow,
   type ArtifactVersionRow,
+  type DecisionRow,
+  type ContextSnapshotRow,
   type ProjectRow,
   type QuestionResponseRow,
   type QuestionRow,
@@ -152,6 +160,38 @@ const assumption: Assumption = {
   version: 1,
 };
 
+const decision: Decision = {
+  id: "dec_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  questionId: question.id,
+  answer: "Use PostgreSQL.",
+  rationale: "Atomic durable state is required.",
+  category: "architecture",
+  scope: { repository: "bridge", component: "persistence" },
+  ownerId: "usr_owner",
+  sourceResponseId: "rsp_mapping",
+  status: "superseded",
+  createdAt: "2026-08-07T10:02:00.000Z",
+  reviewAt: "2027-02-03T10:02:00.000Z",
+  lifecycleRationale: "A later decision introduced a more precise persistence boundary.",
+  lifecycleChangedById: "usr_owner",
+  lifecycleChangedAt: "2026-08-08T10:02:00.000Z",
+  replacementDecisionId: "dec_mapping_replacement",
+  version: 2,
+};
+
+const contextSnapshot: ContextSnapshot = {
+  id: "ctx_mapping",
+  organizationId: project.organizationId,
+  projectId: project.id,
+  principalId: "agt_codex",
+  runId: run.id,
+  task: "Implement the accepted persistence decision",
+  itemIds: [decision.id],
+  createdAt: "2026-08-07T10:02:30.000Z",
+};
+
 const artifact: Artifact = {
   id: "art_mapping",
   organizationId: project.organizationId,
@@ -221,6 +261,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(assumptionFromRow(assumptionToRow(assumption) as AssumptionRow)).toEqual(assumption);
+    expect(decisionFromRow(decisionToRow(decision) as DecisionRow)).toEqual(decision);
+    expect(contextSnapshotFromRow(contextSnapshotToRow(contextSnapshot) as ContextSnapshotRow))
+      .toEqual(contextSnapshot);
 
     const questionRow = questionToRow(question) as QuestionRow;
     const responseRows = question.responses.map(responseToRow) as QuestionResponseRow[];
@@ -312,5 +355,16 @@ describe("PostgreSQL domain mappings", () => {
     expect(outboxMigration).toContain("bridge_outbox_events_organization_project_fk");
     expect(notificationMigration).toContain("question_assigned");
     expect(notificationMigration).toContain("artifact_approved");
+
+    const decisionLifecycleMigration = readFileSync(
+      new URL("../drizzle/0009_true_marauders.sql", import.meta.url),
+      "utf8",
+    );
+    expect(decisionLifecycleMigration).toContain("bridge_decisions_lifecycle_check");
+    expect(decisionLifecycleMigration).toContain("bridge_decisions_replacement_scope_fk");
+    expect(decisionLifecycleMigration).toContain("decision_lifecycle");
+    expect(decisionLifecycleMigration).toContain("decision.lifecycle_changed");
+    expect(decisionLifecycleMigration.indexOf("CREATE UNIQUE INDEX \"bridge_decisions_organization_project_id_unique\""))
+      .toBeLessThan(decisionLifecycleMigration.indexOf("ADD CONSTRAINT \"bridge_decisions_replacement_scope_fk\""));
   });
 });

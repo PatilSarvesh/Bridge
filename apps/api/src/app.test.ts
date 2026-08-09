@@ -347,6 +347,85 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("exposes version-checked decision lifecycle routes and affected-record evidence", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const questionInput = (idempotencyKey: string, title: string, context: string) => ({
+      idempotencyKey,
+      title,
+      type: "decision" as const,
+      category: "architecture",
+      context,
+      whyItMatters: "The active decision must remain traceable when production evidence requires replacement.",
+      intendedOwnerIds: [demoPrincipals.architect.id],
+      intendedOwnerRoles: [],
+      risk: "high" as const,
+      reversible: false,
+      blocking: true,
+      options: [
+        { key: "bounded", label: "Use bounded retries", tradeoffs: "Limits retry loops while retaining recovery." },
+        { key: "none", label: "Do not retry", tradeoffs: "Avoids loops but discards transient recovery." },
+      ],
+      recommendationKey: "bounded",
+      scope: { component: "settlement", workItem: "PAY-77" },
+    });
+    const originalQuestion = await runtime.service.createQuestion(
+      demoPrincipals.agent,
+      demoProject.id,
+      questionInput(
+        "api-decision-lifecycle-original",
+        "Which settlement retry policy should be authoritative?",
+        "Settlement failures need one authoritative initial retry policy for production processing.",
+      ),
+    );
+    const original = await runtime.service.acceptAnswer(demoPrincipals.architect, originalQuestion.id, {
+      optionKey: "bounded",
+      rationale: "Bounded retries recover transient settlement failures without creating an unlimited loop.",
+    });
+    const replacementQuestion = await runtime.service.createQuestion(
+      demoPrincipals.agent,
+      demoProject.id,
+      questionInput(
+        "api-decision-lifecycle-replacement",
+        "Which revised settlement retry policy should replace the first?",
+        "Production evidence now supports a more precise bounded settlement retry policy.",
+      ),
+    );
+    const replacement = await runtime.service.acceptAnswer(demoPrincipals.architect, replacementQuestion.id, {
+      answer: "Retry settlement failures once, then dead-letter.",
+      rationale: "One retry matches observed recovery while preventing repeated settlement processing.",
+    });
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${original.id}/supersede`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: original.version,
+        rationale: "A contributor cannot supersede the authoritative settlement decision.",
+        replacementDecisionId: replacement.id,
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const changed = await app.inject({
+      method: "POST",
+      url: `/v1/decisions/${original.id}/supersede`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: original.version,
+        rationale: "Production evidence requires the newer, more precise settlement retry decision.",
+        replacementDecisionId: replacement.id,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      decision: { id: original.id, status: "superseded", replacementDecisionId: replacement.id, version: 2 },
+      impact: { artifactIds: [], assumptionIds: [], runIds: [], workItems: ["PAY-77"] },
+    });
+  });
+
   it("routes role-owned questions to a matching fixed human principal", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

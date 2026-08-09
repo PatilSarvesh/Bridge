@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
+  changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
   createQuestionInputSchema,
@@ -207,6 +208,30 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       );
     },
   );
+
+  app.post<{ Params: { decisionId: string }; Body: unknown }>(
+    "/v1/decisions/:decisionId/lifecycle",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = changeDecisionLifecycleInputSchema.parse(request.body);
+      return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
+    },
+  );
+
+  for (const status of ["superseded", "expired", "revoked"] as const) {
+    const action = status === "superseded" ? "supersede" : status === "expired" ? "expire" : "revoke";
+    app.post<{ Params: { decisionId: string }; Body: unknown }>(
+      `/v1/decisions/:decisionId/${action}`,
+      async (request) => {
+        const principal = resolvePrincipal(request, options.principals);
+        const body = typeof request.body === "object" && request.body !== null
+          ? request.body as Record<string, unknown>
+          : {};
+        const input = changeDecisionLifecycleInputSchema.parse({ ...body, status });
+        return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
+      },
+    );
+  }
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/questions",

@@ -63,9 +63,9 @@ The prototype now ships two implementations of the application-owned `BridgeRepo
 - A seeded in-memory repository used when `DATABASE_URL` is absent.
 - A PostgreSQL repository using Drizzle ORM and Postgres.js when `DATABASE_URL` is present.
 
-The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions, context snapshots, audit events, idempotency records, durable in-app notifications, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, and outbox delivery state.
+The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions, context snapshots, audit events, idempotency records, durable in-app notifications, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, outbox delivery state, and versioned decision-lifecycle provenance with same-project replacement links.
 
-Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
+Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
 Row-level security, production database roles, external delivery adapters, and a real PostgreSQL runtime validation remain future work. The current fixed-principal prototype is not a production tenant-security implementation.
 
@@ -453,7 +453,17 @@ If any step fails, no partial acceptance is visible.
 6. Record cited decisions and assumptions.
 7. Write audit and outbox events.
 
-### 11.3 Record assumption
+### 11.3 Change decision lifecycle
+
+1. Lock and version-check the active decision.
+2. Require its human owner, a configured project decision owner, or a project administrator.
+3. For supersession, require a different active replacement with the same project, category, and exact scope.
+4. Change only lifecycle metadata; the accepted answer, rationale, source question, and response remain immutable.
+5. Collect directly cited artifacts, decision-confirmed assumptions, source/provenance runs, later runs whose context snapshots consumed the decision, and scoped work-item identifiers as potentially affected records.
+6. Persist the transition, audit event, `decision.lifecycle_changed` outbox event, and any recipient notifications plus `notification.created` delivery intents in one transaction.
+7. Exclude the retired decision from subsequent default context while preserving it in history reads.
+
+### 11.4 Record assumption
 
 1. Validate scope, risk, reversibility, expiry, and source run.
 2. Apply server policy; reject assumptions for protected categories.
@@ -508,7 +518,9 @@ POST   /v1/questions/:questionId/duplicate
 GET    /v1/projects/:projectId/decisions
 GET    /v1/decisions/:decisionId
 POST   /v1/decisions/:decisionId/supersede
-POST   /v1/decisions/:decisionId/review
+POST   /v1/decisions/:decisionId/expire
+POST   /v1/decisions/:decisionId/revoke
+POST   /v1/decisions/:decisionId/lifecycle
 
 POST   /v1/projects/:projectId/assumptions
 GET    /v1/projects/:projectId/assumptions
@@ -690,7 +702,7 @@ Event envelope:
 
 Avoid placing complete artifact bodies, secrets, or raw tokens in events.
 
-The implemented prototype currently persists one typed event, `notification.created`, for each durable in-app notification. Its payload contains the notification ID, recipient, notification type, and target pointer; the full notification body remains in the canonical notification table. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary.
+The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, and target pointer; the full notification body remains in the canonical notification table. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; the additive lifecycle migration extends its type constraint.
 
 ### 16.2 Initial event types
 

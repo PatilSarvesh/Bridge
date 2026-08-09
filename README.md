@@ -39,7 +39,7 @@ pnpm dev:api
 
 Migrations are explicit; API startup does not modify the schema. With `DATABASE_URL` set, the same fixed demo project and sample records are seeded idempotently into PostgreSQL. The standalone MCP server requires this durable mode so MCP writes and the web/API read the same canonical state. Without `DATABASE_URL`, the API/web and CLI path remains dependency-free and resets when the API restarts.
 
-The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used by runs, assumptions, decisions, approvals, and outbox claims take row locks inside those transactions. The worker's delivery handler is injectable; external email/team adapters are not enabled yet.
+The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance/lifecycle transitions, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used by runs, assumptions, decisions, approvals, and outbox claims take row locks inside those transactions. The worker's delivery handler is injectable; external email/team adapters are not enabled yet.
 
 Run the live persistence integration test only against an isolated database:
 
@@ -139,15 +139,17 @@ This is an instruction-driven adapter, not a universal interception of every ven
 
 On each question detail page, human contributors can add an answer with an optional selected option and rationale, or post a version-checked clarification comment/reply. Bridge keeps those responses and threads visible to the configured decision owner, who alone can accept the authoritative answer and create the Decision. The current prototype UI uses the fixed local `usr_architect` browser identity; the REST policy still distinguishes contributor discussion from owner acceptance.
 
+On the **Decisions** page, the decision owner, a configured project decision owner, or a project administrator can supersede, expire, or revoke an active decision with a rationale. Supersession selects another active decision in the same category and exact scope. Bridge preserves the original answer, records lifecycle provenance, removes retired decisions from default agent context, and reports directly linked specifications, assumptions, runs, and work items that may need review.
+
 Agents can target a question to role names with `intendedOwnerRoles` in the structured question payload, for example `['QA Lead']`, `['Business Analyst']`, or `['Security Reviewer']`. Bridge normalizes those names and permits a matching human role to accept the decision. This is a fixed-principal policy seam for the prototype, not organization role administration.
 
 For local policy testing, the web UI exposes a **Reviewing as** selector backed by `GET /v1/principals`. Switching to QA Lead or Business Analyst reloads the project-scoped views under that fixed human principal and makes role-based acceptance easy to exercise. It is deliberately a reviewer-context switcher, not authentication.
 
 The UI separates **My Inbox** from shared **Questions**. The inbox is personalized by direct owner, assigned role, project-admin fallback, and protected-review role, with State, Risk, Category, and Role filters; the shared Questions view remains available to every authorized project participant so contributors can read and propose responses.
 
-The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, and specification review/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
+The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, and specification review/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
 
-The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. They provide read-only detail and source-record navigation; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
+The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. Decisions include governed human lifecycle actions and direct impact counts; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
 
 Protected questions also have a separate security-review step. A configured security reviewer records an approval or rejection with rationale, then the routed owner can finalize the decision only after an approval exists.
 

@@ -494,7 +494,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Ready
+- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, report directly linked impact, and write audit plus notification/outbox records; deeper transitive impact analysis remains BRG-123
 - **Dependencies:** BRG-040, BRG-041
 - **PRD references:** DEC-03, DEC-06
 

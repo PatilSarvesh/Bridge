@@ -164,7 +164,7 @@ export interface Notification {
   readonly readAt?: string;
 }
 
-export type OutboxEventType = "notification.created";
+export type OutboxEventType = "notification.created" | "decision.lifecycle_changed";
 export type OutboxEventStatus = "pending" | "processing" | "processed" | "failed" | "dead_letter";
 
 export interface NotificationOutboxPayload {
@@ -175,12 +175,21 @@ export interface NotificationOutboxPayload {
   readonly targetId: string;
 }
 
+export interface DecisionLifecycleOutboxPayload {
+  readonly decisionId: string;
+  readonly status: "superseded" | "expired" | "revoked";
+  readonly changedById: string;
+  readonly replacementDecisionId?: string;
+}
+
+export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxPayload;
+
 export interface OutboxEvent {
   readonly id: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly type: OutboxEventType;
-  readonly payload: NotificationOutboxPayload;
+  readonly payload: OutboxPayload;
   readonly status: OutboxEventStatus;
   readonly attempts: number;
   readonly availableAt: string;
@@ -242,6 +251,11 @@ export interface Decision {
   readonly status: DecisionStatus;
   readonly createdAt: string;
   readonly reviewAt: string;
+  readonly lifecycleRationale?: string;
+  readonly lifecycleChangedById?: string;
+  readonly lifecycleChangedAt?: string;
+  readonly replacementDecisionId?: string;
+  readonly version: number;
 }
 
 export interface ContextItem {

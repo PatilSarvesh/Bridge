@@ -41,9 +41,11 @@ describeWithDatabase("PostgresBridgeRepository", () => {
 
     const firstStore = createPostgresBridgeStore(databaseUrl);
     let decisionId: string;
+    let replacementDecisionId: string;
     let artifactVersionId: string;
     let assumptionId: string;
     let runId: string;
+    let contextConsumerRunId: string;
     try {
       await firstStore.repository.saveProject(project);
       const service = new BridgeService(firstStore.repository);
@@ -82,6 +84,23 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       });
       decisionId = decision.id;
 
+      const contextConsumer = await service.startRun(agent, project.id, {
+        idempotencyKey: `context-consumer-run-${suffix}`,
+        client: "codex",
+        capability: "cli",
+        taskSummary: "Consume the current persistence decision",
+        scope: { component: "persistence" },
+        externalLinks: [],
+      });
+      contextConsumerRunId = contextConsumer.run.id;
+      await service.getContext(agent, project.id, {
+        runId: contextConsumerRunId,
+        task: "Implement the accepted PostgreSQL persistence policy",
+        scope: { component: "persistence" },
+        categories: ["architecture"],
+        maxItems: 20,
+      });
+
       const assumption = await service.recordAssumption(agent, project.id, {
         idempotencyKey: `assumption-${suffix}`,
         runId,
@@ -113,6 +132,42 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         rationale: "The specification accurately implements the accepted persistence decision.",
       });
       artifactVersionId = publication.version.id;
+
+      const replacementQuestion = await service.createQuestion(agent, project.id, {
+        idempotencyKey: `replacement-question-${suffix}`,
+        runId,
+        title: "Which revised durable repository policy should replace the first?",
+        type: "decision",
+        category: "architecture",
+        context: "New operational evidence requires a more precise PostgreSQL durability policy.",
+        whyItMatters: "The previous accepted rule must leave active context without losing its history.",
+        intendedOwnerIds: [owner.id],
+        intendedOwnerRoles: [],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "postgres-ha", label: "Highly available PostgreSQL", tradeoffs: "Adds operational cost and resilience." },
+          { key: "postgres-single", label: "Single-node PostgreSQL", tradeoffs: "Costs less with a larger recovery window." },
+        ],
+        recommendationKey: "postgres-ha",
+        scope: { component: "persistence" },
+      });
+      const replacement = await service.acceptAnswer(owner, replacementQuestion.id, {
+        optionKey: "postgres-ha",
+        rationale: "Highly available PostgreSQL preserves the required durable transaction boundary during node failure.",
+      });
+      replacementDecisionId = replacement.id;
+      const lifecycle = await service.changeDecisionLifecycle(owner, decision.id, {
+        expectedVersion: decision.version,
+        status: "superseded",
+        rationale: "The highly available PostgreSQL decision replaces the original generic persistence rule.",
+        replacementDecisionId: replacement.id,
+      });
+      expect(lifecycle).toMatchObject({
+        decision: { status: "superseded", version: 2, replacementDecisionId: replacement.id },
+        impact: { artifactIds: [publication.artifact.id], runIds: [runId, contextConsumerRunId] },
+      });
     } finally {
       await firstStore.close();
     }
@@ -135,8 +190,23 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         maxItems: 20,
       });
       expect(context.items.map((item) => item.id)).toEqual(
-        expect.arrayContaining([decisionId, artifactVersionId, assumptionId]),
+        expect.arrayContaining([replacementDecisionId, artifactVersionId, assumptionId]),
       );
+      expect(context.items.map((item) => item.id)).not.toContain(decisionId);
+      expect(await service.listDecisions(owner, project.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: decisionId,
+          status: "superseded",
+          replacementDecisionId,
+          version: 2,
+        }),
+      ]));
+      expect(await secondStore.repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "decision.lifecycle_changed",
+          payload: expect.objectContaining({ decisionId, replacementDecisionId }),
+        }),
+      ]));
     } finally {
       await secondStore.close();
     }

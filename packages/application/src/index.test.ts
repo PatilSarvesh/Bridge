@@ -659,6 +659,126 @@ describe("Bridge decision workflow", () => {
     });
   });
 
+  it("supersedes a decision with owner authority, provenance, impact, and context exclusion", async () => {
+    const { repository, service } = await runtime();
+    const run = await service.startRun(agent, project.id, {
+      idempotencyKey: "decision-lifecycle-run-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Replace the transfer retry policy",
+      scope: { component: "transfers", workItem: "PAY-42" },
+      externalLinks: [],
+    });
+    const scope = { component: "transfers", workItem: "PAY-42" };
+    const originalQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "decision-lifecycle-original",
+      runId: run.run.id,
+      scope,
+    }));
+    const original = await service.acceptAnswer(owner, originalQuestion.id, {
+      optionKey: "transient",
+      rationale: "Only transient failures should initially be retried with bounded backoff.",
+    });
+    const consumerRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "decision-lifecycle-consumer-run",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Consume the current transfer retry decision",
+      scope,
+      externalLinks: [],
+    });
+    await service.getContext(agent, project.id, {
+      runId: consumerRun.run.id,
+      task: "Implement the accepted transfer retry policy",
+      scope,
+      categories: ["architecture"],
+      maxItems: 20,
+    });
+    const replacementQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "decision-lifecycle-replacement",
+      title: "Which bounded retry policy should replace the initial transfer rule?",
+      context: "New production evidence requires a narrower and observable transfer retry policy.",
+      whyItMatters: "The initial accepted policy is now too broad for current operational evidence.",
+      scope,
+    }));
+    const replacement = await service.acceptAnswer(owner, replacementQuestion.id, {
+      answer: "Retry transient failures once before dead-lettering.",
+      rationale: "Production evidence shows that one bounded retry prevents loops while preserving recovery.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "decision-lifecycle-artifact",
+      citedDecisionIds: [original.id],
+      scope,
+    }));
+
+    await expect(service.changeDecisionLifecycle(contributor, original.id, {
+      expectedVersion: original.version,
+      status: "superseded",
+      rationale: "A contributor cannot replace an owner-controlled project decision.",
+      replacementDecisionId: replacement.id,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.changeDecisionLifecycle(owner, original.id, {
+      expectedVersion: original.version + 1,
+      status: "superseded",
+      rationale: "This stale edit must fail optimistic concurrency validation.",
+      replacementDecisionId: replacement.id,
+    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+
+    const changed = await service.changeDecisionLifecycle(owner, original.id, {
+      expectedVersion: original.version,
+      status: "superseded",
+      rationale: "Production evidence replaces the initial policy with a narrower bounded retry rule.",
+      replacementDecisionId: replacement.id,
+    });
+    expect(changed).toMatchObject({
+      decision: {
+        id: original.id,
+        status: "superseded",
+        replacementDecisionId: replacement.id,
+        lifecycleChangedById: owner.id,
+        lifecycleChangedAt: "2026-01-01T00:00:00.000Z",
+        version: 2,
+      },
+      impact: {
+        artifactIds: [publication.artifact.id],
+        assumptionIds: [],
+        runIds: [run.run.id, consumerRun.run.id],
+        workItems: ["PAY-42"],
+      },
+    });
+    const context = await service.getContext(agent, project.id, {
+      task: "Implement transfer retry behavior",
+      scope,
+      categories: ["architecture"],
+      maxItems: 20,
+    });
+    expect(context.items.map((item) => item.id)).toContain(replacement.id);
+    expect(context.items.map((item) => item.id)).not.toContain(original.id);
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "decision.superseded", subjectId: original.id }),
+    ]));
+    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "decision.lifecycle_changed",
+        payload: expect.objectContaining({
+          decisionId: original.id,
+          status: "superseded",
+          replacementDecisionId: replacement.id,
+          changedById: owner.id,
+        }),
+      }),
+      expect.objectContaining({
+        type: "notification.created",
+        payload: expect.objectContaining({ notificationType: "decision_lifecycle", targetId: original.id }),
+      }),
+    ]));
+    await expect(service.changeDecisionLifecycle(owner, original.id, {
+      expectedVersion: 2,
+      status: "revoked",
+      rationale: "A retired decision cannot transition to a second terminal state.",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("records human clarification comments as a threaded question discussion", async () => {
     const { service } = await runtime();
     const question = await service.createQuestion(agent, project.id, questionInput({

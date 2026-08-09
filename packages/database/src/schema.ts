@@ -1,6 +1,6 @@
 import type { Scope } from "@bridge/contracts";
 import type {
-  NotificationOutboxPayload,
+  OutboxPayload,
   QuestionComment,
   QuestionOption,
   QuestionReview,
@@ -8,6 +8,7 @@ import type {
 import {
   boolean,
   type AnyPgColumn,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -225,10 +226,28 @@ export const decisions = pgTable(
     status: decisionStatusEnum("status").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     reviewAt: timestamp("review_at", { withTimezone: true, mode: "string" }).notNull(),
+    lifecycleRationale: text("lifecycle_rationale"),
+    lifecycleChangedById: text("lifecycle_changed_by_id"),
+    lifecycleChangedAt: timestamp("lifecycle_changed_at", { withTimezone: true, mode: "string" }),
+    replacementDecisionId: text("replacement_decision_id").references(
+      (): AnyPgColumn => decisions.id,
+      { onDelete: "restrict" },
+    ),
+    version: integer("version").default(1).notNull(),
   },
   (table) => [
     uniqueIndex("bridge_decisions_question_unique").on(table.questionId),
+    uniqueIndex("bridge_decisions_organization_project_id_unique").on(
+      table.organizationId,
+      table.projectId,
+      table.id,
+    ),
     index("bridge_decisions_project_status_idx").on(table.projectId, table.status),
+    foreignKey({
+      name: "bridge_decisions_replacement_scope_fk",
+      columns: [table.organizationId, table.projectId, table.replacementDecisionId],
+      foreignColumns: [table.organizationId, table.projectId, table.id],
+    }).onDelete("restrict"),
   ],
 );
 
@@ -366,8 +385,7 @@ export const notifications = pgTable(
     id: text("id").primaryKey(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+      .notNull(),
     recipientId: text("recipient_id").notNull(),
     type: text("type").notNull(),
     title: text("title").notNull(),
@@ -380,6 +398,16 @@ export const notifications = pgTable(
   (table) => [
     index("bridge_notifications_recipient_created_idx").on(table.recipientId, table.createdAt),
     index("bridge_notifications_recipient_read_idx").on(table.recipientId, table.readAt),
+    foreignKey({
+      name: "bridge_notifications_project_fk",
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "bridge_notifications_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -389,10 +417,9 @@ export const outboxEvents = pgTable(
     id: text("id").primaryKey(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+      .notNull(),
     type: text("type").notNull(),
-    payload: jsonb("payload").$type<NotificationOutboxPayload>().notNull(),
+    payload: jsonb("payload").$type<OutboxPayload>().notNull(),
     status: text("status").notNull(),
     attempts: integer("attempts").notNull(),
     availableAt: timestamp("available_at", { withTimezone: true, mode: "string" }).notNull(),
@@ -404,6 +431,16 @@ export const outboxEvents = pgTable(
   (table) => [
     index("bridge_outbox_status_available_idx").on(table.status, table.availableAt),
     index("bridge_outbox_project_created_idx").on(table.projectId, table.createdAt),
+    foreignKey({
+      name: "bridge_outbox_events_project_fk",
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "bridge_outbox_events_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
   ],
 );
 
