@@ -1391,4 +1391,152 @@ describe("Bridge decision workflow", () => {
       }),
     ]));
   });
+
+  it("derives project-admin analytics by run cohort without returning stored content", async () => {
+    const { service } = await runtime();
+    const firstRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-codex-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Create the transfer retry policy",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    await service.getContext(agent, project.id, {
+      runId: firstRun.run.id,
+      task: "Find existing transfer retry policy",
+      scope: { component: "transfers" },
+      categories: [],
+      maxItems: 20,
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "analytics-question-001",
+      runId: firstRun.run.id,
+    }));
+    await service.proposeAnswer(contributor, question.id, {
+      answer: "Retry only failures classified as transient.",
+      rationale: "Permanent failures need operator review rather than repeated execution.",
+      optionKey: "transient",
+    });
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Bounded retries for transient failures avoid duplicate work and retry loops.",
+    });
+    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "analytics-assumption-001",
+      runId: firstRun.run.id,
+    }));
+    await service.resolveAssumption(owner, assumption.id, {
+      expectedVersion: assumption.version,
+      status: "rejected",
+      rationale: "The proposed namespace conflicts with the existing production metric contract.",
+    });
+    const artifact = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "analytics-artifact-001",
+      runId: firstRun.run.id,
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, artifact.version.id, {
+      rationale: "The specification follows the accepted retry decision and remains operationally bounded.",
+    });
+
+    const secondRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-codex-002",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Reuse the approved transfer retry policy",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    await service.getContext(agent, project.id, {
+      runId: secondRun.run.id,
+      task: "Apply the approved transfer retry policy",
+      scope: { component: "transfers" },
+      categories: [],
+      maxItems: 20,
+    });
+    const reused = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "analytics-question-reuse-001",
+      runId: secondRun.run.id,
+    }));
+    expect(reused.submissionDisposition).toBe("reused_accepted");
+    await service.startRun(agent, project.id, {
+      idempotencyKey: "analytics-run-claude-001",
+      client: "claude_code",
+      capability: "instructions",
+      taskSummary: "Observe the governed project context",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+
+    const analytics = await service.getProjectAnalytics(owner, project.id, {});
+    expect(analytics).toMatchObject({
+      projectId: project.id,
+      cohort: { runCount: 3 },
+      activity: {
+        contextRetrievals: 2,
+        questionSubmissions: 2,
+        questionsCreated: 1,
+        questionsReused: 1,
+        questionsRoutedOnCreation: 1,
+        responsesProposed: 2,
+        decisionsAccepted: 1,
+        decisionReuseOccurrences: 1,
+        assumptionsRecorded: 1,
+        assumptionsResolved: 1,
+        specificationVersionsPublished: 1,
+        specificationVersionsApproved: 1,
+      },
+      outcomes: {
+        runsWithContextRate: 2 / 3,
+        questionReuseRate: 0.5,
+        firstAssignmentRoutingRate: 1,
+        decisionAcceptanceRate: 1,
+        acceptedDecisionReuseCount: 1,
+        assumptionResolutionRate: 1,
+        assumptionStatusCounts: { active: 0, confirmed: 0, rejected: 1, expired: 0, superseded: 0 },
+        specificationApprovalRate: 1,
+        medianQuestionResolutionMs: 0,
+        medianSpecificationApprovalMs: 0,
+      },
+      guardrails: {
+        questionsPerRun: 2 / 3,
+        blockingQuestions: 1,
+        unroutedBlockingQuestions: 0,
+        contextItemsReturned: 2,
+        contextItemsPerRetrieval: 1,
+      },
+      byClient: [
+        expect.objectContaining({ client: "claude_code", runCount: 1, contextRetrievals: 0 }),
+        expect.objectContaining({
+          client: "codex",
+          runCount: 2,
+          contextRetrievals: 2,
+          questionsReused: 1,
+          decisionReuseOccurrences: 1,
+        }),
+      ],
+    });
+    const serialized = JSON.stringify(analytics);
+    expect(serialized).not.toContain(question.title);
+    expect(serialized).not.toContain(artifact.version.body);
+    expect(serialized).not.toContain(firstRun.run.taskSummary);
+    expect(analytics.privacy.excluded).toEqual(expect.arrayContaining([
+      expect.stringContaining("hidden reasoning"),
+      expect.stringContaining("specification titles"),
+    ]));
+
+    const claudeOnly = await service.getProjectAnalytics(owner, project.id, { client: "claude_code" });
+    expect(claudeOnly).toMatchObject({
+      cohort: { runCount: 1, client: "claude_code" },
+      activity: { contextRetrievals: 0, questionSubmissions: 0, decisionsAccepted: 0 },
+      byClient: [expect.objectContaining({ client: "claude_code", runCount: 1 })],
+    });
+    await expect(service.getProjectAnalytics(contributor, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(agent, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(outsider, project.id, {}))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

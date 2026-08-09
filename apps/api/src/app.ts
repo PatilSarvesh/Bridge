@@ -16,6 +16,7 @@ import {
   notificationListQuerySchema,
   notificationReadAllInputSchema,
   outboxOperationsQuerySchema,
+  projectAnalyticsQuerySchema,
   questionReviewInputSchema,
   questionInboxQuerySchema,
   recordAssumptionInputSchema,
@@ -179,6 +180,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = resolvePrincipal(request, options.principals);
     const query = outboxOperationsQuerySchema.parse(request.query);
     return options.service.inspectProjectOutbox(principal, request.params.projectId, query);
+  });
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/admin/projects/:projectId/analytics", async (request) => {
+    const principal = resolvePrincipal(request, options.principals);
+    const query = projectAnalyticsQuerySchema.parse(request.query);
+    return options.service.getProjectAnalytics(principal, request.params.projectId, query);
   });
 
   app.post<{ Params: { eventId: string }; Body: unknown }>(

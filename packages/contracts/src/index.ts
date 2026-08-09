@@ -227,6 +227,22 @@ export const outboxOperationsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
+export const projectAnalyticsQuerySchema = z
+  .object({
+    client: agentRunClientSchema.optional(),
+    startedFrom: z.string().datetime({ offset: true }).optional(),
+    startedTo: z.string().datetime({ offset: true }).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.startedFrom && value.startedTo && Date.parse(value.startedFrom) > Date.parse(value.startedTo)) {
+      context.addIssue({
+        code: "custom",
+        message: "startedFrom must not be after startedTo.",
+        path: ["startedFrom"],
+      });
+    }
+  });
+
 export const replayOutboxEventInputSchema = z.object({
   expectedAttempts: z.number().int().nonnegative(),
 });
@@ -412,6 +428,7 @@ export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
 export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
+export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;

@@ -49,6 +49,8 @@ Web and CLI calls send bounded correlation IDs; API and MCP validate or generate
 
 The API and standalone MCP service expose dependency-free Prometheus text metrics at `GET /metrics`. Instrumentation covers request latency/errors/authorization denials, context performance, repository transactions, outbox processing, and notification delivery without tenant, project, principal, record, or content labels. Importable pilot dashboard and alert definitions live in `config/observability`; initial non-contractual objectives are in [`docs/service-objectives.md`](docs/service-objectives.md). Restrict production scrape endpoints to the monitoring network. See [`docs/observability.md`](docs/observability.md) for exact behavior and remaining deployment work.
 
+Human project administrators can open the web **Analytics** view or call `GET /v1/admin/projects/:projectId/analytics` to inspect run/context/question/decision/assumption/specification outcomes. The cohort can be filtered by agent client and run-start range. Analytics is calculated from lifecycle metadata and never returns raw prompts, task summaries, question/decision text, specification content, hidden reasoning, principal names, or external links. Definitions and interpretation limits are documented in [`docs/product-analytics.md`](docs/product-analytics.md).
+
 ## Operational health and recovery
 
 The API and standalone MCP service expose `GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness. The API keeps `GET /health` as a compatibility liveness alias. Readiness returns `503` with a sanitized dependency result when PostgreSQL is unavailable; load balancers should route traffic using readiness, not the compatibility endpoint.

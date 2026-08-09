@@ -282,6 +282,54 @@ describe("Bridge API vertical slice", () => {
     expect(replayed.json()).toMatchObject({ id: pending!.id, status: "pending", attempts: 0 });
   });
 
+  it("exposes privacy-safe project analytics only to project administrators", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true, seedArtifact: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics?client=codex&startedFrom=2025-01-01T00:00:00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      projectId: demoProject.id,
+      cohort: { client: "codex", runCount: 1, startedFrom: "2025-01-01T00:00:00.000Z" },
+      activity: {
+        questionSubmissions: 1,
+        questionsCreated: 1,
+        specificationVersionsPublished: 0,
+      },
+      byClient: [expect.objectContaining({ client: "codex", runCount: 1 })],
+      privacy: {
+        derivedFrom: expect.any(Array),
+        excluded: expect.arrayContaining([expect.stringContaining("raw prompts")]),
+      },
+    });
+    expect(response.body).not.toContain("Which transfer failures should trigger an automatic retry?");
+    expect(response.body).not.toContain("Retry transient failures with bounded exponential backoff");
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+    const agentDenied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(agentDenied.statusCode).toBe(403);
+    const invalidRange = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/analytics?startedFrom=2026-02-01T00:00:00.000Z&startedTo=2026-01-01T00:00:00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidRange.statusCode).toBe(400);
+  });
+
   it("returns a personalized question inbox while keeping the shared question list available", async () => {
     const runtime = await createDemoRuntime({ seedQuestion: true });
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

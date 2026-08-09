@@ -785,10 +785,10 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the portable metrics/dashboard/alert/SLO slice:
+Current validation result after the privacy-conscious product-analytics slice:
 
 - Type-check: passed across all eleven TypeScript configurations.
-- Behavioral tests: 70 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 72 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all ten TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -1544,6 +1544,27 @@ Deliberate boundaries:
 - MCP is represented by its bounded HTTP operation; per-tool/session metrics remain follow-up work. Database pool saturation requires provider/exporter telemetry.
 - The included objectives and thresholds are starting hypotheses. BRG-104 remains partial until representative pilot telemetry validates them and external alert delivery is exercised.
 
+### 20.33 Implemented privacy-conscious product analytics
+
+Implemented and locally verified:
+
+1. `GET /v1/admin/projects/:projectId/analytics` defines a mandatory project scope and optional controlled agent-client plus inclusive run-start cohort filters through the shared contract layer.
+2. The application requires a human project administrator after ordinary project access checks. Agents and non-admin humans cannot retrieve analytics, and no support-style cross-tenant bypass exists.
+3. Read-time aggregation uses existing run links to count context retrieval, question creation/reuse/routing coverage, responses, decision acceptance/later-run reuse, assumption resolution, and specification publication/approval.
+4. Outcomes include context compliance, reuse/routing/acceptance/resolution/approval rates, distinct reused decisions, median decision/specification approval times, assumption status counts, question-volume and context-size guardrails, and per-client breakdowns.
+5. The endpoint and web view return only counts, rates, durations, timestamps, and controlled client values. They include a human-readable collection/exclusion notice and do not return task summaries, record text, specification content, principal names, external links, prompts, outputs, transcripts, hidden reasoning, secrets, or credentials.
+6. The web **Analytics** view supports client/date filters, summary cards, governed activity, guardrails, client comparison, loading/empty/denied behavior, and the same privacy notice.
+7. No migration or external analytics service was added. Both in-memory and PostgreSQL modes use the canonical repository/application boundary, and MCP remains optional.
+8. Application and REST regressions prove calculations, exact question/decision reuse, client filtering, content exclusion, invalid-range validation, and project-admin authority. The complete typecheck/test/build/distribution gate passes.
+
+Deliberate boundaries:
+
+- Cohorts select runs by start time and report the current outcome of linked records; this is not an immutable historical as-of warehouse.
+- Routing coverage means an owner or role was present. Subjective first-owner correctness requires configured ownership evidence or pilot feedback.
+- Retrieving a decision proves Bridge supplied approved context, not that a model followed it or avoided rework.
+- User-reported rework, question-quality judgments, mute/unsubscribe behavior, and secret-detection events are not technically available and are not guessed.
+- A future materialized analytics store requires a separate privacy/schema/retention review; the MVP intentionally calculates in place.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1586,6 +1607,7 @@ Deliberate boundaries:
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
 - Observability behavior and boundaries: `docs/observability.md`
+- Product analytics definitions and privacy boundary: `docs/product-analytics.md`
 - Pilot service objectives: `docs/service-objectives.md`
 - Portable dashboard and alert definitions: `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`
 - Read-only restore verifier: `packages/database/src/verify-restore.ts`
@@ -1622,4 +1644,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, end-to-end correlation, safe structured logs, portable bounded metrics with dashboard/alert/SLO definitions, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production telemetry activation/calibration and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, privacy-conscious project/client analytics, durable optional PostgreSQL and MCP paths, end-to-end correlation, safe structured logs, portable bounded metrics with dashboard/alert/SLO definitions, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production telemetry activation/calibration and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

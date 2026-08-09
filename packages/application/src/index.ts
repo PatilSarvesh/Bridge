@@ -24,6 +24,7 @@ import type {
   NotificationListQuery,
   NotificationReadAllInput,
   OutboxOperationsQuery,
+  ProjectAnalyticsQuery,
   QuestionReviewInput,
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
@@ -213,6 +214,215 @@ export interface OutboxOperationsView {
   readonly deliveries: readonly OutboxDelivery[];
   readonly totalMatching: number;
   readonly metrics: OutboxOperationsMetrics;
+}
+
+export interface ProjectAnalyticsActivity {
+  readonly contextRetrievals: number;
+  readonly questionSubmissions: number;
+  readonly questionsCreated: number;
+  readonly questionsReused: number;
+  readonly questionsRoutedOnCreation: number;
+  readonly responsesProposed: number;
+  readonly decisionsAccepted: number;
+  readonly decisionReuseOccurrences: number;
+  readonly assumptionsRecorded: number;
+  readonly assumptionsResolved: number;
+  readonly specificationVersionsPublished: number;
+  readonly specificationVersionsApproved: number;
+}
+
+export interface ProjectAnalyticsOutcomes {
+  readonly runsWithContextRate: number;
+  readonly questionReuseRate: number;
+  readonly firstAssignmentRoutingRate: number;
+  readonly decisionAcceptanceRate: number;
+  readonly acceptedDecisionReuseCount: number;
+  readonly assumptionResolutionRate: number;
+  readonly assumptionStatusCounts: Readonly<Record<Assumption["status"], number>>;
+  readonly specificationApprovalRate: number;
+  readonly medianQuestionResolutionMs?: number;
+  readonly medianSpecificationApprovalMs?: number;
+}
+
+export interface ProjectAnalyticsGuardrails {
+  readonly questionsPerRun: number;
+  readonly blockingQuestions: number;
+  readonly unroutedBlockingQuestions: number;
+  readonly contextItemsReturned: number;
+  readonly contextItemsPerRetrieval: number;
+}
+
+export interface ProjectAnalyticsClientBreakdown {
+  readonly client: AgentRun["client"];
+  readonly runCount: number;
+  readonly contextRetrievals: number;
+  readonly questionSubmissions: number;
+  readonly questionsReused: number;
+  readonly decisionsAccepted: number;
+  readonly decisionReuseOccurrences: number;
+  readonly assumptionsRecorded: number;
+}
+
+export interface ProjectAnalyticsView {
+  readonly projectId: string;
+  readonly generatedAt: string;
+  readonly cohort: {
+    readonly runCount: number;
+    readonly client?: AgentRun["client"];
+    readonly startedFrom?: string;
+    readonly startedTo?: string;
+  };
+  readonly activity: ProjectAnalyticsActivity;
+  readonly outcomes: ProjectAnalyticsOutcomes;
+  readonly guardrails: ProjectAnalyticsGuardrails;
+  readonly byClient: readonly ProjectAnalyticsClientBreakdown[];
+  readonly privacy: {
+    readonly derivedFrom: readonly string[];
+    readonly excluded: readonly string[];
+  };
+}
+
+interface AnalyticsSource {
+  readonly snapshots: readonly ContextSnapshot[];
+  readonly questions: readonly Question[];
+  readonly decisions: readonly Decision[];
+  readonly assumptions: readonly Assumption[];
+  readonly artifacts: readonly Artifact[];
+}
+
+interface AnalyticsCohort {
+  readonly activity: ProjectAnalyticsActivity;
+  readonly outcomes: ProjectAnalyticsOutcomes;
+  readonly guardrails: ProjectAnalyticsGuardrails;
+}
+
+function analyticsRate(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : numerator / denominator;
+}
+
+function medianDuration(values: readonly number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1]! + sorted[middle]!) / 2
+    : sorted[middle];
+}
+
+function calculateAnalyticsCohort(
+  runs: readonly AgentRun[],
+  source: AnalyticsSource,
+): AnalyticsCohort {
+  const runIds = new Set(runs.map((run) => run.id));
+  const questionsById = new Map(source.questions.map((question) => [question.id, question]));
+  const decisionsById = new Map(source.decisions.map((decision) => [decision.id, decision]));
+  const questionPairs: Array<{ readonly run: AgentRun; readonly question: Question }> = [];
+  for (const run of runs) {
+    for (const questionId of run.questionIds) {
+      const question = questionsById.get(questionId);
+      if (question) questionPairs.push({ run, question });
+    }
+  }
+  const createdQuestions = [...new Map(
+    questionPairs
+      .filter(({ run, question }) => question.runId === run.id)
+      .map(({ question }) => [question.id, question]),
+  ).values()];
+  const reusedQuestionPairs = questionPairs.filter(({ run, question }) => question.runId !== run.id);
+  const snapshots = source.snapshots.filter((snapshot) => snapshot.runId && runIds.has(snapshot.runId));
+  const assumptions = source.assumptions.filter((assumption) => assumption.runId && runIds.has(assumption.runId));
+  const versions = source.artifacts.flatMap((artifact) =>
+    artifact.versions.filter((version) => version.runId && runIds.has(version.runId)),
+  );
+  const approvedVersions = versions.filter((version) => version.approvedAt !== undefined);
+  const routedQuestions = createdQuestions.filter(
+    (question) => question.ownerIds.length > 0 || question.ownerRoles.length > 0,
+  );
+  const acceptedQuestions = createdQuestions.filter(
+    (question) => question.decisionId && decisionsById.has(question.decisionId),
+  );
+  const reusedDecisionIds = new Set<string>();
+  let decisionReuseOccurrences = 0;
+  for (const snapshot of snapshots) {
+    for (const itemId of snapshot.itemIds) {
+      const decision = decisionsById.get(itemId);
+      if (!decision || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt)) continue;
+      const originQuestion = questionsById.get(decision.questionId);
+      if (originQuestion?.runId === snapshot.runId) continue;
+      reusedDecisionIds.add(decision.id);
+      decisionReuseOccurrences += 1;
+    }
+  }
+  const assumptionStatusCounts: Record<Assumption["status"], number> = {
+    active: 0,
+    confirmed: 0,
+    rejected: 0,
+    expired: 0,
+    superseded: 0,
+  };
+  for (const assumption of assumptions) assumptionStatusCounts[assumption.status] += 1;
+  const resolvedAssumptions = assumptions.filter((assumption) => assumption.status !== "active");
+  const questionResolutionDurations = acceptedQuestions.flatMap((question) => {
+    const decision = question.decisionId ? decisionsById.get(question.decisionId) : undefined;
+    if (!decision) return [];
+    return [Math.max(0, Date.parse(decision.createdAt) - Date.parse(question.createdAt))];
+  });
+  const approvalDurations = approvedVersions.flatMap((version) => version.approvedAt
+    ? [Math.max(0, Date.parse(version.approvedAt) - Date.parse(version.createdAt))]
+    : []);
+  const medianQuestionResolutionMs = medianDuration(questionResolutionDurations);
+  const medianSpecificationApprovalMs = medianDuration(approvalDurations);
+  const blockingQuestions = createdQuestions.filter((question) => question.blocking);
+  const unroutedBlockingQuestions = blockingQuestions.filter(
+    (question) => question.ownerIds.length === 0 && question.ownerRoles.length === 0,
+  );
+  const contextItemsReturned = snapshots.reduce((total, snapshot) => total + snapshot.itemIds.length, 0);
+  const activity: ProjectAnalyticsActivity = {
+    contextRetrievals: snapshots.length,
+    questionSubmissions: questionPairs.length,
+    questionsCreated: createdQuestions.length,
+    questionsReused: reusedQuestionPairs.length,
+    questionsRoutedOnCreation: routedQuestions.length,
+    responsesProposed: createdQuestions.reduce((total, question) => total + question.responses.length, 0),
+    decisionsAccepted: acceptedQuestions.length,
+    decisionReuseOccurrences,
+    assumptionsRecorded: assumptions.length,
+    assumptionsResolved: resolvedAssumptions.length,
+    specificationVersionsPublished: versions.length,
+    specificationVersionsApproved: approvedVersions.length,
+  };
+  return {
+    activity,
+    outcomes: {
+      runsWithContextRate: analyticsRate(
+        runs.filter((run) => run.contextSnapshotIds.length > 0).length,
+        runs.length,
+      ),
+      questionReuseRate: analyticsRate(activity.questionsReused, activity.questionSubmissions),
+      firstAssignmentRoutingRate: analyticsRate(activity.questionsRoutedOnCreation, activity.questionsCreated),
+      decisionAcceptanceRate: analyticsRate(activity.decisionsAccepted, activity.questionsCreated),
+      acceptedDecisionReuseCount: reusedDecisionIds.size,
+      assumptionResolutionRate: analyticsRate(activity.assumptionsResolved, activity.assumptionsRecorded),
+      assumptionStatusCounts,
+      specificationApprovalRate: analyticsRate(
+        activity.specificationVersionsApproved,
+        activity.specificationVersionsPublished,
+      ),
+      ...(medianQuestionResolutionMs !== undefined
+        ? { medianQuestionResolutionMs }
+        : {}),
+      ...(medianSpecificationApprovalMs !== undefined
+        ? { medianSpecificationApprovalMs }
+        : {}),
+    },
+    guardrails: {
+      questionsPerRun: analyticsRate(activity.questionSubmissions, runs.length),
+      blockingQuestions: blockingQuestions.length,
+      unroutedBlockingQuestions: unroutedBlockingQuestions.length,
+      contextItemsReturned,
+      contextItemsPerRetrieval: analyticsRate(contextItemsReturned, activity.contextRetrievals),
+    },
+  };
 }
 
 export interface QuestionMatch {
@@ -1057,6 +1267,71 @@ export class BridgeService {
               oldestReadyAgeMs: Math.max(0, nowTime - Date.parse(oldestReadyAt)),
             }
           : {}),
+      },
+    };
+  }
+
+  async getProjectAnalytics(
+    principal: Principal,
+    projectId: string,
+    query: ProjectAnalyticsQuery,
+  ): Promise<ProjectAnalyticsView> {
+    await this.requireProject(principal, projectId);
+    this.assertProjectOperator(principal, "Reading project analytics");
+    const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
+      this.repository.listRuns(projectId),
+      this.repository.listContextSnapshots(projectId),
+      this.repository.listQuestions(projectId),
+      this.repository.listDecisions(projectId),
+      this.repository.listAssumptions(projectId),
+      this.repository.listArtifacts(projectId),
+    ]);
+    const runs = allRuns.filter((run) =>
+      (!query.client || run.client === query.client) &&
+      (!query.startedFrom || Date.parse(run.startedAt) >= Date.parse(query.startedFrom)) &&
+      (!query.startedTo || Date.parse(run.startedAt) <= Date.parse(query.startedTo)),
+    );
+    const source: AnalyticsSource = { snapshots, questions, decisions, assumptions, artifacts };
+    const cohort = calculateAnalyticsCohort(runs, source);
+    const clients = [...new Set(runs.map((run) => run.client))].sort((left, right) => left.localeCompare(right));
+    const byClient = clients.map((client): ProjectAnalyticsClientBreakdown => {
+      const clientRuns = runs.filter((run) => run.client === client);
+      const clientCohort = calculateAnalyticsCohort(clientRuns, source);
+      return {
+        client,
+        runCount: clientRuns.length,
+        contextRetrievals: clientCohort.activity.contextRetrievals,
+        questionSubmissions: clientCohort.activity.questionSubmissions,
+        questionsReused: clientCohort.activity.questionsReused,
+        decisionsAccepted: clientCohort.activity.decisionsAccepted,
+        decisionReuseOccurrences: clientCohort.activity.decisionReuseOccurrences,
+        assumptionsRecorded: clientCohort.activity.assumptionsRecorded,
+      };
+    });
+    return {
+      projectId,
+      generatedAt: this.now().toISOString(),
+      cohort: {
+        runCount: runs.length,
+        ...(query.client ? { client: query.client } : {}),
+        ...(query.startedFrom ? { startedFrom: query.startedFrom } : {}),
+        ...(query.startedTo ? { startedTo: query.startedTo } : {}),
+      },
+      ...cohort,
+      byClient,
+      privacy: {
+        derivedFrom: [
+          "agent run client, capability, status, timestamps, and linked record identifiers",
+          "context snapshot timestamps and returned record identifiers",
+          "question routing, lifecycle, response, and accepted-decision metadata",
+          "assumption lifecycle and specification version approval metadata",
+        ],
+        excluded: [
+          "raw prompts, agent outputs, transcripts, and hidden reasoning",
+          "task summaries, question text, responses, comments, decision text, and assumption text",
+          "specification titles, summaries, bodies, hashes, and review text",
+          "principal names, notification content, external links, secrets, and credentials",
+        ],
       },
     };
   }

@@ -217,6 +217,68 @@ interface AgentRun {
   readonly version: number;
 }
 
+type AgentClient = "codex" | "claude_code" | "cursor" | "copilot" | "custom" | "unknown";
+type AnalyticsFilterKey = "client" | "startedFrom" | "startedTo";
+type AnalyticsFilters = Partial<Record<AnalyticsFilterKey, string>>;
+
+interface ProjectAnalytics {
+  readonly projectId: string;
+  readonly generatedAt: string;
+  readonly cohort: {
+    readonly runCount: number;
+    readonly client?: AgentClient;
+    readonly startedFrom?: string;
+    readonly startedTo?: string;
+  };
+  readonly activity: {
+    readonly contextRetrievals: number;
+    readonly questionSubmissions: number;
+    readonly questionsCreated: number;
+    readonly questionsReused: number;
+    readonly questionsRoutedOnCreation: number;
+    readonly responsesProposed: number;
+    readonly decisionsAccepted: number;
+    readonly decisionReuseOccurrences: number;
+    readonly assumptionsRecorded: number;
+    readonly assumptionsResolved: number;
+    readonly specificationVersionsPublished: number;
+    readonly specificationVersionsApproved: number;
+  };
+  readonly outcomes: {
+    readonly runsWithContextRate: number;
+    readonly questionReuseRate: number;
+    readonly firstAssignmentRoutingRate: number;
+    readonly decisionAcceptanceRate: number;
+    readonly acceptedDecisionReuseCount: number;
+    readonly assumptionResolutionRate: number;
+    readonly assumptionStatusCounts: Readonly<Record<Assumption["status"], number>>;
+    readonly specificationApprovalRate: number;
+    readonly medianQuestionResolutionMs?: number;
+    readonly medianSpecificationApprovalMs?: number;
+  };
+  readonly guardrails: {
+    readonly questionsPerRun: number;
+    readonly blockingQuestions: number;
+    readonly unroutedBlockingQuestions: number;
+    readonly contextItemsReturned: number;
+    readonly contextItemsPerRetrieval: number;
+  };
+  readonly byClient: readonly {
+    readonly client: AgentClient;
+    readonly runCount: number;
+    readonly contextRetrievals: number;
+    readonly questionSubmissions: number;
+    readonly questionsReused: number;
+    readonly decisionsAccepted: number;
+    readonly decisionReuseOccurrences: number;
+    readonly assumptionsRecorded: number;
+  }[];
+  readonly privacy: {
+    readonly derivedFrom: readonly string[];
+    readonly excluded: readonly string[];
+  };
+}
+
 type View =
   | "inbox"
   | "questions"
@@ -224,7 +286,8 @@ type View =
   | "notifications"
   | "decisions"
   | "assumptions"
-  | "runs";
+  | "runs"
+  | "analytics";
 
 async function bridgeFetch<T>(
   path: string,
@@ -261,6 +324,17 @@ function displayedArtifactStatus(version: ArtifactVersion | undefined): string {
     : version?.status ?? "draft";
 }
 
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatDuration(value: number | undefined): string {
+  if (value === undefined) return "Not available";
+  if (value < 1_000) return `${Math.round(value)} ms`;
+  if (value < 60_000) return `${(value / 1_000).toFixed(1)} s`;
+  return `${(value / 60_000).toFixed(1)} min`;
+}
+
 function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
   return [...keys].every((key) => left[key] === right[key]);
@@ -283,6 +357,8 @@ export default function Home() {
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
+  const [analytics, setAnalytics] = useState<ProjectAnalytics>();
+  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilters>({});
   const [selectedId, setSelectedId] = useState<string>();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
   const [selectedDecisionId, setSelectedDecisionId] = useState<string>();
@@ -316,6 +392,7 @@ export default function Home() {
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [principalsLoading, setPrincipalsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -325,6 +402,15 @@ export default function Home() {
     () => principals.find((principal) => principal.id === activePrincipalId),
     [activePrincipalId, principals],
   );
+
+  const updateAnalyticsFilter = useCallback((key: AnalyticsFilterKey, value: string) => {
+    setAnalyticsFilters((current) => {
+      const next = { ...current };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  }, []);
 
   const inboxFilterOptions = useMemo(() => ({
     categories: [...new Set(questions.map((question) => question.category))].sort((left, right) => left.localeCompare(right)),
@@ -538,10 +624,41 @@ export default function Home() {
     }
   }, [activePrincipalId, decisionFilters, selectedProjectId]);
 
+  const loadAnalytics = useCallback(async () => {
+    if (!selectedProjectId) {
+      setAnalytics(undefined);
+      setAnalyticsLoading(false);
+      return;
+    }
+    setAnalyticsLoading(true);
+    setError(undefined);
+    try {
+      const parameters = new URLSearchParams();
+      if (analyticsFilters.client) parameters.set("client", analyticsFilters.client);
+      if (analyticsFilters.startedFrom) {
+        parameters.set("startedFrom", `${analyticsFilters.startedFrom}T00:00:00.000Z`);
+      }
+      if (analyticsFilters.startedTo) {
+        parameters.set("startedTo", `${analyticsFilters.startedTo}T23:59:59.999Z`);
+      }
+      const query = parameters.toString();
+      setAnalytics(await bridgeFetch<ProjectAnalytics>(
+        `/v1/admin/projects/${selectedProjectId}/analytics${query ? `?${query}` : ""}`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setAnalytics(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project analytics.");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [activePrincipalId, analyticsFilters, selectedProjectId]);
+
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "analytics"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -576,6 +693,10 @@ export default function Home() {
     void loadNotifications();
     void loadReferenceData();
   }, [loadArtifacts, loadNotifications, loadQuestions, loadReferenceData]);
+
+  useEffect(() => {
+    if (view === "analytics") void loadAnalytics();
+  }, [loadAnalytics, view]);
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
     const updated = await bridgeFetch<Notification>(`/v1/notifications/${notificationId}/read`, {
@@ -641,6 +762,7 @@ export default function Home() {
     decisions: "Decisions",
     assumptions: "Assumptions",
     runs: "Agent Runs",
+    analytics: "Analytics",
   };
 
   useEffect(() => {
@@ -983,6 +1105,11 @@ export default function Home() {
             aria-current={view === "runs" ? "page" : undefined}
             onClick={() => setView("runs")}
           >Agent Runs</button>
+          <button
+            type="button"
+            aria-current={view === "analytics" ? "page" : undefined}
+            onClick={() => setView("analytics")}
+          >Analytics</button>
         </nav>
         <div className="identity"><strong>{activePrincipal?.displayName ?? "Local reviewer"}</strong><small>Prototype identity</small></div>
       </aside>
@@ -1031,6 +1158,153 @@ export default function Home() {
                       <span className="notification-state">{notification.readAt ? "Read" : "Unread"}</span>
                     </button>
                   ))}
+                </div>
+              ) : null}
+            </>
+          ) : view === "analytics" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Privacy-conscious pilot analytics</h1>
+                  <p>Lifecycle counts and outcomes derived from governed records without exposing prompts, answers, specifications, or hidden reasoning.</p>
+                </div>
+                <button className="secondary" type="button" onClick={() => void loadAnalytics()}>Refresh</button>
+              </div>
+              <div className="filter-bar" aria-label="Analytics cohort filters">
+                <label htmlFor="analytics-client">Agent client</label>
+                <select
+                  id="analytics-client"
+                  value={analyticsFilters.client ?? ""}
+                  onChange={(event) => updateAnalyticsFilter("client", event.target.value)}
+                >
+                  <option value="">All clients</option>
+                  {(["codex", "claude_code", "cursor", "copilot", "custom", "unknown"] as const).map((client) => (
+                    <option key={client} value={client}>{client.replaceAll("_", " ")}</option>
+                  ))}
+                </select>
+                <label htmlFor="analytics-from">Runs from</label>
+                <input
+                  id="analytics-from"
+                  type="date"
+                  value={analyticsFilters.startedFrom ?? ""}
+                  onChange={(event) => updateAnalyticsFilter("startedFrom", event.target.value)}
+                />
+                <label htmlFor="analytics-to">Runs to</label>
+                <input
+                  id="analytics-to"
+                  type="date"
+                  value={analyticsFilters.startedTo ?? ""}
+                  onChange={(event) => updateAnalyticsFilter("startedTo", event.target.value)}
+                />
+                <button className="secondary" type="button" onClick={() => setAnalyticsFilters({})}>Clear filters</button>
+              </div>
+              {analyticsLoading ? <div className="empty">Calculating project analytics…</div> : null}
+              {!analyticsLoading && analytics ? (
+                <div className="analytics-stack">
+                  <div className="analytics-grid" aria-label="Pilot outcome summary">
+                    <article className="analytics-card">
+                      <small>Runs in cohort</small>
+                      <strong>{analytics.cohort.runCount}</strong>
+                      <span>{analytics.cohort.client?.replaceAll("_", " ") ?? "all agent clients"}</span>
+                    </article>
+                    <article className="analytics-card">
+                      <small>Runs retrieving context</small>
+                      <strong>{formatPercent(analytics.outcomes.runsWithContextRate)}</strong>
+                      <span>{analytics.activity.contextRetrievals} retrievals</span>
+                    </article>
+                    <article className="analytics-card">
+                      <small>Question reuse rate</small>
+                      <strong>{formatPercent(analytics.outcomes.questionReuseRate)}</strong>
+                      <span>{analytics.activity.questionsReused} existing questions reused</span>
+                    </article>
+                    <article className="analytics-card">
+                      <small>Accepted decisions reused</small>
+                      <strong>{analytics.outcomes.acceptedDecisionReuseCount}</strong>
+                      <span>{analytics.activity.decisionReuseOccurrences} retrieval occurrences</span>
+                    </article>
+                    <article className="analytics-card">
+                      <small>Median decision time</small>
+                      <strong>{formatDuration(analytics.outcomes.medianQuestionResolutionMs)}</strong>
+                      <span>{formatPercent(analytics.outcomes.decisionAcceptanceRate)} of created questions accepted</span>
+                    </article>
+                    <article className="analytics-card">
+                      <small>Specification approval</small>
+                      <strong>{formatPercent(analytics.outcomes.specificationApprovalRate)}</strong>
+                      <span>median {formatDuration(analytics.outcomes.medianSpecificationApprovalMs)}</span>
+                    </article>
+                  </div>
+
+                  <section className="analytics-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Governed activity</h2><p>Counts follow runs selected by the cohort filters.</p></div>
+                      <small>Generated {new Date(analytics.generatedAt).toLocaleString()}</small>
+                    </div>
+                    <div className="analytics-activity-grid">
+                      {[
+                        ["Context retrievals", analytics.activity.contextRetrievals],
+                        ["Question submissions", analytics.activity.questionSubmissions],
+                        ["Questions created", analytics.activity.questionsCreated],
+                        ["Questions reused", analytics.activity.questionsReused],
+                        ["Routed on creation", analytics.activity.questionsRoutedOnCreation],
+                        ["Responses proposed", analytics.activity.responsesProposed],
+                        ["Decisions accepted", analytics.activity.decisionsAccepted],
+                        ["Assumptions resolved", analytics.activity.assumptionsResolved],
+                        ["Specification versions approved", analytics.activity.specificationVersionsApproved],
+                      ].map(([label, value]) => (
+                        <div key={label}><span>{label}</span><strong>{value}</strong></div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="analytics-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Guardrails</h2><p>Signals that should stay bounded during the pilot.</p></div>
+                    </div>
+                    <div className="analytics-activity-grid">
+                      <div><span>Questions per run</span><strong>{analytics.guardrails.questionsPerRun.toFixed(2)}</strong></div>
+                      <div><span>Blocking questions</span><strong>{analytics.guardrails.blockingQuestions}</strong></div>
+                      <div><span>Unrouted blocking questions</span><strong>{analytics.guardrails.unroutedBlockingQuestions}</strong></div>
+                      <div><span>Context items per retrieval</span><strong>{analytics.guardrails.contextItemsPerRetrieval.toFixed(2)}</strong></div>
+                      <div><span>First-assignment routing</span><strong>{formatPercent(analytics.outcomes.firstAssignmentRoutingRate)}</strong></div>
+                      <div><span>Assumption resolution</span><strong>{formatPercent(analytics.outcomes.assumptionResolutionRate)}</strong></div>
+                    </div>
+                  </section>
+
+                  <section className="analytics-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Agent client breakdown</h2><p>Controlled client names only; task and user content are excluded.</p></div>
+                    </div>
+                    {analytics.byClient.length === 0 ? <div className="empty">No runs match this cohort.</div> : (
+                      <div className="analytics-table-wrap">
+                        <table className="analytics-table">
+                          <thead><tr><th>Client</th><th>Runs</th><th>Context</th><th>Questions</th><th>Reused questions</th><th>Accepted decisions</th><th>Decision reuse</th></tr></thead>
+                          <tbody>
+                            {analytics.byClient.map((row) => (
+                              <tr key={row.client}>
+                                <th>{row.client.replaceAll("_", " ")}</th>
+                                <td>{row.runCount}</td>
+                                <td>{row.contextRetrievals}</td>
+                                <td>{row.questionSubmissions}</td>
+                                <td>{row.questionsReused}</td>
+                                <td>{row.decisionsAccepted}</td>
+                                <td>{row.decisionReuseOccurrences}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel privacy-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>What analytics collects</h2><p>This view calculates metadata in place and does not create a second content store.</p></div>
+                    </div>
+                    <div className="privacy-columns">
+                      <div><h3>Derived from</h3><ul>{analytics.privacy.derivedFrom.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                      <div><h3>Explicitly excluded</h3><ul>{analytics.privacy.excluded.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                    </div>
+                  </section>
                 </div>
               ) : null}
             </>

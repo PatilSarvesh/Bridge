@@ -1040,7 +1040,7 @@ Implementation note: acceptance criteria 1, 3, and the repository-portable porti
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Implemented — project-admin run cohorts derive privacy-safe context/question/routing/response/decision-reuse/assumption/specification counts, rates, durations, client breakdowns, guardrails, and an in-product dashboard without a duplicate content store
 - **Dependencies:** BRG-050, BRG-100
 - **PRD references:** Success metrics
 
@@ -1053,6 +1053,8 @@ Acceptance criteria:
 3. Tenant administrators can understand what usage data is collected.
 4. Metrics can be filtered by project and agent client without exposing user content.
 5. Pilot dashboard reports the PRD's primary product and guardrail metrics that are technically available.
+
+Implementation note: project and controlled-client filtering, lifecycle attribution, the administrator collection notice, REST policy tests, and the web dashboard are implemented. Routing coverage measures owner/role presence rather than subjective correctness; rework, question-quality, unsubscribe, and secret-detection metrics remain unavailable and are not inferred.
 
 ### BRG-111 — Provide pilot administration and support view
 
