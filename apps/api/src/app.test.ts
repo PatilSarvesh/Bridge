@@ -434,9 +434,19 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ id: replacement.id }),
     ]);
 
+    const searched = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?search=dead-letter+settlement`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(searched.statusCode).toBe(200);
+    expect(searched.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: replacement.id }),
+    ]);
+
     const history = await app.inject({
       method: "GET",
-      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&search=bounded+retries&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
     });
     expect(history.json<{ items: Array<{ id: string; status: string }> }>().items).toEqual([
@@ -456,6 +466,13 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
     });
     expect(invalidHistoryFlag.statusCode).toBe(400);
+
+    const invalidSearch = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?search=x`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidSearch.statusCode).toBe(400);
   });
 
   it("routes role-owned questions to a matching fixed human principal", async () => {

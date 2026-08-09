@@ -476,7 +476,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — authorized active-by-default browsing, explicit lifecycle history, deterministic category/owner/date/exact-scope filters, detail/source navigation, and deterministic agent search are implemented; PostgreSQL full-text search remains
+- **Status:** Implemented for the MVP — authorized active-by-default browsing, weighted PostgreSQL full-text search with deterministic local fallback, explicit lifecycle history, category/owner/date/exact-scope filters, detail/source navigation, and shared REST/MCP query semantics are implemented
 - **Dependencies:** BRG-040
 - **PRD references:** DEC-04
 

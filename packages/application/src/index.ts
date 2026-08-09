@@ -82,6 +82,7 @@ export interface BridgeRepository {
   getIdempotentRequestHash(key: string): Promise<string | undefined>;
   getDecision(decisionId: string): Promise<Decision | undefined>;
   listDecisions(projectId: string): Promise<readonly Decision[]>;
+  searchDecisions(projectId: string, search: string): Promise<readonly Decision[]>;
   saveDecision(decision: Decision): Promise<void>;
   getArtifact(artifactId: string): Promise<Artifact | undefined>;
   getArtifactByVersionId(versionId: string): Promise<Artifact | undefined>;
@@ -391,6 +392,38 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return [...this.decisions.values()]
       .filter((decision) => decision.projectId === projectId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async searchDecisions(projectId: string, search: string): Promise<readonly Decision[]> {
+    const tokenize = (value: string): readonly string[] =>
+      value.toLocaleLowerCase("en").match(/[\p{L}\p{N}]+/gu) ?? [];
+    const searchTokens = [...new Set(tokenize(search))];
+    if (searchTokens.length === 0) return [];
+
+    return (await this.listDecisions(projectId))
+      .map((decision) => {
+        const answerTokens = new Set(tokenize(decision.answer));
+        const rationaleTokens = new Set(tokenize(decision.rationale));
+        const categoryTokens = new Set(tokenize(decision.category));
+        const matches = searchTokens.every((token) =>
+          answerTokens.has(token) || rationaleTokens.has(token) || categoryTokens.has(token),
+        );
+        const score = matches
+          ? searchTokens.reduce(
+            (total, token) => total +
+              (answerTokens.has(token) ? 4 : 0) +
+              (rationaleTokens.has(token) ? 2 : 0) +
+              (categoryTokens.has(token) ? 1 : 0),
+            0,
+          )
+          : 0;
+        return { decision, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((left, right) =>
+        right.score - left.score || right.decision.createdAt.localeCompare(left.decision.createdAt),
+      )
+      .map(({ decision }) => decision);
   }
 
   async saveDecision(decision: Decision): Promise<void> {
@@ -1816,7 +1849,10 @@ export class BridgeService {
     await this.requireProject(principal, projectId);
     const category = query.category?.toLocaleLowerCase("en");
     const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
-    return (await this.repository.listDecisions(projectId)).filter((decision) => {
+    const candidates = query.search
+      ? await this.repository.searchDecisions(projectId, query.search)
+      : await this.repository.listDecisions(projectId);
+    return candidates.filter((decision) => {
       if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
         return false;
       }

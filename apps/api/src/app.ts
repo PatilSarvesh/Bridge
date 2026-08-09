@@ -381,6 +381,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
             : request.query.includeHistory === "false"
               ? false
               : request.query.includeHistory,
+        search: request.query.search,
         status: request.query.status,
         category: request.query.category,
         ownerId: request.query.ownerId,

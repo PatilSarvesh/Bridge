@@ -221,6 +221,7 @@ export const contextQuerySchema = z.object({
 export const decisionListQuerySchema = z
   .object({
     includeHistory: z.boolean().default(false),
+    search: z.string().trim().min(2).max(200).optional(),
     status: decisionStatusSchema.optional(),
     category: z.string().trim().min(2).max(100).optional(),
     ownerId: z.string().trim().min(1).max(100).optional(),

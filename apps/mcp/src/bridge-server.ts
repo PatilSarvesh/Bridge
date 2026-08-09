@@ -235,10 +235,11 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, query }) => {
-      const needle = query.toLowerCase();
-      const decisions = (await service.listDecisions(principal, projectId)).filter((decision) =>
-        `${decision.answer} ${decision.rationale} ${decision.category}`.toLowerCase().includes(needle),
-      );
+      const decisions = await service.listDecisions(principal, projectId, {
+        includeHistory: false,
+        search: query,
+        scope: {},
+      });
       return result({ items: decisions });
     },
   );

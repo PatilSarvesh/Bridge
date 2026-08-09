@@ -78,6 +78,13 @@
       "when": 1786295087369,
       "tag": "0010_safe_white_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786298046966,
+      "tag": "0011_keen_galactus",
+      "breakpoints": true
     }
   ]
 }

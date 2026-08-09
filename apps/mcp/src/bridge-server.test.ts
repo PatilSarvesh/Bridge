@@ -150,6 +150,17 @@ describe("Bridge MCP tools", () => {
       rationale: "Retry only transient failures using a bounded policy and idempotency keys.",
     });
 
+    const decisionSearchResult = await client.callTool({
+      name: "bridge_search_decisions",
+      arguments: {
+        projectId: demoProject.id,
+        query: "bounded policy",
+      },
+    });
+    expect(decisionSearchResult.structuredContent).toEqual({
+      items: [expect.objectContaining({ category: "architecture", status: "active" })],
+    });
+
     const contextResult = await client.callTool({
       name: "bridge_get_context",
       arguments: {

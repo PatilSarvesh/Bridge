@@ -705,6 +705,11 @@ describe("Bridge decision workflow", () => {
       answer: "Retry transient failures once before dead-lettering.",
       rationale: "Production evidence shows that one bounded retry prevents loops while preserving recovery.",
     });
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      search: "transient failures",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([original.id, replacement.id]);
     const publication = await service.publishArtifact(agent, project.id, artifactInput({
       idempotencyKey: "decision-lifecycle-artifact",
       citedDecisionIds: [original.id],
@@ -757,6 +762,26 @@ describe("Bridge decision workflow", () => {
     expect((await service.listDecisions(owner, project.id)).map((decision) => decision.id)).toEqual([
       replacement.id,
     ]);
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: false,
+      search: "production evidence",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([replacement.id]);
+    expect(await service.listDecisions(owner, project.id, {
+      includeHistory: false,
+      search: "initially retried",
+      scope: {},
+    })).toEqual([]);
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      search: "initially retried",
+      scope: {},
+    })).map((decision) => decision.id)).toEqual([original.id]);
+    await expect(service.listDecisions(outsider, project.id, {
+      includeHistory: true,
+      search: "transient failures",
+      scope: {},
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect((await service.listDecisions(owner, project.id, {
       includeHistory: true,
       scope: {},

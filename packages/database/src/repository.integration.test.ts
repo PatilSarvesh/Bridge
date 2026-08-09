@@ -211,6 +211,21 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           version: 2,
         }),
       ]));
+      expect(await service.listDecisions(owner, project.id, {
+        includeHistory: false,
+        search: "node failure",
+        scope: {},
+      })).toEqual([expect.objectContaining({ id: replacementDecisionId, status: "active" })]);
+      expect(await service.listDecisions(owner, project.id, {
+        includeHistory: false,
+        search: "concurrency controls",
+        scope: {},
+      })).toEqual([]);
+      expect(await service.listDecisions(owner, project.id, {
+        includeHistory: true,
+        search: "concurrency controls",
+        scope: {},
+      })).toEqual([expect.objectContaining({ id: decisionId, status: "superseded" })]);
       expect(await service.getArtifact(owner, artifactId)).toMatchObject({
         versions: [expect.objectContaining({
           id: artifactVersionId,

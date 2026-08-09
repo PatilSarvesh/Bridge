@@ -390,5 +390,13 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(artifactReviewMigration).toContain("bridge_artifact_versions_reviews_shape_check");
     expect(artifactReviewMigration).toContain("artifact_review_feedback");
+
+    const decisionSearchMigration = readFileSync(
+      new URL("../drizzle/0011_keen_galactus.sql", import.meta.url),
+      "utf8",
+    );
+    expect(decisionSearchMigration).toContain('CREATE INDEX "bridge_decisions_full_text_idx"');
+    expect(decisionSearchMigration).toContain("USING gin");
+    expect(decisionSearchMigration).toContain("setweight(to_tsvector('simple'");
   });
 });

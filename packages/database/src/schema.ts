@@ -6,6 +6,7 @@ import type {
   QuestionOption,
   QuestionReview,
 } from "@bridge/domain";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   type AnyPgColumn,
@@ -244,6 +245,14 @@ export const decisions = pgTable(
       table.id,
     ),
     index("bridge_decisions_project_status_idx").on(table.projectId, table.status),
+    index("bridge_decisions_full_text_idx").using(
+      "gin",
+      sql`(
+        setweight(to_tsvector('simple', coalesce(${table.answer}, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(${table.rationale}, '')), 'B') ||
+        setweight(to_tsvector('simple', coalesce(${table.category}, '')), 'C')
+      )`,
+    ),
     foreignKey({
       name: "bridge_decisions_replacement_scope_fk",
       columns: [table.organizationId, table.projectId, table.replacementDecisionId],

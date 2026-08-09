@@ -12,7 +12,7 @@ import type {
   Project,
   Question,
 } from "@bridge/domain";
-import { and, asc, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import {
@@ -322,6 +322,21 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .from(decisions)
       .where(eq(decisions.projectId, projectId))
       .orderBy(desc(decisions.createdAt));
+    return rows.map(decisionFromRow);
+  }
+
+  async searchDecisions(projectId: string, search: string): Promise<readonly Decision[]> {
+    const document = sql`(
+      setweight(to_tsvector('simple', coalesce(${decisions.answer}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${decisions.rationale}, '')), 'B') ||
+      setweight(to_tsvector('simple', coalesce(${decisions.category}, '')), 'C')
+    )`;
+    const query = sql`websearch_to_tsquery('simple', ${search})`;
+    const rows = await this.database
+      .select()
+      .from(decisions)
+      .where(and(eq(decisions.projectId, projectId), sql`${document} @@ ${query}`))
+      .orderBy(desc(sql<number>`ts_rank_cd(${document}, ${query})`), desc(decisions.createdAt));
     return rows.map(decisionFromRow);
   }
 

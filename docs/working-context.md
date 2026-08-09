@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decision retirement, active-by-default decision browsing/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
+| Current implementation phase | Governed decision retirement, active-by-default full-text decision search/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while specification version diff is the recommended next workflow |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -1358,7 +1358,7 @@ Implemented and verified:
 Deliberate boundaries:
 
 - Impact is direct and deterministic; deeper transitive dependency analysis remains BRG-123.
-- PostgreSQL full-text decision search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
+- Automatic review-date expiry and scheduled lifecycle automation remain future work.
 - No agent, CLI, or MCP path can perform a human decision lifecycle action.
 
 ### 20.23 Implemented specification review feedback and request changes
@@ -1395,13 +1395,31 @@ Implemented and verified:
 
 Deliberate boundaries:
 
-- Full-text relevance search remains a PostgreSQL-backed follow-up in BRG-041; the current agent search stays deterministic and authorized.
 - The first UI surface exposes component scope because it is the most common narrowing dimension; REST already supports every defined scope dimension.
 - Filters are local view state, not saved preferences or shareable query parameters.
 
 ### 20.25 Corrected the decision-lifecycle migration for the full PostgreSQL chain
 
-GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement. The next PostgreSQL run `31326475659` proved that the full migration chain proceeded, then exposed a stale reconnect assertion added with the lifecycle scenario: the run correctly persisted both its original and replacement question IDs. The integration test now asserts those exact provenance IDs instead of expecting only one question.
+GitHub Actions run `31326190863` exposed a migration-chain defect that local in-memory validation could not execute: migration `0002_complex_moondragon.sql` already creates the exact `bridge_decisions_organization_project_id_unique` constraint, while the generated decision-lifecycle migration attempted to create a unique index with the same PostgreSQL relation name. Migration `0009_true_marauders.sql` now uses `CREATE UNIQUE INDEX IF NOT EXISTS`, preserving fresh and upgrade behavior while allowing the pre-existing exact uniqueness constraint to support the replacement-decision composite foreign key. The migration-structure regression asserts both the earlier constraint and the guarded later statement. The next PostgreSQL run `31326475659` proved that the full migration chain proceeded, then exposed a stale reconnect assertion added with the lifecycle scenario: the run correctly persisted both its original and replacement question IDs. The integration test now asserts those exact provenance IDs instead of expecting only one question. GitHub Actions run `31326716422` then passed the complete isolated-PostgreSQL CI gate for commit `665d83a`.
+
+### 20.26 Implemented authorized full-text decision search
+
+Implemented and locally verified:
+
+1. The decision-list query contract accepts a trimmed two-to-200-character search expression and composes it with active/history, lifecycle status, category, owner, creation-time, and exact-scope filters.
+2. Application authorization resolves the project before invoking repository search, preventing search input from weakening tenant/project access.
+3. PostgreSQL searches weighted `simple` text-search vectors across answer, rationale, and category, ranks answer matches above rationale and category matches, and preserves creation-time ordering for equal ranks.
+4. Forward-only migration `0011_keen_galactus.sql` creates the matching GIN expression index; the schema, Drizzle snapshot/journal, and migration regression describe the same index.
+5. Dependency-free in-memory mode implements deterministic Unicode token matching and the same answer/rationale/category field weights, so REST, web, CLI-backed API access, and optional MCP remain usable without PostgreSQL or MCP approval.
+6. The MCP `bridge_search_decisions` tool delegates to the same active-only application query instead of maintaining its former substring implementation.
+7. The Decisions UI provides an explicit search control and search-specific empty state; a one-character query is not submitted, and clearing filters also clears the draft.
+8. Application/API/MCP regressions cover active search, explicit retired-history search, combined filters, invalid input, and cross-organization denial. The opt-in PostgreSQL reconnect test covers active and retired full-text results when CI supplies its isolated database.
+
+Deliberate boundaries:
+
+- The `simple` configuration provides predictable language-neutral token matching without extensions; stemming, fuzzy/trigram matching, synonyms, and semantic/vector retrieval remain separate evaluated enhancements.
+- Search relevance scores affect ordering but are not exposed as organizational authority or confidence.
+- The GIN index is created normally rather than concurrently because migrations run explicitly before service startup; a large production deployment should revisit online index rollout.
 
 ## 21. Important implementation files
 
@@ -1428,6 +1446,7 @@ GitHub Actions run `31326190863` exposed a migration-chain defect that local in-
 - Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
 - Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
 - Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
+- Decision full-text search migration: `packages/database/drizzle/0011_keen_galactus.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1468,4 +1487,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default decision browsing with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance, PostgreSQL full-text decision search, and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default weighted decision search with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

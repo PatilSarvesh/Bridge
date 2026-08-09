@@ -75,7 +75,7 @@ interface Question {
 
 type InboxFilterKey = "status" | "risk" | "category" | "role";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
-type DecisionFilterKey = "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
+type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
 type DecisionFilters = Partial<Record<DecisionFilterKey, string>> & { readonly includeHistory?: boolean };
 
 interface ArtifactVersion {
@@ -258,6 +258,7 @@ export default function Home() {
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
   const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
+  const [decisionSearchDraft, setDecisionSearchDraft] = useState("");
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
@@ -455,6 +456,7 @@ export default function Home() {
     try {
       const decisionParameters = new URLSearchParams();
       if (decisionFilters.includeHistory) decisionParameters.set("includeHistory", "true");
+      if (decisionFilters.search) decisionParameters.set("search", decisionFilters.search);
       if (decisionFilters.status) decisionParameters.set("status", decisionFilters.status);
       if (decisionFilters.category) decisionParameters.set("category", decisionFilters.category);
       if (decisionFilters.ownerId) decisionParameters.set("ownerId", decisionFilters.ownerId);
@@ -827,7 +829,8 @@ export default function Home() {
       if (notification.targetType === "decision") {
         setView("decisions");
         requestedDecisionIdRef.current = notification.targetId;
-        setDecisionFilters((current) => ({ ...current, includeHistory: true }));
+        setDecisionSearchDraft("");
+        setDecisionFilters({ includeHistory: true });
         setSelectedDecisionId(notification.targetId);
       } else if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
         setView("specifications");
@@ -979,6 +982,25 @@ export default function Home() {
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
               </div>
               <div className="filter-bar" aria-label="Decision filters">
+                <label htmlFor="decision-search">Search</label>
+                <input
+                  id="decision-search"
+                  value={decisionSearchDraft}
+                  placeholder="Answer, rationale, category"
+                  onChange={(event) => setDecisionSearchDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    const search = decisionSearchDraft.trim();
+                    if (event.key === "Enter" && (search.length === 0 || search.length >= 2)) {
+                      updateDecisionFilter("search", search);
+                    }
+                  }}
+                />
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={decisionSearchDraft.trim().length === 1}
+                  onClick={() => updateDecisionFilter("search", decisionSearchDraft.trim())}
+                >Search</button>
                 <label htmlFor="decision-history">View</label>
                 <select
                   id="decision-history"
@@ -1051,11 +1073,24 @@ export default function Home() {
                   onChange={(event) => updateDecisionFilter("createdTo", event.target.value)}
                 />
                 {hasDecisionFilters ? (
-                  <button className="secondary" type="button" onClick={() => setDecisionFilters({})}>Clear</button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => {
+                      setDecisionSearchDraft("");
+                      setDecisionFilters({});
+                    }}
+                  >Clear</button>
                 ) : null}
               </div>
               {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
-              {!referenceDataLoading && decisions.length === 0 ? <div className="empty">No decisions have been accepted for this project.</div> : null}
+              {!referenceDataLoading && decisions.length === 0 ? (
+                <div className="empty">
+                  {decisionFilters.search
+                    ? `No decisions match “${decisionFilters.search}”.`
+                    : "No decisions have been accepted for this project."}
+                </div>
+              ) : null}
               {!referenceDataLoading && decisions.length > 0 ? (
                 <div className="decision-layout">
                   <div className="question-list" aria-label="Accepted decisions">
