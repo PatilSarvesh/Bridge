@@ -46,6 +46,8 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     let artifactId: string;
     let assumptionId: string;
     let runId: string;
+    let questionId: string;
+    let replacementQuestionId: string;
     let contextConsumerRunId: string;
     try {
       await firstStore.repository.saveProject(project);
@@ -79,6 +81,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         recommendationKey: "postgres",
         scope: { component: "persistence" },
       });
+      questionId = question.id;
       const decision = await service.acceptAnswer(owner, question.id, {
         optionKey: "postgres",
         rationale: "PostgreSQL provides durable transactions and concurrency controls.",
@@ -159,6 +162,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         recommendationKey: "postgres-ha",
         scope: { component: "persistence" },
       });
+      replacementQuestionId = replacementQuestion.id;
       const replacement = await service.acceptAnswer(owner, replacementQuestion.id, {
         optionKey: "postgres-ha",
         rationale: "Highly available PostgreSQL preserves the required durable transaction boundary during node failure.",
@@ -184,7 +188,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       expect(await service.getRun(agent, runId)).toMatchObject({
         id: runId,
         status: "waiting_for_human",
-        questionIds: [expect.any(String)],
+        questionIds: [questionId, replacementQuestionId],
         assumptionIds: [assumptionId],
         artifactVersionIds: [artifactVersionId],
       });
