@@ -814,7 +814,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — authority-checked approval, immutable versions, single current approval, audit/outbox, and web approval are implemented; comments, request-changes, and configurable reviewer/team workflow remain
+- **Status:** Partial — authority-checked append-only review comments, request-changes, immutable versions, single current approval, audit/outbox, and web review/approval are implemented; configurable team workflow and multi-reviewer quorum remain
 - **Dependencies:** BRG-021, BRG-080
 - **PRD references:** ART-03, ART-04
 

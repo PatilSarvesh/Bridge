@@ -1064,6 +1064,11 @@ describe("Bridge decision workflow", () => {
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
+    await service.reviewArtifactVersion(owner, first.version.id, {
+      status: "commented",
+      body: "The bounded retry behavior is clear and ready for approval.",
+    });
+
     await service.approveArtifactVersion(owner, first.version.id, {
       rationale: "The retry policy is bounded, observable, and consistent with the component decision.",
     });
@@ -1097,5 +1102,74 @@ describe("Bridge decision workflow", () => {
       expect.objectContaining({ id: first.version.id, status: "superseded" }),
       expect.objectContaining({ id: second.version.id, status: "approved" }),
     ]);
+  });
+
+  it("records specification feedback and requires a new version after requested changes", async () => {
+    const { repository, service } = await runtime();
+    const first = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-feedback-001",
+    }));
+
+    await expect(service.reviewArtifactVersion(contributor, first.version.id, {
+      status: "commented",
+      body: "A contributor who is not a configured reviewer cannot submit formal review feedback.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const comment = await service.reviewArtifactVersion(owner, first.version.id, {
+      status: "commented",
+      body: "Please clarify how retry metrics distinguish transient and permanent failures.",
+    });
+    expect(comment).toMatchObject({
+      review: { reviewerId: owner.id, status: "commented" },
+      version: { reviews: [expect.objectContaining({ status: "commented" })] },
+    });
+    const requested = await service.reviewArtifactVersion(owner, first.version.id, {
+      status: "changes_requested",
+      body: "Add the retry classification rules and the dead-letter observability requirement.",
+    });
+    expect(requested.version.reviews).toHaveLength(2);
+    await expect(service.approveArtifactVersion(owner, first.version.id, {
+      rationale: "The original version cannot be approved after actionable changes were requested.",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const replacement = await service.publishArtifact(agent, project.id, artifactInput({
+      artifactId: first.artifact.id,
+      idempotencyKey: "artifact-review-feedback-002",
+      summary: "Adds retry classification and dead-letter observability requirements.",
+      body: "# Transfer retry policy\n\nClassify transient failures, use bounded backoff, and emit dead-letter metrics for permanent failures.",
+    }));
+    expect(replacement.version.reviews).toEqual([]);
+    await expect(service.reviewArtifactVersion(owner, first.version.id, {
+      status: "commented",
+      body: "Historical versions cannot receive new formal review feedback.",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await service.approveArtifactVersion(owner, replacement.version.id, {
+      rationale: "The new immutable version addresses the requested classification and observability changes.",
+    });
+    const artifact = await service.getArtifact(agent, first.artifact.id);
+    expect(artifact.versions).toEqual([
+      expect.objectContaining({
+        id: first.version.id,
+        status: "in_review",
+        reviews: [
+          expect.objectContaining({ status: "commented" }),
+          expect.objectContaining({ status: "changes_requested" }),
+        ],
+      }),
+      expect.objectContaining({ id: replacement.version.id, status: "approved", reviews: [] }),
+    ]);
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "artifact.version_commented", subjectId: first.version.id }),
+      expect.objectContaining({ action: "artifact.version_changes_requested", subjectId: first.version.id }),
+    ]));
+    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "notification.created",
+        payload: expect.objectContaining({
+          notificationType: "artifact_review_feedback",
+          targetId: first.version.id,
+        }),
+      }),
+    ]));
   });
 });

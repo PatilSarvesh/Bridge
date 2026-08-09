@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
+  artifactReviewInputSchema,
   changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
@@ -397,6 +398,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = resolvePrincipal(request, options.principals);
     return options.service.getArtifact(principal, request.params.artifactId);
   });
+
+  app.post<{ Params: { versionId: string }; Body: unknown }>(
+    "/v1/artifact-versions/:versionId/reviews",
+    async (request, reply) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = artifactReviewInputSchema.parse(request.body);
+      const result = await options.service.reviewArtifactVersion(principal, request.params.versionId, input);
+      return reply.status(201).send(result);
+    },
+  );
 
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/approve",

@@ -70,6 +70,8 @@ h3 { font-size: 1rem; }
 .status-accepted { color: var(--success); }
 .status-approved { color: var(--success); }
 .status-rejected { color: var(--danger); }
+.status-changes_requested { color: var(--danger); }
+.status-commented { color: var(--action); }
 .status-superseded { color: var(--muted); }
 .question-detail { padding: 20px; }
 .detail-heading { display: flex; justify-content: space-between; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }

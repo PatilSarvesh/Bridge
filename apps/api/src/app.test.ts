@@ -1000,4 +1000,66 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ id: publication.version.id, type: "artifact" }),
     ]);
   });
+
+  it("records reviewer comments and blocks approval after requested specification changes", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const published = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/artifacts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-artifact-review-feedback-001",
+        title: "Settlement retry contract",
+        type: "adr",
+        summary: "Defines retry and dead-letter behavior for settlement processing.",
+        body: "# Settlement retry contract\n\nRetry transient settlement failures with bounded backoff.",
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "settlement" },
+      },
+    });
+    const publication = published.json<{ artifact: { id: string }; version: { id: string } }>();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: { status: "commented", body: "A non-reviewer cannot submit formal feedback." },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        status: "changes_requested",
+        body: "Add the dead-letter threshold and the required settlement failure metrics.",
+      },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({
+      review: { reviewerId: demoPrincipals.architect.id, status: "changes_requested" },
+      version: { reviews: [expect.objectContaining({ status: "changes_requested" })] },
+    });
+
+    const blockedApproval = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { rationale: "This exact version must remain blocked until requested changes are published." },
+    });
+    expect(blockedApproval.statusCode).toBe(409);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(detail.json<{ versions: Array<{ reviews: Array<{ status: string }> }> }>().versions[0]?.reviews)
+      .toEqual([expect.objectContaining({ status: "changes_requested" })]);
+  });
 });

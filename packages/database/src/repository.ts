@@ -405,6 +405,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
           target: artifactVersions.id,
           set: {
             status: versionRow.status,
+            reviews: versionRow.reviews,
             approvedById: versionRow.approvedById,
             approvalRationale: versionRow.approvalRationale,
             approvedAt: versionRow.approvedAt,

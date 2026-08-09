@@ -5,6 +5,7 @@ import type {
   AssumptionConfidence,
   AssumptionStatus,
   ArtifactType,
+  ArtifactReviewStatus,
   ArtifactVersionStatus,
   DecisionStatus,
   PrincipalType,
@@ -282,10 +283,21 @@ export interface ArtifactVersion {
   readonly createdById: string;
   readonly createdByType: PrincipalType;
   readonly createdAt: string;
+  readonly reviews: readonly ArtifactReview[];
   readonly runId?: string;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+export interface ArtifactReview {
+  readonly id: string;
+  readonly artifactVersionId: string;
+  readonly reviewerId: string;
+  readonly reviewerType: PrincipalType;
+  readonly status: ArtifactReviewStatus;
+  readonly body: string;
+  readonly createdAt: string;
 }
 
 export interface Artifact {
@@ -411,6 +423,19 @@ export function assertCanApproveArtifact(principal: Principal, artifact: Artifac
     throw new BridgeError(
       "FORBIDDEN",
       "Only a configured specification reviewer can approve this version.",
+      403,
+    );
+  }
+}
+
+export function assertCanReviewArtifact(principal: Principal, artifact: Artifact): void {
+  assertHuman(principal, "Reviewing a specification");
+  const isReviewer = artifact.reviewerIds.includes(principal.id);
+  const isProjectAdmin = principal.roles.includes("project-admin");
+  if (!isReviewer && !isProjectAdmin) {
+    throw new BridgeError(
+      "FORBIDDEN",
+      "Only a configured specification reviewer can add formal review feedback.",
       403,
     );
   }

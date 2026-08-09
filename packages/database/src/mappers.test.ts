@@ -218,6 +218,17 @@ const artifact: Artifact = {
       createdById: "agt_codex",
       createdByType: "agent",
       createdAt: "2026-08-07T10:02:00.000Z",
+      reviews: [
+        {
+          id: "arv_mapping",
+          artifactVersionId: "av_mapping",
+          reviewerId: "usr_owner",
+          reviewerType: "human",
+          status: "commented",
+          body: "The transaction boundary and recovery behavior are clear.",
+          createdAt: "2026-08-07T10:02:30.000Z",
+        },
+      ],
       approvedById: "usr_owner",
       approvalRationale: "This provides the required durability and atomicity.",
       approvedAt: "2026-08-07T10:03:00.000Z",
@@ -366,5 +377,12 @@ describe("PostgreSQL domain mappings", () => {
     expect(decisionLifecycleMigration).toContain("decision.lifecycle_changed");
     expect(decisionLifecycleMigration.indexOf("CREATE UNIQUE INDEX \"bridge_decisions_organization_project_id_unique\""))
       .toBeLessThan(decisionLifecycleMigration.indexOf("ADD CONSTRAINT \"bridge_decisions_replacement_scope_fk\""));
+
+    const artifactReviewMigration = readFileSync(
+      new URL("../drizzle/0010_safe_white_queen.sql", import.meta.url),
+      "utf8",
+    );
+    expect(artifactReviewMigration).toContain("bridge_artifact_versions_reviews_shape_check");
+    expect(artifactReviewMigration).toContain("artifact_review_feedback");
   });
 });

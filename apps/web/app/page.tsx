@@ -84,9 +84,18 @@ interface ArtifactVersion {
   readonly status: "draft" | "in_review" | "approved" | "superseded";
   readonly createdById: string;
   readonly createdAt: string;
+  readonly reviews: readonly ArtifactReview[];
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+interface ArtifactReview {
+  readonly id: string;
+  readonly reviewerId: string;
+  readonly status: "commented" | "changes_requested";
+  readonly body: string;
+  readonly createdAt: string;
 }
 
 interface Artifact {
@@ -112,6 +121,7 @@ interface Notification {
     | "question_accepted"
     | "decision_lifecycle"
     | "artifact_review_requested"
+    | "artifact_review_feedback"
     | "artifact_approved";
   readonly title: string;
   readonly body: string;
@@ -224,6 +234,12 @@ function currentVersion(artifact: Artifact | undefined): ArtifactVersion | undef
   return artifact?.versions.find((version) => version.id === artifact.currentVersionId);
 }
 
+function displayedArtifactStatus(version: ArtifactVersion | undefined): string {
+  return version?.reviews.some((review) => review.status === "changes_requested")
+    ? "changes_requested"
+    : version?.status ?? "draft";
+}
+
 function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
   return [...keys].every((key) => left[key] === right[key]);
@@ -262,6 +278,8 @@ export default function Home() {
   const [approvalRationale, setApprovalRationale] = useState(
     "The specification accurately records the accepted approach and its operational constraints.",
   );
+  const [artifactReviewStatus, setArtifactReviewStatus] = useState<"commented" | "changes_requested">("commented");
+  const [artifactReviewBody, setArtifactReviewBody] = useState("");
   const [decisionLifecycleStatus, setDecisionLifecycleStatus] = useState<"superseded" | "expired" | "revoked">("revoked");
   const [replacementDecisionId, setReplacementDecisionId] = useState("");
   const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
@@ -543,6 +561,13 @@ export default function Home() {
     [artifacts, selectedArtifactId],
   );
   const selectedArtifactVersion = currentVersion(selectedArtifact);
+  const canReviewSelectedArtifact = Boolean(
+    selectedArtifact && activePrincipal &&
+    (selectedArtifact.reviewerIds.includes(activePrincipalId) || activePrincipal.roles.includes("project-admin")),
+  );
+  const selectedArtifactHasChangesRequested = Boolean(
+    selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
+  );
   const selectedDecision = useMemo(
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
@@ -584,6 +609,11 @@ export default function Home() {
     setDecisionLifecycleRationale("");
     setDecisionLifecycleImpact(undefined);
   }, [selectedDecision?.id]);
+
+  useEffect(() => {
+    setArtifactReviewStatus("commented");
+    setArtifactReviewBody("");
+  }, [selectedArtifactVersion?.id]);
 
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
@@ -683,6 +713,29 @@ export default function Home() {
       await Promise.all([loadArtifacts(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to approve specification.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reviewSpecification = async () => {
+    if (
+      !selectedArtifactVersion ||
+      !canReviewSelectedArtifact ||
+      artifactReviewBody.trim().length < (artifactReviewStatus === "changes_requested" ? 10 : 2)
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/artifact-versions/${selectedArtifactVersion.id}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({ status: artifactReviewStatus, body: artifactReviewBody }),
+      }, activePrincipalId);
+      setArtifactReviewStatus("commented");
+      setArtifactReviewBody("");
+      await Promise.all([loadArtifacts(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to record specification feedback.");
     } finally {
       setSubmitting(false);
     }
@@ -1456,6 +1509,7 @@ export default function Home() {
                   <div className="question-list" aria-label="Specification reviews">
                     {artifacts.map((artifact) => {
                       const version = currentVersion(artifact);
+                      const displayedStatus = displayedArtifactStatus(version);
                       return (
                         <button
                           type="button"
@@ -1465,7 +1519,7 @@ export default function Home() {
                         >
                           <span className="document-mark" aria-hidden="true">§</span>
                           <span><strong>{artifact.title}</strong><small>{artifact.type.replaceAll("_", " ")} · version {version?.version ?? "?"}</small></span>
-                          <span className={`status status-${version?.status ?? "draft"}`}>{(version?.status ?? "draft").replaceAll("_", " ")}</span>
+                          <span className={`status status-${displayedStatus}`}>{displayedStatus.replaceAll("_", " ")}</span>
                         </button>
                       );
                     })}
@@ -1475,7 +1529,7 @@ export default function Home() {
                     <article className="question-detail specification-detail">
                       <div className="detail-heading">
                         <div><small>{selectedArtifact.id} · {selectedArtifact.type.replaceAll("_", " ")} · version {selectedArtifactVersion.version}</small><h2>{selectedArtifact.title}</h2></div>
-                        <span className={`status status-${selectedArtifactVersion.status}`}>{selectedArtifactVersion.status.replaceAll("_", " ")}</span>
+                        <span className={`status status-${displayedArtifactStatus(selectedArtifactVersion)}`}>{displayedArtifactStatus(selectedArtifactVersion).replaceAll("_", " ")}</span>
                       </div>
 
                       <section>
@@ -1494,12 +1548,58 @@ export default function Home() {
                       </section>
 
                       <section>
+                        <h3>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></h3>
+                        {selectedArtifactVersion.reviews.length === 0 ? (
+                          <p className="muted-copy">No reviewer feedback has been recorded for this version.</p>
+                        ) : (
+                          <div className="response-list">
+                            {selectedArtifactVersion.reviews.map((review) => (
+                              <article className="response-card" key={review.id}>
+                                <div className="response-heading">
+                                  <strong>{review.reviewerId}</strong>
+                                  <span className={`status status-${review.status}`}>{review.status.replaceAll("_", " ")}</span>
+                                </div>
+                                <small>{new Date(review.createdAt).toLocaleString()}</small>
+                                <p>{review.body}</p>
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                        {canReviewSelectedArtifact && ["draft", "in_review"].includes(selectedArtifactVersion.status) ? (
+                          <div className="response-form">
+                            <label htmlFor="artifact-review-status">Review action</label>
+                            <select
+                              id="artifact-review-status"
+                              value={artifactReviewStatus}
+                              onChange={(event) => setArtifactReviewStatus(event.target.value as typeof artifactReviewStatus)}
+                            >
+                              <option value="commented">Add review comment</option>
+                              <option value="changes_requested">Request changes</option>
+                            </select>
+                            <label htmlFor="artifact-review-body">Feedback</label>
+                            <textarea
+                              id="artifact-review-body"
+                              value={artifactReviewBody}
+                              onChange={(event) => setArtifactReviewBody(event.target.value)}
+                              placeholder="Add evidence or describe an actionable specification change."
+                            />
+                            <button
+                              className="secondary"
+                              type="button"
+                              disabled={submitting || artifactReviewBody.trim().length < (artifactReviewStatus === "changes_requested" ? 10 : 2)}
+                              onClick={() => void reviewSpecification()}
+                            >{submitting ? "Recording feedback…" : artifactReviewStatus === "changes_requested" ? "Request changes" : "Post review comment"}</button>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section>
                         <h3>Version history</h3>
                         <div className="version-list">
                           {[...selectedArtifact.versions].reverse().map((version) => (
                             <div key={version.id}>
                               <strong>Version {version.version}</strong>
-                              <span className={`status status-${version.status}`}>{version.status.replaceAll("_", " ")}</span>
+                              <span className={`status status-${displayedArtifactStatus(version)}`}>{displayedArtifactStatus(version).replaceAll("_", " ")}</span>
                               <small>{version.id}</small>
                             </div>
                           ))}
@@ -1511,7 +1611,11 @@ export default function Home() {
                           <strong>Specification approved by {selectedArtifactVersion.approvedById}.</strong>
                           {selectedArtifactVersion.approvalRationale}
                         </div>
-                      ) : (
+                      ) : selectedArtifactHasChangesRequested ? (
+                        <div className="impact">
+                          <strong>Changes requested.</strong> This immutable version cannot be approved. Publish a new version that addresses the feedback.
+                        </div>
+                      ) : canReviewSelectedArtifact ? (
                         <section>
                           <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
                           <textarea
@@ -1528,6 +1632,8 @@ export default function Home() {
                             {submitting ? "Approving version…" : `Approve version ${selectedArtifactVersion.version}`}
                           </button>
                         </section>
+                      ) : (
+                        <div className="owner-routing"><strong>Shared review only.</strong> A configured specification reviewer or project administrator must approve this version.</div>
                       )}
                     </article>
                   ) : null}

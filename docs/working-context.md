@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Decision supersession/expiry/revocation with impact reporting is implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
+| Current implementation phase | Specification review comments/request-changes and governed decision retirement are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -183,6 +183,8 @@ Specification rules:
 - Approving a newer version supersedes the previously approved version.
 - Only the currently approved version participates in agent context and repository export.
 - Draft and in-review bodies must never be represented as approved context.
+- Configured human reviewers may append formal comments or request changes on the current version.
+- A change request permanently blocks approval of that exact immutable version; the author must publish a new version with a clean review history.
 
 ### 4.6 Data minimization
 
@@ -402,7 +404,7 @@ A Notification is a durable human-only pointer to a project event. It contains:
 - Target type and target ID
 - Created time and optional read time
 
-The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, decision lifecycle changes, specification review requests, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
+The current event types cover question assignments, proposed responses, clarification comments, protected-question reviews, accepted decisions, decision lifecycle changes, specification review requests/feedback, and specification approvals. Notifications are created in the same application transaction as the originating state change and are scoped again at read/mark-read time.
 
 Each notification also creates a `notification.created` outbox event. The notification is the human read model; the outbox record is the retryable downstream-delivery intent.
 
@@ -494,6 +496,7 @@ Both repository implementations record events for:
 - Decision supersession, expiry, and revocation
 - Context retrieval
 - Specification version publication
+- Specification review comment and change request
 - Specification version approval
 - Run start and status transition
 - Continuation resolution
@@ -519,6 +522,7 @@ Both repository implementations record events for:
 - Only the decision owner, configured project decision owner, or project administrator can retire an active decision; every transition is version-checked and rationale-required.
 - A superseding decision must be active in the same project, category, and exact scope, and retired decisions are excluded from context.
 - Only configured specification reviewers/project administrators approve specification versions.
+- Only configured specification reviewers/project administrators append formal specification feedback; a requested change blocks approval of that version.
 - Only the latest specification version can be approved.
 - Approval of a new version supersedes the old approved version.
 - A cited decision must belong to the same project.
@@ -597,6 +601,7 @@ Specifications:
 - `POST /v1/projects/:projectId/artifacts`
 - `GET /v1/projects/:projectId/artifacts`
 - `GET /v1/artifacts/:artifactId`
+- `POST /v1/artifact-versions/:versionId/reviews`
 - `POST /v1/artifact-versions/:versionId/approve`
 
 All prototype routes resolve one of the fixed local principals using `x-bridge-principal-id`.
@@ -755,6 +760,8 @@ The local web application provides:
 - Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
 - Specifications navigation and pending count.
 - Specification detail, immutable Markdown body, reviewer metadata, and version history.
+- Append-only formal review comments and request-changes controls for authorized specification reviewers.
+- A visible changes-requested state that directs the author to publish a new immutable version.
 - Required human approval rationale.
 - Approved specification state.
 - Project-scoped notification feed with unread count, individual mark-read, and mark-all-read controls.
@@ -771,14 +778,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the decision-lifecycle slice:
+Current validation result after the specification-review-feedback slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 54 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 56 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, legacy-backfill, audit-subject, role-owner, review-array, comment-array, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject, role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -917,7 +924,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Slack/email integrations.
 - PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
-- Specification comments or multi-reviewer quorum.
+- Configurable specification reviewer/team routing or multi-reviewer quorum; append-only comments and request-changes are implemented.
 - Binary attachments or S3 storage.
 - Execution of the first tagged GitHub CLI release and any public/organization-registry publication; the checksummed release workflow, global tarball install path, and local package smoke test are implemented.
 - Claude Code and later-client independent conformance runs; Codex-first observable conformance now passes.
@@ -1354,6 +1361,26 @@ Deliberate boundaries:
 - Decision list filtering/history search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
 - No agent, CLI, or MCP path can perform a human decision lifecycle action.
 
+### 20.23 Implemented specification review feedback and request changes
+
+Implemented and verified:
+
+1. Configured human reviewers and project administrators can append formal `commented` or `changes_requested` feedback to the current draft/in-review specification version.
+2. Agents, ordinary contributors, and cross-project principals cannot submit formal review feedback.
+3. Review records preserve reviewer identity/type, exact version ID, outcome, body, and timestamp without modifying the version's Markdown body or content hash.
+4. Any change request permanently blocks approval of that exact immutable version. The author must publish a new version, which starts with an empty review history.
+5. A previously approved version remains current agent context while a newer version receives feedback; only explicit approval changes agent-facing authority.
+6. Feedback, audit events, durable notifications, and notification outbox intents commit through the application transaction boundary.
+7. REST and the Specifications UI expose review history, comments, request-changes controls, an explicit changes-requested state, and the new-version requirement.
+8. Forward-only migration `0010_safe_white_queen.sql` adds the review array with a JSON-shape constraint and extends the notification type constraint.
+9. Application/API behavior, PostgreSQL mappers and opt-in integration coverage, type-checks, tests, production builds, and packaged CLI smoke validation pass.
+
+Deliberate boundaries:
+
+- Feedback is append-only; edit/delete windows, inline Markdown anchors, mentions, configurable teams, quorum, and reviewer reassignment remain future work.
+- A change request is resolved by publishing a new immutable version, not by mutating or reopening the reviewed body.
+- Human review actions remain REST/web-only and do not require MCP approval.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1378,6 +1405,7 @@ Deliberate boundaries:
 - In-app notifications migration: `packages/database/drizzle/0007_in_app_notifications.sql`
 - Transactional outbox migration: `packages/database/drizzle/0008_transactional_outbox.sql`
 - Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
+- Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1418,4 +1446,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement and impact reporting, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

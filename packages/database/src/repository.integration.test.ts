@@ -43,6 +43,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     let decisionId: string;
     let replacementDecisionId: string;
     let artifactVersionId: string;
+    let artifactId: string;
     let assumptionId: string;
     let runId: string;
     let contextConsumerRunId: string;
@@ -128,10 +129,15 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         requestReview: true,
         scope: { component: "persistence" },
       });
+      await service.reviewArtifactVersion(owner, publication.version.id, {
+        status: "commented",
+        body: "The persistence boundary is clear; retain the reconnect behavior in the final version.",
+      });
       await service.approveArtifactVersion(owner, publication.version.id, {
         rationale: "The specification accurately implements the accepted persistence decision.",
       });
       artifactVersionId = publication.version.id;
+      artifactId = publication.artifact.id;
 
       const replacementQuestion = await service.createQuestion(agent, project.id, {
         idempotencyKey: `replacement-question-${suffix}`,
@@ -201,6 +207,12 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           version: 2,
         }),
       ]));
+      expect(await service.getArtifact(owner, artifactId)).toMatchObject({
+        versions: [expect.objectContaining({
+          id: artifactVersionId,
+          reviews: [expect.objectContaining({ status: "commented", reviewerId: owner.id })],
+        })],
+      });
       expect(await secondStore.repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
         expect.objectContaining({
           type: "decision.lifecycle_changed",

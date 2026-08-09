@@ -1,5 +1,6 @@
 import type { Scope } from "@bridge/contracts";
 import type {
+  ArtifactReview,
   OutboxPayload,
   QuestionComment,
   QuestionOption,
@@ -333,6 +334,7 @@ export const artifactVersions = pgTable(
     createdById: text("created_by_id").notNull(),
     createdByType: principalTypeEnum("created_by_type").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    reviews: jsonb("reviews").$type<readonly ArtifactReview[]>().default([]).notNull(),
     runId: text("run_id").references(() => agentRuns.id, { onDelete: "restrict" }),
     approvedById: text("approved_by_id"),
     approvalRationale: text("approval_rationale"),

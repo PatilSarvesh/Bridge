@@ -141,13 +141,15 @@ On each question detail page, human contributors can add an answer with an optio
 
 On the **Decisions** page, the decision owner, a configured project decision owner, or a project administrator can supersede, expire, or revoke an active decision with a rationale. Supersession selects another active decision in the same category and exact scope. Bridge preserves the original answer, records lifecycle provenance, removes retired decisions from default agent context, and reports directly linked specifications, assumptions, runs, and work items that may need review.
 
+On the **Specifications** page, configured reviewers and project administrators can add formal comments or request changes on the current immutable version. A change request blocks approval of that exact version; the author must publish a new version that addresses the feedback. The previous approved version, if any, remains the agent-facing authority until the replacement version is approved.
+
 Agents can target a question to role names with `intendedOwnerRoles` in the structured question payload, for example `['QA Lead']`, `['Business Analyst']`, or `['Security Reviewer']`. Bridge normalizes those names and permits a matching human role to accept the decision. This is a fixed-principal policy seam for the prototype, not organization role administration.
 
 For local policy testing, the web UI exposes a **Reviewing as** selector backed by `GET /v1/principals`. Switching to QA Lead or Business Analyst reloads the project-scoped views under that fixed human principal and makes role-based acceptance easy to exercise. It is deliberately a reviewer-context switcher, not authentication.
 
 The UI separates **My Inbox** from shared **Questions**. The inbox is personalized by direct owner, assigned role, project-admin fallback, and protected-review role, with State, Risk, Category, and Role filters; the shared Questions view remains available to every authorized project participant so contributors can read and propose responses.
 
-The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, and specification review/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
+The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, and specification review-feedback/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
 
 The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. Decisions include governed human lifecycle actions and direct impact counts; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
 

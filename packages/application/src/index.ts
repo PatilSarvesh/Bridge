@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type {
   AcceptAnswerInput,
   ApproveArtifactVersionInput,
+  ArtifactReviewInput,
   ChangeDecisionLifecycleInput,
   ContextQuery,
   CreateQuestionInput,
@@ -24,6 +25,7 @@ import type {
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
+  assertCanReviewArtifact,
   assertCanAccept,
   assertHuman,
   assertProjectAccess,
@@ -36,6 +38,7 @@ import {
   type Assumption,
   type AuditEvent,
   type Artifact,
+  type ArtifactReview,
   type ArtifactVersion,
   type ContextItem,
   type ContextSnapshot,
@@ -137,6 +140,10 @@ interface AssumptionIdempotencyRecord {
 export interface ArtifactPublication {
   readonly artifact: Artifact;
   readonly version: ArtifactVersion;
+}
+
+export interface ArtifactReviewResult extends ArtifactPublication {
+  readonly review: ArtifactReview;
 }
 
 export interface RunRegistration {
@@ -2033,6 +2040,7 @@ export class BridgeService {
       createdById: principal.id,
       createdByType: principal.type,
       createdAt: timestamp,
+      reviews: [],
       ...(input.runId ? { runId: input.runId } : {}),
     };
     const artifact: Artifact = existingArtifact
@@ -2119,6 +2127,81 @@ export class BridgeService {
     return artifact;
   }
 
+  async reviewArtifactVersion(
+    principal: Principal,
+    versionId: string,
+    input: ArtifactReviewInput,
+  ): Promise<ArtifactReviewResult> {
+    return this.repository.transaction((repository) =>
+      this.reviewArtifactVersionInTransaction(repository, principal, versionId, input),
+    );
+  }
+
+  private async reviewArtifactVersionInTransaction(
+    repository: BridgeRepository,
+    principal: Principal,
+    versionId: string,
+    input: ArtifactReviewInput,
+  ): Promise<ArtifactReviewResult> {
+    const artifact = await repository.getArtifactByVersionId(versionId);
+    if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    await this.requireProject(principal, artifact.projectId, repository);
+    assertCanReviewArtifact(principal, artifact);
+    const target = artifact.versions.find((version) => version.id === versionId);
+    if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    if (artifact.currentVersionId !== versionId) {
+      throw new BridgeError("CONFLICT", "Review feedback can be added only to the current specification version.", 409);
+    }
+    if (["approved", "superseded"].includes(target.status)) {
+      throw new BridgeError("CONFLICT", "Approved or superseded specification versions no longer accept review feedback.", 409);
+    }
+
+    const timestamp = this.now().toISOString();
+    const review: ArtifactReview = {
+      id: `arv_${this.id()}`,
+      artifactVersionId: versionId,
+      reviewerId: principal.id,
+      reviewerType: principal.type,
+      status: input.status,
+      body: input.body,
+      createdAt: timestamp,
+    };
+    const reviewedVersion: ArtifactVersion = {
+      ...target,
+      reviews: [...target.reviews, review],
+    };
+    const updatedArtifact: Artifact = {
+      ...artifact,
+      versions: artifact.versions.map((version) => version.id === versionId ? reviewedVersion : version),
+    };
+    await repository.saveArtifact(updatedArtifact);
+    await this.audit(
+      repository,
+      principal,
+      artifact.projectId,
+      input.status === "changes_requested"
+        ? "artifact.version_changes_requested"
+        : "artifact.version_commented",
+      "artifact_version",
+      versionId,
+      timestamp,
+    );
+    await this.notify(
+      repository,
+      principal,
+      artifact.projectId,
+      [artifact.createdById, ...artifact.reviewerIds],
+      {
+        type: "artifact_review_feedback",
+        title: input.status === "changes_requested" ? "Specification changes requested" : "Specification review comment",
+        body: `${principal.displayName} ${input.status === "changes_requested" ? "requested changes to" : "commented on"} “${artifact.title}”.`,
+        targetType: "artifact_version",
+        targetId: versionId,
+      },
+    );
+    return { artifact: updatedArtifact, version: reviewedVersion, review };
+  }
+
   async approveArtifactVersion(
     principal: Principal,
     versionId: string,
@@ -2146,6 +2229,13 @@ export class BridgeService {
     }
     if (!["draft", "in_review"].includes(target.status)) {
       throw new BridgeError("CONFLICT", "This specification version cannot be approved again.", 409);
+    }
+    if (target.reviews.some((review) => review.status === "changes_requested")) {
+      throw new BridgeError(
+        "CONFLICT",
+        "This specification version has requested changes; publish a new version before approval.",
+        409,
+      );
     }
 
     const timestamp = this.now().toISOString();

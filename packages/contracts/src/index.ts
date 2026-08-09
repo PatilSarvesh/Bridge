@@ -27,11 +27,13 @@ export const notificationTypeSchema = z.enum([
   "question_accepted",
   "decision_lifecycle",
   "artifact_review_requested",
+  "artifact_review_feedback",
   "artifact_approved",
 ]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
+export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested"]);
 export const agentRunClientSchema = z.enum([
   "codex",
   "claude_code",
@@ -234,6 +236,21 @@ export const approveArtifactVersionInputSchema = z.object({
   rationale: z.string().trim().min(10).max(5_000),
 });
 
+export const artifactReviewInputSchema = z
+  .object({
+    status: artifactReviewStatusSchema,
+    body: z.string().trim().min(2).max(5_000),
+  })
+  .superRefine((value, context) => {
+    if (value.status === "changes_requested" && value.body.length < 10) {
+      context.addIssue({
+        code: "custom",
+        message: "A change request requires at least 10 characters of actionable feedback.",
+        path: ["body"],
+      });
+    }
+  });
+
 export const startAgentRunInputSchema = z
   .object({
     idempotencyKey: z.string().trim().min(8).max(200),
@@ -322,6 +339,7 @@ export type NotificationType = z.infer<typeof notificationTypeSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
+export type ArtifactReviewStatus = z.infer<typeof artifactReviewStatusSchema>;
 export type AgentRunClient = z.infer<typeof agentRunClientSchema>;
 export type AgentRunCapability = z.infer<typeof agentRunCapabilitySchema>;
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
@@ -344,6 +362,7 @@ export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSc
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
+export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;
 export type StartAgentRunInput = z.infer<typeof startAgentRunInputSchema>;
 export type ReportAgentRunInput = z.infer<typeof reportAgentRunInputSchema>;
 export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;
