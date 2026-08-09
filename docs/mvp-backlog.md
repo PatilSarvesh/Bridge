@@ -1018,7 +1018,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — bounded web/CLI/API/MCP correlation, durable audit/outbox propagation, worker/integration continuation, and safe structured-log redaction are implemented; metrics export, dashboards, alerts, and initial service objectives remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 

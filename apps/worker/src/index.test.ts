@@ -1,4 +1,5 @@
 import type { Notification, OutboxDelivery, OutboxEvent } from "@bridge/domain";
+import { currentCorrelationId } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -68,6 +69,7 @@ class TestOutboxStore implements OutboxStore {
 function outboxEvent(id: string): OutboxEvent {
   return {
     id,
+    correlationId: `cor_${id}`,
     organizationId: "org_worker",
     projectId: "prj_worker",
     type: "notification.created",
@@ -103,6 +105,7 @@ function notification(id: string, type: Notification["type"] = "question_assigne
 function notificationEvent(id: string, item: Notification): OutboxEvent {
   return {
     id,
+    correlationId: `cor_${id}`,
     organizationId: item.organizationId,
     projectId: item.projectId,
     type: "notification.created",
@@ -175,12 +178,15 @@ describe("notification outbox cycle", () => {
   it("claims and completes events through an injected delivery handler", async () => {
     const store = new TestOutboxStore([outboxEvent("evt_one"), outboxEvent("evt_two")]);
     const delivered: string[] = [];
+    const correlations: Array<string | undefined> = [];
     const result = await runOutboxCycle(store, async (event) => {
       delivered.push(event.id);
+      correlations.push(currentCorrelationId());
     }, { now: () => new Date("2026-08-08T00:00:00.000Z") });
 
     expect(result).toEqual({ claimed: 2, processed: 2, retried: 0, deadLettered: 0 });
     expect(delivered).toEqual(["evt_one", "evt_two"]);
+    expect(correlations).toEqual(["cor_evt_one", "cor_evt_two"]);
     expect(store.events.every((event) => event.status === "processed")).toBe(true);
   });
 
@@ -259,6 +265,7 @@ describe("notification email delivery", () => {
       expect.objectContaining({
         to: "owner@example.test",
         idempotencyKey: "evt_email_immediate:email",
+        correlationId: "cor_evt_email_immediate",
         subject: expect.stringContaining("Review assignment"),
       }),
     ]);

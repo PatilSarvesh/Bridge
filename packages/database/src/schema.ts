@@ -377,6 +377,7 @@ export const auditEvents = pgTable(
   "bridge_audit_events",
   {
     id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
       .notNull()
@@ -388,7 +389,10 @@ export const auditEvents = pgTable(
     subjectId: text("subject_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt)],
+  (table) => [
+    index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
+    index("bridge_audit_events_correlation_idx").on(table.correlationId),
+  ],
 );
 
 export const notifications = pgTable(
@@ -427,6 +431,7 @@ export const outboxEvents = pgTable(
   "bridge_outbox_events",
   {
     id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
     organizationId: text("organization_id").notNull(),
     projectId: text("project_id")
       .notNull(),
@@ -443,6 +448,7 @@ export const outboxEvents = pgTable(
   (table) => [
     index("bridge_outbox_status_available_idx").on(table.status, table.availableAt),
     index("bridge_outbox_project_created_idx").on(table.projectId, table.createdAt),
+    index("bridge_outbox_correlation_idx").on(table.correlationId),
     unique("bridge_outbox_events_org_project_id_unique").on(
       table.organizationId,
       table.projectId,

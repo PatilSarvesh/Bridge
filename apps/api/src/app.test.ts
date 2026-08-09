@@ -16,12 +16,22 @@ describe("Bridge API vertical slice", () => {
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
 
-    const compatibility = await app.inject({ method: "GET", url: "/health" });
-    const live = await app.inject({ method: "GET", url: "/health/live" });
+    const compatibility = await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: { "x-bridge-correlation-id": "web_health-001" },
+    });
+    const live = await app.inject({
+      method: "GET",
+      url: "/health/live",
+      headers: { "x-bridge-correlation-id": "x".repeat(200) },
+    });
     const ready = await app.inject({ method: "GET", url: "/health/ready" });
     expect(compatibility).toMatchObject({ statusCode: 200 });
     expect(compatibility.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(compatibility.headers["x-bridge-correlation-id"]).toBe("web_health-001");
     expect(live.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(live.headers["x-bridge-correlation-id"]).toMatch(/^cor_[0-9a-f]{32}$/);
     expect(ready.statusCode).toBe(200);
     expect(ready.json()).toEqual({
       service: "bridge-api",
@@ -82,7 +92,10 @@ describe("Bridge API vertical slice", () => {
     const created = await app.inject({
       method: "POST",
       url: `/v1/projects/${demoProject.id}/questions`,
-      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      headers: {
+        "x-bridge-principal-id": demoPrincipals.agent.id,
+        "x-bridge-correlation-id": "cli_question-001",
+      },
       payload: {
         idempotencyKey: "api-notification-question-001",
         title: "Which audit evidence should block the release?",
@@ -103,7 +116,25 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(created.statusCode).toBe(201);
+    expect(created.headers["x-bridge-correlation-id"]).toBe("cli_question-001");
     const question = created.json<{ id: string }>();
+    expect(await runtime.repository.listAuditEvents(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          subjectId: question.id,
+          action: "question.created",
+          correlationId: "cli_question-001",
+        }),
+      ]),
+    );
+    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          correlationId: "cli_question-001",
+          payload: expect.objectContaining({ targetId: question.id }),
+        }),
+      ]),
+    );
 
     const notifications = await app.inject({
       method: "GET",

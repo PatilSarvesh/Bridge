@@ -27,6 +27,12 @@ import {
 } from "@bridge/contracts";
 import { BridgeError, type Principal } from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
+import {
+  correlationIdHeader,
+  createSafeLogger,
+  resolveCorrelationId,
+  runWithCorrelationContext,
+} from "@bridge/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -56,13 +62,42 @@ function resolvePrincipal(
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({ logger: false });
+  const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
+  const requestStartedAt = new WeakMap<FastifyRequest, number>();
   await app.register(cors, {
     origin: true,
-    allowedHeaders: ["content-type", "x-bridge-principal-id"],
+    allowedHeaders: ["content-type", "x-bridge-principal-id", correlationIdHeader],
+    exposedHeaders: [correlationIdHeader],
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.addHook("onRequest", (request, reply, done) => {
+    const supplied = request.headers[correlationIdHeader];
+    const correlationId = resolveCorrelationId(typeof supplied === "string" ? supplied : undefined);
+    reply.header(correlationIdHeader, correlationId);
+    requestStartedAt.set(request, performance.now());
+    runWithCorrelationContext({ correlationId, source: "api" }, done);
+  });
+
+  app.addHook("onResponse", (request, reply, done) => {
+    safeLogger?.info("request.completed", {
+      method: request.method,
+      route: request.routeOptions.url,
+      statusCode: reply.statusCode,
+      durationMs: Math.max(0, performance.now() - (requestStartedAt.get(request) ?? performance.now())),
+    });
+    done();
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    safeLogger?.error("request.failed", {
+      method: request.method,
+      route: request.routeOptions.url,
+      statusCode: error instanceof BridgeError
+        ? error.statusCode
+        : error instanceof ZodError ? 400 : 500,
+      error,
+    });
     if (error instanceof BridgeError) {
       return reply.status(error.statusCode).send({
         code: error.code,

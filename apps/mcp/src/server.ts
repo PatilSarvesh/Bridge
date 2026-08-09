@@ -1,4 +1,10 @@
 import { createPostgresBridgeStore } from "@bridge/database";
+import {
+  correlationIdHeader,
+  createSafeLogger,
+  resolveCorrelationId,
+  runWithCorrelationContext,
+} from "@bridge/observability";
 import { createDemoRuntimeWithRepository, demoPrincipals } from "@bridge/test-support";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -28,6 +34,24 @@ if (!principal) {
 }
 const host = process.env.BRIDGE_MCP_HOST ?? "127.0.0.1";
 const app = createMcpExpressApp({ host });
+const logger = createSafeLogger({ service: "bridge-mcp" });
+
+app.use((request: Request, response: Response, next) => {
+  const correlationId = resolveCorrelationId(request.header(correlationIdHeader));
+  response.setHeader(correlationIdHeader, correlationId);
+  runWithCorrelationContext({ correlationId, source: "mcp" }, () => {
+    const startedAt = performance.now();
+    response.on("finish", () => {
+      logger.info("request.completed", {
+        method: request.method,
+        path: request.path,
+        statusCode: response.statusCode,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+    });
+    next();
+  });
+});
 
 const sendLiveness = (_request: Request, response: Response) => {
   response.status(200).json({ status: "ok", service: "bridge-mcp" });
@@ -54,7 +78,12 @@ app.post("/mcp", async (request: Request, response: Response) => {
     await server.connect(transport as unknown as Transport);
     await transport.handleRequest(request, response, request.body);
   } catch (error) {
-    console.error("Bridge MCP request failed", error);
+    logger.error("request.failed", {
+      method: request.method,
+      path: request.path,
+      statusCode: 500,
+      error,
+    });
     if (!response.headersSent) {
       response.status(500).json({
         jsonrpc: "2.0",
@@ -83,7 +112,7 @@ app.delete("/mcp", (_request: Request, response: Response) => {
 
 const port = Number(process.env.BRIDGE_MCP_PORT ?? 4100);
 const httpServer = app.listen(port, host, () => {
-  console.log(`Bridge MCP listening on http://${host}:${port}/mcp`);
+  logger.info("service.started", { path: "/mcp", status: "ready" });
 });
 
 let closing = false;
@@ -99,7 +128,7 @@ async function closeServer(): Promise<void> {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void closeServer().catch((error: unknown) => {
-      console.error("Bridge MCP shutdown failed", error);
+      logger.error("service.shutdown_failed", { error });
       process.exitCode = 1;
     });
   });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -280,6 +280,7 @@ async function bridgeFetch(
       ...init,
       headers: {
         "content-type": "application/json",
+        "x-bridge-correlation-id": `cli_${randomUUID().replaceAll("-", "")}`,
         "x-bridge-principal-id": options.principalId,
         ...init.headers,
       },
@@ -852,6 +853,7 @@ async function probeMcpEndpoint(url: string, runtime: CliRuntime): Promise<McpPr
       headers: {
         accept: "application/json, text/event-stream",
         "content-type": "application/json",
+        "x-bridge-correlation-id": `cli_${randomUUID().replaceAll("-", "")}`,
         "MCP-Protocol-Version": "2025-06-18",
       },
       body: JSON.stringify({

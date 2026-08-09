@@ -255,6 +255,7 @@ const notification: Notification = {
 
 const outboxEvent: OutboxEvent = {
   id: "evt_mapping",
+  correlationId: "cor_mapping",
   organizationId: project.organizationId,
   projectId: project.id,
   type: "notification.created",
@@ -437,5 +438,17 @@ describe("PostgreSQL domain mappings", () => {
       .toBeLessThan(emailDeliveryMigration.indexOf("bridge_outbox_deliveries_event_scope_fk"));
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_result_check");
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_destination_hash_check");
+
+    const correlationMigration = readFileSync(
+      new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),
+      "utf8",
+    );
+    expect(correlationMigration).toContain("UPDATE \"bridge_audit_events\"");
+    expect(correlationMigration).toContain("UPDATE \"bridge_outbox_events\"");
+    expect(correlationMigration.indexOf("SET \"correlation_id\""))
+      .toBeLessThan(correlationMigration.indexOf("ALTER COLUMN \"correlation_id\" SET NOT NULL"));
+    expect(correlationMigration).toContain("bridge_audit_events_correlation_check");
+    expect(correlationMigration).toContain("bridge_outbox_events_correlation_check");
+    expect(correlationMigration).toContain("bridge_outbox_correlation_idx");
   });
 });

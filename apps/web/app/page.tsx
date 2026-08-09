@@ -235,6 +235,7 @@ async function bridgeFetch<T>(
     ...init,
     headers: {
       ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
+      "x-bridge-correlation-id": `web_${crypto.randomUUID().replaceAll("-", "")}`,
       "x-bridge-principal-id": actingPrincipalId,
       ...init?.headers,
     },

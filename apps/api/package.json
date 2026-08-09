@@ -17,6 +17,7 @@
     "@bridge/contracts": "workspace:*",
     "@bridge/database": "workspace:*",
     "@bridge/domain": "workspace:*",
+    "@bridge/observability": "workspace:*",
     "@bridge/test-support": "workspace:*",
     "@fastify/cors": "11.3.0",
     "fastify": "5.11.2",

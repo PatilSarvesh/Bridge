@@ -45,6 +45,8 @@ Fixed project administrators can inspect delivery state and point-in-time queue 
 
 The worker exports a provider-neutral notification-email handler with minimal plain-text templates, injected recipient-directory/preferences and sender contracts, stable idempotency keys, and durable delivery receipts. Bridge persists only an organization-scoped destination hash, preference outcome, attempt count, sanitized error, and provider message ID—never an email address or provider credential. Muted ordinary mail is suppressed, digest mail is durably deferred, and protected-review mail remains immediate. An SES sender, real directory, digest scheduler, and runtime wiring remain deployment work.
 
+Web and CLI calls now send bounded correlation IDs; API and MCP validate or generate them, return them in `x-bridge-correlation-id`, and carry them through application transactions into durable audit/outbox records. Workers restore the same ID before invoking integrations, including the provider-neutral email request. The shared structured logger preserves operational identifiers and numbers while redacting authorization data, secrets, artifact bodies, prompts, answers, rationales, error messages, and unknown free-form text by default. See [`docs/observability.md`](docs/observability.md) for the implemented boundary and remaining metrics/alert work.
+
 ## Operational health and recovery
 
 The API and standalone MCP service expose `GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness. The API keeps `GET /health` as a compatibility liveness alias. Readiness returns `503` with a sanitized dependency result when PostgreSQL is unavailable; load balancers should route traffic using readiness, not the compatibility endpoint.

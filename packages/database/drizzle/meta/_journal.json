@@ -99,6 +99,13 @@
       "when": 1786301000000,
       "tag": "0013_ancient_gwen_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786301880714,
+      "tag": "0014_first_jane_foster",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import type { BridgeRepository } from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
+import { currentCorrelationId, runWithCorrelationContextIfAbsent } from "@bridge/observability";
 import type {
   AgentRun,
   Assumption,
@@ -82,6 +83,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+    if (!currentCorrelationId()) {
+      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
+    }
     if (this.lockAggregateReads) return work(this);
 
     try {
@@ -550,6 +554,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .onConflictDoUpdate({
         target: outboxEvents.id,
         set: {
+          correlationId: row.correlationId,
           organizationId: row.organizationId,
           projectId: row.projectId,
           type: row.type,

@@ -39,6 +39,7 @@ export interface EmailRecipientDirectory {
 export interface EmailSendRequest extends RenderedEmailTemplate {
   readonly to: string;
   readonly idempotencyKey: string;
+  readonly correlationId: string;
 }
 
 export interface EmailSender {
@@ -221,6 +222,7 @@ export function createNotificationEmailHandler(
         to: address,
         ...template,
         idempotencyKey: `${event.id}:email`,
+        correlationId: event.correlationId,
       });
       const providerMessageId = safeProviderMessageId(result.providerMessageId);
       await options.store.saveOutboxDelivery({

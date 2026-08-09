@@ -889,6 +889,8 @@ Propagate one correlation ID across:
 agent/client -> MCP/API -> application command -> database/outbox -> worker -> integration
 ```
 
+The current vendor-neutral implementation validates or generates `x-bridge-correlation-id` at web/CLI/API/MCP boundaries, establishes async request context, creates a context at the repository transaction boundary for direct application use, persists the ID on audit/outbox rows, restores it per worker event, and supplies it explicitly to the email integration seam. Correlation is diagnostic metadata and never replaces principal or tenant authorization.
+
 ### 22.2 Metrics
 
 Initial technical metrics:
@@ -906,6 +908,8 @@ Initial technical metrics:
 ### 22.3 Logging
 
 Use structured logs with record IDs and correlation IDs. Redact tokens, secrets, authorization headers, artifact bodies, and free-form content by default. Production log access is role-restricted and audited.
+
+`@bridge/observability` implements the local safe JSON logger with an operational-field allowlist, recursive sensitive-key redaction, exception-message removal, and an injectable sink. Standalone API/MCP runtimes avoid framework-default request logging. Production export, access control, retention, dashboards, and alerts remain deployment work.
 
 ## 23. Reliability and performance
 

@@ -198,6 +198,7 @@ export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxP
 
 export interface OutboxEvent {
   readonly id: string;
+  readonly correlationId: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly type: OutboxEventType;
@@ -356,6 +357,7 @@ export interface ContextSnapshot {
 
 export interface AuditEvent {
   readonly id: string;
+  readonly correlationId: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly actorId: string;

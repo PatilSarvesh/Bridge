@@ -88,6 +88,7 @@ export function notificationFromRow(row: NotificationRow): Notification {
 export function outboxEventToRow(event: OutboxEvent): typeof outboxEvents.$inferInsert {
   return {
     id: event.id,
+    correlationId: event.correlationId,
     organizationId: event.organizationId,
     projectId: event.projectId,
     type: event.type,
@@ -105,6 +106,7 @@ export function outboxEventToRow(event: OutboxEvent): typeof outboxEvents.$infer
 export function outboxEventFromRow(row: OutboxEventRow): OutboxEvent {
   return {
     id: row.id,
+    correlationId: row.correlationId,
     organizationId: row.organizationId,
     projectId: row.projectId,
     type: row.type as OutboxEvent["type"],
@@ -537,6 +539,7 @@ export function contextSnapshotFromRow(row: ContextSnapshotRow): ContextSnapshot
 export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferInsert {
   return {
     id: event.id,
+    correlationId: event.correlationId,
     organizationId: event.organizationId,
     projectId: event.projectId,
     actorId: event.actorId,
@@ -551,6 +554,7 @@ export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferIns
 export function auditEventFromRow(row: AuditEventRow): AuditEvent {
   return {
     id: row.id,
+    correlationId: row.correlationId,
     organizationId: row.organizationId,
     projectId: row.projectId,
     actorId: row.actorId,

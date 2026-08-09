@@ -251,12 +251,22 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           reviews: [expect.objectContaining({ status: "commented", reviewerId: owner.id })],
         })],
       });
-      expect(await secondStore.repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+      const persistedOutbox = await secondStore.repository.listOutboxEvents(project.id);
+      expect(persistedOutbox).toEqual(expect.arrayContaining([
         expect.objectContaining({
           type: "decision.lifecycle_changed",
           payload: expect.objectContaining({ decisionId, replacementDecisionId }),
         }),
       ]));
+      const questionEvent = persistedOutbox.find((event) =>
+        event.type === "notification.created" &&
+        "targetId" in event.payload &&
+        event.payload.targetId === questionId,
+      );
+      const questionAudit = (await secondStore.repository.listAuditEvents(project.id))
+        .find((event) => event.action === "question.created" && event.subjectId === questionId);
+      expect(questionAudit?.correlationId).toMatch(/^cor_[0-9a-f]{32}$/);
+      expect(questionEvent?.correlationId).toBe(questionAudit?.correlationId);
       expect(await secondStore.repository.listOutboxDeliveries(project.id)).toEqual([
         expect.objectContaining({
           outboxEventId: deliveryEventId,

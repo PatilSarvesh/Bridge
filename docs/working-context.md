@@ -785,14 +785,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the provider-neutral email-delivery slice:
+Current validation result after the correlation and safe-logging slice:
 
-- Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 66 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
-- Production builds: passed for all nine TypeScript packages plus the Next.js application.
+- Type-check: passed across all eleven TypeScript configurations.
+- Behavioral tests: 69 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Production builds: passed for all ten TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, and email-delivery scope/result/hash constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy/correlation backfills, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, correlation format/indexes, and email-delivery scope/result/hash constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -1504,6 +1504,25 @@ Deliberate boundaries:
 - Current artifact bodies live in PostgreSQL; object-storage recovery becomes mandatory when the runtime begins storing objects outside that database.
 - Readiness covers the canonical repository dependency only. Provider/queue degradation belongs to operational telemetry, and future identity readiness requires the product owner to reopen identity scope.
 
+### 20.31 Implemented end-to-end correlation and safe structured-logging foundations
+
+Implemented and locally verified:
+
+1. Web and CLI callers generate a bounded `x-bridge-correlation-id`; API and MCP validate or replace inbound values and return the effective value on every response.
+2. Async request context crosses the transport/application boundary without adding correlation parameters to domain commands. Direct application calls receive a generated context at the repository transaction boundary.
+3. Audit and outbox events persist the operation correlation ID. Forward-only migration `0014_first_jane_foster.sql` backfills deterministic legacy IDs before setting non-null constraints, adds format checks, and indexes both durable lookup paths.
+4. The worker restores each claimed event's persisted context before handling it. The email sender request receives that ID explicitly with the existing stable event/channel idempotency key.
+5. Replayed delivery work keeps its original causal correlation ID while the operator replay audit uses the new request correlation ID.
+6. `@bridge/observability` provides context helpers and a JSON logger with bounded event/service names, an operational-field allowlist, recursive sensitive-key removal, unknown free-form redaction, and exception-message suppression.
+7. Standalone API/MCP runtimes use safe logging instead of framework-default request/error logs; worker cycle logs are injectable and correlated.
+8. Observability, API, application, worker, database mapper/migration, MCP, CLI, web, type-check, test, build, and packaged-distribution validation pass.
+
+Deliberate boundaries:
+
+- This slice provides correlation and safe logs, not distributed tracing export, metrics, dashboards, alert delivery, or deployment log-access controls. BRG-104 remains partial.
+- Correlation IDs are untrusted diagnostic metadata. They never confer identity, tenant access, approval authority, or idempotency.
+- The logger intentionally sacrifices arbitrary message text for privacy; diagnostic code should add stable event names, safe machine codes, record IDs, enums, and numeric measurements instead of free-form content.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1532,6 +1551,7 @@ Deliberate boundaries:
 - Decision full-text search migration: `packages/database/drizzle/0011_keen_galactus.sql`
 - Outbox operator-audit migration: `packages/database/drizzle/0012_outbox_operator_replay.sql`
 - Email delivery-receipt migration: `packages/database/drizzle/0013_ancient_gwen_stacy.sql`
+- Correlation propagation migration: `packages/database/drizzle/0014_first_jane_foster.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1542,6 +1562,8 @@ Deliberate boundaries:
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
+- Correlation and safe structured logging: `packages/observability/src/index.ts`
+- Observability behavior and boundaries: `docs/observability.md`
 - Read-only restore verifier: `packages/database/src/verify-restore.ts`
 - Backup/restore runbook: `docs/runbooks/backup-restore.md`
 - Incident runbook: `docs/runbooks/incidents.md`
@@ -1576,4 +1598,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, end-to-end correlation and safe structured logs, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production metrics/alerts and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

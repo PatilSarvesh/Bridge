@@ -60,6 +60,11 @@ import {
   type OutboxDelivery,
   type OutboxEvent,
 } from "@bridge/domain";
+import {
+  createCorrelationId,
+  currentCorrelationId,
+  runWithCorrelationContextIfAbsent,
+} from "@bridge/observability";
 
 export interface BridgeRepository {
   checkHealth(): Promise<{ readonly backend: string }>;
@@ -392,6 +397,9 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   }
 
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+    if (!currentCorrelationId()) {
+      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
+    }
     let release!: () => void;
     const previous = this.transactionTail;
     this.transactionTail = new Promise<void>((resolve) => {
@@ -2315,6 +2323,7 @@ export class BridgeService {
     );
     await repository.saveOutboxEvent({
       id: `evt_${this.id()}`,
+      correlationId: currentCorrelationId() ?? createCorrelationId(),
       organizationId: decision.organizationId,
       projectId: decision.projectId,
       type: "decision.lifecycle_changed",
@@ -3000,6 +3009,7 @@ export class BridgeService {
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
+      correlationId: currentCorrelationId() ?? createCorrelationId(),
       organizationId: principal.organizationId,
       projectId,
       actorId: principal.id,
@@ -3036,6 +3046,7 @@ export class BridgeService {
       });
       await repository.saveOutboxEvent({
         id: `evt_${this.id()}`,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
         organizationId: principal.organizationId,
         projectId,
         type: "notification.created",
