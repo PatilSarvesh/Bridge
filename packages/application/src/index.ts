@@ -6,6 +6,7 @@ import type {
   ArtifactReviewInput,
   ChangeDecisionLifecycleInput,
   ContextQuery,
+  DecisionListQuery,
   CreateQuestionInput,
   FindQuestionMatchesInput,
   PublishArtifactInput,
@@ -1807,9 +1808,24 @@ export class BridgeService {
     return decision;
   }
 
-  async listDecisions(principal: Principal, projectId: string): Promise<readonly Decision[]> {
+  async listDecisions(
+    principal: Principal,
+    projectId: string,
+    query: DecisionListQuery = { includeHistory: false, scope: {} },
+  ): Promise<readonly Decision[]> {
     await this.requireProject(principal, projectId);
-    return this.repository.listDecisions(projectId);
+    const category = query.category?.toLocaleLowerCase("en");
+    const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+    return (await this.repository.listDecisions(projectId)).filter((decision) => {
+      if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
+        return false;
+      }
+      if (category && decision.category.toLocaleLowerCase("en") !== category) return false;
+      if (query.ownerId && decision.ownerId !== query.ownerId) return false;
+      if (query.createdFrom && Date.parse(decision.createdAt) < Date.parse(query.createdFrom)) return false;
+      if (query.createdTo && Date.parse(decision.createdAt) > Date.parse(query.createdTo)) return false;
+      return scopeEntries.every(([key, value]) => decision.scope[key] === value);
+    });
   }
 
   async changeDecisionLifecycle(

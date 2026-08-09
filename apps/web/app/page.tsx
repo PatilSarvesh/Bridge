@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
@@ -75,6 +75,8 @@ interface Question {
 
 type InboxFilterKey = "status" | "risk" | "category" | "role";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
+type DecisionFilterKey = "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
+type DecisionFilters = Partial<Record<DecisionFilterKey, string>> & { readonly includeHistory?: boolean };
 
 interface ArtifactVersion {
   readonly id: string;
@@ -246,6 +248,7 @@ function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Recor
 }
 
 export default function Home() {
+  const requestedDecisionIdRef = useRef<string | undefined>(undefined);
   const [view, setView] = useState<View>("inbox");
   const [principals, setPrincipals] = useState<readonly Principal[]>([]);
   const [activePrincipalId, setActivePrincipalId] = useState(defaultPrincipalId);
@@ -254,6 +257,7 @@ export default function Home() {
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
+  const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
@@ -303,6 +307,8 @@ export default function Home() {
     roles: [...new Set(questions.flatMap((question) => question.ownerRoles))].sort((left, right) => left.localeCompare(right)),
   }), [questions]);
   const hasInboxFilters = Object.values(inboxFilters).some(Boolean);
+  const hasDecisionFilters = Boolean(decisionFilters.includeHistory) ||
+    Object.entries(decisionFilters).some(([key, value]) => key !== "includeHistory" && Boolean(value));
 
   const loadPrincipals = useCallback(async () => {
     setPrincipalsLoading(true);
@@ -447,9 +453,18 @@ export default function Home() {
     setReferenceDataLoading(true);
     setError(undefined);
     try {
+      const decisionParameters = new URLSearchParams();
+      if (decisionFilters.includeHistory) decisionParameters.set("includeHistory", "true");
+      if (decisionFilters.status) decisionParameters.set("status", decisionFilters.status);
+      if (decisionFilters.category) decisionParameters.set("category", decisionFilters.category);
+      if (decisionFilters.ownerId) decisionParameters.set("ownerId", decisionFilters.ownerId);
+      if (decisionFilters.component) decisionParameters.set("component", decisionFilters.component);
+      if (decisionFilters.createdFrom) decisionParameters.set("createdFrom", `${decisionFilters.createdFrom}T00:00:00.000Z`);
+      if (decisionFilters.createdTo) decisionParameters.set("createdTo", `${decisionFilters.createdTo}T23:59:59.999Z`);
+      const decisionQuery = decisionParameters.toString();
       const [decisionResponse, assumptionResponse, runResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Decision[] }>(
-          `/v1/projects/${selectedProjectId}/decisions`,
+          `/v1/projects/${selectedProjectId}/decisions${decisionQuery ? `?${decisionQuery}` : ""}`,
           undefined,
           activePrincipalId,
         ),
@@ -467,11 +482,20 @@ export default function Home() {
       setDecisions(decisionResponse.items);
       setAssumptions(assumptionResponse.items);
       setRuns(runResponse.items);
-      setSelectedDecisionId((current) =>
-        current && decisionResponse.items.some((decision) => decision.id === current)
+      setSelectedDecisionId((current) => {
+        const requested = requestedDecisionIdRef.current;
+        if (requested) {
+          if (decisionResponse.items.some((decision) => decision.id === requested)) {
+            requestedDecisionIdRef.current = undefined;
+            return requested;
+          }
+          if (!decisionFilters.includeHistory) return requested;
+          requestedDecisionIdRef.current = undefined;
+        }
+        return current && decisionResponse.items.some((decision) => decision.id === current)
           ? current
-          : decisionResponse.items[0]?.id,
-      );
+          : decisionResponse.items[0]?.id;
+      });
       setSelectedAssumptionId((current) =>
         current && assumptionResponse.items.some((assumption) => assumption.id === current)
           ? current
@@ -487,7 +511,7 @@ export default function Home() {
     } finally {
       setReferenceDataLoading(false);
     }
-  }, [activePrincipalId, selectedProjectId]);
+  }, [activePrincipalId, decisionFilters, selectedProjectId]);
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -504,7 +528,11 @@ export default function Home() {
     if (projectId) setSelectedProjectId(projectId);
     if (questionId) setSelectedId(questionId);
     if (artifactId) setSelectedArtifactId(artifactId);
-    if (decisionId) setSelectedDecisionId(decisionId);
+    if (decisionId) {
+      requestedDecisionIdRef.current = decisionId;
+      setSelectedDecisionId(decisionId);
+      setDecisionFilters((current) => ({ ...current, includeHistory: true }));
+    }
     if (assumptionId) setSelectedAssumptionId(assumptionId);
     if (runId) setSelectedRunId(runId);
   }, []);
@@ -779,6 +807,13 @@ export default function Home() {
     }));
   };
 
+  const updateDecisionFilter = (key: DecisionFilterKey, value: string) => {
+    setDecisionFilters((current) => ({
+      ...current,
+      ...(value ? { [key]: value } : { [key]: undefined }),
+    }));
+  };
+
   const pendingQuestions = inboxQuestions.length;
   const pendingSpecifications = artifacts.filter((artifact) =>
     ["draft", "in_review"].includes(currentVersion(artifact)?.status ?? ""),
@@ -791,6 +826,8 @@ export default function Home() {
       await markNotificationRead(notification.id);
       if (notification.targetType === "decision") {
         setView("decisions");
+        requestedDecisionIdRef.current = notification.targetId;
+        setDecisionFilters((current) => ({ ...current, includeHistory: true }));
         setSelectedDecisionId(notification.targetId);
       } else if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
         setView("specifications");
@@ -940,6 +977,82 @@ export default function Home() {
               <div className="title-row">
                 <div><h1>Accepted project decisions</h1><p>Only human-accepted answers appear here as authoritative context.</p></div>
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
+              </div>
+              <div className="filter-bar" aria-label="Decision filters">
+                <label htmlFor="decision-history">View</label>
+                <select
+                  id="decision-history"
+                  value={decisionFilters.includeHistory ? "history" : "active"}
+                  onChange={(event) => {
+                    const includeHistory = event.target.value === "history";
+                    setDecisionFilters((current) => {
+                      const { status: _status, ...withoutStatus } = current;
+                      return includeHistory
+                        ? { ...current, includeHistory: true }
+                        : { ...withoutStatus, includeHistory: false };
+                    });
+                  }}
+                >
+                  <option value="active">Active only</option>
+                  <option value="history">Include history</option>
+                </select>
+                <label htmlFor="decision-status">Status</label>
+                <select
+                  id="decision-status"
+                  value={decisionFilters.status ?? ""}
+                  disabled={!decisionFilters.includeHistory}
+                  onChange={(event) => updateDecisionFilter("status", event.target.value)}
+                >
+                  <option value="">Any status</option>
+                  <option value="active">Active</option>
+                  <option value="superseded">Superseded</option>
+                  <option value="expired">Expired</option>
+                  <option value="revoked">Revoked</option>
+                </select>
+                <label htmlFor="decision-category">Category</label>
+                <select
+                  id="decision-category"
+                  value={decisionFilters.category ?? ""}
+                  onChange={(event) => updateDecisionFilter("category", event.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {[...new Set(questions.map((question) => question.category))].sort().map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+                <label htmlFor="decision-owner">Owner</label>
+                <select
+                  id="decision-owner"
+                  value={decisionFilters.ownerId ?? ""}
+                  onChange={(event) => updateDecisionFilter("ownerId", event.target.value)}
+                >
+                  <option value="">All owners</option>
+                  {principals.map((principal) => <option key={principal.id} value={principal.id}>{principal.displayName}</option>)}
+                </select>
+                <label htmlFor="decision-component">Component</label>
+                <input
+                  id="decision-component"
+                  value={decisionFilters.component ?? ""}
+                  placeholder="Exact component"
+                  onChange={(event) => updateDecisionFilter("component", event.target.value)}
+                />
+                <label htmlFor="decision-from">From</label>
+                <input
+                  id="decision-from"
+                  type="date"
+                  value={decisionFilters.createdFrom ?? ""}
+                  onChange={(event) => updateDecisionFilter("createdFrom", event.target.value)}
+                />
+                <label htmlFor="decision-to">To</label>
+                <input
+                  id="decision-to"
+                  type="date"
+                  value={decisionFilters.createdTo ?? ""}
+                  onChange={(event) => updateDecisionFilter("createdTo", event.target.value)}
+                />
+                {hasDecisionFilters ? (
+                  <button className="secondary" type="button" onClick={() => setDecisionFilters({})}>Clear</button>
+                ) : null}
               </div>
               {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
               {!referenceDataLoading && decisions.length === 0 ? <div className="empty">No decisions have been accepted for this project.</div> : null}

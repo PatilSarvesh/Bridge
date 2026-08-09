@@ -218,6 +218,26 @@ export const contextQuerySchema = z.object({
   maxItems: z.number().int().min(1).max(50).default(20),
 });
 
+export const decisionListQuerySchema = z
+  .object({
+    includeHistory: z.boolean().default(false),
+    status: decisionStatusSchema.optional(),
+    category: z.string().trim().min(2).max(100).optional(),
+    ownerId: z.string().trim().min(1).max(100).optional(),
+    createdFrom: z.string().datetime({ offset: true }).optional(),
+    createdTo: z.string().datetime({ offset: true }).optional(),
+    scope: scopeSchema.default({}),
+  })
+  .superRefine((value, context) => {
+    if (value.createdFrom && value.createdTo && Date.parse(value.createdFrom) > Date.parse(value.createdTo)) {
+      context.addIssue({
+        code: "custom",
+        message: "createdFrom must not be after createdTo.",
+        path: ["createdFrom"],
+      });
+    }
+  });
+
 export const publishArtifactInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   artifactId: z.string().trim().min(1).max(100).optional(),
@@ -360,6 +380,7 @@ export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
+export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
 export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;

@@ -754,6 +754,22 @@ describe("Bridge decision workflow", () => {
     });
     expect(context.items.map((item) => item.id)).toContain(replacement.id);
     expect(context.items.map((item) => item.id)).not.toContain(original.id);
+    expect((await service.listDecisions(owner, project.id)).map((decision) => decision.id)).toEqual([
+      replacement.id,
+    ]);
+    expect((await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      scope: {},
+    })).map((decision) => decision.id)).toEqual(expect.arrayContaining([original.id, replacement.id]));
+    expect(await service.listDecisions(owner, project.id, {
+      includeHistory: true,
+      status: "superseded",
+      category: "Architecture",
+      ownerId: owner.id,
+      createdFrom: "2026-01-01T00:00:00.000Z",
+      createdTo: "2026-01-01T23:59:59.999Z",
+      scope: { component: "transfers", workItem: "PAY-42" },
+    })).toEqual([expect.objectContaining({ id: original.id, status: "superseded" })]);
     expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "decision.superseded", subjectId: original.id }),
     ]));

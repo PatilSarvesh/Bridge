@@ -424,6 +424,38 @@ describe("Bridge API vertical slice", () => {
       decision: { id: original.id, status: "superseded", replacementDecisionId: replacement.id, version: 2 },
       impact: { artifactIds: [], assumptionIds: [], runIds: [], workItems: ["PAY-77"] },
     });
+
+    const active = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(active.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: replacement.id }),
+    ]);
+
+    const history = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=true&status=superseded&category=Architecture&ownerId=${demoPrincipals.architect.id}&component=settlement&workItem=PAY-77`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(history.json<{ items: Array<{ id: string; status: string }> }>().items).toEqual([
+      expect.objectContaining({ id: original.id, status: "superseded" }),
+    ]);
+
+    const invalidDates = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?createdFrom=2026-08-10T00%3A00%3A00.000Z&createdTo=2026-08-09T00%3A00%3A00.000Z`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidDates.statusCode).toBe(400);
+
+    const invalidHistoryFlag = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decisions?includeHistory=yes`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidHistoryFlag.statusCode).toBe(400);
   });
 
   it("routes role-owned questions to a matching fixed human principal", async () => {

@@ -7,6 +7,7 @@ import {
   contextQuerySchema,
   continuationQuerySchema,
   createQuestionInputSchema,
+  decisionListQuerySchema,
   findQuestionMatchesInputSchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
@@ -368,11 +369,32 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/decisions",
     async (request) => {
       const principal = resolvePrincipal(request, options.principals);
-      return { items: await options.service.listDecisions(principal, request.params.projectId) };
+      const query = decisionListQuerySchema.parse({
+        includeHistory: request.query.includeHistory === undefined
+          ? undefined
+          : request.query.includeHistory === "true"
+            ? true
+            : request.query.includeHistory === "false"
+              ? false
+              : request.query.includeHistory,
+        status: request.query.status,
+        category: request.query.category,
+        ownerId: request.query.ownerId,
+        createdFrom: request.query.createdFrom,
+        createdTo: request.query.createdTo,
+        scope: {
+          ...(request.query.repository ? { repository: request.query.repository } : {}),
+          ...(request.query.component ? { component: request.query.component } : {}),
+          ...(request.query.branch ? { branch: request.query.branch } : {}),
+          ...(request.query.environment ? { environment: request.query.environment } : {}),
+          ...(request.query.workItem ? { workItem: request.query.workItem } : {}),
+        },
+      });
+      return { items: await options.service.listDecisions(principal, request.params.projectId, query) };
     },
   );
 

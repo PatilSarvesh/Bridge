@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Specification review comments/request-changes and governed decision retirement are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
+| Current implementation phase | Governed decision retirement, active-by-default decision browsing/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while the next product workflow is selected from the remaining backlog |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -358,7 +358,7 @@ An accepted human answer creates a durable Decision containing:
 - Lifecycle version
 - Optional retirement rationale, human actor, timestamp, and same-project replacement link
 
-Only active decisions participate in context retrieval.
+Only active decisions participate in context retrieval. Human browsing is active-only by default, with explicit lifecycle history plus category, owner, created-time, and exact-scope filtering.
 
 ### 9.3 Specifications/artifacts
 
@@ -557,7 +557,7 @@ Reviewer context:
 Context and decisions:
 
 - `GET /v1/projects/:projectId/context`
-- `GET /v1/projects/:projectId/decisions`
+- `GET /v1/projects/:projectId/decisions` (active by default; supports explicit history/status plus category, owner, creation-time, and exact-scope filters)
 - `POST /v1/decisions/:decisionId/lifecycle`
 - `POST /v1/decisions/:decisionId/supersede`
 - `POST /v1/decisions/:decisionId/expire`
@@ -1358,7 +1358,7 @@ Implemented and verified:
 Deliberate boundaries:
 
 - Impact is direct and deterministic; deeper transitive dependency analysis remains BRG-123.
-- Decision list filtering/history search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
+- PostgreSQL full-text decision search, automatic review-date expiry, and scheduled lifecycle automation remain future work.
 - No agent, CLI, or MCP path can perform a human decision lifecycle action.
 
 ### 20.23 Implemented specification review feedback and request changes
@@ -1380,6 +1380,24 @@ Deliberate boundaries:
 - Feedback is append-only; edit/delete windows, inline Markdown anchors, mentions, configurable teams, quorum, and reviewer reassignment remain future work.
 - A change request is resolved by publishing a new immutable version, not by mutating or reopening the reviewed body.
 - Human review actions remain REST/web-only and do not require MCP approval.
+
+### 20.24 Implemented active-by-default decision browsing and explicit history filters
+
+Implemented and verified:
+
+1. Decision collection reads return active records by default, matching the existing rule that only active authority enters agent context.
+2. An authorized caller can explicitly include lifecycle history or select one lifecycle status, then narrow results by exact case-insensitive category, owner, inclusive creation-time range, or supplied exact repository/component/branch/environment/work-item scope dimensions.
+3. The shared query contract rejects invalid timestamps and reversed creation-time ranges at the REST boundary.
+4. Filtering occurs after tenant/project authorization, so query parameters cannot expose records outside the caller's project access.
+5. The Decisions UI exposes active/history mode, lifecycle state, category, owner, component, and creation-date controls with a single clear action.
+6. Direct decision links and lifecycle notifications automatically enable history, preserving navigation to retired records without changing the normal active-only view.
+7. Application and API regressions cover active defaults, explicit superseded history, combined filters, and invalid date ranges; the PostgreSQL integration path explicitly requests history when verifying retired rows.
+
+Deliberate boundaries:
+
+- Full-text relevance search remains a PostgreSQL-backed follow-up in BRG-041; the current agent search stays deterministic and authorized.
+- The first UI surface exposes component scope because it is the most common narrowing dimension; REST already supports every defined scope dimension.
+- Filters are local view state, not saved preferences or shareable query parameters.
 
 ## 21. Important implementation files
 
@@ -1446,4 +1464,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default decision browsing with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance, PostgreSQL full-text decision search, and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

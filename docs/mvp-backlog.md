@@ -476,7 +476,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — deterministic authorized search plus read-only list/detail UI and source navigation are implemented; the full filter/history surface and PostgreSQL full-text search remain
+- **Status:** Partial — authorized active-by-default browsing, explicit lifecycle history, deterministic category/owner/date/exact-scope filters, detail/source navigation, and deterministic agent search are implemented; PostgreSQL full-text search remains
 - **Dependencies:** BRG-040
 - **PRD references:** DEC-04
 

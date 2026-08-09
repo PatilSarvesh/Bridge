@@ -199,7 +199,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         expect.arrayContaining([replacementDecisionId, artifactVersionId, assumptionId]),
       );
       expect(context.items.map((item) => item.id)).not.toContain(decisionId);
-      expect(await service.listDecisions(owner, project.id)).toEqual(expect.arrayContaining([
+      expect(await service.listDecisions(owner, project.id, { includeHistory: true, scope: {} })).toEqual(expect.arrayContaining([
         expect.objectContaining({
           id: decisionId,
           status: "superseded",

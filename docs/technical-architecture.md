@@ -549,6 +549,8 @@ GET    /v1/projects/:projectId/search
 GET    /v1/projects/:projectId/audit-events
 ```
 
+Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. Authorized callers can additionally filter by exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. These filters execute after tenant/project authorization and do not weaken record access. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only.
+
 Administrative endpoints are separated under `/v1/admin` and require explicit scopes.
 
 The prototype `GET /v1/principals` route is intentionally limited to same-organization human summaries from fixed development fixtures. The web **Reviewing as** selector uses those summaries to exercise role-aware policy; it is a reviewer-context switcher, not authentication or organization onboarding. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
