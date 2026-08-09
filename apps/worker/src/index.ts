@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import type { OutboxEvent } from "@bridge/domain";
 import {
+  type BridgeMetrics,
   createSafeLogger,
   runWithCorrelationContext,
   type SafeLogger,
@@ -40,6 +41,7 @@ export interface OutboxCycleOptions {
   readonly maxAttempts?: number;
   readonly baseBackoffMs?: number;
   readonly logger?: SafeLogger;
+  readonly metrics?: BridgeMetrics;
 }
 
 export interface OutboxCycleResult {
@@ -59,6 +61,12 @@ export async function runOutboxCycle(
   const maxAttempts = options.maxAttempts ?? 5;
   const baseBackoffMs = options.baseBackoffMs ?? 1_000;
   const events = await store.claimOutboxEvents(currentTime.toISOString(), options.batchSize ?? 25);
+  const oldestClaimedAgeMs = events.length === 0
+    ? 0
+    : Math.max(
+        0,
+        currentTime.getTime() - Math.min(...events.map((event) => new Date(event.createdAt).getTime())),
+      );
   let processed = 0;
   let retried = 0;
   let deadLettered = 0;
@@ -103,7 +111,13 @@ export async function runOutboxCycle(
     );
   }
 
-  return { claimed: events.length, processed, retried, deadLettered };
+  const result = { claimed: events.length, processed, retried, deadLettered };
+  options.metrics?.recordOutboxCycle({
+    ...result,
+    oldestClaimedAgeMs,
+    observedAtMs: currentTime.getTime(),
+  });
+  return result;
 }
 
 export function decisionsDueForReview(

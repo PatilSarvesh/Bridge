@@ -61,6 +61,7 @@ import {
   type OutboxEvent,
 } from "@bridge/domain";
 import {
+  type BridgeMetrics,
   createCorrelationId,
   currentCorrelationId,
   runWithCorrelationContextIfAbsent,
@@ -392,6 +393,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly runContinuationKeys = new Map<string, string>();
   private transactionTail: Promise<void> = Promise.resolve();
 
+  constructor(private readonly metrics?: BridgeMetrics) {}
+
   async checkHealth(): Promise<{ readonly backend: string }> {
     return { backend: "memory" };
   }
@@ -400,6 +403,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     if (!currentCorrelationId()) {
       return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
     }
+    const startedAt = performance.now();
+    let outcome: "success" | "error" = "success";
     let release!: () => void;
     const previous = this.transactionTail;
     this.transactionTail = new Promise<void>((resolve) => {
@@ -429,6 +434,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     try {
       return await work(this);
     } catch (error) {
+      outcome = "error";
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -448,6 +454,11 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       throw error;
     } finally {
       release();
+      this.metrics?.recordDatabaseTransaction({
+        backend: "memory",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
     }
   }
 
@@ -774,6 +785,7 @@ export interface BridgeServiceOptions {
   readonly now?: () => Date;
   readonly id?: () => string;
   readonly resumeKey?: () => string;
+  readonly metrics?: BridgeMetrics;
 }
 
 export interface BridgeReadiness {
@@ -791,6 +803,7 @@ export class BridgeService {
   private readonly now: () => Date;
   private readonly id: () => string;
   private readonly resumeKey: () => string;
+  private readonly metrics: BridgeMetrics | undefined;
 
   constructor(
     private readonly repository: BridgeRepository,
@@ -800,6 +813,7 @@ export class BridgeService {
     this.now = options.now ?? (() => new Date());
     this.id = options.id ?? randomUUID;
     this.resumeKey = options.resumeKey ?? (() => randomBytes(32).toString("base64url"));
+    this.metrics = options.metrics;
   }
 
   private recordUrl(parameters: Readonly<Record<string, string>>): string {
@@ -2697,9 +2711,25 @@ export class BridgeService {
     projectId: string,
     query: ContextQuery,
   ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
-    return this.repository.transaction((repository) =>
-      this.getContextInTransaction(repository, principal, projectId, query),
-    );
+    const startedAt = performance.now();
+    try {
+      const { candidateCount, ...result } = await this.repository.transaction((repository) =>
+        this.getContextInTransaction(repository, principal, projectId, query),
+      );
+      this.metrics?.recordContextRetrieval({
+        outcome: "success",
+        durationMs: Math.max(0, performance.now() - startedAt),
+        resultCount: result.items.length,
+        candidateCount,
+      });
+      return result;
+    } catch (error) {
+      this.metrics?.recordContextRetrieval({
+        outcome: "error",
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      throw error;
+    }
   }
 
   private async getContextInTransaction(
@@ -2707,7 +2737,12 @@ export class BridgeService {
     principal: Principal,
     projectId: string,
     query: ContextQuery,
-  ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
+  ): Promise<{
+    readonly contextSnapshotId: string;
+    readonly items: readonly ContextItem[];
+    readonly truncated: boolean;
+    readonly candidateCount: number;
+  }> {
     await this.requireProject(principal, projectId, repository);
     const sourceRun = query.runId
       ? await this.requireLinkableRun(principal, query.runId, repository)
@@ -2841,7 +2876,12 @@ export class BridgeService {
       snapshot.id,
       snapshot.createdAt,
     );
-    return { contextSnapshotId: snapshot.id, items, truncated: scored.length > items.length };
+    return {
+      contextSnapshotId: snapshot.id,
+      items,
+      truncated: scored.length > items.length,
+      candidateCount: scored.length,
+    };
   }
 
   private async requireRun(

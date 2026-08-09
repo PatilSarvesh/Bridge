@@ -785,10 +785,10 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the correlation and safe-logging slice:
+Current validation result after the portable metrics/dashboard/alert/SLO slice:
 
 - Type-check: passed across all eleven TypeScript configurations.
-- Behavioral tests: 69 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 70 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all ten TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -1523,6 +1523,27 @@ Deliberate boundaries:
 - Correlation IDs are untrusted diagnostic metadata. They never confer identity, tenant access, approval authority, or idempotency.
 - The logger intentionally sacrifices arbitrary message text for privacy; diagnostic code should add stable event names, safe machine codes, record IDs, enums, and numeric measurements instead of free-form content.
 
+### 20.32 Implemented portable metrics, dashboard, alerts, and initial service objectives
+
+Implemented and locally verified:
+
+1. `@bridge/observability` now includes a dependency-free process-local `BridgeMetrics` registry with fixed counters, gauges, histograms, deterministic snapshots, and Prometheus text rendering.
+2. API and standalone MCP runtimes share a registry with their application service and PostgreSQL repository, record bounded route/outcome/duration series, and expose `GET /metrics`. `401`/`403` authorization denials are counted separately.
+3. Metrics never add tenant, project, principal, record, prompt, answer, specification, or other content labels. API operations use framework route templates and both HTTP surfaces collapse unmatched paths to `unmatched`.
+4. Context retrieval records success/error, end-to-end latency, result count, and pre-truncation candidate count without changing the public context contract.
+5. In-memory and PostgreSQL repository transactions record backend/outcome/duration at the outer transaction boundary. The current driver does not expose a stable pool-utilization metric, so provider/exporter saturation telemetry remains explicit deployment work.
+6. Outbox cycles record their completion timestamp, claimed count, oldest claimed age, and processed/retried/dead-lettered outcomes; notification email handling records delivered/failed/suppressed/deferred/skipped outcomes and duration.
+7. `config/observability/bridge-pilot-dashboard.json` provides request, latency, error, authorization, database, context, queue, and notification PromQL panels. `config/observability/bridge-pilot-alerts.yml` provides sustained API/MCP failure, database availability-risk, outbox backlog/dead-letter, and notification-failure rules.
+8. `docs/service-objectives.md` defines the measurement boundary, initial non-contractual pilot objectives, error-budget interpretation, thresholds, response class, ownership, and calibration process.
+9. Observability, application, API, and worker regressions cover rendering/privacy, authorization denial, context/database wiring, queue outcomes/age, and email delivery/idempotent-skip metrics.
+
+Deliberate boundaries:
+
+- Metrics are process-local and reset on restart. Multi-instance collection, storage, dashboard hosting, rule evaluation, paging routes, and monitoring-network access control belong to the deployment.
+- The worker exposes injection seams rather than a long-running metrics server because its scheduled durable runtime remains incomplete. Queue/provider panels become live only after that deployment host exports the shared registry.
+- MCP is represented by its bounded HTTP operation; per-tool/session metrics remain follow-up work. Database pool saturation requires provider/exporter telemetry.
+- The included objectives and thresholds are starting hypotheses. BRG-104 remains partial until representative pilot telemetry validates them and external alert delivery is exercised.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1563,7 +1584,10 @@ Deliberate boundaries:
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
+- Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
 - Observability behavior and boundaries: `docs/observability.md`
+- Pilot service objectives: `docs/service-objectives.md`
+- Portable dashboard and alert definitions: `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`
 - Read-only restore verifier: `packages/database/src/verify-restore.ts`
 - Backup/restore runbook: `docs/runbooks/backup-restore.md`
 - Incident runbook: `docs/runbooks/incidents.md`
@@ -1598,4 +1622,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, end-to-end correlation and safe structured logs, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production metrics/alerts and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, end-to-end correlation, safe structured logs, portable bounded metrics with dashboard/alert/SLO definitions, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production telemetry activation/calibration and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

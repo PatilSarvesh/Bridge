@@ -895,7 +895,7 @@ The current vendor-neutral implementation validates or generates `x-bridge-corre
 
 Initial technical metrics:
 
-- Request count, latency, and error rate by endpoint/tool.
+- Request count, latency, and error rate by bounded endpoint/tool operation.
 - Authentication and authorization failures.
 - Database pool usage and transaction latency.
 - Context retrieval candidate count, latency, and result size.
@@ -905,11 +905,17 @@ Initial technical metrics:
 - Idempotency hits and conflicts.
 - Cross-tenant test and policy-denial counts.
 
+`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; in-memory test/runtime paths use the same transaction instrumentation. Outbox and email handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are route templates, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
+
+The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email handling outcomes/duration. Database pool utilization, MCP tool-name/session counts, idempotency/conflict counters, and a durable worker exporter remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
+
+Provider-neutral operational assets are `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`, and `docs/service-objectives.md`. They are initial definitions requiring a real metrics backend, rule evaluator, notification route, and pilot calibration; repository presence is not evidence that production monitoring is active.
+
 ### 22.3 Logging
 
 Use structured logs with record IDs and correlation IDs. Redact tokens, secrets, authorization headers, artifact bodies, and free-form content by default. Production log access is role-restricted and audited.
 
-`@bridge/observability` implements the local safe JSON logger with an operational-field allowlist, recursive sensitive-key redaction, exception-message removal, and an injectable sink. Standalone API/MCP runtimes avoid framework-default request logging. Production export, access control, retention, dashboards, and alerts remain deployment work.
+`@bridge/observability` implements the local safe JSON logger with an operational-field allowlist, recursive sensitive-key redaction, exception-message removal, and an injectable sink. Standalone API/MCP runtimes avoid framework-default request logging. Production export, access control, retention, dashboard hosting, and alert delivery remain deployment work.
 
 ## 23. Reliability and performance
 

@@ -1,5 +1,6 @@
 import { createPostgresBridgeStore } from "@bridge/database";
 import {
+  BridgeMetrics,
   correlationIdHeader,
   createSafeLogger,
   resolveCorrelationId,
@@ -20,11 +21,12 @@ if (!databaseUrl) {
   );
 }
 const publicWebUrl = process.env.BRIDGE_PUBLIC_WEB_URL ?? "http://127.0.0.1:3000";
-const postgresStore = createPostgresBridgeStore(databaseUrl);
+const metrics = new BridgeMetrics();
+const postgresStore = createPostgresBridgeStore(databaseUrl, { metrics });
 const runtime = await createDemoRuntimeWithRepository(postgresStore.repository, {
   seedQuestion: true,
   seedArtifact: true,
-  serviceOptions: { publicBaseUrl: publicWebUrl },
+  serviceOptions: { publicBaseUrl: publicWebUrl, metrics },
 });
 const principalId = process.env.BRIDGE_MCP_PRINCIPAL_ID ?? demoPrincipals.agent.id;
 const principal = runtime.principals[principalId];
@@ -42,11 +44,20 @@ app.use((request: Request, response: Response, next) => {
   runWithCorrelationContext({ correlationId, source: "mcp" }, () => {
     const startedAt = performance.now();
     response.on("finish", () => {
+      const durationMs = Math.max(0, performance.now() - startedAt);
+      const operation = ["/health", "/health/live", "/health/ready", "/metrics", "/mcp"]
+        .includes(request.path) ? request.path : "unmatched";
+      metrics.recordHttpRequest({
+        service: "mcp",
+        operation,
+        statusCode: response.statusCode,
+        durationMs,
+      });
       logger.info("request.completed", {
         method: request.method,
         path: request.path,
         statusCode: response.statusCode,
-        durationMs: Math.max(0, performance.now() - startedAt),
+        durationMs,
       });
     });
     next();
@@ -58,6 +69,9 @@ const sendLiveness = (_request: Request, response: Response) => {
 };
 app.get("/health", sendLiveness);
 app.get("/health/live", sendLiveness);
+app.get("/metrics", (_request: Request, response: Response) => {
+  response.type("text/plain; version=0.0.4; charset=utf-8").send(metrics.renderPrometheus());
+});
 app.get("/health/ready", async (_request: Request, response: Response) => {
   const readiness = await runtime.service.checkReadiness();
   response

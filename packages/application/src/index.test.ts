@@ -4,6 +4,7 @@ import type {
   RecordAssumptionInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
+import { BridgeMetrics } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
 import { BridgeService, InMemoryBridgeRepository } from "./index.js";
@@ -136,13 +137,14 @@ function assumptionInput(overrides: Partial<RecordAssumptionInput> = {}): Record
   };
 }
 
-async function runtime(): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
-  const repository = new InMemoryBridgeRepository();
+async function runtime(metrics?: BridgeMetrics): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
+  const repository = new InMemoryBridgeRepository(metrics);
   await repository.saveProject(project);
   return {
     repository,
     service: new BridgeService(repository, {
       publicBaseUrl: "http://bridge.test/review",
+      ...(metrics ? { metrics } : {}),
       now: () => new Date("2026-01-01T00:00:00.000Z"),
       id: (() => {
         let next = 0;
@@ -203,7 +205,8 @@ describe("Bridge decision workflow", () => {
   });
 
   it("records, ranks, expires, and human-resolves visible assumptions", async () => {
-    const { repository, service } = await runtime();
+    const metrics = new BridgeMetrics();
+    const { repository, service } = await runtime(metrics);
     const registration = await service.startRun(agent, project.id, {
       idempotencyKey: "assumption-run-001",
       client: "codex",
@@ -241,6 +244,21 @@ describe("Bridge decision workflow", () => {
       }),
     ]);
     expect(new URL(context.items[0]!.sourceUrl).searchParams.get("assumptionId")).toBe(assumption.id);
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_context_requests_total",
+        labels: { outcome: "success" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_database_transactions_total",
+        labels: { backend: "memory", outcome: "success" },
+      }),
+    ]));
+    expect(metrics.snapshot().histograms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bridge_context_result_count", count: 1, sum: 1 }),
+      expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 1 }),
+    ]));
     await expect(
       service.resolveAssumption(agent, assumption.id, {
         expectedVersion: 1,

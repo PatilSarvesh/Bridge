@@ -6,6 +6,7 @@ import type {
   OutboxDelivery,
   OutboxEvent,
 } from "@bridge/domain";
+import type { BridgeMetrics, BridgeNotificationOutcome } from "@bridge/observability";
 
 export type EssentialEmailTemplateKind =
   | "assignment"
@@ -59,6 +60,7 @@ export interface NotificationEmailHandlerOptions {
   readonly publicBaseUrl: string;
   readonly now?: () => Date;
   readonly mandatory?: (notification: Notification) => boolean;
+  readonly metrics?: BridgeMetrics;
 }
 
 const TEMPLATE_LABELS: Readonly<Record<EssentialEmailTemplateKind, string>> = {
@@ -166,78 +168,90 @@ export function createNotificationEmailHandler(
 
   return async (event) => {
     if (event.type !== "notification.created") return;
-    if (!("notificationId" in event.payload)) throw new Error("Notification outbox payload is invalid.");
-    const notification = await options.store.getNotification(event.payload.notificationId);
-    if (
-      !notification ||
-      notification.organizationId !== event.organizationId ||
-      notification.projectId !== event.projectId ||
-      notification.recipientId !== event.payload.recipientId ||
-      notification.type !== event.payload.notificationType ||
-      notification.targetType !== event.payload.targetType ||
-      notification.targetId !== event.payload.targetId
-    ) {
-      throw new Error("Notification delivery source is missing or inconsistent.");
-    }
-
-    const existing = await options.store.getOutboxDelivery(event.id, "email");
-    if (existing && existing.status !== "failed") return;
-    const recipient = await options.directory.resolveEmailRecipient(notification.recipientId);
-    if (!recipient) throw new Error("No email destination is configured for this recipient.");
-    const address = normalizeAddress(recipient.address);
-    const hashedDestination = destinationHash(event.organizationId, address);
-    if (existing && existing.destinationHash !== hashedDestination) {
-      throw new Error("The email destination changed after a failed attempt; operator review is required.");
-    }
-
-    const timestamp = now().toISOString();
-    const baseDelivery = {
-      id: existing?.id ?? deliveryId(event.id),
-      organizationId: event.organizationId,
-      projectId: event.projectId,
-      outboxEventId: event.id,
-      channel: "email" as const,
-      destinationHash: hashedDestination,
-      attemptCount: event.attempts,
-      preference: recipient.preference,
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
-    if (!mandatory(notification) && recipient.preference !== "immediate") {
-      await options.store.saveOutboxDelivery({
-        ...baseDelivery,
-        status: recipient.preference === "muted" ? "suppressed" : "deferred",
-      });
-      return;
-    }
-
-    const template = renderEssentialEmailTemplate({
-      kind: templateKind(notification),
-      title: notification.title,
-      context: notification.body,
-      actionUrl: notificationUrl(options.publicBaseUrl, notification),
-    });
+    const startedAt = performance.now();
+    let outcome: BridgeNotificationOutcome = "failed";
     try {
-      const result = await options.sender.send({
-        to: address,
-        ...template,
-        idempotencyKey: `${event.id}:email`,
-        correlationId: event.correlationId,
+      if (!("notificationId" in event.payload)) throw new Error("Notification outbox payload is invalid.");
+      const notification = await options.store.getNotification(event.payload.notificationId);
+      if (
+        !notification ||
+        notification.organizationId !== event.organizationId ||
+        notification.projectId !== event.projectId ||
+        notification.recipientId !== event.payload.recipientId ||
+        notification.type !== event.payload.notificationType ||
+        notification.targetType !== event.payload.targetType ||
+        notification.targetId !== event.payload.targetId
+      ) {
+        throw new Error("Notification delivery source is missing or inconsistent.");
+      }
+
+      const existing = await options.store.getOutboxDelivery(event.id, "email");
+      if (existing && existing.status !== "failed") {
+        outcome = "skipped";
+        return;
+      }
+      const recipient = await options.directory.resolveEmailRecipient(notification.recipientId);
+      if (!recipient) throw new Error("No email destination is configured for this recipient.");
+      const address = normalizeAddress(recipient.address);
+      const hashedDestination = destinationHash(event.organizationId, address);
+      if (existing && existing.destinationHash !== hashedDestination) {
+        throw new Error("The email destination changed after a failed attempt; operator review is required.");
+      }
+
+      const timestamp = now().toISOString();
+      const baseDelivery = {
+        id: existing?.id ?? deliveryId(event.id),
+        organizationId: event.organizationId,
+        projectId: event.projectId,
+        outboxEventId: event.id,
+        channel: "email" as const,
+        destinationHash: hashedDestination,
+        attemptCount: event.attempts,
+        preference: recipient.preference,
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      };
+      if (!mandatory(notification) && recipient.preference !== "immediate") {
+        outcome = recipient.preference === "muted" ? "suppressed" : "deferred";
+        await options.store.saveOutboxDelivery({ ...baseDelivery, status: outcome });
+        return;
+      }
+
+      const template = renderEssentialEmailTemplate({
+        kind: templateKind(notification),
+        title: notification.title,
+        context: notification.body,
+        actionUrl: notificationUrl(options.publicBaseUrl, notification),
       });
-      const providerMessageId = safeProviderMessageId(result.providerMessageId);
-      await options.store.saveOutboxDelivery({
-        ...baseDelivery,
-        status: "delivered",
-        providerMessageId,
+      try {
+        const result = await options.sender.send({
+          to: address,
+          ...template,
+          idempotencyKey: `${event.id}:email`,
+          correlationId: event.correlationId,
+        });
+        const providerMessageId = safeProviderMessageId(result.providerMessageId);
+        await options.store.saveOutboxDelivery({
+          ...baseDelivery,
+          status: "delivered",
+          providerMessageId,
+        });
+        outcome = "delivered";
+      } catch (error) {
+        const lastError = sanitizeDeliveryError(error);
+        await options.store.saveOutboxDelivery({
+          ...baseDelivery,
+          status: "failed",
+          lastError,
+        });
+        throw new Error(lastError);
+      }
+    } finally {
+      options.metrics?.recordNotificationDelivery({
+        channel: "email",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
       });
-    } catch (error) {
-      const lastError = sanitizeDeliveryError(error);
-      await options.store.saveOutboxDelivery({
-        ...baseDelivery,
-        status: "failed",
-        lastError,
-      });
-      throw new Error(lastError);
     }
   };
 }

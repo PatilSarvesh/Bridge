@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import type { BridgeMetrics } from "@bridge/observability";
 
 import { PostgresBridgeRepository } from "./repository.js";
 import * as schema from "./schema.js";
@@ -15,7 +16,14 @@ export interface PostgresBridgeStore {
   close(): Promise<void>;
 }
 
-export function createPostgresBridgeStore(connectionString: string): PostgresBridgeStore {
+export interface PostgresBridgeStoreOptions {
+  readonly metrics?: BridgeMetrics;
+}
+
+export function createPostgresBridgeStore(
+  connectionString: string,
+  options: PostgresBridgeStoreOptions = {},
+): PostgresBridgeStore {
   const client = postgres(connectionString, {
     max: 10,
     prepare: false,
@@ -23,7 +31,7 @@ export function createPostgresBridgeStore(connectionString: string): PostgresBri
   });
   const database = drizzle(client, { schema });
   return {
-    repository: new PostgresBridgeRepository(database),
+    repository: new PostgresBridgeRepository(database, false, options.metrics),
     close: () => client.end(),
   };
 }

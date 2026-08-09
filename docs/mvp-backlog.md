@@ -1018,7 +1018,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded web/CLI/API/MCP correlation, durable audit/outbox propagation, worker/integration continuation, and safe structured-log redaction are implemented; metrics export, dashboards, alerts, and initial service objectives remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP Prometheus export, request/auth/context/database/outbox/notification metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, worker export, PostgreSQL pool saturation, MCP tool/session metrics, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
@@ -1031,6 +1031,8 @@ Acceptance criteria:
 3. Logs redact tokens, secrets, and artifact bodies by default.
 4. Alerts cover sustained API failure, MCP failure, database exhaustion, and outbox backlog.
 5. Initial service objectives and alert thresholds are documented.
+
+Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
 
 ## 19. E11 — Pilot operations and analytics
 

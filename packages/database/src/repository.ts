@@ -1,6 +1,10 @@
 import type { BridgeRepository } from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
-import { currentCorrelationId, runWithCorrelationContextIfAbsent } from "@bridge/observability";
+import {
+  type BridgeMetrics,
+  currentCorrelationId,
+  runWithCorrelationContextIfAbsent,
+} from "@bridge/observability";
 import type {
   AgentRun,
   Assumption,
@@ -75,6 +79,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
   constructor(
     private readonly database: BridgeDatabase,
     private readonly lockAggregateReads = false,
+    private readonly metrics?: BridgeMetrics,
   ) {}
 
   async checkHealth(): Promise<{ readonly backend: string }> {
@@ -88,12 +93,16 @@ export class PostgresBridgeRepository implements BridgeRepository {
     }
     if (this.lockAggregateReads) return work(this);
 
+    const startedAt = performance.now();
+    let outcome: "success" | "error" = "success";
+
     try {
       return await this.database.transaction(async (transaction) =>
-        work(new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true)),
+        work(new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true, this.metrics)),
         { isolationLevel: "serializable" },
       );
     } catch (error) {
+      outcome = "error";
       const code = databaseErrorCode(error);
       if (code === "23505") {
         throw new BridgeError("CONFLICT", "A concurrent operation already created this record.", 409);
@@ -102,6 +111,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
         throw new BridgeError("CONFLICT", "The operation conflicted with another update; retry it.", 409);
       }
       throw error;
+    } finally {
+      this.metrics?.recordDatabaseTransaction({
+        backend: "postgresql",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
     }
   }
 

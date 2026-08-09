@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BridgeMetrics,
   correlationIdPattern,
   createSafeLogger,
   currentCorrelationContext,
@@ -80,5 +81,79 @@ describe("Bridge observability primitives", () => {
       prompt: "[redacted]",
       count: 2,
     });
+  });
+
+  it("renders bounded request, context, database, outbox, and delivery metrics", () => {
+    const metrics = new BridgeMetrics();
+    metrics.recordHttpRequest({
+      service: "api",
+      operation: "/v1/projects/:projectId/context?ignored=true",
+      statusCode: 403,
+      durationMs: 125,
+    });
+    metrics.recordContextRetrieval({
+      outcome: "success",
+      durationMs: 50,
+      resultCount: 4,
+      candidateCount: 12,
+    });
+    metrics.recordDatabaseTransaction({ backend: "postgresql", outcome: "success", durationMs: 20 });
+    metrics.recordOutboxCycle({
+      claimed: 3,
+      processed: 1,
+      retried: 1,
+      deadLettered: 1,
+      oldestClaimedAgeMs: 12_000,
+      observedAtMs: 1_786_320_000_000,
+    });
+    metrics.recordNotificationDelivery({ channel: "email", outcome: "delivered", durationMs: 30 });
+
+    const snapshot = metrics.snapshot();
+    expect(snapshot.counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_authorization_denials_total",
+        labels: { service: "api", operation: "/v1/projects/:projectId/context", status: "403" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_outbox_events_total",
+        labels: { outcome: "dead_lettered" },
+        value: 1,
+      }),
+    ]));
+    expect(snapshot.gauges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bridge_outbox_last_cycle_claimed", value: 3 }),
+      expect.objectContaining({ name: "bridge_outbox_oldest_claimed_age_seconds", value: 12 }),
+      expect.objectContaining({ name: "bridge_outbox_last_cycle_timestamp_seconds", value: 1_786_320_000 }),
+    ]));
+    expect(snapshot.histograms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 12 }),
+      expect.objectContaining({ name: "bridge_http_request_duration_seconds", count: 1, sum: 0.125 }),
+    ]));
+
+    const rendered = metrics.renderPrometheus();
+    expect(rendered).toContain("# TYPE bridge_http_requests_total counter");
+    expect(rendered).toContain('bridge_http_requests_total{operation="/v1/projects/:projectId/context",outcome="client_error",service="api"} 1');
+    expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
+    expect(rendered).not.toContain("ignored=true");
+    expect(rendered).not.toContain("organizationId");
+    expect(rendered).not.toContain("projectId=prj_");
+
+    for (let index = 0; index < 140; index += 1) {
+      metrics.recordHttpRequest({
+        service: "api",
+        operation: `/cardinality-test/${index}`,
+        statusCode: 200,
+        durationMs: 1,
+      });
+    }
+    const boundedRequests = metrics.snapshot().counters.filter(
+      (sample) => sample.name === "bridge_http_requests_total",
+    );
+    expect(boundedRequests).toHaveLength(129);
+    expect(boundedRequests).toContainEqual(expect.objectContaining({
+      labels: { service: "api", operation: "overflow", outcome: "success" },
+      value: 13,
+    }));
   });
 });

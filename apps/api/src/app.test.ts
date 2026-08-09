@@ -1,4 +1,5 @@
 import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
+import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -12,8 +13,9 @@ describe("Bridge API vertical slice", () => {
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
-    const runtime = await createDemoRuntime();
-    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    const metrics = new BridgeMetrics();
+    const runtime = await createDemoRuntime({ serviceOptions: { metrics } });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, metrics });
     apps.push(app);
 
     const compatibility = await app.inject({
@@ -38,6 +40,14 @@ describe("Bridge API vertical slice", () => {
       status: "ready",
       checks: [{ name: "repository", status: "ready", backend: "memory" }],
     });
+
+    const denied = await app.inject({ method: "GET", url: "/v1/principals" });
+    expect(denied.statusCode).toBe(401);
+    const scrape = await app.inject({ method: "GET", url: "/metrics" });
+    expect(scrape.statusCode).toBe(200);
+    expect(scrape.headers["content-type"]).toContain("text/plain");
+    expect(scrape.body).toContain('bridge_authorization_denials_total{operation="/v1/principals",service="api",status="401"} 1');
+    expect(scrape.body).not.toContain(demoProject.id);
 
     class UnavailableRepository extends InMemoryBridgeRepository {
       override async checkHealth(): Promise<{ readonly backend: string }> {

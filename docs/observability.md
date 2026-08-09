@@ -1,6 +1,6 @@
 # Observability foundation
 
-Bridge's first observability slice provides vendor-neutral correlation and safe structured logging. It does not require OpenTelemetry, CloudWatch, MCP, or a hosted deployment, and it does not claim that dashboards, metrics export, alerts, or service objectives are complete.
+Bridge provides vendor-neutral correlation, safe structured logging, bounded process-local metrics, Prometheus text export for the HTTP services, a pilot dashboard definition, alert rules, and initial service objectives. It does not require OpenTelemetry, CloudWatch, MCP, or a hosted deployment.
 
 ## Correlation flow
 
@@ -41,12 +41,36 @@ Errors retain only a bounded error name and safe machine code when present. Logs
 - Worker processed/retry/dead-letter log records reuse the outbox event's persisted correlation ID when a safe logger is supplied.
 - Project-admin outbox inspection includes the durable correlation ID through the existing authorized event representation.
 
+## Metrics and scraping
+
+`@bridge/observability` includes a dependency-free `BridgeMetrics` registry. The API and standalone MCP service each create one registry shared with their application and PostgreSQL repository, then expose it through `GET /metrics` in Prometheus text format. For local inspection:
+
+```bash
+curl --silent http://127.0.0.1:4000/metrics
+curl --silent http://127.0.0.1:4100/metrics
+```
+
+The endpoints intentionally contain no tenant, project, principal, record, prompt, answer, specification, or other content labels. Operations use route templates; unmatched paths collapse to `unmatched`, and the registry collapses operations beyond its 128-label process budget to `overflow`. A deployed reverse proxy must restrict `/metrics` to the monitoring network even though the current fixed-principal prototype does not implement authentication.
+
+The registry records:
+
+- HTTP request count, outcome, authorization denials, and duration by `api`/`mcp` and bounded operation;
+- context success/error count, latency, result count, and candidate count;
+- in-memory/PostgreSQL transaction count, outcome, and duration;
+- most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
+- email delivery/policy outcome and handler duration.
+
+API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle` and `createNotificationEmailHandler`; its long-running scheduling/export host remains deployment-owned because the repository worker entry point is not yet a durable daemon.
+
+Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or translate its PromQL into the chosen dashboard system), load `config/observability/bridge-pilot-alerts.yml` into a Prometheus-compatible rule evaluator, and use [`service-objectives.md`](./service-objectives.md) for the initial objectives and threshold rationale.
+
 ## Remaining BRG-104 work
 
 - OpenTelemetry spans/export and production collector wiring.
-- Request/tool latency, error, authorization-denial, context-performance, database-pool, notification, and queue-age metrics.
-- Dashboards and alert rules for API/MCP failure, database exhaustion, and outbox backlog.
-- Initial service-level indicators, objectives, and alert thresholds validated against pilot telemetry.
+- MCP tool-name/session metrics beyond the bounded `/mcp` HTTP operation.
+- Stable PostgreSQL pool-utilization telemetry supplied by the selected deployment/provider.
+- A long-running worker metrics endpoint or collector integration and production evaluation of the included alert rules.
+- Validation and tuning of the initial service objectives against representative pilot telemetry.
 - Deployment-owned log access control, retention, and audit evidence.
 
-Until these exist, correlation materially improves diagnosis but BRG-104 remains partial.
+The repository now supplies the portable instrumentation and operational definitions, but BRG-104 remains partial until a real deployment exports the worker/provider signals, evaluates alerts, proves database saturation coverage, and calibrates the objectives.

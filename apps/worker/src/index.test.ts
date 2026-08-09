@@ -1,5 +1,5 @@
 import type { Notification, OutboxDelivery, OutboxEvent } from "@bridge/domain";
-import { currentCorrelationId } from "@bridge/observability";
+import { BridgeMetrics, currentCorrelationId } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -176,18 +176,29 @@ describe("decision review reminders", () => {
 
 describe("notification outbox cycle", () => {
   it("claims and completes events through an injected delivery handler", async () => {
+    const metrics = new BridgeMetrics();
     const store = new TestOutboxStore([outboxEvent("evt_one"), outboxEvent("evt_two")]);
     const delivered: string[] = [];
     const correlations: Array<string | undefined> = [];
     const result = await runOutboxCycle(store, async (event) => {
       delivered.push(event.id);
       correlations.push(currentCorrelationId());
-    }, { now: () => new Date("2026-08-08T00:00:00.000Z") });
+    }, { now: () => new Date("2026-08-08T00:00:00.000Z"), metrics });
 
     expect(result).toEqual({ claimed: 2, processed: 2, retried: 0, deadLettered: 0 });
     expect(delivered).toEqual(["evt_one", "evt_two"]);
     expect(correlations).toEqual(["cor_evt_one", "cor_evt_two"]);
     expect(store.events.every((event) => event.status === "processed")).toBe(true);
+    expect(metrics.snapshot().counters).toContainEqual({
+      name: "bridge_outbox_events_total",
+      labels: { outcome: "processed" },
+      value: 2,
+    });
+    expect(metrics.snapshot().gauges).toContainEqual({
+      name: "bridge_outbox_last_cycle_claimed",
+      labels: {},
+      value: 2,
+    });
   });
 
   it("retries failures and dead-letters after the configured attempt budget", async () => {
@@ -240,6 +251,7 @@ describe("notification email delivery", () => {
   });
 
   it("delivers immediate email idempotently without persisting its address", async () => {
+    const metrics = new BridgeMetrics();
     const item = notification("email_immediate");
     const event = { ...notificationEvent("evt_email_immediate", item), status: "processing" as const, attempts: 1 };
     const store = new TestNotificationEmailStore([item]);
@@ -257,6 +269,7 @@ describe("notification email delivery", () => {
       },
       publicBaseUrl: "https://bridge.example.test/review",
       now: () => new Date("2026-08-08T00:00:01.000Z"),
+      metrics,
     });
 
     await handler(event);
@@ -280,6 +293,18 @@ describe("notification email delivery", () => {
       destinationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(JSON.stringify(delivery)).not.toContain("owner@example.test");
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_notification_deliveries_total",
+        labels: { channel: "email", outcome: "delivered" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_notification_deliveries_total",
+        labels: { channel: "email", outcome: "skipped" },
+        value: 1,
+      }),
+    ]));
   });
 
   it("honors ordinary muted/digest preferences while protected review email remains immediate", async () => {

@@ -28,6 +28,7 @@ import {
 import { BridgeError, type Principal } from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
 import {
+  BridgeMetrics,
   correlationIdHeader,
   createSafeLogger,
   resolveCorrelationId,
@@ -40,6 +41,7 @@ export interface BuildAppOptions {
   readonly service: BridgeService;
   readonly principals: Readonly<Record<string, Principal>>;
   readonly logger?: boolean;
+  readonly metrics?: BridgeMetrics;
 }
 
 function resolvePrincipal(
@@ -63,6 +65,7 @@ function resolvePrincipal(
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  const metrics = options.metrics ?? new BridgeMetrics();
   const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
   await app.register(cors, {
@@ -80,11 +83,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.addHook("onResponse", (request, reply, done) => {
+    const durationMs = Math.max(0, performance.now() - (requestStartedAt.get(request) ?? performance.now()));
+    const operation = request.routeOptions.url || "unmatched";
+    metrics.recordHttpRequest({
+      service: "api",
+      operation,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
     safeLogger?.info("request.completed", {
       method: request.method,
-      route: request.routeOptions.url,
+      route: operation,
       statusCode: reply.statusCode,
-      durationMs: Math.max(0, performance.now() - (requestStartedAt.get(request) ?? performance.now())),
+      durationMs,
     });
     done();
   });
@@ -121,6 +132,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const liveness = async () => ({ status: "ok", service: "bridge-api" });
   app.get("/health", liveness);
   app.get("/health/live", liveness);
+  app.get("/metrics", async (_request, reply) => reply
+    .type("text/plain; version=0.0.4; charset=utf-8")
+    .send(metrics.renderPrometheus()));
   app.get("/health/ready", async (_request, reply) => {
     const readiness = await options.service.checkReadiness();
     return reply
