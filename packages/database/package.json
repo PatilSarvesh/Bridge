@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "tsx src/migrate.ts",
+    "restore:verify": "tsx src/verify-restore.ts",
     "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

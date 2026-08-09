@@ -1,3 +1,4 @@
+import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,6 +9,48 @@ describe("Bridge API vertical slice", () => {
 
   afterEach(async () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
+  });
+
+  it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const compatibility = await app.inject({ method: "GET", url: "/health" });
+    const live = await app.inject({ method: "GET", url: "/health/live" });
+    const ready = await app.inject({ method: "GET", url: "/health/ready" });
+    expect(compatibility).toMatchObject({ statusCode: 200 });
+    expect(compatibility.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(live.json()).toEqual({ status: "ok", service: "bridge-api" });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({
+      service: "bridge-api",
+      status: "ready",
+      checks: [{ name: "repository", status: "ready", backend: "memory" }],
+    });
+
+    class UnavailableRepository extends InMemoryBridgeRepository {
+      override async checkHealth(): Promise<{ readonly backend: string }> {
+        throw new Error("SENSITIVE_INTERNAL_DETAIL");
+      }
+    }
+    const unavailableApp = await buildApp({
+      service: new BridgeService(new UnavailableRepository()),
+      principals: runtime.principals,
+    });
+    apps.push(unavailableApp);
+    const unavailable = await unavailableApp.inject({ method: "GET", url: "/health/ready" });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json()).toEqual({
+      service: "bridge-api",
+      status: "not_ready",
+      checks: [{
+        name: "repository",
+        status: "failed",
+        message: "Repository dependency is unavailable.",
+      }],
+    });
+    expect(unavailable.body).not.toContain("SENSITIVE_INTERNAL_DETAIL");
   });
 
   it("lists same-organization fixed human principals for the prototype reviewer switcher", async () => {

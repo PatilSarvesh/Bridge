@@ -83,7 +83,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     });
   });
 
-  app.get("/health", async () => ({ status: "ok", service: "bridge-api" }));
+  const liveness = async () => ({ status: "ok", service: "bridge-api" });
+  app.get("/health", liveness);
+  app.get("/health/live", liveness);
+  app.get("/health/ready", async (_request, reply) => {
+    const readiness = await options.service.checkReadiness();
+    return reply
+      .status(readiness.status === "ready" ? 200 : 503)
+      .send({ service: "bridge-api", ...readiness });
+  });
 
   app.get<{ Querystring: Record<string, string | undefined> }>(
     "/v1/notifications",

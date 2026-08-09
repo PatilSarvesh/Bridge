@@ -76,6 +76,11 @@ export class PostgresBridgeRepository implements BridgeRepository {
     private readonly lockAggregateReads = false,
   ) {}
 
+  async checkHealth(): Promise<{ readonly backend: string }> {
+    await this.database.execute(sql`select 1`);
+    return { backend: "postgresql" };
+  }
+
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
     if (this.lockAggregateReads) return work(this);
 

@@ -788,7 +788,7 @@ pnpm check
 Current validation result after the provider-neutral email-delivery slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 63 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 66 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -1486,6 +1486,24 @@ Deliberate boundaries:
 - Digest preference is durably deferred but not yet batched or sent. The blocking-escalation template exists, while producing SLA escalation notifications awaits scheduled policy work.
 - Only plain text is generated. HTML rendering, unsubscribe/preference administration, bounce/complaint handling, SES provider implementation, scheduling, jitter, and telemetry export remain deployment slices.
 
+### 20.30 Implemented operational health and restore-verification foundations
+
+Implemented and locally verified:
+
+1. API and standalone MCP HTTP surfaces expose separate liveness and readiness routes; the API preserves its legacy `/health` liveness response.
+2. Readiness crosses the application repository boundary. In-memory development reports its backend, PostgreSQL executes a minimal dependency query, and failures return a sanitized `503` without connection details.
+3. `pnpm restore:verify` is a read-only verifier for an already restored isolated PostgreSQL database. It checks required tables, migration history, core row counts, immutable artifact SHA-256 values, tenant-scope consistency, delivery scope, and artifact current/approved-version pointers.
+4. The verifier refuses an obvious production-target mistake when `BRIDGE_RESTORE_DATABASE_URL` identifies the same database as `DATABASE_URL`, never prints artifact bodies or connection strings, and exits nonzero on failed checks.
+5. `docs/runbooks/backup-restore.md` documents safe dump/restore separation, disabled workers, verification, evidence, and recovery activation without destructive cleanup commands.
+6. `docs/runbooks/incidents.md` covers queue backlog/dead letters, failed migrations, the explicitly deferred identity dependency, and notification-provider outages while preserving human authority and MCP-independent paths.
+7. Application, API, database verifier, MCP, type-check, test, build, and packaged-CLI validation pass without adding a schema migration or production identity/provider dependency.
+
+Deliberate boundaries:
+
+- No repository change can configure or prove managed PostgreSQL PITR, backup retention, object-storage versioning, alerting, or a real isolated restore. BRG-103 remains partial until deployment owners attach dated external evidence.
+- Current artifact bodies live in PostgreSQL; object-storage recovery becomes mandatory when the runtime begins storing objects outside that database.
+- Readiness covers the canonical repository dependency only. Provider/queue degradation belongs to operational telemetry, and future identity readiness requires the product owner to reopen identity scope.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1524,6 +1542,9 @@ Deliberate boundaries:
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
+- Read-only restore verifier: `packages/database/src/verify-restore.ts`
+- Backup/restore runbook: `docs/runbooks/backup-restore.md`
+- Incident runbook: `docs/runbooks/incidents.md`
 
 ## 22. Source references already used in product decisions
 
@@ -1555,4 +1576,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, durable optional PostgreSQL and MCP paths, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

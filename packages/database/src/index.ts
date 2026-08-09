@@ -6,6 +6,8 @@ import * as schema from "./schema.js";
 
 export { PostgresBridgeRepository } from "./repository.js";
 export { migrateDatabase } from "./migrate.js";
+export { verifyRestoredDatabase } from "./verify-restore.js";
+export type { RestoreVerificationReport } from "./verify-restore.js";
 export * from "./schema.js";
 
 export interface PostgresBridgeStore {

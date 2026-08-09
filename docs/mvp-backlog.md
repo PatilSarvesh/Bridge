@@ -1000,7 +1000,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — API/MCP liveness and repository-backed readiness, a read-only restore verifier, and the required incident/restore runbooks are implemented; production PITR/object-storage controls and a dated isolated restore exercise remain deployment evidence
 - **Dependencies:** BRG-003, BRG-090
 - **PRD references:** Non-functional requirements
 

@@ -62,6 +62,7 @@ import {
 } from "@bridge/domain";
 
 export interface BridgeRepository {
+  checkHealth(): Promise<{ readonly backend: string }>;
   transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T>;
   getProject(projectId: string): Promise<Project | undefined>;
   listProjects(organizationId: string): Promise<readonly Project[]>;
@@ -385,6 +386,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly assumptionIdempotency = new Map<string, AssumptionIdempotencyRecord>();
   private readonly runContinuationKeys = new Map<string, string>();
   private transactionTail: Promise<void> = Promise.resolve();
+
+  async checkHealth(): Promise<{ readonly backend: string }> {
+    return { backend: "memory" };
+  }
 
   async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
     let release!: () => void;
@@ -763,6 +768,16 @@ export interface BridgeServiceOptions {
   readonly resumeKey?: () => string;
 }
 
+export interface BridgeReadiness {
+  readonly status: "ready" | "not_ready";
+  readonly checks: readonly [{
+    readonly name: "repository";
+    readonly status: "ready" | "failed";
+    readonly backend?: string;
+    readonly message?: string;
+  }];
+}
+
 export class BridgeService {
   private readonly publicBaseUrl: string;
   private readonly now: () => Date;
@@ -783,6 +798,25 @@ export class BridgeService {
     const url = new URL(this.publicBaseUrl);
     for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
     return url.toString();
+  }
+
+  async checkReadiness(): Promise<BridgeReadiness> {
+    try {
+      const health = await this.repository.checkHealth();
+      return {
+        status: "ready",
+        checks: [{ name: "repository", status: "ready", backend: health.backend }],
+      };
+    } catch {
+      return {
+        status: "not_ready",
+        checks: [{
+          name: "repository",
+          status: "failed",
+          message: "Repository dependency is unavailable.",
+        }],
+      };
+    }
   }
 
   async registerProject(

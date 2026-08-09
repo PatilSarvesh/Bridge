@@ -45,6 +45,19 @@ Fixed project administrators can inspect delivery state and point-in-time queue 
 
 The worker exports a provider-neutral notification-email handler with minimal plain-text templates, injected recipient-directory/preferences and sender contracts, stable idempotency keys, and durable delivery receipts. Bridge persists only an organization-scoped destination hash, preference outcome, attempt count, sanitized error, and provider message ID—never an email address or provider credential. Muted ordinary mail is suppressed, digest mail is durably deferred, and protected-review mail remains immediate. An SES sender, real directory, digest scheduler, and runtime wiring remain deployment work.
 
+## Operational health and recovery
+
+The API and standalone MCP service expose `GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness. The API keeps `GET /health` as a compatibility liveness alias. Readiness returns `503` with a sanitized dependency result when PostgreSQL is unavailable; load balancers should route traffic using readiness, not the compatibility endpoint.
+
+Bridge includes a read-only verifier for an already restored, isolated PostgreSQL database:
+
+```bash
+export BRIDGE_RESTORE_DATABASE_URL='postgresql://.../bridge_restore_exercise'
+pnpm restore:verify
+```
+
+The full safe procedure and evidence requirements are in [`docs/runbooks/backup-restore.md`](docs/runbooks/backup-restore.md). Queue backlog, failed migration, future identity-outage, and notification-outage response is in [`docs/runbooks/incidents.md`](docs/runbooks/incidents.md). Production PITR and an actual isolated restore remain deployment-owner work; this repository does not claim those external controls are configured.
+
 Run the live persistence integration test only against an isolated database:
 
 ```bash

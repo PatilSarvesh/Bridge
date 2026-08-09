@@ -934,11 +934,19 @@ These are implementation defaults, not product SLAs, and must be tuned from pilo
 
 ### 23.3 Backups and recovery
 
-- Automated PostgreSQL backups with point-in-time recovery.
-- Versioned object storage with lifecycle controls.
-- Regular restore tests in an isolated environment.
-- Documented recovery point and recovery time objectives before production pilot.
-- Audit and outbox integrity checks after restoration.
+- Production must use automated encrypted PostgreSQL backups with point-in-time recovery and deployment-owned evidence; repository code cannot assert that an external provider control is enabled.
+- Current specification bodies live in PostgreSQL and are covered by the same recovery boundary. If object storage is introduced, it must use versioning or equivalent immutable recovery plus lifecycle controls.
+- Restores must occur in a new isolated database with workers and external delivery adapters disabled. `pnpm restore:verify` performs read-only schema, migration-history, row-count, artifact-hash, tenant-scope, and artifact-pointer checks.
+- Recovery point and recovery time objectives, retention, a dated restore exercise, and exceptions must be documented before the production pilot.
+- The canonical operator procedure is `docs/runbooks/backup-restore.md`; repository validation is not a substitute for an actual restore.
+
+### 23.4 Health semantics
+
+- `GET /health/live` reports only that the API or MCP HTTP process can serve a request. The API's legacy `GET /health` remains a liveness alias.
+- `GET /health/ready` calls the application repository health boundary. It returns `200` when the dependency responds and a sanitized `503` when it does not.
+- Liveness must not depend on PostgreSQL, because restarting a healthy process does not repair a database outage. Traffic routing and rollout gates use readiness.
+- Notification-provider failure is degraded delivery, not core API unavailability while canonical PostgreSQL state remains writable. Queue/provider telemetry belongs to BRG-104.
+- Worker and CLI are command/process surfaces rather than HTTP services; long-running worker health reporting remains deployment/observability work.
 
 ## 24. Environment and deployment model
 

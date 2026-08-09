@@ -29,6 +29,18 @@ if (!principal) {
 const host = process.env.BRIDGE_MCP_HOST ?? "127.0.0.1";
 const app = createMcpExpressApp({ host });
 
+const sendLiveness = (_request: Request, response: Response) => {
+  response.status(200).json({ status: "ok", service: "bridge-mcp" });
+};
+app.get("/health", sendLiveness);
+app.get("/health/live", sendLiveness);
+app.get("/health/ready", async (_request: Request, response: Response) => {
+  const readiness = await runtime.service.checkReadiness();
+  response
+    .status(readiness.status === "ready" ? 200 : 503)
+    .json({ service: "bridge-mcp", ...readiness });
+});
+
 app.post("/mcp", async (request: Request, response: Response) => {
   const server = createBridgeMcpServer(runtime.service, principal, { publicWebUrl });
   const transport = new StreamableHTTPServerTransport();
