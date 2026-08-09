@@ -851,7 +851,7 @@ Acceptance criteria:
 
 - **Priority:** P1
 - **Size:** M
-- **Status:** Ready
+- **Status:** Implemented for MVP — authorized REST/application comparison and the Specifications UI render exact or bounded line diffs without mutating stored versions
 - **Dependencies:** BRG-082
 - **PRD references:** ART-06
 

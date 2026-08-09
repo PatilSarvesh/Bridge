@@ -1021,7 +1021,7 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(publishResponse.statusCode).toBe(201);
-    const publication = publishResponse.json<{ version: { id: string } }>();
+    const publication = publishResponse.json<{ artifact: { id: string }; version: { id: string } }>();
 
     const deniedResponse = await app.inject({
       method: "POST",
@@ -1048,6 +1048,61 @@ describe("Bridge API vertical slice", () => {
     expect(contextResponse.json<{ items: Array<{ id: string; type: string }> }>().items).toEqual([
       expect.objectContaining({ id: publication.version.id, type: "artifact" }),
     ]);
+
+    const replacementResponse = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/artifacts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-artifact-test-002",
+        artifactId: publication.artifact.id,
+        title: "Transfer retry policy",
+        type: "adr",
+        summary: "Adds jitter and a maximum attempt count to bounded transfer retry behavior.",
+        body: "# Transfer retry policy\n\nRetry transient failures using bounded exponential backoff, jitter, and five attempts.",
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "transfers" },
+      },
+    });
+    expect(replacementResponse.statusCode).toBe(201);
+    const replacement = replacementResponse.json<{ version: { id: string } }>();
+
+    const diffResponse = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}&toVersionId=${replacement.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(diffResponse.statusCode).toBe(200);
+    expect(diffResponse.json()).toMatchObject({
+      artifactId: publication.artifact.id,
+      from: { id: publication.version.id, version: 1 },
+      to: { id: replacement.version.id, version: 2 },
+      counts: { unchanged: 2, removed: 1, added: 1 },
+      exact: true,
+      truncated: false,
+      lines: [
+        expect.objectContaining({ kind: "unchanged" }),
+        expect.objectContaining({ kind: "unchanged" }),
+        expect.objectContaining({ kind: "removed" }),
+        expect.objectContaining({ kind: "added" }),
+      ],
+    });
+
+    const deniedDiff = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}&toVersionId=${replacement.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(deniedDiff.statusCode).toBe(403);
+
+    const invalidDiff = await app.inject({
+      method: "GET",
+      url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalidDiff.statusCode).toBe(400);
   });
 
   it("records reviewer comments and blocks approval after requested specification changes", async () => {

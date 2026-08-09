@@ -531,6 +531,7 @@ POST   /v1/assumptions/:assumptionId/reject
 
 POST   /v1/projects/:projectId/artifacts
 GET    /v1/artifacts/:artifactId
+GET    /v1/artifacts/:artifactId/diff?fromVersionId=&toVersionId=
 POST   /v1/artifacts/:artifactId/versions
 POST   /v1/artifact-versions/:versionId/reviews
 POST   /v1/artifact-versions/:versionId/approve
@@ -550,6 +551,8 @@ GET    /v1/projects/:projectId/audit-events
 ```
 
 Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
+
+Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
 Administrative endpoints are separated under `/v1/admin` and require explicit scopes.
 

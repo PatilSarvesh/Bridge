@@ -1138,11 +1138,73 @@ describe("Bridge decision workflow", () => {
     await service.approveArtifactVersion(owner, second.version.id, {
       rationale: "Jitter and a fixed attempt limit reduce synchronized load and bound execution time.",
     });
+    const diff = await service.diffArtifactVersions(owner, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    });
+    expect(diff).toMatchObject({
+      artifactId: first.artifact.id,
+      from: { id: first.version.id, version: 1, status: "superseded" },
+      to: { id: second.version.id, version: 2, status: "approved" },
+      counts: { unchanged: 2, added: 1, removed: 1 },
+      exact: true,
+      truncated: false,
+      totalLines: 4,
+    });
+    expect(diff.lines).toEqual([
+      expect.objectContaining({ kind: "unchanged", oldLineNumber: 1, newLineNumber: 1, text: "# Transfer retry policy" }),
+      expect.objectContaining({ kind: "unchanged", oldLineNumber: 2, newLineNumber: 2, text: "" }),
+      expect.objectContaining({ kind: "removed", oldLineNumber: 3, text: expect.stringContaining("idempotency keys") }),
+      expect.objectContaining({ kind: "added", newLineNumber: 3, text: expect.stringContaining("five attempts") }),
+    ]);
+    await expect(service.diffArtifactVersions(outsider, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
     const artifact = await service.getArtifact(agent, first.artifact.id);
     expect(artifact.versions).toEqual([
-      expect.objectContaining({ id: first.version.id, status: "superseded" }),
-      expect.objectContaining({ id: second.version.id, status: "approved" }),
+      expect.objectContaining({
+        id: first.version.id,
+        status: "superseded",
+        body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff and idempotency keys.",
+      }),
+      expect.objectContaining({
+        id: second.version.id,
+        status: "approved",
+        body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
+      }),
     ]);
+  });
+
+  it("bounds large specification diffs without changing immutable content", async () => {
+    const { service } = await runtime();
+    const oldBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `old-line-${index}`)].join("\n");
+    const newBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `new-line-${index}`)].join("\n");
+    const first = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-large-diff-001",
+      summary: "Defines the original large generated specification for bounded diff verification.",
+      body: oldBody,
+    }));
+    const second = await service.publishArtifact(agent, project.id, artifactInput({
+      artifactId: first.artifact.id,
+      idempotencyKey: "artifact-large-diff-002",
+      summary: "Defines the replacement large generated specification for bounded diff verification.",
+      body: newBody,
+    }));
+
+    const diff = await service.diffArtifactVersions(owner, first.artifact.id, {
+      fromVersionId: first.version.id,
+      toVersionId: second.version.id,
+    });
+    expect(diff).toMatchObject({
+      counts: { unchanged: 1, removed: 1_100, added: 1_100 },
+      exact: false,
+      truncated: true,
+      totalLines: 2_201,
+    });
+    expect(diff.lines).toHaveLength(2_000);
+    const artifact = await service.getArtifact(owner, first.artifact.id);
+    expect(artifact.versions.map((version) => version.body)).toEqual([oldBody, newBody]);
   });
 
   it("records specification feedback and requires a new version after requested changes", async () => {

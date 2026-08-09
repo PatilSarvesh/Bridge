@@ -3,7 +3,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type {
   AcceptAnswerInput,
   ApproveArtifactVersionInput,
+  ArtifactDiffLine,
   ArtifactReviewInput,
+  ArtifactVersionDiff,
+  ArtifactVersionDiffQuery,
   ChangeDecisionLifecycleInput,
   ContextQuery,
   DecisionListQuery,
@@ -203,6 +206,140 @@ interface NotificationDraft {
 export type QuestionSubmission = Question & {
   readonly submissionDisposition: QuestionSubmissionDisposition;
 };
+
+type RawArtifactDiffLine = Pick<ArtifactDiffLine, "kind" | "text">;
+
+const MAX_EXACT_DIFF_CELLS = 1_000_000;
+const MAX_EXACT_DIFF_DIMENSION = 5_000;
+const MAX_RENDERED_DIFF_LINES = 2_000;
+
+function splitMarkdownLines(body: string): readonly string[] {
+  return body.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+}
+
+function exactLineDiff(fromLines: readonly string[], toLines: readonly string[]): readonly RawArtifactDiffLine[] {
+  const matrix = Array.from(
+    { length: fromLines.length + 1 },
+    () => new Uint32Array(toLines.length + 1),
+  );
+  for (let fromIndex = 1; fromIndex <= fromLines.length; fromIndex += 1) {
+    for (let toIndex = 1; toIndex <= toLines.length; toIndex += 1) {
+      matrix[fromIndex]![toIndex] = fromLines[fromIndex - 1] === toLines[toIndex - 1]
+        ? matrix[fromIndex - 1]![toIndex - 1]! + 1
+        : Math.max(matrix[fromIndex - 1]![toIndex]!, matrix[fromIndex]![toIndex - 1]!);
+    }
+  }
+
+  const reversed: RawArtifactDiffLine[] = [];
+  let fromIndex = fromLines.length;
+  let toIndex = toLines.length;
+  while (fromIndex > 0 || toIndex > 0) {
+    if (
+      fromIndex > 0 &&
+      toIndex > 0 &&
+      fromLines[fromIndex - 1] === toLines[toIndex - 1]
+    ) {
+      reversed.push({ kind: "unchanged", text: fromLines[fromIndex - 1]! });
+      fromIndex -= 1;
+      toIndex -= 1;
+    } else if (
+      toIndex > 0 &&
+      (fromIndex === 0 || matrix[fromIndex]![toIndex - 1]! >= matrix[fromIndex - 1]![toIndex]!)
+    ) {
+      reversed.push({ kind: "added", text: toLines[toIndex - 1]! });
+      toIndex -= 1;
+    } else {
+      reversed.push({ kind: "removed", text: fromLines[fromIndex - 1]! });
+      fromIndex -= 1;
+    }
+  }
+  return reversed.reverse();
+}
+
+function buildArtifactVersionDiff(
+  artifactId: string,
+  fromVersion: ArtifactVersion,
+  toVersion: ArtifactVersion,
+): ArtifactVersionDiff {
+  const fromLines = splitMarkdownLines(fromVersion.body);
+  const toLines = splitMarkdownLines(toVersion.body);
+  let prefixLength = 0;
+  while (
+    prefixLength < fromLines.length &&
+    prefixLength < toLines.length &&
+    fromLines[prefixLength] === toLines[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength < fromLines.length - prefixLength &&
+    suffixLength < toLines.length - prefixLength &&
+    fromLines[fromLines.length - suffixLength - 1] === toLines[toLines.length - suffixLength - 1]
+  ) {
+    suffixLength += 1;
+  }
+
+  const fromMiddle = fromLines.slice(prefixLength, fromLines.length - suffixLength);
+  const toMiddle = toLines.slice(prefixLength, toLines.length - suffixLength);
+  const exact = fromMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
+    toMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
+    fromMiddle.length * toMiddle.length <= MAX_EXACT_DIFF_CELLS;
+  const lines: ArtifactDiffLine[] = [];
+  const counts = { unchanged: 0, added: 0, removed: 0 };
+  let oldLineNumber = 1;
+  let newLineNumber = 1;
+  let totalLines = 0;
+  const append = (kind: ArtifactDiffLine["kind"], text: string) => {
+    const oldNumber = kind === "added" ? undefined : oldLineNumber;
+    const newNumber = kind === "removed" ? undefined : newLineNumber;
+    counts[kind] += 1;
+    totalLines += 1;
+    if (lines.length < MAX_RENDERED_DIFF_LINES) {
+      lines.push({
+        kind,
+        text,
+        ...(oldNumber === undefined ? {} : { oldLineNumber: oldNumber }),
+        ...(newNumber === undefined ? {} : { newLineNumber: newNumber }),
+      });
+    }
+    if (kind !== "added") oldLineNumber += 1;
+    if (kind !== "removed") newLineNumber += 1;
+  };
+
+  for (let index = 0; index < prefixLength; index += 1) {
+    append("unchanged", fromLines[index]!);
+  }
+  if (exact) {
+    for (const line of exactLineDiff(fromMiddle, toMiddle)) append(line.kind, line.text);
+  } else {
+    for (const line of fromMiddle) append("removed", line);
+    for (const line of toMiddle) append("added", line);
+  }
+  for (let index = suffixLength; index > 0; index -= 1) {
+    append("unchanged", fromLines[fromLines.length - index]!);
+  }
+
+  const versionMetadata = (version: ArtifactVersion) => ({
+    id: version.id,
+    version: version.version,
+    summary: version.summary,
+    status: version.status,
+    createdById: version.createdById,
+    createdAt: version.createdAt,
+    contentSha256: version.contentSha256,
+  });
+  return {
+    artifactId,
+    from: versionMetadata(fromVersion),
+    to: versionMetadata(toVersion),
+    lines,
+    counts,
+    exact,
+    truncated: totalLines > lines.length,
+    totalLines,
+  };
+}
 
 export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projects = new Map<string, Project>();
@@ -2166,6 +2303,24 @@ export class BridgeService {
 
   async getArtifact(principal: Principal, artifactId: string): Promise<Artifact> {
     return this.requireArtifact(principal, artifactId, this.repository);
+  }
+
+  async diffArtifactVersions(
+    principal: Principal,
+    artifactId: string,
+    query: ArtifactVersionDiffQuery,
+  ): Promise<ArtifactVersionDiff> {
+    const artifact = await this.requireArtifact(principal, artifactId, this.repository);
+    const fromVersion = artifact.versions.find((version) => version.id === query.fromVersionId);
+    const toVersion = artifact.versions.find((version) => version.id === query.toVersionId);
+    if (!fromVersion || !toVersion) {
+      throw new BridgeError(
+        "ARTIFACT_NOT_FOUND",
+        "Both specification versions must belong to the requested specification.",
+        404,
+      );
+    }
+    return buildArtifactVersionDiff(artifact.id, fromVersion, toVersion);
   }
 
   private async requireArtifact(

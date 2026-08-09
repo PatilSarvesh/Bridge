@@ -3,6 +3,7 @@ import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
   artifactReviewInputSchema,
+  artifactVersionDiffQuerySchema,
   changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
@@ -421,6 +422,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = resolvePrincipal(request, options.principals);
     return options.service.getArtifact(principal, request.params.artifactId);
   });
+
+  app.get<{ Params: { artifactId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/artifacts/:artifactId/diff",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const query = artifactVersionDiffQuerySchema.parse(request.query);
+      return options.service.diffArtifactVersions(principal, request.params.artifactId, query);
+    },
+  );
 
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/reviews",

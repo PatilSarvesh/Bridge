@@ -111,6 +111,24 @@ interface Artifact {
   readonly versions: readonly ArtifactVersion[];
 }
 
+interface ArtifactDiffLine {
+  readonly kind: "unchanged" | "added" | "removed";
+  readonly text: string;
+  readonly oldLineNumber?: number;
+  readonly newLineNumber?: number;
+}
+
+interface ArtifactVersionDiff {
+  readonly artifactId: string;
+  readonly from: Pick<ArtifactVersion, "id" | "version" | "summary" | "status" | "createdById" | "createdAt">;
+  readonly to: Pick<ArtifactVersion, "id" | "version" | "summary" | "status" | "createdById" | "createdAt">;
+  readonly lines: readonly ArtifactDiffLine[];
+  readonly counts: { readonly unchanged: number; readonly added: number; readonly removed: number };
+  readonly exact: boolean;
+  readonly truncated: boolean;
+  readonly totalLines: number;
+}
+
 interface Notification {
   readonly id: string;
   readonly projectId: string;
@@ -285,6 +303,10 @@ export default function Home() {
   );
   const [artifactReviewStatus, setArtifactReviewStatus] = useState<"commented" | "changes_requested">("commented");
   const [artifactReviewBody, setArtifactReviewBody] = useState("");
+  const [artifactDiffFromVersionId, setArtifactDiffFromVersionId] = useState("");
+  const [artifactDiffToVersionId, setArtifactDiffToVersionId] = useState("");
+  const [artifactDiff, setArtifactDiff] = useState<ArtifactVersionDiff>();
+  const [artifactDiffLoading, setArtifactDiffLoading] = useState(false);
   const [decisionLifecycleStatus, setDecisionLifecycleStatus] = useState<"superseded" | "expired" | "revoked">("revoked");
   const [replacementDecisionId, setReplacementDecisionId] = useState("");
   const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
@@ -645,6 +667,15 @@ export default function Home() {
     setArtifactReviewBody("");
   }, [selectedArtifactVersion?.id]);
 
+  useEffect(() => {
+    const versions = selectedArtifact?.versions ?? [];
+    const toVersion = versions.at(-1);
+    const fromVersion = versions.at(-2) ?? toVersion;
+    setArtifactDiffFromVersionId(fromVersion?.id ?? "");
+    setArtifactDiffToVersionId(toVersion?.id ?? "");
+    setArtifactDiff(undefined);
+  }, [activePrincipalId, selectedArtifact?.currentVersionId, selectedArtifact?.id, selectedArtifact?.versions.length]);
+
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
     setSubmitting(true);
@@ -768,6 +799,33 @@ export default function Home() {
       setError(requestError instanceof Error ? requestError.message : "Unable to record specification feedback.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const loadArtifactDiff = async () => {
+    if (
+      !selectedArtifact ||
+      !artifactDiffFromVersionId ||
+      !artifactDiffToVersionId ||
+      artifactDiffFromVersionId === artifactDiffToVersionId
+    ) return;
+    setArtifactDiffLoading(true);
+    setError(undefined);
+    try {
+      const parameters = new URLSearchParams({
+        fromVersionId: artifactDiffFromVersionId,
+        toVersionId: artifactDiffToVersionId,
+      });
+      const result = await bridgeFetch<ArtifactVersionDiff>(
+        `/v1/artifacts/${selectedArtifact.id}/diff?${parameters.toString()}`,
+        undefined,
+        activePrincipalId,
+      );
+      setArtifactDiff(result);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to compare specification versions.");
+    } finally {
+      setArtifactDiffLoading(false);
     }
   };
 
@@ -1739,6 +1797,98 @@ export default function Home() {
                             >{submitting ? "Recording feedback…" : artifactReviewStatus === "changes_requested" ? "Request changes" : "Post review comment"}</button>
                           </div>
                         ) : null}
+                      </section>
+
+                      <section>
+                        <h3>Compare immutable versions</h3>
+                        {selectedArtifact.versions.length < 2 ? (
+                          <p className="muted-copy">Publish another version to compare specification changes.</p>
+                        ) : (
+                          <>
+                            <div className="diff-controls">
+                              <label htmlFor="artifact-diff-from">From</label>
+                              <select
+                                id="artifact-diff-from"
+                                value={artifactDiffFromVersionId}
+                                onChange={(event) => {
+                                  setArtifactDiffFromVersionId(event.target.value);
+                                  setArtifactDiff(undefined);
+                                }}
+                              >
+                                {selectedArtifact.versions.map((version) => (
+                                  <option key={version.id} value={version.id}>
+                                    Version {version.version} · {displayedArtifactStatus(version).replaceAll("_", " ")}
+                                  </option>
+                                ))}
+                              </select>
+                              <label htmlFor="artifact-diff-to">To</label>
+                              <select
+                                id="artifact-diff-to"
+                                value={artifactDiffToVersionId}
+                                onChange={(event) => {
+                                  setArtifactDiffToVersionId(event.target.value);
+                                  setArtifactDiff(undefined);
+                                }}
+                              >
+                                {selectedArtifact.versions.map((version) => (
+                                  <option key={version.id} value={version.id}>
+                                    Version {version.version} · {displayedArtifactStatus(version).replaceAll("_", " ")}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                className="secondary"
+                                type="button"
+                                disabled={
+                                  artifactDiffLoading ||
+                                  !artifactDiffFromVersionId ||
+                                  !artifactDiffToVersionId ||
+                                  artifactDiffFromVersionId === artifactDiffToVersionId
+                                }
+                                onClick={() => void loadArtifactDiff()}
+                              >{artifactDiffLoading ? "Comparing…" : "Compare"}</button>
+                            </div>
+                            {artifactDiff ? (
+                              <div className="artifact-diff">
+                                <div className="diff-summary">
+                                  <strong>Version {artifactDiff.from.version} → {artifactDiff.to.version}</strong>
+                                  <span className="diff-added">+{artifactDiff.counts.added}</span>
+                                  <span className="diff-removed">−{artifactDiff.counts.removed}</span>
+                                  <span>{artifactDiff.counts.unchanged} unchanged</span>
+                                </div>
+                                <div className="diff-version-meta">
+                                  <span>
+                                    <strong>From version {artifactDiff.from.version}</strong>
+                                    {artifactDiff.from.summary}
+                                    <small>{artifactDiff.from.createdById} · {new Date(artifactDiff.from.createdAt).toLocaleString()}</small>
+                                  </span>
+                                  <span>
+                                    <strong>To version {artifactDiff.to.version}</strong>
+                                    {artifactDiff.to.summary}
+                                    <small>{artifactDiff.to.createdById} · {new Date(artifactDiff.to.createdAt).toLocaleString()}</small>
+                                  </span>
+                                </div>
+                                {!artifactDiff.exact ? (
+                                  <div className="impact"><strong>Large comparison.</strong> The changed middle is shown as bounded removals and additions to protect server and browser performance.</div>
+                                ) : null}
+                                {artifactDiff.truncated ? (
+                                  <div className="impact"><strong>Display limited.</strong> Showing {artifactDiff.lines.length} of {artifactDiff.totalLines} diff lines.</div>
+                                ) : null}
+                                <div className="diff-view" role="table" aria-label={`Specification diff from version ${artifactDiff.from.version} to ${artifactDiff.to.version}`}>
+                                  {artifactDiff.lines.map((line, index) => (
+                                    <div className={`diff-line diff-line-${line.kind}`} role="row" key={`${line.kind}-${index}`}>
+                                      <span className="diff-line-number" role="cell">{line.oldLineNumber ?? ""}</span>
+                                      <span className="diff-line-number" role="cell">{line.newLineNumber ?? ""}</span>
+                                      <span className="diff-marker" aria-hidden="true">{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}</span>
+                                      <code role="cell">{line.text || " "}</code>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="muted-copy">Changed Markdown appears as adjacent removed and added lines. Stored version bodies remain immutable.</p>
+                              </div>
+                            ) : null}
+                          </>
+                        )}
                       </section>
 
                       <section>

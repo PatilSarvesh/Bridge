@@ -272,6 +272,11 @@ export const artifactReviewInputSchema = z
     }
   });
 
+export const artifactVersionDiffQuerySchema = z.object({
+  fromVersionId: z.string().trim().min(1).max(100),
+  toVersionId: z.string().trim().min(1).max(100),
+});
+
 export const startAgentRunInputSchema = z
   .object({
     idempotencyKey: z.string().trim().min(8).max(200),
@@ -385,8 +390,41 @@ export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
 export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;
+export type ArtifactVersionDiffQuery = z.infer<typeof artifactVersionDiffQuerySchema>;
 export type StartAgentRunInput = z.infer<typeof startAgentRunInputSchema>;
 export type ReportAgentRunInput = z.infer<typeof reportAgentRunInputSchema>;
 export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;
 export type RecordAssumptionInput = z.infer<typeof recordAssumptionInputSchema>;
 export type ResolveAssumptionInput = z.infer<typeof resolveAssumptionInputSchema>;
+
+export interface ArtifactDiffVersion {
+  readonly id: string;
+  readonly version: number;
+  readonly summary: string;
+  readonly status: ArtifactVersionStatus;
+  readonly createdById: string;
+  readonly createdAt: string;
+  readonly contentSha256: string;
+}
+
+export interface ArtifactDiffLine {
+  readonly kind: "unchanged" | "added" | "removed";
+  readonly text: string;
+  readonly oldLineNumber?: number;
+  readonly newLineNumber?: number;
+}
+
+export interface ArtifactVersionDiff {
+  readonly artifactId: string;
+  readonly from: ArtifactDiffVersion;
+  readonly to: ArtifactDiffVersion;
+  readonly lines: readonly ArtifactDiffLine[];
+  readonly counts: {
+    readonly unchanged: number;
+    readonly added: number;
+    readonly removed: number;
+  };
+  readonly exact: boolean;
+  readonly truncated: boolean;
+  readonly totalLines: number;
+}

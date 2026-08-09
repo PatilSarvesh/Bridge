@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decision retirement, active-by-default full-text decision search/history filters, and specification review comments/request-changes are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, while specification version diff is the recommended next workflow |
+| Current implementation phase | Governed decision retirement/search and specification review/version comparison are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, and the next workflow should be selected from the remaining prioritized backlog |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -601,6 +601,7 @@ Specifications:
 - `POST /v1/projects/:projectId/artifacts`
 - `GET /v1/projects/:projectId/artifacts`
 - `GET /v1/artifacts/:artifactId`
+- `GET /v1/artifacts/:artifactId/diff?fromVersionId=&toVersionId=`
 - `POST /v1/artifact-versions/:versionId/reviews`
 - `POST /v1/artifact-versions/:versionId/approve`
 
@@ -760,6 +761,7 @@ The local web application provides:
 - Agent-run list/detail with provenance, lifecycle state, linked-record counts, outcome, and source-question navigation.
 - Specifications navigation and pending count.
 - Specification detail, immutable Markdown body, reviewer metadata, and version history.
+- Authorized comparison of any two immutable versions with safe added/removed line rendering, provenance, and bounded large-document behavior.
 - Append-only formal review comments and request-changes controls for authorized specification reviewers.
 - A visible changes-requested state that directs the author to publish a new immutable version.
 - Required human approval rationale.
@@ -778,10 +780,10 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the decision-history-filter slice:
+Current validation result after the specification-version-diff slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 56 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 57 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -1420,6 +1422,24 @@ Deliberate boundaries:
 - The `simple` configuration provides predictable language-neutral token matching without extensions; stemming, fuzzy/trigram matching, synonyms, and semantic/vector retrieval remain separate evaluated enhancements.
 - Search relevance scores affect ordering but are not exposed as organizational authority or confidence.
 - The GIN index is created normally rather than concurrently because migrations run explicitly before service startup; a large production deployment should revisit online index rollout.
+
+### 20.27 Implemented bounded immutable specification version diffs
+
+Implemented and locally verified:
+
+1. `GET /v1/artifacts/:artifactId/diff` delegates to one application query that authorizes artifact access and requires both requested versions to belong to that artifact.
+2. The derived response includes from/to version provenance, stable old/new line numbers, added/removed/unchanged kinds, complete counts, and exact/truncated metadata.
+3. Normal documents use a deterministic longest-common-subsequence line comparison bounded to one million comparison cells and 5,000 lines on either side.
+4. Larger generated documents fall back to deterministic removed/added regions and every response caps rendered lines at 2,000, preventing unbounded browser rendering while retaining complete counts.
+5. The Specifications UI lets a reviewer choose any two versions, safely renders text through React, and represents changed text as adjacent removed and added lines.
+6. Comparison only normalizes line endings in derived input. Stored Markdown, hashes, versions, approval state, audits, and outbox records remain untouched, so no schema migration was required.
+7. Application and API regressions cover exact changes, metadata and line numbers, cross-project denial, invalid input, large-diff fallback/truncation, and byte-for-byte preservation of immutable bodies.
+
+Deliberate boundaries:
+
+- This is a line diff rather than a word-level or semantic Markdown diff; its output is predictable and does not execute or render embedded Markdown/HTML.
+- A truncated response shows its retained prefix and complete aggregate counts, not a pageable diff. Server-side pagination or downloadable patches can be evaluated if real pilot artifacts require them.
+- No MCP-specific diff tool was added. Human review uses the canonical REST/web path, while agents retain existing artifact-version retrieval and MCP remains optional.
 
 ## 21. Important implementation files
 
