@@ -548,13 +548,15 @@ POST   /v1/notifications/:notificationId/read
 POST   /v1/notifications/read-all
 GET    /v1/projects/:projectId/search
 GET    /v1/projects/:projectId/audit-events
+GET    /v1/admin/projects/:projectId/outbox?status=&type=&limit=
+POST   /v1/admin/outbox/:eventId/replay
 ```
 
 Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin` and require explicit scopes.
+Administrative endpoints are separated under `/v1/admin`. In the fixed-principal prototype, outbox operations require a human project administrator with project access; production token scopes remain deferred with authentication.
 
 The prototype `GET /v1/principals` route is intentionally limited to same-organization human summaries from fixed development fixtures. The web **Reviewing as** selector uses those summaries to exercise role-aware policy; it is a reviewer-context switcher, not authentication or organization onboarding. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
@@ -740,7 +742,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice now implements the first four guarantees for injected handlers: claims increment attempts and acquire a lease, successes are marked processed, failures are rescheduled with bounded exponential backoff, and events reaching the configured attempt budget become dead letters. Operator replay, metrics, jitter, and external adapter idempotency remain deployment work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, and oldest-ready age. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. Jitter, external destination adapters/idempotency, time-series telemetry, and scheduled runtime wiring remain deployment work.
 
 ## 17. Notification architecture
 
@@ -808,7 +810,7 @@ The prototype implements the manual continuation baseline across the application
 - The locator is stored separately from the public run record. It is currently stored as a value to allow exact replay of an idempotent start response; hashing or encryption at rest belongs to a future production identity/security slice.
 - The implementation never persists raw prompts, full outputs, transcripts, repository source, or hidden reasoning.
 
-Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; external channels, preferences, and operator replay remain future work.
+Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; external channels, preferences, scheduled delivery, and telemetry export remain future work.
 
 ## 19. Audit design
 

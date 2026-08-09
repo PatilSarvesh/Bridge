@@ -949,6 +949,83 @@ describe("Bridge decision workflow", () => {
     expect(await service.markAllNotificationsRead(limitedOwner)).toEqual({ markedCount: 0 });
   });
 
+  it("lets project administrators inspect delivery metrics and safely replay dead letters", async () => {
+    const { repository, service } = await runtime();
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-outbox-operations-001",
+    }));
+    const [pending] = await repository.listOutboxEvents(project.id);
+    expect(pending).toBeDefined();
+
+    const initial = await service.inspectProjectOutbox(owner, project.id, { limit: 50 });
+    expect(initial).toMatchObject({
+      totalMatching: 1,
+      metrics: {
+        total: 1,
+        statusCounts: { pending: 1, processing: 0, processed: 0, failed: 0, dead_letter: 0 },
+        failedCount: 0,
+        totalAttempts: 0,
+        readyCount: 1,
+        expiredLeaseCount: 0,
+        oldestReadyAgeMs: 0,
+      },
+    });
+    await expect(service.inspectProjectOutbox(contributor, project.id, { limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.inspectProjectOutbox(agent, project.id, { limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 0 }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+
+    const [claimed] = await repository.claimOutboxEvents("2026-01-01T00:00:00.000Z", 1);
+    expect(claimed).toMatchObject({ id: pending!.id, status: "processing", attempts: 1 });
+    await repository.failOutboxEvent(
+      pending!.id,
+      "provider unavailable",
+      "2026-01-01T00:00:00.000Z",
+      true,
+    );
+    const failures = await service.inspectProjectOutbox(owner, project.id, {
+      status: "dead_letter",
+      type: "notification.created",
+      limit: 10,
+    });
+    expect(failures).toMatchObject({
+      totalMatching: 1,
+      items: [expect.objectContaining({ id: pending!.id, attempts: 1, lastError: "provider unavailable" })],
+      metrics: {
+        failedCount: 1,
+        totalAttempts: 1,
+        readyCount: 0,
+        expiredLeaseCount: 0,
+      },
+    });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 2 }))
+      .rejects.toMatchObject({ code: "CONFLICT", details: { currentAttempts: 1 } });
+    await expect(service.replayOutboxEvent(outsider, pending!.id, { expectedAttempts: 1 }))
+      .rejects.toMatchObject({ code: "OUTBOX_EVENT_NOT_FOUND" });
+
+    const replayed = await service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 });
+    expect(replayed).toEqual({
+      ...pending,
+      status: "pending",
+      attempts: 0,
+      availableAt: "2026-01-01T00:00:00.000Z",
+    });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: owner.id,
+          action: "outbox.replayed",
+          subjectType: "outbox_event",
+          subjectId: pending!.id,
+        }),
+      ]),
+    );
+  });
+
   it("elevates security questions and prevents cross-tenant access", async () => {
     const { service } = await runtime();
     await expect(

@@ -398,5 +398,12 @@ describe("PostgreSQL domain mappings", () => {
     expect(decisionSearchMigration).toContain('CREATE INDEX "bridge_decisions_full_text_idx"');
     expect(decisionSearchMigration).toContain("USING gin");
     expect(decisionSearchMigration).toContain("setweight(to_tsvector('simple'");
+
+    const outboxOperatorMigration = readFileSync(
+      new URL("../drizzle/0012_outbox_operator_replay.sql", import.meta.url),
+      "utf8",
+    );
+    expect(outboxOperatorMigration).toContain("bridge_audit_events_subject_type_check");
+    expect(outboxOperatorMigration).toContain("'outbox_event'");
   });
 });

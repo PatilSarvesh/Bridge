@@ -15,12 +15,14 @@ import {
   questionCommentInputSchema,
   notificationListQuerySchema,
   notificationReadAllInputSchema,
+  outboxOperationsQuerySchema,
   questionReviewInputSchema,
   questionInboxQuerySchema,
   recordAssumptionInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
   resolveAssumptionInputSchema,
+  replayOutboxEventInputSchema,
   startAgentRunInputSchema,
 } from "@bridge/contracts";
 import { BridgeError, type Principal } from "@bridge/domain";
@@ -110,6 +112,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = resolvePrincipal(request, options.principals);
       const input = notificationReadAllInputSchema.parse(request.body ?? {});
       return options.service.markAllNotificationsRead(principal, input);
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/admin/projects/:projectId/outbox", async (request) => {
+    const principal = resolvePrincipal(request, options.principals);
+    const query = outboxOperationsQuerySchema.parse(request.query);
+    return options.service.inspectProjectOutbox(principal, request.params.projectId, query);
+  });
+
+  app.post<{ Params: { eventId: string }; Body: unknown }>(
+    "/v1/admin/outbox/:eventId/replay",
+    async (request) => {
+      const principal = resolvePrincipal(request, options.principals);
+      const input = replayOutboxEventInputSchema.parse(request.body);
+      return options.service.replayOutboxEvent(principal, request.params.eventId, input);
     },
   );
 

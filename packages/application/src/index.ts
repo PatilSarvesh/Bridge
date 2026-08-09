@@ -23,9 +23,11 @@ import type {
   StartAgentRunInput,
   NotificationListQuery,
   NotificationReadAllInput,
+  OutboxOperationsQuery,
   QuestionReviewInput,
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
+  ReplayOutboxEventInput,
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
@@ -111,6 +113,7 @@ export interface BridgeRepository {
   ): Promise<readonly Notification[]>;
   saveNotification(notification: Notification): Promise<void>;
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
+  getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
   completeOutboxEvent(eventId: string, processedAt: string): Promise<void>;
@@ -180,6 +183,23 @@ export interface DecisionLifecycleImpact {
 export interface DecisionLifecycleChange {
   readonly decision: Decision;
   readonly impact: DecisionLifecycleImpact;
+}
+
+export interface OutboxOperationsMetrics {
+  readonly total: number;
+  readonly statusCounts: Readonly<Record<OutboxEvent["status"], number>>;
+  readonly failedCount: number;
+  readonly totalAttempts: number;
+  readonly readyCount: number;
+  readonly expiredLeaseCount: number;
+  readonly oldestReadyAt?: string;
+  readonly oldestReadyAgeMs?: number;
+}
+
+export interface OutboxOperationsView {
+  readonly items: readonly OutboxEvent[];
+  readonly totalMatching: number;
+  readonly metrics: OutboxOperationsMetrics;
 }
 
 export interface QuestionMatch {
@@ -647,6 +667,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
+  async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
+    return this.outboxEvents.get(eventId);
+  }
+
   async saveOutboxEvent(event: OutboxEvent): Promise<void> {
     this.outboxEvents.set(event.id, event);
   }
@@ -881,6 +905,112 @@ export class BridgeService {
         await repository.saveNotification({ ...notification, readAt });
       }
       return { markedCount: notificationsToMark.length };
+    });
+  }
+
+  async inspectProjectOutbox(
+    principal: Principal,
+    projectId: string,
+    query: OutboxOperationsQuery,
+  ): Promise<OutboxOperationsView> {
+    await this.requireProject(principal, projectId);
+    this.assertProjectOperator(principal, "Inspecting delivery operations");
+    const events = await this.repository.listOutboxEvents(projectId);
+    const nowTime = this.now().getTime();
+    const statusCounts: Record<OutboxEvent["status"], number> = {
+      pending: 0,
+      processing: 0,
+      processed: 0,
+      failed: 0,
+      dead_letter: 0,
+    };
+    let totalAttempts = 0;
+    let expiredLeaseCount = 0;
+    const readyEvents: OutboxEvent[] = [];
+    for (const event of events) {
+      statusCounts[event.status] += 1;
+      totalAttempts += event.attempts;
+      const leaseExpired = event.status === "processing" &&
+        Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowTime;
+      if (leaseExpired) expiredLeaseCount += 1;
+      const processingReady = event.status === "processing" &&
+        (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime);
+      const retryable = event.status === "pending" || event.status === "failed" || processingReady;
+      if (retryable && Date.parse(event.availableAt) <= nowTime) readyEvents.push(event);
+    }
+    const oldestReadyAt = readyEvents
+      .map((event) => event.availableAt)
+      .sort((left, right) => left.localeCompare(right))[0];
+    const matching = events.filter((event) =>
+      (!query.status || event.status === query.status) &&
+      (!query.type || event.type === query.type),
+    );
+    return {
+      items: matching.slice(0, query.limit),
+      totalMatching: matching.length,
+      metrics: {
+        total: events.length,
+        statusCounts,
+        failedCount: statusCounts.failed + statusCounts.dead_letter,
+        totalAttempts,
+        readyCount: readyEvents.length,
+        expiredLeaseCount,
+        ...(oldestReadyAt
+          ? {
+              oldestReadyAt,
+              oldestReadyAgeMs: Math.max(0, nowTime - Date.parse(oldestReadyAt)),
+            }
+          : {}),
+      },
+    };
+  }
+
+  async replayOutboxEvent(
+    principal: Principal,
+    eventId: string,
+    input: ReplayOutboxEventInput,
+  ): Promise<OutboxEvent> {
+    return this.repository.transaction(async (repository) => {
+      this.assertProjectOperator(principal, "Replaying a delivery event");
+      const event = await repository.getOutboxEvent(eventId);
+      if (!event || event.organizationId !== principal.organizationId) {
+        throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Delivery event not found.", 404);
+      }
+      await this.requireProject(principal, event.projectId, repository);
+      if (event.status !== "failed" && event.status !== "dead_letter") {
+        throw new BridgeError(
+          "CONFLICT",
+          "Only failed or dead-letter delivery events can be replayed.",
+          409,
+          { currentStatus: event.status, currentAttempts: event.attempts },
+        );
+      }
+      if (event.attempts !== input.expectedAttempts) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The delivery event changed before replay; refresh and try again.",
+          409,
+          { currentStatus: event.status, currentAttempts: event.attempts },
+        );
+      }
+      const { leaseUntil: _leaseUntil, processedAt: _processedAt, lastError: _lastError, ...base } = event;
+      const replayed: OutboxEvent = {
+        ...base,
+        status: "pending",
+        attempts: 0,
+        availableAt: this.now().toISOString(),
+      };
+      await repository.saveOutboxEvent(replayed);
+      await this.audit(
+        repository,
+        principal,
+        event.projectId,
+        "outbox.replayed",
+        "outbox_event",
+        event.id,
+        this.now().toISOString(),
+      );
+      return replayed;
     });
   }
 
@@ -2776,6 +2906,13 @@ export class BridgeService {
     }
     assertProjectAccess(principal, project);
     return project;
+  }
+
+  private assertProjectOperator(principal: Principal, action: string): void {
+    assertHuman(principal, action);
+    if (!principal.roles.some((role) => normalizeRoleName(role) === "project-admin")) {
+      throw new BridgeError("FORBIDDEN", `${action} requires a project administrator.`, 403);
+    }
   }
 
   private async audit(

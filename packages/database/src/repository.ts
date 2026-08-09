@@ -523,6 +523,16 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(outboxEventFromRow);
   }
 
+  async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
+    const query = this.database
+      .select()
+      .from(outboxEvents)
+      .where(eq(outboxEvents.id, eventId))
+      .limit(1);
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    return rows[0] ? outboxEventFromRow(rows[0]) : undefined;
+  }
+
   async saveOutboxEvent(event: OutboxEvent): Promise<void> {
     const row = outboxEventToRow(event);
     await this.database

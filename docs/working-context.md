@@ -7,7 +7,7 @@
 | Last updated | 2026-08-09, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decision retirement/search and specification review/version comparison are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance awaits an available client, and the next workflow should be selected from the remaining prioritized backlog |
+| Current implementation phase | Governed decisions/specifications and project-admin outbox inspection, metrics, and replay are implemented after the Codex-first conformance and CLI distribution slices; Claude Code conformance and external delivery integrations remain pending |
 | Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
 
 ## 1. How to use and maintain this file
@@ -596,6 +596,11 @@ Notifications (human-only):
 - `POST /v1/notifications/:notificationId/read`
 - `POST /v1/notifications/read-all`
 
+Delivery operations (human project administrators only):
+
+- `GET /v1/admin/projects/:projectId/outbox?status=&type=&limit=`
+- `POST /v1/admin/outbox/:eventId/replay` with the last observed `expectedAttempts`
+
 Specifications:
 
 - `POST /v1/projects/:projectId/artifacts`
@@ -780,14 +785,14 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the specification-version-diff slice:
+Current validation result after the outbox-operations slice:
 
 - Type-check: passed across all ten TypeScript configurations.
-- Behavioral tests: 57 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Behavioral tests: 59 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed for all nine TypeScript packages plus the Next.js application.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
-- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject, role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
+- Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy-backfill, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification-type, notification tenant-project, and outbox status/type/attempt constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
 - Packaged in-memory API startup and `GET /health` smoke test passed.
 - Packaged run start -> linked context snapshot -> version-checked completion smoke test passed.
@@ -828,6 +833,7 @@ Current validation result after the specification-version-diff slice:
 - Protected-review browser verification passed: a security reviewer recorded an approval, the review history rendered, and the routed QA owner retained the final acceptance action.
 - In-app notification browser verification passed: the human reviewer saw the seeded assignment, opened it from the Notifications view, and the unread state changed to Read.
 - Transactional-outbox application, mapper/migration, and worker-cycle tests passed: each notification creates a pending delivery intent, claims acquire a lease and increment attempts, successful handlers complete events, and repeated failures become dead letters.
+- Outbox-operations application/API tests passed: only project administrators can inspect delivery state, metrics report status/failure/ready/lease/age data, stale replay requests conflict, cross-tenant IDs remain hidden, successful replay retains the event ID, and the reset plus audit record commit atomically.
 - CLI bootstrap diagnostics passed: dry-run registration leaves API/files untouched, while doctor verifies the mapped project and generated client instructions.
 - Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
 - Adapter installation diagnostics passed: `bridge install` switches the selected native instruction adapter without project registration, preserves unrelated content, and leaves the repository untouched during `--dry-run`.
@@ -916,7 +922,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 ### 17.4 Not yet implemented
 
 - Database row-level security.
-- External outbox adapters, scheduled worker deployment, and operator replay/metrics.
+- External outbox adapters, scheduled worker deployment, jitter, and time-series delivery telemetry/alerts.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
 - Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
@@ -979,7 +985,7 @@ Environment facts remain:
 
 1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
 2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
-3. Connect claimed outbox events to approved email/team-channel adapters after live PostgreSQL validation; add operator metrics, replay controls, and notification preferences with that integration.
+3. Connect claimed outbox events to approved email/team-channel adapters after live PostgreSQL validation; add destination idempotency, notification preferences, jitter, and telemetry export around the implemented operator controls.
 4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
 
 ### 20.2 Implemented agent-run and continuation slice
@@ -1224,7 +1230,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, email/team-channel delivery, preferences, digests, pagination, and operator replay/metrics remain future work. The outbox cycle is deliberately handler-injected and does not choose an external provider.
+- The current prototype resolves direct owner/reviewer IDs only; role-directory fanout, membership-change reconciliation, email/team-channel delivery, preferences, digests, and pagination remain future work. The outbox cycle is deliberately handler-injected and does not choose an external provider.
 - Notifications do not capture raw agent transcripts or private reasoning. MCP remains optional and does not expose the human notification feed to ordinary agents.
 
 ### 20.15 Implemented transactional outbox and worker cycle slice
@@ -1240,7 +1246,7 @@ Implemented:
 Deliberate boundaries:
 
 - No email, chat, source-control, or work-item adapter is enabled yet; handlers remain an explicit integration seam.
-- No daemon scheduler, operator replay API, delivery metrics, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database.
+- No daemon scheduler, external adapter, time-series telemetry export, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database. Project-scoped inspection, point-in-time metrics, and audited replay are implemented through REST.
 
 ### 20.16 Implemented CLI bootstrap safety and diagnostics slice
 
@@ -1441,6 +1447,24 @@ Deliberate boundaries:
 - A truncated response shows its retained prefix and complete aggregate counts, not a pageable diff. Server-side pagination or downloadable patches can be evaluated if real pilot artifacts require them.
 - No MCP-specific diff tool was added. Human review uses the canonical REST/web path, while agents retain existing artifact-version retrieval and MCP remains optional.
 
+### 20.28 Implemented project-scoped outbox operations and replay
+
+Implemented and locally verified:
+
+1. `GET /v1/admin/projects/:projectId/outbox` is a human project-admin-only application/REST query with optional status/type filters and a bounded 1–200 item response.
+2. Every response includes project-wide point-in-time metrics: counts by state, cumulative attempts, failed/dead-letter count, ready work, expired processing leases, and oldest-ready age.
+3. `POST /v1/admin/outbox/:eventId/replay` accepts only failed or dead-letter work and requires the operator's last observed attempt count, preventing stale or concurrent replay.
+4. Replay retains the stable event ID and safe pointer-only payload, clears lease/error/completion state, resets the retry budget, and makes the event immediately available to the existing worker.
+5. The replay mutation and immutable `outbox.replayed` audit event commit in one repository transaction. Forward-only migration `0012_outbox_operator_replay.sql` adds the matching `outbox_event` audit subject.
+6. Cross-organization event IDs return not found; project members without project-admin authority and all agent principals are denied.
+7. Application/API/migration regressions cover metrics, filters, invalid input, authority boundaries, invalid states, optimistic conflicts, successful replay, event-ID preservation, and audit provenance.
+
+Deliberate boundaries:
+
+- The snapshot is an operational API, not a web administration page or a time-series telemetry backend; dashboards and alerts remain BRG-104/BRG-111 work.
+- Replay resets per-cycle attempts because the immutable audit record preserves who replayed the stable event and when. Per-destination delivery history/provider message IDs will be introduced with a real external adapter.
+- The worker remains handler-injected. Email/team adapters, destination idempotency, jitter, scheduling, and notification preferences are still pending and MCP is not required for operator access.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1467,6 +1491,7 @@ Deliberate boundaries:
 - Decision lifecycle migration: `packages/database/drizzle/0009_true_marauders.sql`
 - Specification review migration: `packages/database/drizzle/0010_safe_white_queen.sql`
 - Decision full-text search migration: `packages/database/drizzle/0011_keen_galactus.sql`
+- Outbox operator-audit migration: `packages/database/drizzle/0012_outbox_operator_replay.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1507,4 +1532,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default weighted decision search with explicit history filters, formal specification comments/request-changes, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, notifications/outbox, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared question/decision/specification workflows, governed decision retirement/impact reporting, active-by-default weighted decision search, formal specification review/version comparison, assumption/run provenance, human review UI, durable optional PostgreSQL and MCP paths, project-admin outbox metrics/audited replay, deep-linked record views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; cross-vendor conformance and external deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.

@@ -41,6 +41,8 @@ Migrations are explicit; API startup does not modify the schema. With `DATABASE_
 
 The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance/lifecycle transitions, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used by runs, assumptions, decisions, approvals, and outbox claims take row locks inside those transactions. The worker's delivery handler is injectable; external email/team adapters are not enabled yet.
 
+Fixed project administrators can inspect delivery state and point-in-time queue metrics through `GET /v1/admin/projects/:projectId/outbox`. Failed or dead-letter events can be safely requeued through `POST /v1/admin/outbox/:eventId/replay` with the last observed `expectedAttempts` value. Replay retains the event ID for handler idempotency, resets its retry budget, and creates an audit event; it cannot replay pending, processing, or processed work.
+
 Run the live persistence integration test only against an isolated database:
 
 ```bash

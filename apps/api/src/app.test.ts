@@ -95,6 +95,89 @@ describe("Bridge API vertical slice", () => {
     expect(unread.json<{ items: unknown[]; unreadCount: number }>()).toMatchObject({ items: [], unreadCount: 0 });
   });
 
+  it("exposes project-admin delivery metrics and optimistic dead-letter replay", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-outbox-operations-001",
+        title: "Which delivery retry threshold should notify operators?",
+        type: "decision",
+        category: "operations",
+        context: "The notification delivery queue requires an operator-visible retry threshold.",
+        whyItMatters: "Unbounded retries hide permanent failures while premature dead letters lose notifications.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "three", label: "Three attempts", tradeoffs: "Surfaces failures quickly but tolerates fewer transient outages." },
+          { key: "five", label: "Five attempts", tradeoffs: "Tolerates longer outages but delays operator action." },
+        ],
+        recommendationKey: "five",
+        scope: { component: "notification-worker" },
+      },
+    });
+    const [pending] = await runtime.repository.listOutboxEvents(demoProject.id);
+    expect(pending).toBeDefined();
+    await runtime.repository.claimOutboxEvents(pending!.availableAt, 1);
+    await runtime.repository.failOutboxEvent(
+      pending!.id,
+      "provider unavailable",
+      pending!.availableAt,
+      true,
+    );
+
+    const inspection = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox?status=dead_letter&limit=10`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(inspection.statusCode).toBe(200);
+    expect(inspection.json()).toMatchObject({
+      totalMatching: 1,
+      items: [expect.objectContaining({ id: pending!.id, status: "dead_letter", attempts: 1 })],
+      metrics: {
+        statusCounts: { pending: 0, processing: 0, processed: 0, failed: 0, dead_letter: 1 },
+        failedCount: 1,
+        totalAttempts: 1,
+      },
+    });
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/outbox?status=stuck`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const conflict = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/${pending!.id}/replay`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedAttempts: 2 },
+    });
+    expect(conflict.statusCode).toBe(409);
+    const replayed = await app.inject({
+      method: "POST",
+      url: `/v1/admin/outbox/${pending!.id}/replay`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedAttempts: 1 },
+    });
+    expect(replayed.statusCode).toBe(200);
+    expect(replayed.json()).toMatchObject({ id: pending!.id, status: "pending", attempts: 0 });
+  });
+
   it("returns a personalized question inbox while keeping the shared question list available", async () => {
     const runtime = await createDemoRuntime({ seedQuestion: true });
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -30,6 +30,14 @@ export const notificationTypeSchema = z.enum([
   "artifact_review_feedback",
   "artifact_approved",
 ]);
+export const outboxEventTypeSchema = z.enum(["notification.created", "decision.lifecycle_changed"]);
+export const outboxEventStatusSchema = z.enum([
+  "pending",
+  "processing",
+  "processed",
+  "failed",
+  "dead_letter",
+]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
@@ -210,6 +218,16 @@ export const notificationReadAllInputSchema = z.object({
   projectId: z.string().trim().min(1).max(100).optional(),
 });
 
+export const outboxOperationsQuerySchema = z.object({
+  status: outboxEventStatusSchema.optional(),
+  type: outboxEventTypeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+export const replayOutboxEventInputSchema = z.object({
+  expectedAttempts: z.number().int().nonnegative(),
+});
+
 export const contextQuerySchema = z.object({
   runId: z.string().trim().min(1).max(100).optional(),
   task: z.string().trim().min(3).max(2_000),
@@ -362,6 +380,8 @@ export type Risk = z.infer<typeof riskSchema>;
 export type QuestionStatus = z.infer<typeof questionStatusSchema>;
 export type QuestionReviewStatus = z.infer<typeof questionReviewStatusSchema>;
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
+export type OutboxEventType = z.infer<typeof outboxEventTypeSchema>;
+export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
@@ -385,6 +405,8 @@ export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
+export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
+export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;

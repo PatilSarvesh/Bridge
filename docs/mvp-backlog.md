@@ -870,7 +870,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed notification outbox schema, same-transaction enqueueing, PostgreSQL/in-memory claim leases, bounded retry, and dead-letter handling are implemented; external adapters, operator replay/metrics, and scheduled runtime wiring remain
+- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, and optimistic audited replay are implemented; external adapters, destination idempotency, jitter, telemetry export, and scheduled runtime wiring remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -882,8 +882,8 @@ Acceptance criteria:
 2. Worker claims and processes events at least once. **Implemented through the injected `runOutboxCycle` handler boundary.**
 3. Handlers are idempotent by event and destination. **Event IDs are stable for handler-side idempotency; destination adapters remain.**
 4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempt and backoff settings.**
-5. Operators can inspect and safely replay failed jobs.
-6. Queue lag and failure metrics are available.
+5. Operators can inspect and safely replay failed jobs. **Implemented through project-admin REST operations; replay preserves the event ID and requires the last observed attempt count.**
+6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot; time-series export and alerts remain BRG-104 work.**
 
 ### BRG-091 — Provide durable in-app notifications
 
