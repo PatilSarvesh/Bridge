@@ -31,7 +31,11 @@ export interface OidcConfiguration {
   readonly authorizationEndpoint?: string;
   readonly tokenEndpoint?: string;
   readonly endSessionEndpoint?: string;
+  readonly revocationEndpoint?: string;
   readonly jwksUri?: string;
+  readonly cliClientId?: string;
+  readonly cliRedirectUri?: string;
+  readonly cliScopes?: readonly string[];
   readonly publicApiUrl: string;
   readonly publicWebUrl: string;
   readonly sessionSecret: string;
@@ -144,6 +148,30 @@ function safeReturnTo(candidate: string | undefined, publicWebUrl: string): stri
   }
 }
 
+function validateCliRedirectUri(value: string): void {
+  let redirect: URL;
+  try {
+    redirect = new URL(value);
+  } catch {
+    throw new Error("BRIDGE_OIDC_CLI_REDIRECT_URI must be a valid URL.");
+  }
+  if (
+    redirect.protocol !== "http:" ||
+    redirect.hostname !== "127.0.0.1" ||
+    !redirect.port ||
+    Number(redirect.port) < 1 ||
+    Number(redirect.port) > 65_535 ||
+    redirect.username ||
+    redirect.password ||
+    redirect.search ||
+    redirect.hash
+  ) {
+    throw new Error(
+      "BRIDGE_OIDC_CLI_REDIRECT_URI must use http://127.0.0.1:<port>/<path> without credentials, query, or fragment.",
+    );
+  }
+}
+
 function isLoginTransaction(value: unknown): value is LoginTransaction {
   return typeof value === "object" && value !== null &&
     "state" in value && typeof value.state === "string" &&
@@ -173,6 +201,10 @@ export class OidcAuthenticator implements AuthenticationProvider {
     if (configuration.sessionSecret.length < 32) {
       throw new Error("BRIDGE_AUTH_SESSION_SECRET must contain at least 32 characters.");
     }
+    if (Boolean(configuration.cliClientId) !== Boolean(configuration.cliRedirectUri)) {
+      throw new Error("BRIDGE_OIDC_CLI_CLIENT_ID and BRIDGE_OIDC_CLI_REDIRECT_URI must be configured together.");
+    }
+    if (configuration.cliRedirectUri) validateCliRedirectUri(configuration.cliRedirectUri);
     this.config = {
       ...configuration,
       issuer: normalizedIssuer(configuration.issuer),
@@ -186,11 +218,22 @@ export class OidcAuthenticator implements AuthenticationProvider {
   }
 
   publicConfiguration(): Readonly<Record<string, string>> {
-    return {
+    const configuration: Record<string, string> = {
       mode: "oidc",
       loginUrl: `${this.config.publicApiUrl.replace(/\/$/, "")}/v1/auth/login`,
       logoutUrl: `${this.config.publicApiUrl.replace(/\/$/, "")}/v1/auth/logout`,
     };
+    if (this.config.cliClientId && this.config.cliRedirectUri) {
+      configuration.cliClientId = this.config.cliClientId;
+      configuration.cliAuthorizationEndpoint = this.config.authorizationEndpoint ?? `${this.config.issuer}authorize`;
+      configuration.cliTokenEndpoint = this.config.tokenEndpoint ?? `${this.config.issuer}oauth/token`;
+      configuration.cliRevocationEndpoint = this.config.revocationEndpoint ?? `${this.config.issuer}oauth/revoke`;
+      configuration.cliAudience = this.config.audience;
+      configuration.cliRedirectUri = this.config.cliRedirectUri;
+      configuration.cliScopes = (this.config.cliScopes ?? ["openid", "profile", "email", "offline_access"]).join(" ");
+      if (this.config.loginOrganization) configuration.cliOrganization = this.config.loginOrganization;
+    }
+    return configuration;
   }
 
   async authenticateRequest(input: {

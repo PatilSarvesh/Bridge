@@ -7,8 +7,8 @@
 | Last updated | 2026-08-10, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication plus versioned, audited organization/project member administration now complement the governed decision/specification MVP; CLI/MCP OAuth, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification and membership enforcement are implemented for web/API, but the product is not fully production-secure until remaining token scopes, MCP/CLI identity, RLS, deployment, and audit work is complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, and versioned audited organization/project member administration complement the governed decision/specification MVP; MCP OAuth/scopes, noninteractive identities, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification and membership enforcement are implemented for web/API and interactive CLI use, but the product is not fully production-secure until token scopes, MCP/noninteractive identities, RLS, deployment, and audit work are complete |
 
 ## 1. How to use and maintain this file
 
@@ -247,7 +247,7 @@ If no automated integration is permitted, humans can use the web UI and manually
 | Queue | Typed transactional outbox claim/lease/retry cycle implemented; pg-boss or a scheduled worker runtime remains a deployment choice |
 | Object storage | S3 planned for large/binary artifacts, not implemented |
 | Search | Deterministic ranking now; PostgreSQL text/trigram planned |
-| Authentication | OIDC web sessions and API bearer verification implemented; CLI/MCP OAuth and scopes remain |
+| Authentication | OIDC web sessions, API bearer verification, and interactive CLI public-client PKCE implemented; MCP OAuth/scopes and noninteractive identities remain |
 | Organization onboarding | Durable organizations/memberships, protected first-admin bootstrap, and versioned member/project-access administration UI implemented; provider invitations and enterprise provisioning remain |
 
 ### 6.3 Architectural rules
@@ -785,10 +785,10 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after versioned organization member administration:
+Current validation result after interactive CLI authentication:
 
 - Type-check: passed across all twelve workspace packages.
-- Tests: 81 behavioral tests plus 4 observability tests passed (85 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Tests: 88 behavioral tests plus 4 observability tests passed (92 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -1583,9 +1583,9 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - This slice completes the BRG-010 code foundation but not live Auth0 tenant validation or durable authentication audit events.
-- The CLI still lacks browser PKCE login and operating-system credential storage. The standalone MCP server still uses its fixed development principal; dedicated MCP audience/scope enforcement remains BRG-013/052 work.
-- Organization invitation, membership-disable, role assignment, and project-membership administration APIs/UI must be version-checked and audited in the next organization-management slice. Enterprise group provisioning remains BRG-127.
-- OAuth scopes, CI/service grants, token revocation beyond expiry/membership disable, refresh sessions, PostgreSQL RLS, and maintenance roles remain incomplete.
+- The standalone MCP server still uses its fixed development principal; dedicated MCP audience/scope enforcement remains BRG-013/052 work. Noninteractive CLI/CI service identities remain separate from the implemented delegated-human CLI flow.
+- Provider-backed organization invitations and enterprise group provisioning remain BRG-127 work; versioned member/role/project-access administration is recorded in section 20.35.
+- OAuth scope enforcement, CI/service grants, web refresh/revocation administration, PostgreSQL RLS, and maintenance roles remain incomplete.
 - Secrets belong only in environment/deployment secret management. No client secret, access token, session token, raw identity-provider response, or customer identity data is recorded in repository documentation.
 
 ### 20.35 Implemented versioned organization member administration
@@ -1607,7 +1607,27 @@ Deliberate boundaries:
 - Provisioning currently requires the exact provider subject; Bridge does not send provider email invitations or synchronize identity profile changes.
 - Reusable teams, ownership-rule configuration, custom role-definition lifecycle, SCIM/group provisioning, and enterprise directory reconciliation remain future slices.
 - Organization audit retrieval has a repository boundary but no separate operator audit-view UI yet.
-- Authentication audits, OAuth scopes, CLI/MCP authentication, RLS, refresh/revocation administration, and live-provider validation remain incomplete.
+- Authentication audits, OAuth scope enforcement, MCP authentication, noninteractive service identities, RLS, provider-side refresh/revocation administration, and live-provider validation remain incomplete.
+
+### 20.36 Implemented interactive CLI public-client authentication
+
+Implemented and locally verified:
+
+1. OIDC configuration can publish a separate native/public CLI client ID, exact loopback redirect URI, authorization/token/revocation endpoints, audience, scopes, and organization. The confidential web client secret and session secret are never published.
+2. `bridge login` generates unpredictable state and a high-entropy verifier, sends an S256 challenge, binds only the configured literal `127.0.0.1` port, accepts only the exact callback path and GET method, compares state safely, bounds the authorization code, and times out after five minutes.
+3. The CLI exchanges the authorization code without a client secret, then calls Bridge `/v1/auth/me` with the bearer token before persisting anything. The API remains responsible for issuer/audience/signature/expiry validation and active organization/project membership resolution.
+4. Versioned sessions are keyed by API URL and stored in macOS Keychain or Linux Secret Service. Keychain writes send the secret over child-process stdin rather than process arguments. Tokens are never written to `.bridge`, repository configuration, CLI success output, or structured CLI errors.
+5. Every ordinary CLI request discovers the API authentication mode. Development mode retains the fixed local principal header; OIDC mode omits that header and uses the stored bearer token.
+6. Near-expiry sessions refresh when a refresh token exists, preserve or replace rotated refresh tokens, validate the refreshed access token through Bridge, and atomically replace the credential. Rejected/non-refreshable sessions are removed and explicitly require login.
+7. `bridge auth status` reports mode, principal metadata, expiry, refresh availability, and credential-store type without credentials. It removes corrupt sessions safely. `bridge logout` attempts provider refresh-token revocation and clears local storage even when remote revocation is unavailable.
+8. The packaged CLI now includes the authentication module. Focused tests cover PKCE/public configuration, callback path/state rejection, keychain stdin handling, stored-session account binding, login, refresh, authenticated API calls, revocation, cleanup, and token exclusion from output.
+
+Deliberate boundaries:
+
+- Windows Credential Manager is not supported by this build. The pilot operating-system implementations are macOS Keychain and Linux Secret Service (`secret-tool`).
+- Refresh-token issuance and rotation must be enabled on the external native OIDC client; otherwise the CLI safely asks the user to log in again after access-token expiry.
+- The interactive session represents a delegated human. CI and unattended agents need a separate narrowly scoped service-identity flow and must not copy a person's keychain credential.
+- API OAuth scope enforcement, MCP protected-resource/authorization-server metadata, dedicated MCP audiences, durable authentication audits, and live-provider validation remain pending.
 
 ## 21. Important implementation files
 
@@ -1648,6 +1668,7 @@ Deliberate boundaries:
 - MCP tools: `apps/mcp/src/bridge-server.ts`
 - MCP HTTP bootstrap: `apps/mcp/src/server.ts`
 - CLI: `apps/cli/src/index.ts`
+- CLI PKCE, loopback callback, and OS credential stores: `apps/cli/src/auth.ts`
 - Web UI: `apps/web/app/page.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
@@ -1692,4 +1713,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics and observability, and a new Auth0-compatible OIDC web/API plus organization/project-membership foundation; CLI/MCP OAuth, audited membership administration, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, and audited organization/project membership administration; MCP OAuth/scopes, noninteractive identities, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

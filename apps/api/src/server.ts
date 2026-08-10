@@ -48,6 +48,13 @@ function requiredEnvironment(name: string): string {
 
 let authenticator: OidcAuthenticator | undefined;
 if (oidcEnabled) {
+  const cliClientId = process.env.BRIDGE_OIDC_CLI_CLIENT_ID?.trim();
+  const cliRedirectUri = process.env.BRIDGE_OIDC_CLI_REDIRECT_URI?.trim();
+  if (Boolean(cliClientId) !== Boolean(cliRedirectUri)) {
+    throw new Error(
+      "BRIDGE_OIDC_CLI_CLIENT_ID and BRIDGE_OIDC_CLI_REDIRECT_URI must be configured together.",
+    );
+  }
   const configuration: OidcConfiguration = {
     issuer: requiredEnvironment("BRIDGE_OIDC_ISSUER"),
     audience: requiredEnvironment("BRIDGE_OIDC_AUDIENCE"),
@@ -60,6 +67,7 @@ if (oidcEnabled) {
     ...(process.env.BRIDGE_OIDC_LOGIN_ORGANIZATION
       ? { loginOrganization: process.env.BRIDGE_OIDC_LOGIN_ORGANIZATION }
       : {}),
+    ...(cliClientId && cliRedirectUri ? { cliClientId, cliRedirectUri } : {}),
     secureCookies: process.env.BRIDGE_AUTH_INSECURE_COOKIES !== "true",
   };
   authenticator = new OidcAuthenticator(configuration, runtime.repository);

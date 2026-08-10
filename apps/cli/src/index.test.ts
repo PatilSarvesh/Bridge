@@ -23,6 +23,7 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
     const json = (value: unknown, status = 200) =>
       new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/health") return json({ status: "ok", service: "bridge-api" });
+    if (url.pathname === "/v1/auth/config") return json({ mode: "development" });
     if (url.hostname === "mcp.test" && url.pathname === "/mcp") {
       if (!state.mcpAvailable) {
         return json({ jsonrpc: "2.0", error: { code: -32000, message: "MCP unavailable" } }, 503);
@@ -759,5 +760,150 @@ describe("Bridge CLI fallback adapter", () => {
 
     expect(exitCode).toBe(cliExitCodes.pending);
     expect(JSON.parse(stderr[0] ?? "{}")).toMatchObject({ code: "QUESTION_PENDING", exitCode: 10 });
+  });
+
+  it("logs in with public-client PKCE, refreshes, authenticates API calls, and revokes logout", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-oidc-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const opened: string[] = [];
+    const stored = new Map<string, string>();
+    const tokenRequests: URLSearchParams[] = [];
+    const apiAuthorizations: string[] = [];
+    const accessTokenOne = "access-token-one-with-sufficient-test-length";
+    const accessTokenTwo = "access-token-two-with-sufficient-test-length";
+    const refreshToken = "refresh-token-with-sufficient-test-length";
+    let now = new Date("2026-08-10T00:00:00.000Z");
+    let revoked = false;
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      environment: {},
+      now: () => now,
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      openBrowser: async (url) => {
+        opened.push(url);
+        return true;
+      },
+      startOAuthCallback: async () => ({
+        waitForCode: Promise.resolve("authorization-code"),
+        close: async () => undefined,
+      }),
+      credentialStore: {
+        kind: "test-keychain",
+        get: async (account) => stored.get(account),
+        set: async (account, secret) => {
+          stored.set(account, secret);
+        },
+        delete: async (account) => stored.delete(account),
+      },
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+        if (url.origin === "http://bridge.test" && url.pathname === "/v1/auth/config") {
+          return json({
+            mode: "oidc",
+            cliClientId: "bridge-cli",
+            cliAuthorizationEndpoint: "https://identity.test/authorize",
+            cliTokenEndpoint: "https://identity.test/oauth/token",
+            cliRevocationEndpoint: "https://identity.test/oauth/revoke",
+            cliAudience: "https://api.bridge.test",
+            cliRedirectUri: "http://127.0.0.1:8765/callback",
+            cliScopes: "openid profile offline_access",
+            cliOrganization: "org_acme",
+          });
+        }
+        if (url.origin === "https://identity.test" && url.pathname === "/oauth/token") {
+          const parameters = new URLSearchParams(String(init?.body));
+          tokenRequests.push(parameters);
+          expect(parameters.has("client_secret")).toBe(false);
+          if (parameters.get("grant_type") === "authorization_code") {
+            expect(parameters.get("code")).toBe("authorization-code");
+            expect(parameters.get("code_verifier")?.length).toBeGreaterThanOrEqual(43);
+            return json({
+              access_token: accessTokenOne,
+              refresh_token: refreshToken,
+              expires_in: 300,
+              token_type: "Bearer",
+              scope: "openid profile offline_access",
+            });
+          }
+          expect(parameters.get("grant_type")).toBe("refresh_token");
+          expect(parameters.get("refresh_token")).toBe(refreshToken);
+          return json({
+            access_token: accessTokenTwo,
+            expires_in: 300,
+            token_type: "Bearer",
+          });
+        }
+        if (url.origin === "https://identity.test" && url.pathname === "/oauth/revoke") {
+          const parameters = new URLSearchParams(String(init?.body));
+          expect(parameters.get("token")).toBe(refreshToken);
+          revoked = true;
+          return new Response(null, { status: 200 });
+        }
+        if (url.origin === "http://bridge.test" && url.pathname === "/v1/auth/me") {
+          const headers = new Headers(init?.headers);
+          expect(headers.get("x-bridge-principal-id")).toBeNull();
+          const authorization = headers.get("authorization") ?? "";
+          apiAuthorizations.push(authorization);
+          if (![accessTokenOne, accessTokenTwo].some((token) => authorization === `Bearer ${token}`)) {
+            return json({ code: "UNAUTHENTICATED", message: "Authentication is required." }, 401);
+          }
+          return json({
+            id: "usr_member",
+            type: "human",
+            displayName: "Bridge Member",
+            organizationId: "org_acme",
+            roles: ["organization-member"],
+            projectRoles: { prj_payments: ["contributor"] },
+            projectIds: ["prj_payments"],
+            allProjects: false,
+          });
+        }
+        if (url.pathname.endsWith("/context")) {
+          const headers = new Headers(init?.headers);
+          expect(headers.get("x-bridge-principal-id")).toBeNull();
+          const authorization = headers.get("authorization") ?? "";
+          apiAuthorizations.push(authorization);
+          return json({ contextSnapshotId: "ctx_oidc", items: [], truncated: false });
+        }
+        return json({ code: "NOT_FOUND", message: "Route not found." }, 404);
+      },
+    };
+
+    expect(await runCli(["login", "--api-url", "http://bridge.test"], runtime))
+      .toBe(cliExitCodes.success);
+    expect(opened).toHaveLength(1);
+    const authorization = new URL(opened[0]!);
+    expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authorization.searchParams.get("organization")).toBe("org_acme");
+    expect(stored.has("http://bridge.test")).toBe(true);
+    expect(stdout.at(-1)).toContain('"status": "authenticated"');
+
+    now = new Date("2026-08-10T00:06:00.000Z");
+    expect(await runCli(["auth", "status", "--api-url", "http://bridge.test"], runtime))
+      .toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain('"authenticated": true');
+    expect(tokenRequests.map((request) => request.get("grant_type")))
+      .toEqual(["authorization_code", "refresh_token"]);
+
+    expect(await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime))
+      .toBe(cliExitCodes.success);
+    expect(await runCli(["context", "--task", "Review authenticated context"], runtime))
+      .toBe(cliExitCodes.success);
+    expect(apiAuthorizations.at(-1)).toBe(`Bearer ${accessTokenTwo}`);
+
+    expect(await runCli(["logout", "--api-url", "http://bridge.test"], runtime))
+      .toBe(cliExitCodes.success);
+    expect(revoked).toBe(true);
+    expect(stored.size).toBe(0);
+    const terminalOutput = [...stdout, ...stderr].join("\n");
+    expect(terminalOutput).not.toContain(accessTokenOne);
+    expect(terminalOutput).not.toContain(accessTokenTwo);
+    expect(terminalOutput).not.toContain(refreshToken);
   });
 });

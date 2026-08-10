@@ -32,6 +32,8 @@ async function fixture(directoryResult: Principal | null = principal) {
     audience,
     clientId: "bridge-web",
     clientSecret: "test-client-secret",
+    cliClientId: "bridge-cli",
+    cliRedirectUri: "http://127.0.0.1:8765/callback",
     publicApiUrl: "https://api.bridge.example",
     publicWebUrl: "https://bridge.example/app",
     sessionSecret: "test-session-secret-with-at-least-thirty-two-characters",
@@ -61,6 +63,23 @@ async function fixture(directoryResult: Principal | null = principal) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("OIDC authentication", () => {
+  it("publishes only public CLI OAuth configuration for a hardened loopback client", async () => {
+    const { authenticator } = await fixture();
+    expect(authenticator.publicConfiguration()).toMatchObject({
+      mode: "oidc",
+      cliClientId: "bridge-cli",
+      cliAuthorizationEndpoint: "https://identity.example/authorize",
+      cliTokenEndpoint: "https://identity.example/oauth/token",
+      cliRevocationEndpoint: "https://identity.example/oauth/revoke",
+      cliAudience: audience,
+      cliRedirectUri: "http://127.0.0.1:8765/callback",
+      cliScopes: "openid profile email offline_access",
+      cliOrganization: "auth0-org-acme",
+    });
+    expect(JSON.stringify(authenticator.publicConfiguration())).not.toContain("test-client-secret");
+    expect(JSON.stringify(authenticator.publicConfiguration())).not.toContain("session-secret");
+  });
+
   it("verifies access tokens and resolves authority from server-side membership", async () => {
     const { authenticator, directory, sign } = await fixture();
     const token = await sign({ org_id: "auth0-org-acme", roles: ["untrusted-token-admin"] });

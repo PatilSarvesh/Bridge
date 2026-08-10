@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC and durable membership foundations are active; fixed principals are development-only, and unfinished CLI/MCP OAuth, RLS, administration, and provisioning work prevents a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, and durable membership administration are active; fixed principals are development-only, and unfinished MCP OAuth/scopes, service identities, RLS, and provisioning work prevents a production-security claim.
 
 ## 2. Planning conventions
 
@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed principals remain available only in development; the OIDC web/API and durable organization-membership foundation is implemented, while CLI/MCP OAuth and enterprise provisioning remain.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, and durable organization-member administration are implemented, while MCP OAuth/scopes, noninteractive identities, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — the API accepts audience-validated bearer tokens and distinguishes server-side principal types; CLI PKCE login, MCP OAuth metadata/audience integration, scopes, secure credential storage, refresh, and service-identity grants remain
+- **Status:** Partial — the API accepts audience-validated bearer tokens and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented, while MCP OAuth metadata/audience/scopes and noninteractive service-identity grants remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 
@@ -644,7 +644,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Ready — the shared OIDC verifier and browser-session foundation exist; CLI Authorization Code + PKCE, localhost callback hardening, secure credential storage, refresh, logout, and noninteractive service identities remain
+- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, and revoking logout are implemented; Windows Credential Manager and noninteractive service identities remain
 - **Dependencies:** BRG-013
 - **PRD references:** AUTH-02, CLI contract
 
@@ -652,10 +652,10 @@ As a CLI user, I need browser login with credentials stored in the operating-sys
 
 Acceptance criteria:
 
-1. `bridge login`, `bridge logout`, and session status work on pilot operating systems.
-2. Tokens are stored in the OS credential facility, not repository files.
-3. Expired sessions refresh or request login safely.
-4. Logs and errors never reveal tokens.
+1. `bridge login`, `bridge logout`, and session status work on pilot operating systems. **Implemented for macOS Keychain and Linux Secret Service.**
+2. Tokens are stored in the OS credential facility, not repository files. **Implemented.**
+3. Expired sessions refresh or request login safely. **Implemented and covered for refresh-token preservation/rotation.**
+4. Logs and errors never reveal tokens. **Implemented for CLI output/errors and existing structured API logging.**
 5. Noninteractive mode requires a separate service-identity mechanism.
 
 ### BRG-061 — Initialize repository project configuration

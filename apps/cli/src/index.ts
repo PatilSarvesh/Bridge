@@ -5,6 +5,21 @@ import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/pr
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  CliAuthenticationError,
+  createAuthorizationRequest,
+  createSystemCredentialStore,
+  openSystemBrowser,
+  parseCliOidcConfiguration,
+  parseStoredSession,
+  serializeStoredSession,
+  startLoopbackCallback,
+  type CliOidcConfiguration,
+  type CredentialStore,
+  type LoopbackCallback,
+  type StoredCliSession,
+} from "./auth.js";
+
 export const cliExitCodes = {
   success: 0,
   usage: 2,
@@ -29,6 +44,13 @@ export interface CliRuntime {
   readonly readStdin: () => Promise<string>;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly now: () => Date;
+  readonly credentialStore: CredentialStore;
+  readonly openBrowser: (url: string) => Promise<boolean>;
+  readonly startOAuthCallback: (
+    redirectUri: string,
+    expectedState: string,
+    timeoutMilliseconds?: number,
+  ) => Promise<LoopbackCallback>;
 }
 
 interface ProjectConfig {
@@ -46,6 +68,13 @@ interface ConnectionOptions {
   readonly apiUrl: string;
   readonly principalId: string;
 }
+
+interface ConnectionAuthenticationState {
+  publicConfiguration?: Promise<Readonly<Record<string, unknown>>>;
+  session?: Promise<StoredCliSession | undefined>;
+}
+
+const connectionAuthenticationStates = new WeakMap<ConnectionOptions, ConnectionAuthenticationState>();
 
 class CliError extends Error {
   constructor(
@@ -76,6 +105,10 @@ function defaultRuntime(): CliRuntime {
     },
     sleep: (milliseconds) => new Promise((complete) => setTimeout(complete, milliseconds)),
     now: () => new Date(),
+    credentialStore: createSystemCredentialStore(),
+    openBrowser: (url) => openSystemBrowser(url),
+    startOAuthCallback: (redirectUri, expectedState, timeoutMilliseconds) =>
+      startLoopbackCallback(redirectUri, expectedState, timeoutMilliseconds),
   };
 }
 
@@ -93,6 +126,9 @@ function usage(): string {
   return `Bridge CLI — works with or without MCP
 
 Usage:
+  bridge login [--api-url <url>] [--no-browser]
+  bridge logout [--api-url <url>]
+  bridge auth status [--api-url <url>]
   bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
   bridge install [--client <client>] [--dry-run]
   bridge doctor
@@ -129,7 +165,7 @@ Configuration:
 Development environment:
   BRIDGE_API_URL        Overrides the configured API URL
   BRIDGE_MCP_URL        Overrides the optional configured MCP endpoint
-  BRIDGE_PRINCIPAL_ID   Local development identity (default: agt_codex)
+  BRIDGE_PRINCIPAL_ID   Development-mode identity (default: agt_codex; ignored by OIDC servers)
 
 Exit codes:
   0 success, 2 invalid input, 3 configuration, 4 connection/server,
@@ -237,13 +273,15 @@ function connectionOptions(
   runtime: CliRuntime,
   config?: ProjectConfig,
 ): ConnectionOptions {
-  return {
-    apiUrl: (
-      optionValue(args, "--api-url") ??
+  const apiUrl = optionalHttpUrl(
+    optionValue(args, "--api-url") ??
       runtime.environment.BRIDGE_API_URL ??
       config?.apiUrl ??
-      "http://127.0.0.1:4000"
-    ).replace(/\/$/, ""),
+      "http://127.0.0.1:4000",
+    "Bridge API URL",
+  )!;
+  return {
+    apiUrl,
     principalId: runtime.environment.BRIDGE_PRINCIPAL_ID ?? "agt_codex",
   };
 }
@@ -273,7 +311,11 @@ async function bridgeFetch(
   options: ConnectionOptions,
   runtime: CliRuntime,
   init: RequestInit = {},
+  authenticate = true,
 ): Promise<unknown> {
+  const authenticationHeaders = authenticate
+    ? await resolveAuthenticationHeaders(options, runtime)
+    : {};
   let response: Response;
   try {
     response = await runtime.fetch(`${options.apiUrl}${path}`, {
@@ -281,8 +323,8 @@ async function bridgeFetch(
       headers: {
         "content-type": "application/json",
         "x-bridge-correlation-id": `cli_${randomUUID().replaceAll("-", "")}`,
-        "x-bridge-principal-id": options.principalId,
         ...init.headers,
+        ...authenticationHeaders,
       },
     });
   } catch (error) {
@@ -304,6 +346,12 @@ async function bridgeFetch(
     }
   }
   if (!response.ok) {
+    if (response.status === 401 && authenticate) {
+      const configuration = await authenticationState(options).publicConfiguration?.catch(() => undefined);
+      if (configuration?.mode === "oidc") {
+        await deleteStoredSession(options, runtime).catch(() => undefined);
+      }
+    }
     const code =
       typeof body === "object" && body !== null && "code" in body ? String(body.code) : "API_ERROR";
     const message =
@@ -313,6 +361,58 @@ async function bridgeFetch(
     throw new CliError(code, message, apiExitCode(response.status), { status: response.status });
   }
   return body;
+}
+
+function authenticationState(options: ConnectionOptions): ConnectionAuthenticationState {
+  const existing = connectionAuthenticationStates.get(options);
+  if (existing) return existing;
+  const state: ConnectionAuthenticationState = {};
+  connectionAuthenticationStates.set(options, state);
+  return state;
+}
+
+async function publicAuthenticationConfiguration(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<Readonly<Record<string, unknown>>> {
+  const state = authenticationState(options);
+  state.publicConfiguration ??= bridgeFetch(
+    "/v1/auth/config",
+    options,
+    runtime,
+    { method: "GET" },
+    false,
+  ).then((value) => {
+    const record = asRecord(value);
+    if (!record || (record.mode !== "development" && record.mode !== "oidc")) {
+      throw new CliError(
+        "INVALID_AUTH_CONFIGURATION",
+        "Bridge returned invalid authentication configuration.",
+        cliExitCodes.connection,
+      );
+    }
+    return record;
+  });
+  return state.publicConfiguration;
+}
+
+async function resolveAuthenticationHeaders(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<Readonly<Record<string, string>>> {
+  const configuration = await publicAuthenticationConfiguration(options, runtime);
+  if (configuration.mode === "development") {
+    return { "x-bridge-principal-id": options.principalId };
+  }
+  const session = await usableStoredSession(options, runtime, configuration);
+  if (!session) {
+    throw new CliError(
+      "AUTHENTICATION_REQUIRED",
+      `Sign in with \`bridge login --api-url ${options.apiUrl}\` before calling this OIDC Bridge API.`,
+      cliExitCodes.forbidden,
+    );
+  }
+  return { authorization: `Bearer ${session.accessToken}` };
 }
 
 function humanLabel(key: string): string {
@@ -401,6 +501,457 @@ function output(runtime: CliRuntime, value: unknown): void {
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : undefined;
+}
+
+interface TokenGrant {
+  readonly accessToken: string;
+  readonly refreshToken?: string;
+  readonly expiresIn: number;
+  readonly scopes?: readonly string[];
+}
+
+function asCliAuthenticationError(error: unknown): CliError {
+  if (error instanceof CliError) return error;
+  if (error instanceof CliAuthenticationError) {
+    return new CliError(
+      error.code,
+      error.message,
+      error.code === "LOGIN_REJECTED" ? cliExitCodes.forbidden : cliExitCodes.configuration,
+    );
+  }
+  return new CliError(
+    "AUTHENTICATION_FAILED",
+    "CLI authentication could not complete safely.",
+    cliExitCodes.configuration,
+  );
+}
+
+function cliOidcConfiguration(value: unknown): CliOidcConfiguration {
+  try {
+    return parseCliOidcConfiguration(value);
+  } catch (error) {
+    throw asCliAuthenticationError(error);
+  }
+}
+
+async function loadStoredSession(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<StoredCliSession | undefined> {
+  const state = authenticationState(options);
+  state.session ??= runtime.credentialStore.get(options.apiUrl).then((value) => {
+    if (value === undefined) return undefined;
+    try {
+      return parseStoredSession(value, options.apiUrl);
+    } catch (error) {
+      throw asCliAuthenticationError(error);
+    }
+  }).catch((error: unknown) => {
+    throw asCliAuthenticationError(error);
+  });
+  return state.session;
+}
+
+async function saveStoredSession(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+  session: StoredCliSession,
+): Promise<void> {
+  try {
+    await runtime.credentialStore.set(options.apiUrl, serializeStoredSession(session));
+  } catch (error) {
+    throw asCliAuthenticationError(error);
+  }
+  authenticationState(options).session = Promise.resolve(session);
+}
+
+async function deleteStoredSession(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<boolean> {
+  try {
+    const deleted = await runtime.credentialStore.delete(options.apiUrl);
+    authenticationState(options).session = Promise.resolve(undefined);
+    return deleted;
+  } catch (error) {
+    throw asCliAuthenticationError(error);
+  }
+}
+
+async function requestToken(
+  configuration: CliOidcConfiguration,
+  runtime: CliRuntime,
+  parameters: URLSearchParams,
+  failureCode: "LOGIN_EXCHANGE_FAILED" | "SESSION_REFRESH_FAILED",
+): Promise<TokenGrant> {
+  let response: Response;
+  try {
+    response = await runtime.fetch(configuration.tokenEndpoint, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: parameters,
+    });
+  } catch {
+    throw new CliError(
+      "IDENTITY_PROVIDER_UNAVAILABLE",
+      "The CLI could not reach the configured identity provider.",
+      cliExitCodes.connection,
+    );
+  }
+  if (!response.ok) {
+    throw new CliError(
+      failureCode,
+      failureCode === "LOGIN_EXCHANGE_FAILED"
+        ? "The identity provider rejected the CLI sign-in exchange."
+        : "The CLI session could not be refreshed; sign in again.",
+      cliExitCodes.forbidden,
+    );
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new CliError(failureCode, "The identity provider returned an invalid token response.", cliExitCodes.connection);
+  }
+  const record = asRecord(body);
+  const accessToken = record?.access_token;
+  const refreshToken = record?.refresh_token;
+  const expiresIn = record?.expires_in;
+  const tokenType = record?.token_type;
+  if (
+    typeof accessToken !== "string" ||
+    accessToken.length < 20 ||
+    accessToken.length > 32_768 ||
+    typeof expiresIn !== "number" ||
+    !Number.isSafeInteger(expiresIn) ||
+    expiresIn < 1 ||
+    expiresIn > 2_592_000 ||
+    (refreshToken !== undefined && (
+      typeof refreshToken !== "string" ||
+      refreshToken.length < 20 ||
+      refreshToken.length > 32_768
+    )) ||
+    (tokenType !== undefined && (typeof tokenType !== "string" || tokenType.toLowerCase() !== "bearer"))
+  ) {
+    throw new CliError(failureCode, "The identity provider returned an invalid token response.", cliExitCodes.connection);
+  }
+  const scope = typeof record?.scope === "string"
+    ? [...new Set(record.scope.split(/\s+/).filter(Boolean))]
+    : undefined;
+  return {
+    accessToken,
+    expiresIn,
+    ...(typeof refreshToken === "string" ? { refreshToken } : {}),
+    ...(scope ? { scopes: scope } : {}),
+  };
+}
+
+function sessionFromGrant(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+  configuration: CliOidcConfiguration,
+  grant: TokenGrant,
+  previous?: StoredCliSession,
+): StoredCliSession {
+  const now = runtime.now();
+  const refreshToken = grant.refreshToken ?? previous?.refreshToken;
+  return {
+    version: 1,
+    apiUrl: options.apiUrl,
+    accessToken: grant.accessToken,
+    ...(refreshToken ? { refreshToken } : {}),
+    expiresAt: Math.floor(now.getTime() / 1_000) + grant.expiresIn,
+    scopes: grant.scopes ?? previous?.scopes ?? configuration.scopes,
+    obtainedAt: now.toISOString(),
+  };
+}
+
+async function currentPrincipalForToken(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+  accessToken: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  try {
+    const value = await bridgeFetch(
+      "/v1/auth/me",
+      options,
+      runtime,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+      false,
+    );
+    const principal = asRecord(value);
+    if (!principal || typeof principal.id !== "string" || principal.type !== "human") {
+      throw new Error("invalid principal");
+    }
+    return principal;
+  } catch (error) {
+    if (error instanceof CliError && error.exitCode === cliExitCodes.connection) throw error;
+    throw new CliError(
+      "SESSION_VALIDATION_FAILED",
+      "Bridge rejected the CLI session; sign in again or ask an administrator to verify membership.",
+      cliExitCodes.forbidden,
+    );
+  }
+}
+
+async function refreshStoredSession(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+  configuration: CliOidcConfiguration,
+  session: StoredCliSession,
+): Promise<StoredCliSession> {
+  if (!session.refreshToken) {
+    await deleteStoredSession(options, runtime);
+    throw new CliError(
+      "AUTHENTICATION_EXPIRED",
+      `The CLI session expired and cannot refresh; run \`bridge login --api-url ${options.apiUrl}\` again.`,
+      cliExitCodes.forbidden,
+    );
+  }
+  let grant: TokenGrant;
+  try {
+    grant = await requestToken(configuration, runtime, new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: configuration.clientId,
+      refresh_token: session.refreshToken,
+    }), "SESSION_REFRESH_FAILED");
+  } catch (error) {
+    if (error instanceof CliError && error.code === "IDENTITY_PROVIDER_UNAVAILABLE") throw error;
+    await deleteStoredSession(options, runtime);
+    throw error;
+  }
+  const refreshed = sessionFromGrant(options, runtime, configuration, grant, session);
+  try {
+    await currentPrincipalForToken(options, runtime, refreshed.accessToken);
+  } catch (error) {
+    await deleteStoredSession(options, runtime);
+    throw error;
+  }
+  await saveStoredSession(options, runtime, refreshed);
+  return refreshed;
+}
+
+async function usableStoredSession(
+  options: ConnectionOptions,
+  runtime: CliRuntime,
+  publicConfiguration: unknown,
+): Promise<StoredCliSession | undefined> {
+  const session = await loadStoredSession(options, runtime);
+  if (!session) return undefined;
+  if (session.expiresAt > Math.floor(runtime.now().getTime() / 1_000) + 60) return session;
+  return refreshStoredSession(options, runtime, cliOidcConfiguration(publicConfiguration), session);
+}
+
+async function runLogin(
+  args: readonly string[],
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const configuration = cliOidcConfiguration(
+    await publicAuthenticationConfiguration(connection, runtime),
+  );
+  const authorization = createAuthorizationRequest(configuration);
+  let callback: LoopbackCallback;
+  try {
+    callback = await runtime.startOAuthCallback(configuration.redirectUri, authorization.state, 300_000);
+  } catch (error) {
+    throw asCliAuthenticationError(error);
+  }
+  output(runtime, {
+    ok: true,
+    status: "waiting_for_browser",
+    authorizationUrl: authorization.authorizationUrl,
+    callback: configuration.redirectUri,
+  });
+  if (!args.includes("--no-browser")) await runtime.openBrowser(authorization.authorizationUrl);
+  let code: string;
+  try {
+    code = await callback.waitForCode;
+  } catch (error) {
+    throw asCliAuthenticationError(error);
+  } finally {
+    await callback.close().catch(() => undefined);
+  }
+  const grant = await requestToken(configuration, runtime, new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: configuration.clientId,
+    code,
+    code_verifier: authorization.verifier,
+    redirect_uri: configuration.redirectUri,
+  }), "LOGIN_EXCHANGE_FAILED");
+  const session = sessionFromGrant(connection, runtime, configuration, grant);
+  const principal = await currentPrincipalForToken(connection, runtime, session.accessToken);
+  await saveStoredSession(connection, runtime, session);
+  output(runtime, {
+    ok: true,
+    status: "authenticated",
+    apiUrl: connection.apiUrl,
+    principal: {
+      id: principal.id,
+      displayName: principal.displayName,
+      organizationId: principal.organizationId,
+      roles: principal.roles,
+    },
+    expiresAt: new Date(session.expiresAt * 1_000).toISOString(),
+    refreshAvailable: Boolean(session.refreshToken),
+    credentialStore: runtime.credentialStore.kind,
+  });
+}
+
+async function runAuthStatus(
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const publicConfiguration = await publicAuthenticationConfiguration(connection, runtime);
+  if (publicConfiguration.mode === "development") {
+    output(runtime, {
+      ok: true,
+      mode: "development",
+      authenticated: true,
+      principalId: connection.principalId,
+      credentialStore: "not_used",
+    });
+    return;
+  }
+  let configuration: CliOidcConfiguration;
+  try {
+    configuration = parseCliOidcConfiguration(publicConfiguration);
+  } catch (error) {
+    if (error instanceof CliAuthenticationError && error.code === "CLI_AUTH_NOT_CONFIGURED") {
+      output(runtime, { ok: true, mode: "oidc", configured: false, authenticated: false, loginRequired: true });
+      return;
+    }
+    throw asCliAuthenticationError(error);
+  }
+  let session: StoredCliSession | undefined;
+  try {
+    session = await loadStoredSession(connection, runtime);
+  } catch (error) {
+    if (error instanceof CliError && error.code === "INVALID_SESSION") {
+      await deleteStoredSession(connection, runtime);
+      output(runtime, {
+        ok: true,
+        mode: "oidc",
+        configured: true,
+        authenticated: false,
+        loginRequired: true,
+        invalidSessionRemoved: true,
+        credentialStore: runtime.credentialStore.kind,
+      });
+      return;
+    }
+    throw error;
+  }
+  if (!session) {
+    output(runtime, {
+      ok: true,
+      mode: "oidc",
+      configured: true,
+      authenticated: false,
+      loginRequired: true,
+      credentialStore: runtime.credentialStore.kind,
+    });
+    return;
+  }
+  if (session.expiresAt <= Math.floor(runtime.now().getTime() / 1_000) + 60) {
+    try {
+      session = await refreshStoredSession(connection, runtime, configuration, session);
+    } catch (error) {
+      if (error instanceof CliError && error.code !== "IDENTITY_PROVIDER_UNAVAILABLE") {
+        output(runtime, {
+          ok: true,
+          mode: "oidc",
+          configured: true,
+          authenticated: false,
+          loginRequired: true,
+          credentialStore: runtime.credentialStore.kind,
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+  let principal: Readonly<Record<string, unknown>>;
+  try {
+    principal = await currentPrincipalForToken(connection, runtime, session.accessToken);
+  } catch (error) {
+    if (error instanceof CliError && error.code === "SESSION_VALIDATION_FAILED") {
+      await deleteStoredSession(connection, runtime);
+      output(runtime, {
+        ok: true,
+        mode: "oidc",
+        configured: true,
+        authenticated: false,
+        loginRequired: true,
+        invalidSessionRemoved: true,
+        credentialStore: runtime.credentialStore.kind,
+      });
+      return;
+    }
+    throw error;
+  }
+  output(runtime, {
+    ok: true,
+    mode: "oidc",
+    configured: true,
+    authenticated: true,
+    principal: {
+      id: principal.id,
+      displayName: principal.displayName,
+      organizationId: principal.organizationId,
+      roles: principal.roles,
+    },
+    expiresAt: new Date(session.expiresAt * 1_000).toISOString(),
+    refreshAvailable: Boolean(session.refreshToken),
+    credentialStore: runtime.credentialStore.kind,
+  });
+}
+
+async function runLogout(
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const publicConfiguration = await publicAuthenticationConfiguration(connection, runtime);
+  if (publicConfiguration.mode === "development") {
+    output(runtime, { ok: true, mode: "development", deleted: false, remoteRevoked: false });
+    return;
+  }
+  let session: StoredCliSession | undefined;
+  let invalidSessionRemoved = false;
+  try {
+    session = await loadStoredSession(connection, runtime);
+  } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "INVALID_SESSION") throw error;
+    await deleteStoredSession(connection, runtime);
+    invalidSessionRemoved = true;
+  }
+  let remoteRevoked = false;
+  if (session?.refreshToken) {
+    try {
+      const configuration = parseCliOidcConfiguration(publicConfiguration);
+      const response = await runtime.fetch(configuration.revocationEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: configuration.clientId,
+          token: session.refreshToken,
+          token_type_hint: "refresh_token",
+        }),
+      });
+      remoteRevoked = response.ok;
+    } catch {
+      remoteRevoked = false;
+    }
+  }
+  const deleted = invalidSessionRemoved || await deleteStoredSession(connection, runtime);
+  output(runtime, {
+    ok: true,
+    mode: "oidc",
+    deleted,
+    remoteRevoked,
+    invalidSessionRemoved,
+    credentialStore: runtime.credentialStore.kind,
+  });
 }
 
 function itemsFrom(value: unknown): readonly unknown[] {
@@ -1261,6 +1812,24 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
   const config = await loadProjectConfig(runtime.cwd);
   const connection = connectionOptions(args, runtime, config);
 
+  if (command === "login") {
+    await runLogin(args, connection, runtime);
+    return;
+  }
+
+  if (command === "logout") {
+    await runLogout(connection, runtime);
+    return;
+  }
+
+  if (command === "auth") {
+    if (args[1] !== "status") {
+      throw new CliError("UNKNOWN_AUTH_COMMAND", "Use `bridge auth status`.", cliExitCodes.usage);
+    }
+    await runAuthStatus(connection, runtime);
+    return;
+  }
+
   if (command === "doctor") {
     await runDoctor(config, connection, runtime);
     return;
@@ -1934,8 +2503,8 @@ export async function runCli(
     await executeCli(args, runtime);
     return cliExitCodes.success;
   } catch (error) {
-    const cliError = error instanceof CliError
-      ? error
+    const cliError = error instanceof CliError || error instanceof CliAuthenticationError
+      ? asCliAuthenticationError(error)
       : new CliError(
           "INTERNAL_ERROR",
           error instanceof Error ? error.message : String(error),
