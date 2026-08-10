@@ -8,6 +8,7 @@ import {
   changeDecisionLifecycleInputSchema,
   contextQuerySchema,
   continuationQuerySchema,
+  createOrganizationMemberInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
   findQuestionMatchesInputSchema,
@@ -26,6 +27,7 @@ import {
   resolveAssumptionInputSchema,
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
+  updateOrganizationMemberInputSchema,
 } from "@bridge/contracts";
 import { BridgeError, type Principal } from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
@@ -94,6 +96,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(cors, {
     origin: options.corsOrigin ?? true,
     credentials: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
     allowedHeaders: ["authorization", "content-type", "x-bridge-principal-id", correlationIdHeader],
     exposedHeaders: [correlationIdHeader],
   });
@@ -283,6 +286,33 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         })),
     };
   });
+
+  app.get("/v1/admin/organization/members", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const [items, projects] = await Promise.all([
+      options.service.listOrganizationMembers(principal),
+      options.service.listOrganizationProjectsForAdministration(principal),
+    ]);
+    return { items, projects };
+  });
+
+  app.post<{ Body: unknown }>("/v1/admin/organization/members", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = createOrganizationMemberInputSchema.parse(request.body);
+    const registration = await options.service.createOrganizationMember(principal, input);
+    return reply
+      .status(registration.disposition === "created" ? 201 : 200)
+      .send(registration);
+  });
+
+  app.patch<{ Params: { memberId: string }; Body: unknown }>(
+    "/v1/admin/organization/members/:memberId",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = updateOrganizationMemberInputSchema.parse(request.body);
+      return options.service.updateOrganizationMember(principal, request.params.memberId, input);
+    },
+  );
 
   app.post<{ Body: unknown }>("/v1/projects", async (request, reply) => {
     const principal = await resolvePrincipal(request, options);

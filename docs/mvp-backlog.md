@@ -283,7 +283,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — durable organization and membership tables, operator-controlled first-admin bootstrap, authorized project registration, and membership-enforced project discovery are implemented; repository records and version-checked member/project administration UI remain
+- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, and version-checked member/project-access administration UI are implemented; repository records remain
 - **Dependencies:** BRG-010, BRG-012
 - **PRD references:** PRJ-01, PRJ-03
 
@@ -301,7 +301,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — normalized roles, explicit owners, scoped defaults, separate protected reviewers, and durable project-scoped membership roles are implemented; administrator-managed teams/rules and versioned configuration remain
+- **Status:** Partial — normalized roles, explicit owners, scoped defaults, separate protected reviewers, and audited administrator-managed organization/project membership roles are implemented; reusable teams, ownership rules, and versioned role definitions remain
 - **Dependencies:** BRG-020
 - **PRD references:** PRJ-02, QST-03, QST-05
 

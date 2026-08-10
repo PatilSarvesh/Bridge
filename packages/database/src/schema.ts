@@ -1,6 +1,7 @@
 import type { Scope } from "@bridge/contracts";
 import type {
   ArtifactReview,
+  OrganizationAuditEvent,
   OutboxPayload,
   QuestionComment,
   QuestionOption,
@@ -144,6 +145,7 @@ export const organizationMemberships = pgTable(
     allProjects: boolean("all_projects").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").default(1).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.organizationId, table.principalId] }),
@@ -176,6 +178,7 @@ export const projectMemberships = pgTable(
     roles: jsonb("roles").$type<readonly string[]>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").default(1).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.organizationId, table.projectId, table.principalId] }),
@@ -469,6 +472,30 @@ export const auditEvents = pgTable(
   (table) => [
     index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_audit_events_correlation_idx").on(table.correlationId),
+  ],
+);
+
+export const organizationAuditEvents = pgTable(
+  "bridge_organization_audit_events",
+  {
+    id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    actorId: text("actor_id").notNull(),
+    actorType: principalTypeEnum("actor_type").notNull(),
+    action: text("action").$type<OrganizationAuditEvent["action"]>().notNull(),
+    subjectType: text("subject_type").$type<OrganizationAuditEvent["subjectType"]>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("bridge_organization_audit_events_org_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
   ],
 );
 

@@ -8,6 +8,7 @@ import type {
   Decision,
   Notification,
   Organization,
+  OrganizationAuditEvent,
   OrganizationMembership,
   OutboxDelivery,
   OutboxEvent,
@@ -33,6 +34,8 @@ import {
   notificationFromRow,
   notificationToRow,
   organizationFromRow,
+  organizationAuditEventFromRow,
+  organizationAuditEventToRow,
   organizationMembershipFromRow,
   organizationMembershipToRow,
   organizationToRow,
@@ -62,6 +65,7 @@ import {
   type OutboxEventRow,
   type OutboxDeliveryRow,
   type OrganizationMembershipRow,
+  type OrganizationAuditEventRow,
   type OrganizationRow,
   type PrincipalIdentityRow,
   type ProjectMembershipRow,
@@ -328,6 +332,7 @@ describe("PostgreSQL domain mappings", () => {
       allProjects: false,
       createdAt: organization.createdAt,
       updatedAt: organization.createdAt,
+      version: 1,
     };
     const projectMembership: ProjectMembership = {
       organizationId: organization.id,
@@ -337,6 +342,18 @@ describe("PostgreSQL domain mappings", () => {
       roles: ["project-admin"],
       createdAt: organization.createdAt,
       updatedAt: organization.createdAt,
+      version: 1,
+    };
+    const organizationAuditEvent: OrganizationAuditEvent = {
+      id: "oaud_mapping",
+      correlationId: "cor_mapping",
+      organizationId: organization.id,
+      actorId: identity.id,
+      actorType: "human",
+      action: "organization_member.updated",
+      subjectType: "organization_membership",
+      subjectId: identity.id,
+      createdAt: organization.createdAt,
     };
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
@@ -347,6 +364,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(projectMembershipFromRow(
       projectMembershipToRow(projectMembership) as ProjectMembershipRow,
     )).toEqual(projectMembership);
+    expect(organizationAuditEventFromRow(
+      organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
+    )).toEqual(organizationAuditEvent);
   });
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
@@ -521,5 +541,15 @@ describe("PostgreSQL domain mappings", () => {
     expect(identityMigration).toContain("CREATE TABLE \"bridge_project_memberships\"");
     expect(identityMigration.indexOf("INSERT INTO \"bridge_organizations\""))
       .toBeLessThan(identityMigration.indexOf("bridge_projects_organization_id_bridge_organizations_id_fk"));
+
+    const memberAdministrationMigration = readFileSync(
+      new URL("../drizzle/0016_charming_siren.sql", import.meta.url),
+      "utf8",
+    );
+    expect(memberAdministrationMigration).toContain("CREATE TABLE \"bridge_organization_audit_events\"");
+    expect(memberAdministrationMigration).toContain("bridge_organization_memberships_positive_version_check");
+    expect(memberAdministrationMigration).toContain("bridge_project_memberships_positive_version_check");
+    expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_action_check");
+    expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_correlation_check");
   });
 });

@@ -27,6 +27,8 @@ pnpm dev
 
 The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path now supports configurable OIDC authentication plus durable organization and project memberships; CLI/MCP OAuth and enterprise provisioning remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
 
+Human organization administrators can use the web **Organization** area to provision an exact OIDC subject, disable or reactivate access, assign organization roles, and configure per-project membership roles. Changes use optimistic membership versions, preserve at least one active organization administrator, and create organization-level audit records.
+
 For contributors and coding agents, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/working-context.md`](docs/working-context.md). Root [`AGENTS.md`](AGENTS.md) is also referenced by [`CLAUDE.md`](CLAUDE.md) so Claude-based contributors receive the same architecture and scope constraints. Every push and pull request runs typecheck, tests, production builds, and the isolated PostgreSQL check through GitHub Actions.
 
 By default the API uses a seeded in-memory repository. To preserve agent-run metadata, assumptions, questions, accepted decisions, specifications, context snapshots, continuation locators, audit events, in-app notifications, and their transactional delivery intents across API restarts, provide a PostgreSQL database:

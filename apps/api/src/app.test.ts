@@ -104,6 +104,72 @@ describe("Bridge API vertical slice", () => {
       .not.toContain(demoPrincipals.outsider.id);
   });
 
+  it("lets a human organization admin provision and version-update project membership", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeader = { "x-bridge-principal-id": demoPrincipals.architect.id };
+
+    const denied = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/members",
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/members",
+      headers: adminHeader,
+      payload: {
+        oidcSubject: "auth0|api-member",
+        displayName: "API Member",
+        roles: ["organization-member"],
+        allProjects: false,
+        projectMemberships: [{ projectId: demoProject.id, roles: ["QA Lead"] }],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const member = created.json<{ member: { id: string; version: number } }>().member;
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: `/v1/admin/organization/members/${member.id}`,
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        "access-control-request-method": "PATCH",
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("PATCH");
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/v1/admin/organization/members/${member.id}`,
+      headers: adminHeader,
+      payload: {
+        expectedVersion: member.version,
+        status: "disabled",
+        roles: ["organization-member"],
+        allProjects: false,
+        projectMemberships: [],
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ status: "disabled", version: 2 });
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/members",
+      headers: adminHeader,
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: member.id, status: "disabled" })]),
+      projects: [expect.objectContaining({ id: demoProject.id })],
+    });
+  });
+
   it("lists and marks scoped human notifications without exposing them to agents", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

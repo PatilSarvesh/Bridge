@@ -41,6 +41,9 @@ export type BridgeErrorCode =
   | "ASSUMPTION_NOT_FOUND"
   | "NOTIFICATION_NOT_FOUND"
   | "OUTBOX_EVENT_NOT_FOUND"
+  | "MEMBER_NOT_FOUND"
+  | "IDENTITY_NOT_CONFIGURED"
+  | "LAST_ORGANIZATION_ADMIN"
   | "CONTINUATION_INVALID"
   | "VALIDATION_FAILED"
   | "POLICY_BLOCKED"
@@ -96,6 +99,7 @@ export interface OrganizationMembership {
   readonly allProjects: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly version: number;
 }
 
 export interface ProjectMembership {
@@ -106,6 +110,19 @@ export interface ProjectMembership {
   readonly roles: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface OrganizationAuditEvent {
+  readonly id: string;
+  readonly correlationId: string;
+  readonly organizationId: string;
+  readonly actorId: string;
+  readonly actorType: PrincipalType;
+  readonly action: "organization_member.created" | "organization_member.updated";
+  readonly subjectType: "organization_membership";
+  readonly subjectId: string;
+  readonly createdAt: string;
 }
 
 export interface Project {

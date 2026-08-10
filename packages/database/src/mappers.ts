@@ -8,6 +8,7 @@ import type {
   Decision,
   Notification,
   Organization,
+  OrganizationAuditEvent,
   OrganizationMembership,
   OutboxDelivery,
   OutboxEvent,
@@ -32,6 +33,7 @@ import {
   notifications,
   organizations,
   organizationMemberships,
+  organizationAuditEvents,
   outboxDeliveries,
   outboxEvents,
   principalIdentities,
@@ -41,6 +43,7 @@ import {
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
@@ -100,6 +103,22 @@ export function projectMembershipToRow(
 
 export function projectMembershipFromRow(row: ProjectMembershipRow): ProjectMembership {
   return { ...row };
+}
+
+export function organizationAuditEventToRow(
+  event: OrganizationAuditEvent,
+): typeof organizationAuditEvents.$inferInsert {
+  return { ...event };
+}
+
+export function organizationAuditEventFromRow(
+  row: OrganizationAuditEventRow,
+): OrganizationAuditEvent {
+  return {
+    ...row,
+    action: row.action as OrganizationAuditEvent["action"],
+    subjectType: row.subjectType as OrganizationAuditEvent["subjectType"],
+  };
 }
 
 export function projectToRow(project: Project): typeof projects.$inferInsert {

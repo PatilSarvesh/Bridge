@@ -7,7 +7,7 @@
 | Last updated | 2026-08-10, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication and durable organization/project membership foundations now complement the governed decision/specification MVP; CLI/MCP OAuth, member administration, enterprise provisioning, and live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication plus versioned, audited organization/project member administration now complement the governed decision/specification MVP; CLI/MCP OAuth, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
 | Security posture | Production-shaped OIDC verification and membership enforcement are implemented for web/API, but the product is not fully production-secure until remaining token scopes, MCP/CLI identity, RLS, deployment, and audit work is complete |
 
 ## 1. How to use and maintain this file
@@ -248,7 +248,7 @@ If no automated integration is permitted, humans can use the web UI and manually
 | Object storage | S3 planned for large/binary artifacts, not implemented |
 | Search | Deterministic ranking now; PostgreSQL text/trigram planned |
 | Authentication | OIDC web sessions and API bearer verification implemented; CLI/MCP OAuth and scopes remain |
-| Organization onboarding | Durable organizations/memberships and operator first-admin bootstrap implemented; member administration UI/lifecycle remains |
+| Organization onboarding | Durable organizations/memberships, protected first-admin bootstrap, and versioned member/project-access administration UI implemented; provider invitations and enterprise provisioning remain |
 
 ### 6.3 Architectural rules
 
@@ -291,7 +291,7 @@ docs/
 
 ## 8. Current prototype identities and fixtures
 
-No login or onboarding exists.
+Production-shaped OIDC login and administrator-managed membership now exist. The fixed principals below remain development-only fixtures and are not production identities.
 
 Fixed local project:
 
@@ -785,10 +785,10 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the authentication and organization-membership foundation:
+Current validation result after versioned organization member administration:
 
 - Type-check: passed across all twelve workspace packages.
-- Tests: 78 behavioral tests plus 4 observability tests passed (82 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Tests: 81 behavioral tests plus 4 observability tests passed (85 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -915,7 +915,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 ### 17.3 Security
 
 - OIDC web/API authentication and encrypted bounded sessions are implemented; CLI and standalone MCP OAuth are not.
-- Durable organization/project membership and operator first-admin bootstrap are implemented; member administration is not.
+- Durable organization/project membership, protected first-admin bootstrap, versioned member administration, project-role assignment, and organization audit events are implemented.
 - OAuth scopes, refresh/revocation administration, durable authentication audits, RLS, and deployment-provider validation remain incomplete.
 - Fixed local principals remain development-only.
 - Application organization/project checks are active for both identity modes, but this is not yet complete production tenant security.
@@ -1588,6 +1588,27 @@ Deliberate boundaries:
 - OAuth scopes, CI/service grants, token revocation beyond expiry/membership disable, refresh sessions, PostgreSQL RLS, and maintenance roles remain incomplete.
 - Secrets belong only in environment/deployment secret management. No client secret, access token, session token, raw identity-provider response, or customer identity data is recorded in repository documentation.
 
+### 20.35 Implemented versioned organization member administration
+
+Implemented and locally verified:
+
+1. Organization and project membership rows now carry positive optimistic-concurrency versions. Administrator updates require the last-read organization membership version, and project membership writes use their stored versions inside the same transaction.
+2. Human organization administrators can list all human members, provision an exact subject under the configured OIDC issuer, disable/reactivate organization access, assign normalized organization roles, grant all-project access, and configure active project memberships with scoped roles.
+3. `GET`/`POST /v1/admin/organization/members` and `PATCH /v1/admin/organization/members/:memberId` are the canonical REST boundary. Agents, ordinary humans, and cross-tenant project identifiers are denied.
+4. The web **Organization** area is visible only for an organization-level `organization-admin`. It includes member creation, active/disabled status, organization roles, all-project access, and per-project role editing with loading, empty, conflict, and failure behavior.
+5. Disabling membership takes effect on the next authentication resolution. The application prevents disabling or demoting the final active organization administrator.
+6. Material member changes write a dedicated organization-level audit record with correlation ID, actor, action, target membership, and timestamp. They are not incorrectly attached to an arbitrary project audit stream.
+7. Migration `0016_charming_siren.sql` adds the organization audit table, membership versions, positive-version checks, controlled audit actions/subject type, correlation validation, and indexes. Restore verification now requires and counts the new table.
+8. The first-admin bootstrap creates membership only when it is absent, so leaving bootstrap configuration present cannot reset a later versioned membership update.
+9. Development fixtures grant the architect an explicit organization-admin role so the workflow can be tested without external identity infrastructure. Production OIDC startup remains free of demo data.
+
+Deliberate boundaries:
+
+- Provisioning currently requires the exact provider subject; Bridge does not send provider email invitations or synchronize identity profile changes.
+- Reusable teams, ownership-rule configuration, custom role-definition lifecycle, SCIM/group provisioning, and enterprise directory reconciliation remain future slices.
+- Organization audit retrieval has a repository boundary but no separate operator audit-view UI yet.
+- Authentication audits, OAuth scopes, CLI/MCP authentication, RLS, refresh/revocation administration, and live-provider validation remain incomplete.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1620,6 +1641,7 @@ Deliberate boundaries:
 - Email delivery-receipt migration: `packages/database/drizzle/0013_ancient_gwen_stacy.sql`
 - Correlation propagation migration: `packages/database/drizzle/0014_first_jane_foster.sql`
 - Organization/identity/membership migration: `packages/database/drizzle/0015_spooky_bulldozer.sql`
+- Versioned member-administration migration: `packages/database/drizzle/0016_charming_siren.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`

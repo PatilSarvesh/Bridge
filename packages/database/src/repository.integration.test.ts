@@ -75,6 +75,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         allProjects: false,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
+        version: 1,
       });
       await firstStore.repository.saveProjectMembership({
         organizationId: project.organizationId,
@@ -84,7 +85,41 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         roles: owner.roles,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
+        version: 1,
       });
+      expect(await firstStore.repository.saveOrganizationMembership({
+        organizationId: project.organizationId,
+        principalId: owner.id,
+        status: "active",
+        roles: ["organization-member", "project-admin"],
+        allProjects: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        version: 2,
+      }, 1)).toBe(true);
+      expect(await firstStore.repository.saveOrganizationMembership({
+        organizationId: project.organizationId,
+        principalId: owner.id,
+        status: "disabled",
+        roles: [],
+        allProjects: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+        version: 3,
+      }, 1)).toBe(false);
+      await firstStore.repository.saveOrganizationAuditEvent({
+        id: `oaud_${suffix}`,
+        correlationId: `cor_${suffix}`,
+        organizationId: project.organizationId,
+        actorId: owner.id,
+        actorType: "human",
+        action: "organization_member.updated",
+        subjectType: "organization_membership",
+        subjectId: owner.id,
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      await expect(firstStore.repository.listOrganizationAuditEvents(project.organizationId))
+        .resolves.toMatchObject([{ subjectId: owner.id, action: "organization_member.updated" }]);
       const service = new BridgeService(firstStore.repository);
       const registration = await service.startRun(agent, project.id, {
         idempotencyKey: `run-${suffix}`,

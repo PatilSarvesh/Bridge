@@ -5,7 +5,7 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. CLI browser login, MCP OAuth metadata/scope enforcement, enterprise provisioning, organization-member administration UI, refresh tokens, and durable authentication audit events remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration is implemented; CLI browser login, MCP OAuth metadata/scope enforcement, provider-backed invitations, enterprise provisioning, refresh tokens, and durable authentication audit events remain separate work.
 
 ## Security boundary
 
@@ -75,6 +75,20 @@ Bootstrap is idempotent by internal organization and principal IDs. It creates a
 
 When OIDC mode is enabled, API startup does not seed the local demo organization, principals, project, question, or specification. After the initial administrator signs in, use the existing authorized project-registration operation to create the first real project.
 
+## Organization member administration
+
+An active human with the organization-level `organization-admin` role can open **Organization** in the web application or use:
+
+```text
+GET   /v1/admin/organization/members
+POST  /v1/admin/organization/members
+PATCH /v1/admin/organization/members/:memberId
+```
+
+Creating a member provisions a human identity for the configured OIDC issuer using its exact subject, then assigns organization roles, all-project access, and optional project-scoped roles. Updates require the last-read organization-membership version. Project identifiers are validated against the administrator's organization, role names are normalized, and every successful creation or update writes an organization-level audit event.
+
+Disabling an organization membership denies the member's next authenticated request. Bridge also prevents disabling or demoting the final active organization administrator. The operator bootstrap creates the first administrator only when that membership is absent; leaving bootstrap variables configured no longer overwrites later versioned administration changes.
+
 ## Public authentication endpoints
 
 ```text
@@ -92,6 +106,6 @@ All business endpoints accept the encrypted Bridge session cookie or a valid `Au
 - The standalone MCP process still uses its fixed development principal and is not production-authenticated.
 - The CLI has no PKCE login or secure credential-store integration yet.
 - Access tokens are audience-validated, but application scopes and service-identity grants are not yet enforced.
-- There is no organization member invitation/disable UI; the durable repository methods and schema are the foundation for that next slice.
+- Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.
 - A real Auth0 tenant and hosted callback/logout configuration require deployment-owner validation.

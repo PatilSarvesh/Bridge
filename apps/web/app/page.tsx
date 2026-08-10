@@ -24,6 +24,26 @@ interface AuthenticationConfiguration {
   readonly logoutUrl?: string;
 }
 
+interface OrganizationProjectMembership {
+  readonly projectId: string;
+  readonly status: "active" | "disabled";
+  readonly roles: readonly string[];
+  readonly version: number;
+}
+
+interface OrganizationMember {
+  readonly id: string;
+  readonly displayName: string;
+  readonly oidcSubject: string;
+  readonly status: "active" | "disabled";
+  readonly roles: readonly string[];
+  readonly allProjects: boolean;
+  readonly projectMemberships: readonly OrganizationProjectMembership[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
 interface Option {
   readonly key: string;
   readonly label: string;
@@ -294,6 +314,7 @@ type View =
   | "decisions"
   | "assumptions"
   | "runs"
+  | "organization"
   | "analytics";
 
 async function bridgeFetch<T>(
@@ -348,6 +369,14 @@ function sameScope(left: Readonly<Record<string, string>>, right: Readonly<Recor
   return [...keys].every((key) => left[key] === right[key]);
 }
 
+function roleList(value: string): readonly string[] {
+  return [...new Set(value.split(",").map((role) => role.trim()).filter(Boolean))];
+}
+
+function normalizedRole(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 export default function Home() {
   const requestedDecisionIdRef = useRef<string | undefined>(undefined);
   const [view, setView] = useState<View>("inbox");
@@ -369,6 +398,19 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
   const [analytics, setAnalytics] = useState<ProjectAnalytics>();
+  const [organizationMembers, setOrganizationMembers] = useState<readonly OrganizationMember[]>([]);
+  const [organizationProjects, setOrganizationProjects] = useState<readonly Project[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>();
+  const [memberStatus, setMemberStatus] = useState<OrganizationMember["status"]>("active");
+  const [memberRoles, setMemberRoles] = useState("");
+  const [memberAllProjects, setMemberAllProjects] = useState(false);
+  const [memberProjectRoles, setMemberProjectRoles] = useState<Record<string, string | undefined>>({});
+  const [newMemberSubject, setNewMemberSubject] = useState("");
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberRoles, setNewMemberRoles] = useState("organization-member");
+  const [newMemberAllProjects, setNewMemberAllProjects] = useState(false);
+  const [newMemberProjectId, setNewMemberProjectId] = useState("");
+  const [newMemberProjectRoles, setNewMemberProjectRoles] = useState("contributor");
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilters>({});
   const [selectedId, setSelectedId] = useState<string>();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
@@ -404,6 +446,8 @@ export default function Home() {
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
+  const [memberSubmitting, setMemberSubmitting] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [principalsLoading, setPrincipalsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -417,6 +461,13 @@ export default function Home() {
     ...(activePrincipal?.roles ?? []),
     ...(selectedProjectId ? activePrincipal?.projectRoles?.[selectedProjectId] ?? [] : []),
   ])], [activePrincipal, selectedProjectId]);
+  const isOrganizationAdmin = activePrincipal?.roles.some(
+    (role) => normalizedRole(role) === "organization-admin",
+  ) ?? false;
+  const selectedOrganizationMember = useMemo(
+    () => organizationMembers.find((member) => member.id === selectedMemberId) ?? organizationMembers[0],
+    [organizationMembers, selectedMemberId],
+  );
 
   const loadAuthentication = useCallback(async () => {
     setAuthenticationReady(false);
@@ -695,10 +746,122 @@ export default function Home() {
     }
   }, [activePrincipalId, analyticsFilters, selectedProjectId]);
 
+  const loadOrganizationMembers = useCallback(async () => {
+    if (!isOrganizationAdmin) {
+      setOrganizationMembers([]);
+      setOrganizationProjects([]);
+      setOrganizationMembersLoading(false);
+      return;
+    }
+    setOrganizationMembersLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{
+        items: readonly OrganizationMember[];
+        projects: readonly Project[];
+      }>("/v1/admin/organization/members", undefined, activePrincipalId);
+      setOrganizationMembers(response.items);
+      setOrganizationProjects(response.projects);
+      setSelectedMemberId((current) =>
+        current && response.items.some((member) => member.id === current)
+          ? current
+          : response.items[0]?.id,
+      );
+    } catch (requestError) {
+      setOrganizationMembers([]);
+      setOrganizationProjects([]);
+      setError(requestError instanceof Error ? requestError.message : "Unable to load organization members.");
+    } finally {
+      setOrganizationMembersLoading(false);
+    }
+  }, [activePrincipalId, isOrganizationAdmin]);
+
+  const createOrganizationMember = useCallback(async () => {
+    setMemberSubmitting(true);
+    setError(undefined);
+    try {
+      const registration = await bridgeFetch<{ member: OrganizationMember }>(
+        "/v1/admin/organization/members",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            oidcSubject: newMemberSubject,
+            displayName: newMemberName,
+            roles: roleList(newMemberRoles),
+            allProjects: newMemberAllProjects,
+            projectMemberships: newMemberProjectId
+              ? [{ projectId: newMemberProjectId, roles: roleList(newMemberProjectRoles) }]
+              : [],
+          }),
+        },
+        activePrincipalId,
+      );
+      setNewMemberSubject("");
+      setNewMemberName("");
+      setNewMemberRoles("organization-member");
+      setNewMemberAllProjects(false);
+      setNewMemberProjectId("");
+      setNewMemberProjectRoles("contributor");
+      await loadOrganizationMembers();
+      setSelectedMemberId(registration.member.id);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to create organization member.");
+    } finally {
+      setMemberSubmitting(false);
+    }
+  }, [
+    activePrincipalId,
+    loadOrganizationMembers,
+    newMemberAllProjects,
+    newMemberName,
+    newMemberProjectId,
+    newMemberProjectRoles,
+    newMemberRoles,
+    newMemberSubject,
+  ]);
+
+  const updateOrganizationMember = useCallback(async () => {
+    if (!selectedOrganizationMember) return;
+    setMemberSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch<OrganizationMember>(
+        `/v1/admin/organization/members/${selectedOrganizationMember.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            expectedVersion: selectedOrganizationMember.version,
+            status: memberStatus,
+            roles: roleList(memberRoles),
+            allProjects: memberAllProjects,
+            projectMemberships: Object.entries(memberProjectRoles)
+              .filter((entry): entry is [string, string] => entry[1] !== undefined)
+              .map(([projectId, roles]) => ({ projectId, roles: roleList(roles) })),
+          }),
+        },
+        activePrincipalId,
+      );
+      await loadOrganizationMembers();
+      setSelectedMemberId(selectedOrganizationMember.id);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update organization member.");
+    } finally {
+      setMemberSubmitting(false);
+    }
+  }, [
+    activePrincipalId,
+    loadOrganizationMembers,
+    memberAllProjects,
+    memberProjectRoles,
+    memberRoles,
+    memberStatus,
+    selectedOrganizationMember,
+  ]);
+
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "analytics"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -742,6 +905,16 @@ export default function Home() {
   useEffect(() => {
     if (authenticationReady && signedIn && view === "analytics") void loadAnalytics();
   }, [authenticationReady, loadAnalytics, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "organization") void loadOrganizationMembers();
+  }, [authenticationReady, loadOrganizationMembers, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "organization" && !isOrganizationAdmin) {
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, signedIn, view]);
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
     const updated = await bridgeFetch<Notification>(`/v1/notifications/${notificationId}/read`, {
@@ -807,6 +980,7 @@ export default function Home() {
     decisions: "Decisions",
     assumptions: "Assumptions",
     runs: "Agent Runs",
+    organization: "Organization",
     analytics: "Analytics",
   };
 
@@ -834,6 +1008,18 @@ export default function Home() {
     setArtifactReviewStatus("commented");
     setArtifactReviewBody("");
   }, [selectedArtifactVersion?.id]);
+
+  useEffect(() => {
+    if (!selectedOrganizationMember) return;
+    setMemberStatus(selectedOrganizationMember.status);
+    setMemberRoles(selectedOrganizationMember.roles.join(", "));
+    setMemberAllProjects(selectedOrganizationMember.allProjects);
+    setMemberProjectRoles(Object.fromEntries(
+      selectedOrganizationMember.projectMemberships
+        .filter((membership) => membership.status === "active")
+        .map((membership) => [membership.projectId, membership.roles.join(", ")]),
+    ));
+  }, [selectedOrganizationMember]);
 
   useEffect(() => {
     const versions = selectedArtifact?.versions ?? [];
@@ -1172,6 +1358,13 @@ export default function Home() {
             aria-current={view === "runs" ? "page" : undefined}
             onClick={() => setView("runs")}
           >Agent Runs</button>
+          {isOrganizationAdmin ? (
+            <button
+              type="button"
+              aria-current={view === "organization" ? "page" : undefined}
+              onClick={() => setView("organization")}
+            >Organization</button>
+          ) : null}
           <button
             type="button"
             aria-current={view === "analytics" ? "page" : undefined}
@@ -1190,12 +1383,130 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <strong>{viewTitle[view]}</strong>
-          <span>{selectedProject?.name ?? "Select a project"}</span>
+          <span>{view === "organization" ? "Member access and roles" : selectedProject?.name ?? "Select a project"}</span>
         </header>
         <div className="content">
           {error ? <div className="error" role="alert">{error}</div> : null}
 
-          {view === "notifications" ? (
+          {view === "organization" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Organization members</h1>
+                  <p>Provision OIDC identities, suspend access, and assign organization or project roles with optimistic version checks.</p>
+                </div>
+                <button className="secondary" type="button" onClick={() => void loadOrganizationMembers()}>Refresh</button>
+              </div>
+              {organizationMembersLoading ? <div className="empty">Loading organization members…</div> : null}
+              {!organizationMembersLoading ? (
+                <div className="organization-stack">
+                  <form
+                    className="organization-panel member-create-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void createOrganizationMember();
+                    }}
+                  >
+                    <div className="organization-panel-heading">
+                      <div><h2>Add an OIDC member</h2><p>The subject must match the configured identity provider exactly.</p></div>
+                    </div>
+                    <div className="member-form-grid">
+                      <label>Display name<input value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} required minLength={2} /></label>
+                      <label>OIDC subject<input value={newMemberSubject} onChange={(event) => setNewMemberSubject(event.target.value)} required placeholder="auth0|user-id" /></label>
+                      <label>Organization roles<input value={newMemberRoles} onChange={(event) => setNewMemberRoles(event.target.value)} placeholder="organization-member, business-analyst" /></label>
+                      <label>Initial project
+                        <select value={newMemberProjectId} onChange={(event) => setNewMemberProjectId(event.target.value)}>
+                          <option value="">No initial project</option>
+                          {organizationProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                        </select>
+                      </label>
+                      <label>Initial project roles<input value={newMemberProjectRoles} onChange={(event) => setNewMemberProjectRoles(event.target.value)} disabled={!newMemberProjectId} /></label>
+                      <label className="checkbox-label"><input type="checkbox" checked={newMemberAllProjects} onChange={(event) => setNewMemberAllProjects(event.target.checked)} />Access every organization project</label>
+                    </div>
+                    <div className="member-form-actions">
+                      <small>Role names are normalized and duplicates are removed. Creating members never grants approval to an agent identity.</small>
+                      <button className="primary" type="submit" disabled={memberSubmitting || !newMemberName.trim() || !newMemberSubject.trim()}>Add member</button>
+                    </div>
+                  </form>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Directory and access</h2><p>Disabled memberships fail authentication on the next request.</p></div>
+                      <small>{organizationMembers.length} members</small>
+                    </div>
+                    {organizationMembers.length === 0 ? <div className="empty">No organization members are configured.</div> : (
+                      <div className="member-directory-layout">
+                        <div className="member-list" aria-label="Organization members">
+                          {organizationMembers.map((member) => (
+                            <button
+                              key={member.id}
+                              type="button"
+                              className={selectedOrganizationMember?.id === member.id ? "member-row selected" : "member-row"}
+                              onClick={() => setSelectedMemberId(member.id)}
+                            >
+                              <span><strong>{member.displayName}</strong><small>{member.roles.join(" · ") || "No organization roles"}</small></span>
+                              <span className={`status status-${member.status}`}>{member.status}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {selectedOrganizationMember ? (
+                          <form
+                            className="member-editor"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void updateOrganizationMember();
+                            }}
+                          >
+                            <div className="member-editor-heading">
+                              <div><h3>{selectedOrganizationMember.displayName}</h3><small>{selectedOrganizationMember.oidcSubject}</small></div>
+                              <small>Version {selectedOrganizationMember.version}</small>
+                            </div>
+                            <label>Status
+                              <select value={memberStatus} onChange={(event) => setMemberStatus(event.target.value as OrganizationMember["status"])}>
+                                <option value="active">Active</option>
+                                <option value="disabled">Disabled</option>
+                              </select>
+                            </label>
+                            <label>Organization roles<input value={memberRoles} onChange={(event) => setMemberRoles(event.target.value)} placeholder="organization-member" /></label>
+                            <label className="checkbox-label"><input type="checkbox" checked={memberAllProjects} onChange={(event) => setMemberAllProjects(event.target.checked)} />Access every organization project</label>
+                            <fieldset className="project-membership-editor">
+                              <legend>Project memberships and roles</legend>
+                              {organizationProjects.length === 0 ? <small>No projects are registered.</small> : organizationProjects.map((project) => {
+                                const enabled = memberProjectRoles[project.id] !== undefined;
+                                return (
+                                  <div key={project.id} className="project-membership-row">
+                                    <label className="checkbox-label"><input
+                                      type="checkbox"
+                                      checked={enabled}
+                                      onChange={(event) => setMemberProjectRoles((current) => ({
+                                        ...current,
+                                        [project.id]: event.target.checked ? current[project.id] ?? "contributor" : undefined,
+                                      }))}
+                                    />{project.name}</label>
+                                    <input
+                                      aria-label={`${project.name} roles`}
+                                      value={memberProjectRoles[project.id] ?? ""}
+                                      disabled={!enabled}
+                                      placeholder="contributor, qa-lead"
+                                      onChange={(event) => setMemberProjectRoles((current) => ({ ...current, [project.id]: event.target.value }))}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </fieldset>
+                            <div className="member-form-actions">
+                              <small>The final active organization administrator cannot be disabled or demoted.</small>
+                              <button className="primary" type="submit" disabled={memberSubmitting}>Save access</button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              ) : null}
+            </>
+          ) : view === "notifications" ? (
             <>
               <div className="title-row">
                 <div>

@@ -36,6 +36,13 @@ const owner: Principal = {
   displayName: "Owner",
 };
 
+const organizationAdmin: Principal = {
+  ...owner,
+  id: "usr_org_admin",
+  roles: ["organization-admin"],
+  displayName: "Organization Admin",
+};
+
 const outsider: Principal = {
   ...owner,
   id: "usr_outsider",
@@ -144,6 +151,7 @@ async function runtime(metrics?: BridgeMetrics): Promise<{ repository: InMemoryB
     repository,
     service: new BridgeService(repository, {
       publicBaseUrl: "http://bridge.test/review",
+      identityIssuer: "https://identity.example/",
       ...(metrics ? { metrics } : {}),
       now: () => new Date("2026-01-01T00:00:00.000Z"),
       id: (() => {
@@ -156,6 +164,35 @@ async function runtime(metrics?: BridgeMetrics): Promise<{ repository: InMemoryB
       })(),
     }),
   };
+}
+
+async function seedOrganizationAdministrator(repository: InMemoryBridgeRepository): Promise<void> {
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  await repository.saveOrganization({
+    id: project.organizationId,
+    externalIdentityProviderId: "auth0-org-one",
+    slug: "one",
+    name: "Organization One",
+    createdAt: timestamp,
+  });
+  await repository.savePrincipalIdentity({
+    id: organizationAdmin.id,
+    type: "human",
+    displayName: organizationAdmin.displayName,
+    oidcIssuer: "https://identity.example/",
+    oidcSubject: "auth0|admin",
+    createdAt: timestamp,
+  });
+  await repository.saveOrganizationMembership({
+    organizationId: project.organizationId,
+    principalId: organizationAdmin.id,
+    status: "active",
+    roles: organizationAdmin.roles,
+    allProjects: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+  });
 }
 
 class FailingAuditRepository extends InMemoryBridgeRepository {
@@ -202,6 +239,99 @@ describe("Bridge decision workflow", () => {
       project,
     ]);
     expect(await service.listProjects(outsider)).toEqual([]);
+  });
+
+  it("creates, lists, audits, and version-updates organization members", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    const input = {
+      oidcSubject: "auth0|qa-member",
+      displayName: "QA Member",
+      roles: ["Organization Member"],
+      allProjects: false,
+      projectMemberships: [{ projectId: project.id, roles: ["QA Lead", "qa-lead"] }],
+    };
+
+    const created = await service.createOrganizationMember(organizationAdmin, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      member: {
+        displayName: "QA Member",
+        status: "active",
+        roles: ["organization-member"],
+        allProjects: false,
+        version: 1,
+        projectMemberships: [{
+          projectId: project.id,
+          status: "active",
+          roles: ["qa-lead"],
+          version: 1,
+        }],
+      },
+    });
+    await expect(service.createOrganizationMember(organizationAdmin, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.listOrganizationMembers(organizationAdmin)).resolves.toHaveLength(2);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
+      { action: "organization_member.created", subjectId: created.member.id },
+    ]);
+
+    const updated = await service.updateOrganizationMember(organizationAdmin, created.member.id, {
+      expectedVersion: 1,
+      status: "active",
+      roles: ["organization-member", "business-analyst"],
+      allProjects: true,
+      projectMemberships: [{ projectId: project.id, roles: ["project-admin"] }],
+    });
+    expect(updated).toMatchObject({
+      version: 2,
+      roles: ["business-analyst", "organization-member"],
+      allProjects: true,
+      projectMemberships: [{ status: "active", roles: ["project-admin"], version: 2 }],
+    });
+    await expect(service.updateOrganizationMember(organizationAdmin, created.member.id, {
+      expectedVersion: 1,
+      status: "disabled",
+      roles: [],
+      allProjects: false,
+      projectMemberships: [],
+    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 2 } });
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
+      { action: "organization_member.updated", subjectId: created.member.id },
+      { action: "organization_member.created", subjectId: created.member.id },
+    ]);
+  });
+
+  it("requires a human organization admin and protects tenant scope and the final admin", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    await expect(service.listOrganizationMembers(owner)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.createOrganizationMember(agent, {
+      oidcSubject: "auth0|blocked",
+      displayName: "Blocked Member",
+      roles: [],
+      allProjects: false,
+      projectMemberships: [],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await repository.saveProject({ ...project, id: "prj_other", organizationId: "org_two" });
+    await expect(service.createOrganizationMember(organizationAdmin, {
+      oidcSubject: "auth0|cross-tenant",
+      displayName: "Cross Tenant",
+      roles: [],
+      allProjects: false,
+      projectMemberships: [{ projectId: "prj_other", roles: ["contributor"] }],
+    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+
+    await expect(service.updateOrganizationMember(organizationAdmin, organizationAdmin.id, {
+      expectedVersion: 1,
+      status: "disabled",
+      roles: [],
+      allProjects: false,
+      projectMemberships: [],
+    })).rejects.toMatchObject({ code: "LAST_ORGANIZATION_ADMIN" });
   });
 
   it("records, ranks, expires, and human-resolves visible assumptions", async () => {
@@ -1567,6 +1697,7 @@ describe("Bridge decision workflow", () => {
       allProjects: false,
       createdAt: timestamp,
       updatedAt: timestamp,
+      version: 1,
     });
     await repository.saveProjectMembership({
       organizationId: project.organizationId,
@@ -1576,6 +1707,7 @@ describe("Bridge decision workflow", () => {
       roles: ["project-admin"],
       createdAt: timestamp,
       updatedAt: timestamp,
+      version: 1,
     });
 
     await expect(repository.resolveOidcPrincipal({
@@ -1598,6 +1730,7 @@ describe("Bridge decision workflow", () => {
       allProjects: false,
       createdAt: timestamp,
       updatedAt: "2026-01-02T00:00:00.000Z",
+      version: 2,
     });
     await expect(repository.resolveOidcPrincipal({
       issuer: "https://identity.example/",

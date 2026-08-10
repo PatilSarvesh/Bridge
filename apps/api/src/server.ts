@@ -8,7 +8,8 @@ import { buildApp } from "./app.js";
 const databaseUrl = process.env.DATABASE_URL;
 const publicWebUrl = process.env.BRIDGE_PUBLIC_WEB_URL ?? "http://127.0.0.1:3000";
 const publicApiUrl = process.env.BRIDGE_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
-const oidcEnabled = Boolean(process.env.BRIDGE_OIDC_ISSUER?.trim());
+const configuredOidcIssuer = process.env.BRIDGE_OIDC_ISSUER?.trim();
+const oidcEnabled = Boolean(configuredOidcIssuer);
 if (process.env.NODE_ENV === "production" && !oidcEnabled) {
   throw new Error("BRIDGE_OIDC_ISSUER is required in production.");
 }
@@ -22,13 +23,21 @@ const runtime = postgresStore
       seedFixtures: !oidcEnabled,
       seedQuestion: !oidcEnabled,
       seedArtifact: !oidcEnabled,
-      serviceOptions: { publicBaseUrl: publicWebUrl, metrics },
+      serviceOptions: {
+        publicBaseUrl: publicWebUrl,
+        ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),
+        metrics,
+      },
     })
   : await createDemoRuntime({
       seedFixtures: !oidcEnabled,
       seedQuestion: !oidcEnabled,
       seedArtifact: !oidcEnabled,
-      serviceOptions: { publicBaseUrl: publicWebUrl, metrics },
+      serviceOptions: {
+        publicBaseUrl: publicWebUrl,
+        ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),
+        metrics,
+      },
     });
 
 function requiredEnvironment(name: string): string {
@@ -86,15 +95,22 @@ if (oidcEnabled) {
         oidcSubject: values.BRIDGE_BOOTSTRAP_ADMIN_SUBJECT,
         createdAt: now,
       });
-      await repository.saveOrganizationMembership({
-        organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
-        principalId: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
-        status: "active",
-        roles: ["organization-admin", "project-admin"],
-        allProjects: true,
-        createdAt: now,
-        updatedAt: now,
-      });
+      const existingMembership = await repository.getOrganizationMembership(
+        values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
+        values.BRIDGE_BOOTSTRAP_ADMIN_ID,
+      );
+      if (!existingMembership) {
+        await repository.saveOrganizationMembership({
+          organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
+          principalId: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
+          status: "active",
+          roles: ["organization-admin", "project-admin"],
+          allProjects: true,
+          createdAt: now,
+          updatedAt: now,
+          version: 1,
+        });
+      }
     });
   }
 }

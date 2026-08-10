@@ -305,6 +305,7 @@ The following is the logical schema. Physical names may change during migrations
 organizations
 users
 organization_memberships
+organization_audit_events
 teams
 team_memberships
 roles
@@ -317,6 +318,8 @@ ownership_rules
 agent_identities
 service_identities
 ```
+
+The current implementation uses versioned organization and project membership rows plus a separate organization-level audit stream for member creation and access changes. Organization administrators may manage membership but do not gain decision-owner or specification-approver authority merely from that role.
 
 #### Work and knowledge
 

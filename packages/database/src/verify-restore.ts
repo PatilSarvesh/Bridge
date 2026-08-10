@@ -19,6 +19,7 @@ export const restoreRequiredTables = [
   "bridge_artifact_versions",
   "bridge_context_snapshots",
   "bridge_audit_events",
+  "bridge_organization_audit_events",
   "bridge_notifications",
   "bridge_outbox_events",
   "bridge_outbox_deliveries",
@@ -125,6 +126,7 @@ export async function verifyRestoredDatabase(
       union all select 'bridge_artifacts', count(*)::integer from bridge_artifacts
       union all select 'bridge_artifact_versions', count(*)::integer from bridge_artifact_versions
       union all select 'bridge_audit_events', count(*)::integer from bridge_audit_events
+      union all select 'bridge_organization_audit_events', count(*)::integer from bridge_organization_audit_events
       union all select 'bridge_notifications', count(*)::integer from bridge_notifications
       union all select 'bridge_outbox_events', count(*)::integer from bridge_outbox_events
       union all select 'bridge_outbox_deliveries', count(*)::integer from bridge_outbox_deliveries

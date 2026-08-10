@@ -47,7 +47,7 @@ export const demoPrincipals = {
     organizationId: "org_acme",
     projectIds: [demoProject.id],
     allProjects: true,
-    roles: ["architecture-owner", "project-admin", "security-reviewer"],
+    roles: ["architecture-owner", "organization-admin", "project-admin", "security-reviewer"],
     displayName: "Sarvesh Patil",
   },
   contributor: {
@@ -131,7 +131,10 @@ export async function createDemoRuntimeWithRepository(
   repository: BridgeRepository,
   options: DemoRuntimeOptions = {},
 ): Promise<DemoRuntime> {
-  const service = new BridgeService(repository, options.serviceOptions);
+  const service = new BridgeService(repository, {
+    identityIssuer: demoOidcIssuer,
+    ...options.serviceOptions,
+  });
   if (options.seedFixtures === false) {
     return {
       repository,
@@ -161,6 +164,7 @@ export async function createDemoRuntimeWithRepository(
       allProjects: principal.allProjects ?? false,
       createdAt: timestamp,
       updatedAt: timestamp,
+      version: 1,
     });
     if (principal.organizationId === demoProject.organizationId) {
       await repository.saveProjectMembership({
@@ -171,6 +175,7 @@ export async function createDemoRuntimeWithRepository(
         roles: principal.roles,
         createdAt: timestamp,
         updatedAt: timestamp,
+        version: 1,
       });
     }
   }
