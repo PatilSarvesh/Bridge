@@ -1539,4 +1539,70 @@ describe("Bridge decision workflow", () => {
     await expect(service.getProjectAnalytics(outsider, project.id, {}))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("resolves OIDC identities only through active organization and project memberships", async () => {
+    const repository = new InMemoryBridgeRepository();
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    await repository.saveOrganization({
+      id: project.organizationId,
+      externalIdentityProviderId: "auth0-org-one",
+      slug: "one",
+      name: "Organization One",
+      createdAt: timestamp,
+    });
+    await repository.saveProject(project);
+    await repository.savePrincipalIdentity({
+      id: "usr_oidc",
+      type: "human",
+      displayName: "OIDC Member",
+      oidcIssuer: "https://identity.example/",
+      oidcSubject: "auth0|member",
+      createdAt: timestamp,
+    });
+    await repository.saveOrganizationMembership({
+      organizationId: project.organizationId,
+      principalId: "usr_oidc",
+      status: "active",
+      roles: ["organization-member"],
+      allProjects: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await repository.saveProjectMembership({
+      organizationId: project.organizationId,
+      projectId: project.id,
+      principalId: "usr_oidc",
+      status: "active",
+      roles: ["project-admin"],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    await expect(repository.resolveOidcPrincipal({
+      issuer: "https://identity.example/",
+      subject: "auth0|member",
+      organizationExternalId: "auth0-org-one",
+    })).resolves.toMatchObject({
+      id: "usr_oidc",
+      organizationId: project.organizationId,
+      projectIds: [project.id],
+      roles: ["organization-member"],
+      projectRoles: { [project.id]: ["project-admin"] },
+    });
+
+    await repository.saveOrganizationMembership({
+      organizationId: project.organizationId,
+      principalId: "usr_oidc",
+      status: "disabled",
+      roles: ["organization-member"],
+      allProjects: false,
+      createdAt: timestamp,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    await expect(repository.resolveOidcPrincipal({
+      issuer: "https://identity.example/",
+      subject: "auth0|member",
+      organizationExternalId: "auth0-org-one",
+    })).resolves.toBeUndefined();
+  });
 });

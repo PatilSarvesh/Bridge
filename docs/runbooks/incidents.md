@@ -38,17 +38,17 @@ Escalate immediately for destructive statements, constraint failures involving t
 
 ## Identity outage
 
-Authentication, SSO, organization onboarding, and an external identity provider are intentionally absent from the current fixed-principal prototype. Therefore there is no active production identity dependency to repair in this repository, and readiness checks only the repository.
+OIDC is now an active dependency for authenticated web/API deployments. Symptoms include provider authorization/token failures, JWKS fetch or key-rotation errors, valid users receiving `UNAUTHENTICATED`, or a broad increase in `401` metrics. Readiness still checks the canonical repository only, so an identity outage may leave `/health/ready` green.
 
-If identity is introduced later:
+1. Never bypass authentication, enable the development principal header in production, or substitute a shared human/agent principal.
+2. Confirm issuer/audience/client/callback configuration and provider status without printing client secrets, access tokens, cookies, authorization codes, or customer claims.
+3. Stop protected writes if token signature, issuer, audience, expiry, organization, or membership cannot be verified. Do not trust roles copied from a token.
+4. Distinguish provider failure from a Bridge directory problem: inspect only scoped membership status and external organization mapping through an approved operator path.
+5. Preserve accepted decisions/specifications. If the approved deployment architecture provides a separate authenticated read-only continuity path, enable only that reviewed path; do not invent an incident-time bypass.
+6. After recovery, validate login state/nonce, callback, `/v1/auth/me`, project visibility, one authorized action, one unauthorized cross-project action, logout, and a bearer-token request.
+7. Review authentication failures by correlation ID and safe metrics/log fields. Record counts and configuration versions, never raw tokens or identity-provider responses.
 
-1. never bypass authentication or substitute a shared human/agent principal;
-2. stop protected writes if identity or policy claims cannot be verified;
-3. keep already accepted decisions and approved specifications read-only where the approved security design permits;
-4. use provider status and private deployment telemetry, then validate a real user and agent flow after recovery;
-5. add the identity dependency to readiness only if inability to verify identity makes the process unsafe for all traffic.
-
-An identity implementation requires the product owner to reopen the explicit scope boundary first.
+Escalate immediately for suspected key/issuer compromise, unexpected organization mapping, disabled-member access, cross-tenant visibility, callback manipulation, or session-cookie leakage. Rotate affected provider/client/session secrets through deployment secret management and invalidate sessions according to the provider incident plan.
 
 ## Notification provider outage
 

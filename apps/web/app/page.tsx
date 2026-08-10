@@ -15,6 +15,13 @@ interface Principal {
   readonly id: string;
   readonly displayName: string;
   readonly roles: readonly string[];
+  readonly projectRoles?: Readonly<Record<string, readonly string[]>>;
+}
+
+interface AuthenticationConfiguration {
+  readonly mode: "development" | "oidc";
+  readonly loginUrl?: string;
+  readonly logoutUrl?: string;
 }
 
 interface Option {
@@ -296,6 +303,7 @@ async function bridgeFetch<T>(
 ): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
       "x-bridge-correlation-id": `web_${crypto.randomUUID().replaceAll("-", "")}`,
@@ -344,6 +352,9 @@ export default function Home() {
   const requestedDecisionIdRef = useRef<string | undefined>(undefined);
   const [view, setView] = useState<View>("inbox");
   const [principals, setPrincipals] = useState<readonly Principal[]>([]);
+  const [authentication, setAuthentication] = useState<AuthenticationConfiguration>();
+  const [authenticationReady, setAuthenticationReady] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const [activePrincipalId, setActivePrincipalId] = useState(defaultPrincipalId);
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
@@ -402,6 +413,35 @@ export default function Home() {
     () => principals.find((principal) => principal.id === activePrincipalId),
     [activePrincipalId, principals],
   );
+  const activeRoles = useMemo(() => [...new Set([
+    ...(activePrincipal?.roles ?? []),
+    ...(selectedProjectId ? activePrincipal?.projectRoles?.[selectedProjectId] ?? [] : []),
+  ])], [activePrincipal, selectedProjectId]);
+
+  const loadAuthentication = useCallback(async () => {
+    setAuthenticationReady(false);
+    try {
+      const configuration = await bridgeFetch<AuthenticationConfiguration>("/v1/auth/config");
+      setAuthentication(configuration);
+      if (configuration.mode === "development") {
+        setSignedIn(true);
+        return;
+      }
+      try {
+        const principal = await bridgeFetch<Principal>("/v1/auth/me");
+        setPrincipals([principal]);
+        setActivePrincipalId(principal.id);
+        setSignedIn(true);
+      } catch {
+        setSignedIn(false);
+      }
+    } catch (requestError) {
+      setSignedIn(false);
+      setError(requestError instanceof Error ? requestError.message : "Unable to load authentication configuration.");
+    } finally {
+      setAuthenticationReady(true);
+    }
+  }, []);
 
   const updateAnalyticsFilter = useCallback((key: AnalyticsFilterKey, value: string) => {
     setAnalyticsFilters((current) => {
@@ -680,23 +720,28 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    void loadPrincipals();
-  }, [loadPrincipals]);
+    void loadAuthentication();
+  }, [loadAuthentication]);
 
   useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+    if (authenticationReady && signedIn) void loadPrincipals();
+  }, [authenticationReady, loadPrincipals, signedIn]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn) void loadProjects();
+  }, [authenticationReady, loadProjects, signedIn]);
+
+  useEffect(() => {
+    if (!authenticationReady || !signedIn) return;
     void loadQuestions();
     void loadArtifacts();
     void loadNotifications();
     void loadReferenceData();
-  }, [loadArtifacts, loadNotifications, loadQuestions, loadReferenceData]);
+  }, [authenticationReady, loadArtifacts, loadNotifications, loadQuestions, loadReferenceData, signedIn]);
 
   useEffect(() => {
-    if (view === "analytics") void loadAnalytics();
-  }, [loadAnalytics, view]);
+    if (authenticationReady && signedIn && view === "analytics") void loadAnalytics();
+  }, [authenticationReady, loadAnalytics, signedIn, view]);
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
     const updated = await bridgeFetch<Notification>(`/v1/notifications/${notificationId}/read`, {
@@ -737,7 +782,7 @@ export default function Home() {
   const selectedArtifactVersion = currentVersion(selectedArtifact);
   const canReviewSelectedArtifact = Boolean(
     selectedArtifact && activePrincipal &&
-    (selectedArtifact.reviewerIds.includes(activePrincipalId) || activePrincipal.roles.includes("project-admin")),
+    (selectedArtifact.reviewerIds.includes(activePrincipalId) || activeRoles.includes("project-admin")),
   );
   const selectedArtifactHasChangesRequested = Boolean(
     selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
@@ -1036,6 +1081,26 @@ export default function Home() {
     }
   };
 
+  if (!authenticationReady) {
+    return <main className="auth-shell"><div className="auth-card">Loading Bridge…</div></main>;
+  }
+
+  if (authentication?.mode === "oidc" && !signedIn) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card" aria-labelledby="bridge-sign-in-title">
+          <div className="auth-mark" aria-hidden="true">B</div>
+          <small>Shared decisions and specifications</small>
+          <h1 id="bridge-sign-in-title">Sign in to Bridge</h1>
+          <p>Your identity provider verifies you. Bridge then applies active organization and project memberships on every request.</p>
+          {error ? <div className="error" role="alert">{error}</div> : null}
+          <a className="auth-action" href={authentication.loginUrl}>Continue with SSO</a>
+          <small>Access is denied when your Bridge organization membership is missing or disabled.</small>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1054,21 +1119,23 @@ export default function Home() {
             ))}
           </select>
         </div>
-        <div className="reviewer">
-          <label htmlFor="bridge-reviewer"><small>Reviewing as</small></label>
-          <select
-            id="bridge-reviewer"
-            value={activePrincipalId}
-            disabled={principalsLoading || principals.length === 0}
-            onChange={(event) => setActivePrincipalId(event.target.value)}
-          >
-            {principals.length === 0 ? <option value="">No reviewers</option> : null}
-            {principals.map((principal) => (
-              <option key={principal.id} value={principal.id}>{principal.displayName}</option>
-            ))}
-          </select>
-          <small>{activePrincipal?.roles.join(" · ") ?? "Loading reviewer roles…"}</small>
-        </div>
+        {authentication?.mode === "development" ? (
+          <div className="reviewer">
+            <label htmlFor="bridge-reviewer"><small>Reviewing as</small></label>
+            <select
+              id="bridge-reviewer"
+              value={activePrincipalId}
+              disabled={principalsLoading || principals.length === 0}
+              onChange={(event) => setActivePrincipalId(event.target.value)}
+            >
+              {principals.length === 0 ? <option value="">No reviewers</option> : null}
+              {principals.map((principal) => (
+                <option key={principal.id} value={principal.id}>{principal.displayName}</option>
+              ))}
+            </select>
+            <small>{activeRoles.join(" · ") || "Loading reviewer roles…"}</small>
+          </div>
+        ) : null}
         <nav aria-label="Bridge navigation">
           <button
             type="button"
@@ -1111,7 +1178,13 @@ export default function Home() {
             onClick={() => setView("analytics")}
           >Analytics</button>
         </nav>
-        <div className="identity"><strong>{activePrincipal?.displayName ?? "Local reviewer"}</strong><small>Prototype identity</small></div>
+        <div className="identity">
+          <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
+          <small>{authentication?.mode === "oidc" ? "Authenticated member" : "Development identity"}</small>
+          {authentication?.mode === "oidc" && authentication.logoutUrl ? (
+            <a href={authentication.logoutUrl}>Sign out</a>
+          ) : null}
+        </div>
       </aside>
 
       <section className="workspace">
@@ -1926,7 +1999,7 @@ export default function Home() {
                               ))}
                             </div>
                           )}
-                          {selectedQuestion.status !== "accepted" && activePrincipal?.roles.includes("security-reviewer") && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId) ? (
+                          {selectedQuestion.status !== "accepted" && activeRoles.includes("security-reviewer") && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId) ? (
                             <div className="response-form">
                               <label htmlFor="review-status">Review outcome</label>
                               <select

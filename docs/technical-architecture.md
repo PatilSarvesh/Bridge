@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Active prototype constraint:** Organization onboarding and authentication are intentionally not implemented. Fixed local principals exercise authorization seams, but they do not provide production security. Identity sections are retained only as future design reference and require explicit founder approval before implementation.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication and durable membership resolution are active; fixed principals remain development-only. CLI/MCP OAuth, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -67,7 +67,7 @@ The reviewed migrations normalize projects, agent runs, continuation locators, a
 
 Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
-Row-level security, production database roles, external delivery adapters, and a real PostgreSQL runtime validation remain future work. The current fixed-principal prototype is not a production tenant-security implementation.
+Row-level security, production database roles, external delivery adapters, and live identity-provider/deployment validation remain future work. OIDC plus application membership checks materially improve the boundary but are not by themselves a complete production tenant-security implementation.
 
 ## 4. System context
 
@@ -85,7 +85,7 @@ flowchart LR
     OUT --> WK["Bridge worker"]
     WK --> EMAIL["Email provider"]
     WK --> EXT["Chat, source-control, and work-item integrations"]
-    IDP["Future identity provider — deferred"] -.-> W
+    IDP["OIDC identity provider"] --> W
     IDP -.-> MCP
     IDP -.-> CLI
 ```
@@ -101,7 +101,7 @@ Responsibilities:
 - Administrative configuration for ownership, roles, policy, and integrations.
 - No direct database access from the browser.
 
-The prototype web application calls the public API using a fixed local principal identifier. This mechanism must not be exposed as production authentication.
+The web application calls the public API with an encrypted OIDC session cookie in authenticated mode. Local development can instead use a fixed principal identifier; production startup rejects that mechanism.
 
 ### 5.2 Public API
 
@@ -215,9 +215,9 @@ infrastructure implements repository and integration interfaces
 
 The domain package must not depend on web frameworks, MCP transports, SQL clients, or vendor SDKs.
 
-## 7. Future tenant and identity model — not active implementation scope
+## 7. Tenant and identity model
 
-This section is a production design reference only. The active prototype uses fixed local principals and does not implement organization onboarding, tokens, login, federation, or credential storage.
+The web/API foundation implements the human OIDC portion of this model. Other principal flows remain the target architecture and are identified below where incomplete.
 
 ### 7.1 Principal types
 
@@ -500,7 +500,11 @@ Current prototype behavior adds these conservative rules:
 ### 12.2 Initial endpoint groups
 
 ```text
-GET    /v1/me
+GET    /v1/auth/config
+GET    /v1/auth/login
+GET    /v1/auth/callback
+GET    /v1/auth/logout
+GET    /v1/auth/me
 GET    /v1/principals
 GET    /v1/organizations/:organizationId/projects
 POST   /v1/projects
@@ -558,9 +562,9 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin`. In the fixed-principal prototype, outbox operations and project analytics require a human project administrator with project access; production token scopes remain deferred with authentication.
+Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Additional OAuth admin scopes remain deferred.
 
-The prototype `GET /v1/principals` route is intentionally limited to same-organization human summaries from fixed development fixtures. The web **Reviewing as** selector uses those summaries to exercise role-aware policy; it is a reviewer-context switcher, not authentication or organization onboarding. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
+`GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
 ## 13. MCP architecture
 
@@ -979,7 +983,7 @@ Each environment has separate databases, object-storage namespaces, OAuth client
 
 ### 24.2 Local development
 
-The current prototype needs no infrastructure when `DATABASE_URL` is absent and uses seeded in-memory state. For durable development, provide PostgreSQL, run `pnpm db:migrate`, and then start the API with `DATABASE_URL` set. The API seeds the fixed demo project and sample records idempotently. No authentication issuer or organization-onboarding flow is implemented.
+The local development mode needs no infrastructure when `DATABASE_URL` is absent and uses seeded in-memory state plus the fixed reviewer switcher. For durable OIDC development, provide PostgreSQL, run `pnpm db:migrate`, configure the issuer/audience/client/session variables documented in `docs/authentication.md`, and start the API. Production mode fails startup without OIDC; the fixed principal header is development-only.
 
 ### 24.3 Deployment units
 
@@ -1105,7 +1109,7 @@ The fresh-repository portion of gate 2 is now validated twice for the local Code
 
 The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, the configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox now routes direct owners, assigned roles, project administrators, and protected-review principals, with status/risk/category/role filters. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; comment editing, notification preferences, due-date filtering, and reassignment remain future work. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
 
-Role-aware routing is validated locally as a policy seam: a question assigned to `qa-lead` can be accepted by the fixed QA Lead principal, while an ordinary contributor receives a deterministic denial. Project role configuration and production identity remain deferred.
+Role-aware routing is validated locally: a question assigned to `qa-lead` can be accepted by a matching member, while an ordinary contributor receives a deterministic denial. OIDC memberships now support project-specific role data; administrator-managed role configuration remains deferred.
 
 ## 29. Recommended first vertical slice
 

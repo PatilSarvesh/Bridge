@@ -203,11 +203,11 @@ CLI and MCP call the same API and application policies. Repository snapshots inc
 
 Use one primary region during the pilot. Add regional deployment or data residency only after customer requirements justify it.
 
-### PILOT-019 — Identity and OAuth (deferred)
+### PILOT-019 — Identity and OAuth (reopened)
 
-**Decision:** Do not implement organization onboarding or authentication in the active prototype. Use fixed local development principals at the API boundary. This is a deliberate product-scope constraint and must not be represented as production security.
+**Decision:** On 2026-08-10 the founder explicitly reopened authentication and organization scope. Implement the Auth0-compatible OIDC web/API foundation while retaining fixed principals only as an explicit non-production development mode.
 
-The Auth0 design below is retained as prior research only. It is not approved implementation work until the founder explicitly reopens identity scope.
+The first slice includes durable organizations, OIDC identities, active/disabled organization memberships, project memberships, project-scoped role resolution, browser Authorization Code with PKCE, and API bearer validation. Initial organization administration is an operator-controlled environment bootstrap. Self-service invitations, CLI login, standalone MCP OAuth, service scopes, and enterprise provisioning remain later slices.
 
 **Flow decisions:**
 
@@ -217,7 +217,7 @@ The Auth0 design below is retained as prior research only. It is not approved im
 - CI: Client Credentials using a dedicated service identity and narrow project scopes.
 - Enterprise federation: Auth0 connection to customer identity providers when required.
 
-**Prior rationale:** Auth0 provides standards-aligned MCP authorization guidance and avoids building an authorization server before product validation. Its Device Authorization Flow has organization limitations, so a future CLI design would use PKCE with a local callback.
+**Rationale:** Auth0 provides standards-aligned OIDC/OAuth behavior without making Bridge an authorization server. Authority remains in Bridge memberships rather than token role claims. Auth0 Device Authorization Flow has organization limitations, so the future CLI design retains PKCE with a local callback.
 
 **Evidence:**
 

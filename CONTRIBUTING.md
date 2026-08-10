@@ -1,6 +1,6 @@
 # Contributing to Bridge
 
-Thanks for helping build Bridge. The project is currently a functional prototype: the core question/specification workflow is implemented, while authentication, organization onboarding, production identity, and enterprise integrations are intentionally deferred.
+Thanks for helping build Bridge. The project is currently a functional prototype: the core question/specification workflow and OIDC web/API plus organization-membership foundation are implemented, while CLI/MCP OAuth, membership administration, production hardening, and enterprise integrations remain incomplete.
 
 ## Local setup
 
@@ -42,7 +42,7 @@ Never use a shared or production database for tests.
 2. Keep changes inside the existing package boundaries. The API/application/domain contracts are the source of truth; CLI, MCP, and web are adapters.
 3. Add regression tests for changed behavior.
 4. For database changes, add a forward-only Drizzle migration and update schema, mappers, repositories, metadata, and tests together.
-5. Preserve the explicit no-authentication/no-organization-onboarding boundary and MCP-independent operation.
+5. Preserve the reopened identity scope boundaries documented in `docs/authentication.md`, and keep every important workflow MCP-independent.
 6. Update the living context and backlog when behavior, decisions, validation, or limitations change.
 7. Run `pnpm check` before opening a pull request.
 

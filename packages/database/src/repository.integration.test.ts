@@ -51,7 +51,40 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     let contextConsumerRunId: string;
     let deliveryEventId: string;
     try {
+      await firstStore.repository.saveOrganization({
+        id: project.organizationId,
+        externalIdentityProviderId: `auth0-${project.organizationId}`,
+        slug: `integration-${suffix}`,
+        name: "PostgreSQL Integration Organization",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
       await firstStore.repository.saveProject(project);
+      await firstStore.repository.savePrincipalIdentity({
+        id: owner.id,
+        type: owner.type,
+        displayName: owner.displayName,
+        oidcIssuer: "https://identity.example/",
+        oidcSubject: `auth0|${owner.id}`,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await firstStore.repository.saveOrganizationMembership({
+        organizationId: project.organizationId,
+        principalId: owner.id,
+        status: "active",
+        roles: ["organization-member"],
+        allProjects: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await firstStore.repository.saveProjectMembership({
+        organizationId: project.organizationId,
+        projectId: project.id,
+        principalId: owner.id,
+        status: "active",
+        roles: owner.roles,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
       const service = new BridgeService(firstStore.repository);
       const registration = await service.startRun(agent, project.id, {
         idempotencyKey: `run-${suffix}`,
@@ -204,6 +237,15 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     const secondStore = createPostgresBridgeStore(databaseUrl);
     try {
       const service = new BridgeService(secondStore.repository);
+      await expect(secondStore.repository.resolveOidcPrincipal({
+        issuer: "https://identity.example/",
+        subject: `auth0|${owner.id}`,
+        organizationExternalId: `auth0-${project.organizationId}`,
+      })).resolves.toMatchObject({
+        id: owner.id,
+        projectIds: [project.id],
+        projectRoles: { [project.id]: owner.roles },
+      });
       expect(await service.getRun(agent, runId)).toMatchObject({
         id: runId,
         status: "waiting_for_human",

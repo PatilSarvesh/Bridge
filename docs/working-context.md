@@ -7,8 +7,8 @@
 | Last updated | 2026-08-10, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | Governed decisions/specifications, outbox operations, and a provider-neutral privacy-minimized email delivery seam are implemented; Claude Code conformance, live SES/directory wiring, and scheduled delivery remain pending |
-| Security posture | Prototype only; organization onboarding and authentication are explicitly out of scope |
+| Current implementation phase | OIDC web/API authentication and durable organization/project membership foundations now complement the governed decision/specification MVP; CLI/MCP OAuth, member administration, enterprise provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification and membership enforcement are implemented for web/API, but the product is not fully production-secure until remaining token scopes, MCP/CLI identity, RLS, deployment, and audit work is complete |
 
 ## 1. How to use and maintain this file
 
@@ -34,8 +34,8 @@ The founder originated the product concept and delegated ordinary product and ar
 Current explicit founder directives:
 
 1. Build Bridge as a shared place for agent questions, accepted answers, decisions, and specifications.
-2. Do not implement organization onboarding.
-3. Do not implement authentication.
+2. Authentication and organization scope was explicitly reopened on 2026-08-10; implement it in controlled, testable slices.
+3. Preserve the fixed-principal path only as an explicit development mode, never as production authentication.
 4. MCP must be optional because some organizations do not approve MCP.
 5. Provide CLI and repository-file workflows for organizations where agents cannot use MCP or initiate network requests.
 6. Only humans may accept decisions or approve specification versions.
@@ -43,7 +43,7 @@ Current explicit founder directives:
 8. Maintain this file as durable context for future sessions.
 9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
 
-Interpret “do not implement authentication or organization onboarding” as an active implementation prohibition until the founder explicitly reopens that scope. Prior Auth0/OAuth research remains reference material only.
+The founder's 2026-08-10 request supersedes the earlier authentication/onboarding prohibition. The selected Auth0/OIDC design is active, while enterprise provisioning and unrelated identity expansion still require their own scoped tasks.
 
 ## 3. Product concept
 
@@ -118,7 +118,7 @@ Bridge is not:
 - A replacement for source control or issue tracking.
 - An autonomous approver.
 - Dependent on MCP.
-- Production-secure in its current fixed-principal form.
+- Fully production-secure merely because the first OIDC/membership foundation exists.
 
 ## 4. Approved product decisions
 
@@ -247,8 +247,8 @@ If no automated integration is permitted, humans can use the web UI and manually
 | Queue | Typed transactional outbox claim/lease/retry cycle implemented; pg-boss or a scheduled worker runtime remains a deployment choice |
 | Object storage | S3 planned for large/binary artifacts, not implemented |
 | Search | Deterministic ranking now; PostgreSQL text/trigram planned |
-| Authentication | Explicitly deferred and prohibited from active implementation |
-| Organization onboarding | Explicitly deferred and prohibited from active implementation |
+| Authentication | OIDC web sessions and API bearer verification implemented; CLI/MCP OAuth and scopes remain |
+| Organization onboarding | Durable organizations/memberships and operator first-admin bootstrap implemented; member administration UI/lifecycle remains |
 
 ### 6.3 Architectural rules
 
@@ -310,7 +310,7 @@ Fixed local principals:
 | `usr_contributor` | Human | Contributor without decision-owner authority |
 | `usr_outsider` | Human fixture | Different organization used for isolation-policy tests |
 
-The API currently receives the local principal through `x-bridge-principal-id`. This is a development seam, not authentication.
+In development mode the API receives these fixtures through `x-bridge-principal-id`. OIDC mode ignores that header and resolves the verified subject through durable memberships.
 
 ## 9. Implemented domain model
 
@@ -441,7 +441,7 @@ Run statuses:
 - `failed`
 - `cancelled`
 
-Starting a run returns a random opaque `resumeContextKey`. The key is stored separately from the public run record and is never returned by ordinary get/list operations. It is a locator, not authentication: the caller must still have project access. In the current prototype it is stored as a value rather than a hash so an identical idempotent start request can replay the original registration response; production credential handling remains outside the unauthenticated prototype.
+Starting a run returns a random opaque `resumeContextKey`. The key is stored separately from the public run record and is never returned by ordinary get/list operations. It is a locator, not authentication: the caller must still establish identity and project access. It is stored as a value rather than a hash so an identical idempotent start request can replay the original registration response; hardening this locator remains separate from OIDC authentication.
 
 A linked blocking question atomically moves a running run to `waiting_for_human`. Human acceptance does not auto-resume an agent. Resolving the continuation returns accepted decision IDs and remaining blockers. When every blocker is resolved, a later session starts a new run using both `continuesRunId` and the prior locator. The original waiting run remains historical; Bridge does not claim that the exact vendor session restarted.
 
@@ -610,7 +610,7 @@ Specifications:
 - `POST /v1/artifact-versions/:versionId/reviews`
 - `POST /v1/artifact-versions/:versionId/approve`
 
-All prototype routes resolve one of the fixed local principals using `x-bridge-principal-id`.
+Development mode resolves fixed local principals using `x-bridge-principal-id`. OIDC mode ignores that header, accepts an encrypted browser session or bearer access token, and resolves organization/project authority from durable active memberships.
 
 ## 12. Implemented MCP tools
 
@@ -785,11 +785,11 @@ Full validation command:
 pnpm check
 ```
 
-Current validation result after the privacy-conscious product-analytics slice:
+Current validation result after the authentication and organization-membership foundation:
 
-- Type-check: passed across all eleven TypeScript configurations.
-- Behavioral tests: 72 passed; the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
-- Production builds: passed for all ten TypeScript packages plus the Next.js application.
+- Type-check: passed across all twelve workspace packages.
+- Tests: 78 behavioral tests plus 4 observability tests passed (82 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
 - Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy/correlation backfills, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, correlation format/indexes, and email-delivery scope/result/hash constraints.
@@ -914,11 +914,11 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 
 ### 17.3 Security
 
-- No authentication.
-- No organization onboarding.
-- No secure sessions or tokens.
-- Fixed local principals only.
-- Application-level organization/project checks exist for policy testing, but this is not production tenant security.
+- OIDC web/API authentication and encrypted bounded sessions are implemented; CLI and standalone MCP OAuth are not.
+- Durable organization/project membership and operator first-admin bootstrap are implemented; member administration is not.
+- OAuth scopes, refresh/revocation administration, durable authentication audits, RLS, and deployment-provider validation remain incomplete.
+- Fixed local principals remain development-only.
+- Application organization/project checks are active for both identity modes, but this is not yet complete production tenant security.
 
 ### 17.4 Not yet implemented
 
@@ -973,7 +973,7 @@ Implemented:
 9. Explicit `db:generate` and `db:migrate` scripts; API startup never migrates automatically.
 10. Pure mapper/migration tests and an opt-in live reconnect integration test.
 11. An additive project-registration audit migration that permits `project` audit subjects without changing existing project storage.
-12. No authentication or organization-onboarding implementation.
+12. This original persistence slice introduced no authentication; that historical boundary was later superseded by the explicitly reopened identity slice in section 20.34.
 13. Notifications enqueue a typed transactional outbox event in the same repository transaction; the worker exposes a claim/lease/retry/dead-letter cycle for downstream delivery handlers.
 
 Environment facts remain:
@@ -1140,7 +1140,7 @@ Deliberate boundaries:
 
 - This is a local testing/reviewer-context switcher, not authentication, session management, organization onboarding, or a production directory.
 - The API only returns human principals in the current principal's organization; fixed fixture membership and permissions remain development-only.
-- Saved/URL-persisted filters, configurable role membership, and real identity propagation remain future work.
+- Saved/URL-persisted filters and administrator-managed role membership remain future work; OIDC identity propagation is now implemented separately.
 
 ### 20.9 Implemented personalized reviewer inbox slice
 
@@ -1482,7 +1482,7 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - No message leaves the process until a deployment supplies a real recipient directory and sender. SES credentials, email addresses, and customer data are not stored in repository files or outbox payloads.
-- The link is ready for a future signed-in deployment but the fixed-principal prototype has no authentication by explicit founder direction; BRG-092 therefore remains partial rather than claiming a production signed-in email flow.
+- The link can now enter the OIDC web flow; hosted callback, cookie-domain, and email-link validation remain deployment work, so BRG-092 still does not claim a production delivery path.
 - Digest preference is durably deferred but not yet batched or sent. The blocking-escalation template exists, while producing SLA escalation notifications awaits scheduled policy work.
 - Only plain text is generated. HTML rendering, unsubscribe/preference administration, bounce/complaint handling, SES provider implementation, scheduling, jitter, and telemetry export remain deployment slices.
 
@@ -1495,14 +1495,14 @@ Implemented and locally verified:
 3. `pnpm restore:verify` is a read-only verifier for an already restored isolated PostgreSQL database. It checks required tables, migration history, core row counts, immutable artifact SHA-256 values, tenant-scope consistency, delivery scope, and artifact current/approved-version pointers.
 4. The verifier refuses an obvious production-target mistake when `BRIDGE_RESTORE_DATABASE_URL` identifies the same database as `DATABASE_URL`, never prints artifact bodies or connection strings, and exits nonzero on failed checks.
 5. `docs/runbooks/backup-restore.md` documents safe dump/restore separation, disabled workers, verification, evidence, and recovery activation without destructive cleanup commands.
-6. `docs/runbooks/incidents.md` covers queue backlog/dead letters, failed migrations, the explicitly deferred identity dependency, and notification-provider outages while preserving human authority and MCP-independent paths.
+6. `docs/runbooks/incidents.md` covers queue backlog/dead letters, failed migrations, active OIDC identity outages, and notification-provider outages while preserving human authority and MCP-independent paths.
 7. Application, API, database verifier, MCP, type-check, test, build, and packaged-CLI validation pass without adding a schema migration or production identity/provider dependency.
 
 Deliberate boundaries:
 
 - No repository change can configure or prove managed PostgreSQL PITR, backup retention, object-storage versioning, alerting, or a real isolated restore. BRG-103 remains partial until deployment owners attach dated external evidence.
 - Current artifact bodies live in PostgreSQL; object-storage recovery becomes mandatory when the runtime begins storing objects outside that database.
-- Readiness covers the canonical repository dependency only. Provider/queue degradation belongs to operational telemetry, and future identity readiness requires the product owner to reopen identity scope.
+- Readiness covers the canonical repository dependency only. Provider/queue degradation belongs to operational telemetry; the new identity-outage runbook explicitly notes that OIDC can fail while repository readiness stays green.
 
 ### 20.31 Implemented end-to-end correlation and safe structured-logging foundations
 
@@ -1565,6 +1565,29 @@ Deliberate boundaries:
 - User-reported rework, question-quality judgments, mute/unsubscribe behavior, and secret-detection events are not technically available and are not guessed.
 - A future materialized analytics store requires a separate privacy/schema/retention review; the MVP intentionally calculates in place.
 
+### 20.34 Implemented OIDC web/API and organization-membership foundation
+
+Implemented and locally verified:
+
+1. The founder explicitly reopened authentication and organization scope. `@bridge/auth` now verifies RS256 OIDC access/ID tokens against JWKS with exact issuer, audience, signature, expiry, state, nonce, PKCE, and matching ID/access-token subject checks.
+2. Browser Authorization Code login stores state/nonce/verifier/return location in a ten-minute encrypted `HttpOnly` cookie. The callback exchanges the code server-side and creates an encrypted `HttpOnly` session that cannot outlive the access token; logout clears it and delegates provider logout.
+3. API requests accept the session or bearer token. OIDC mode ignores `x-bridge-principal-id`; production startup fails closed without OIDC configuration. The fixed reviewer switcher remains available only outside production.
+4. Forward-only migration `0015_spooky_bulldozer.sql` adds organizations, OIDC principal identities, active/disabled organization memberships, and project memberships. It backfills organizations from existing projects before adding the project foreign key.
+5. Token role/project claims are not authoritative. Issuer + subject + external organization resolve through the repository on every request, so disabling organization membership blocks the next request.
+6. Project roles are stored and evaluated for the target project. A project-admin role in one project cannot confer authority in another; existing fixed global roles remain backward-compatible for development fixtures.
+7. `GET /v1/auth/config`, `/login`, `/callback`, `/logout`, and `/me` drive the web sign-in surface. OIDC mode hides reviewer impersonation and displays the authenticated member; local development behavior remains dependency-free.
+8. An all-or-nothing environment bootstrap creates the initial external organization mapping and human administrator without exposing a public unauthenticated onboarding endpoint.
+9. OIDC startup disables demo organization/project/content seeding. The initial administrator can create the first real project through the existing authorized registration command; development mode retains the complete seeded demonstration.
+10. Authentication, application, domain, API, mapper/migration, in-memory directory, and opt-in PostgreSQL reconnect coverage exercises valid/invalid tokens, missing claims, inactive membership, state/nonce/PKCE, session cookies, development-header rejection, and project-scoped roles.
+
+Deliberate boundaries:
+
+- This slice completes the BRG-010 code foundation but not live Auth0 tenant validation or durable authentication audit events.
+- The CLI still lacks browser PKCE login and operating-system credential storage. The standalone MCP server still uses its fixed development principal; dedicated MCP audience/scope enforcement remains BRG-013/052 work.
+- Organization invitation, membership-disable, role assignment, and project-membership administration APIs/UI must be version-checked and audited in the next organization-management slice. Enterprise group provisioning remains BRG-127.
+- OAuth scopes, CI/service grants, token revocation beyond expiry/membership disable, refresh sessions, PostgreSQL RLS, and maintenance roles remain incomplete.
+- Secrets belong only in environment/deployment secret management. No client secret, access token, session token, raw identity-provider response, or customer identity data is recorded in repository documentation.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1575,6 +1598,8 @@ Deliberate boundaries:
 - Implementation backlog: `docs/mvp-backlog.md`
 - This living context: `docs/working-context.md`
 - Domain entities/policy: `packages/domain/src/index.ts`
+- OIDC verifier and encrypted web session: `packages/auth/src/index.ts`
+- Authentication and organization operator guide: `docs/authentication.md`
 - Shared schemas: `packages/contracts/src/index.ts`
 - Application service/repository interface: `packages/application/src/index.ts`
 - Database schema: `packages/database/src/schema.ts`
@@ -1594,6 +1619,7 @@ Deliberate boundaries:
 - Outbox operator-audit migration: `packages/database/drizzle/0012_outbox_operator_replay.sql`
 - Email delivery-receipt migration: `packages/database/drizzle/0013_ancient_gwen_stacy.sql`
 - Correlation propagation migration: `packages/database/drizzle/0014_first_jane_foster.sql`
+- Organization/identity/membership migration: `packages/database/drizzle/0015_spooky_bulldozer.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1625,7 +1651,7 @@ These references were previously reviewed and are recorded in the formal decisio
 - Auth0 MCP authorization reference: `https://auth0.com/ai/docs/mcp/get-started/authorization-for-your-mcp-server`
 - Auth0 Organizations reference: `https://auth0.com/docs/manage-users/organizations/organizations-overview`
 
-Auth0 references are retained only as historical research. Identity implementation is currently prohibited by founder direction.
+Auth0 references now support the reopened identity implementation. Provider-specific deployment configuration still requires live validation.
 
 ## 23. Continuation checklist
 
@@ -1635,7 +1661,7 @@ Before continuing work:
 2. Read the latest explicit user message.
 3. Check `git status --short` and preserve user changes.
 4. Check whether `AGENTS.md` or other workspace instructions now exist.
-5. Confirm the active slice does not introduce authentication or organization onboarding.
+5. Confirm identity changes stay inside the reopened scope and preserve membership, tenant, human-approval, secret-handling, and MCP-optional boundaries.
 6. Update the task plan.
 7. Implement through existing contracts/domain/application boundaries.
 8. Add tests proportional to the behavior changed.
@@ -1644,4 +1670,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready fixed-principal MVP prototype with installable CLI bootstrap, shared governed question/decision/specification workflows, weighted decision search, formal specification review/version comparison, assumption/run provenance, privacy-conscious project/client analytics, durable optional PostgreSQL and MCP paths, end-to-end correlation, safe structured logs, portable bounded metrics with dashboard/alert/SLO definitions, repository-backed readiness, read-only restore verification and incident runbooks, project-admin outbox controls, privacy-minimized provider-neutral email templates/receipts, deep-linked human views, comprehensive checks, GitHub CI guardrails, and one passing real independent Codex fresh-project conformance run; production telemetry activation/calibration and recovery evidence, cross-vendor conformance, and live provider/deployment integrations remain pending, while authentication and organization onboarding remain explicitly out of scope.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics and observability, and a new Auth0-compatible OIDC web/API plus organization/project-membership foundation; CLI/MCP OAuth, audited membership administration, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

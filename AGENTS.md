@@ -10,7 +10,7 @@ Bridge is a TypeScript/pnpm monorepo for a shared decision and specification con
 
 ## Non-negotiable scope boundaries
 
-- Do not implement authentication, SSO, organization onboarding, or production identity management unless the product owner explicitly reopens that scope.
+- The product owner reopened authentication and organization scope on 2026-08-10. Keep identity changes inside the approved OIDC/membership backlog slices; do not silently expand into enterprise federation/provisioning or claim production readiness before the remaining scope, RLS, audit, and deployment controls are complete.
 - MCP is optional. Every important workflow must continue to work through the REST API, CLI, repository snapshots, or web UI when MCP is not approved.
 - Human approval remains distinct from agent recommendation. Agents may create questions, assumptions, drafts, and run records; only the existing human policy boundary may accept decisions or approve specifications.
 - Do not store secrets, tokens, raw transcripts, private reasoning, or customer data in the repository or documentation.

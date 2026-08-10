@@ -40,6 +40,7 @@ import {
   questionInboxReasons,
   BridgeError,
   normalizeRoleName,
+  principalHasRole,
   reviewDateFor,
   type AgentRun,
   type Assumption,
@@ -58,8 +59,12 @@ import {
   type QuestionReview,
   type QuestionResponse,
   type Notification,
+  type Organization,
+  type OrganizationMembership,
   type OutboxDelivery,
   type OutboxEvent,
+  type PrincipalIdentity,
+  type ProjectMembership,
 } from "@bridge/domain";
 import {
   type BridgeMetrics,
@@ -71,6 +76,26 @@ import {
 export interface BridgeRepository {
   checkHealth(): Promise<{ readonly backend: string }>;
   transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T>;
+  getOrganizationByExternalId(externalIdentityProviderId: string): Promise<Organization | undefined>;
+  saveOrganization(organization: Organization): Promise<void>;
+  getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined>;
+  savePrincipalIdentity(identity: PrincipalIdentity): Promise<void>;
+  getOrganizationMembership(
+    organizationId: string,
+    principalId: string,
+  ): Promise<OrganizationMembership | undefined>;
+  saveOrganizationMembership(membership: OrganizationMembership): Promise<void>;
+  listProjectMemberships(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly ProjectMembership[]>;
+  saveProjectMembership(membership: ProjectMembership): Promise<void>;
+  resolveOidcPrincipal(identity: {
+    readonly issuer: string;
+    readonly subject: string;
+    readonly organizationExternalId: string;
+  }): Promise<Principal | undefined>;
+  listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]>;
   getProject(projectId: string): Promise<Project | undefined>;
   listProjects(organizationId: string): Promise<readonly Project[]>;
   saveProject(project: Project): Promise<void>;
@@ -585,6 +610,10 @@ function buildArtifactVersionDiff(
 }
 
 export class InMemoryBridgeRepository implements BridgeRepository {
+  private readonly organizations = new Map<string, Organization>();
+  private readonly principalIdentities = new Map<string, PrincipalIdentity>();
+  private readonly organizationMemberships = new Map<string, OrganizationMembership>();
+  private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly runs = new Map<string, AgentRun>();
   private readonly assumptions = new Map<string, Assumption>();
@@ -623,6 +652,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     await previous;
 
     const snapshot = {
+      organizations: new Map(this.organizations),
+      principalIdentities: new Map(this.principalIdentities),
+      organizationMemberships: new Map(this.organizationMemberships),
+      projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       runs: new Map(this.runs),
       assumptions: new Map(this.assumptions),
@@ -645,6 +678,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       return await work(this);
     } catch (error) {
       outcome = "error";
+      this.restoreMap(this.organizations, snapshot.organizations);
+      this.restoreMap(this.principalIdentities, snapshot.principalIdentities);
+      this.restoreMap(this.organizationMemberships, snapshot.organizationMemberships);
+      this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -675,6 +712,118 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private restoreMap<Key, Value>(target: Map<Key, Value>, source: Map<Key, Value>): void {
     target.clear();
     for (const [key, value] of source) target.set(key, value);
+  }
+
+  async getOrganizationByExternalId(
+    externalIdentityProviderId: string,
+  ): Promise<Organization | undefined> {
+    return [...this.organizations.values()].find(
+      (organization) => organization.externalIdentityProviderId === externalIdentityProviderId,
+    );
+  }
+
+  async saveOrganization(organization: Organization): Promise<void> {
+    this.organizations.set(organization.id, organization);
+  }
+
+  async getPrincipalIdentityByOidc(
+    issuer: string,
+    subject: string,
+  ): Promise<PrincipalIdentity | undefined> {
+    return [...this.principalIdentities.values()].find(
+      (identity) => identity.oidcIssuer === issuer && identity.oidcSubject === subject,
+    );
+  }
+
+  async savePrincipalIdentity(identity: PrincipalIdentity): Promise<void> {
+    this.principalIdentities.set(identity.id, identity);
+  }
+
+  async getOrganizationMembership(
+    organizationId: string,
+    principalId: string,
+  ): Promise<OrganizationMembership | undefined> {
+    return this.organizationMemberships.get(`${organizationId}:${principalId}`);
+  }
+
+  async saveOrganizationMembership(membership: OrganizationMembership): Promise<void> {
+    this.organizationMemberships.set(
+      `${membership.organizationId}:${membership.principalId}`,
+      membership,
+    );
+  }
+
+  async listProjectMemberships(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly ProjectMembership[]> {
+    return [...this.projectMemberships.values()].filter(
+      (membership) =>
+        membership.organizationId === organizationId &&
+        membership.principalId === principalId,
+    );
+  }
+
+  async saveProjectMembership(membership: ProjectMembership): Promise<void> {
+    this.projectMemberships.set(
+      `${membership.organizationId}:${membership.projectId}:${membership.principalId}`,
+      membership,
+    );
+  }
+
+  async resolveOidcPrincipal(identity: {
+    readonly issuer: string;
+    readonly subject: string;
+    readonly organizationExternalId: string;
+  }): Promise<Principal | undefined> {
+    const principalIdentity = await this.getPrincipalIdentityByOidc(identity.issuer, identity.subject);
+    const organization = await this.getOrganizationByExternalId(identity.organizationExternalId);
+    if (!principalIdentity || !organization) return undefined;
+    const organizationMembership = await this.getOrganizationMembership(
+      organization.id,
+      principalIdentity.id,
+    );
+    if (!organizationMembership || organizationMembership.status !== "active") return undefined;
+    const projectMemberships = (await this.listProjectMemberships(
+      organization.id,
+      principalIdentity.id,
+    )).filter((membership) => membership.status === "active");
+    return {
+      id: principalIdentity.id,
+      type: principalIdentity.type,
+      organizationId: organization.id,
+      projectIds: projectMemberships.map((membership) => membership.projectId),
+      allProjects: organizationMembership.allProjects,
+      roles: organizationMembership.roles,
+      projectRoles: Object.fromEntries(
+        projectMemberships.map((membership) => [membership.projectId, membership.roles]),
+      ),
+      displayName: principalIdentity.displayName,
+    };
+  }
+
+  async listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]> {
+    const principals: Principal[] = [];
+    for (const membership of this.organizationMemberships.values()) {
+      if (membership.organizationId !== organizationId || membership.status !== "active") continue;
+      const identity = this.principalIdentities.get(membership.principalId);
+      if (!identity) continue;
+      const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id))
+        .filter((projectMembership) => projectMembership.status === "active");
+      principals.push({
+        id: identity.id,
+        type: identity.type,
+        organizationId,
+        projectIds: projectMemberships.map((projectMembership) => projectMembership.projectId),
+        allProjects: membership.allProjects,
+        roles: membership.roles,
+        projectRoles: Object.fromEntries(
+          projectMemberships.map((projectMembership) => [projectMembership.projectId, projectMembership.roles]),
+        ),
+        displayName: identity.displayName,
+      });
+    }
+    return principals.sort((left, right) => left.displayName.localeCompare(right.displayName));
   }
 
   async getProject(projectId: string): Promise<Project | undefined> {
@@ -1057,8 +1206,11 @@ export class BridgeService {
   ): Promise<ProjectRegistration> {
     return this.repository.transaction(async (repository) => {
       assertHuman(principal, "Registering a project");
-      if (!principal.roles.includes("project-admin")) {
-        throw new BridgeError("FORBIDDEN", "Project registration requires a project administrator.", 403);
+      if (
+        !principalHasRole(principal, "organization-admin") &&
+        !principalHasRole(principal, "project-admin")
+      ) {
+        throw new BridgeError("FORBIDDEN", "Project registration requires an organization administrator.", 403);
       }
       const projectId = `prj_${createHash("sha256")
         .update(`${principal.organizationId}:${input.idempotencyKey}`)
@@ -1112,6 +1264,32 @@ export class BridgeService {
         return false;
       }
     });
+  }
+
+  async listOrganizationPrincipals(principal: Principal): Promise<readonly Principal[]> {
+    assertHuman(principal, "Reading the organization directory");
+    const accessibleProjectIds = new Set(
+      (await this.repository.listProjects(principal.organizationId))
+        .filter((project) => {
+          try {
+            assertProjectAccess(principal, project);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .map((project) => project.id),
+    );
+    return (await this.repository.listOrganizationPrincipals(principal.organizationId))
+      .filter((candidate) => candidate.type === "human")
+      .map((candidate) => ({
+        ...candidate,
+        projectIds: candidate.projectIds.filter((projectId) => accessibleProjectIds.has(projectId)),
+        projectRoles: Object.fromEntries(
+          Object.entries(candidate.projectRoles ?? {})
+            .filter(([projectId]) => accessibleProjectIds.has(projectId)),
+        ),
+      }));
   }
 
   async getProject(principal: Principal, projectId: string): Promise<Project> {
@@ -1208,7 +1386,7 @@ export class BridgeService {
     query: OutboxOperationsQuery,
   ): Promise<OutboxOperationsView> {
     await this.requireProject(principal, projectId);
-    this.assertProjectOperator(principal, "Inspecting delivery operations");
+    this.assertProjectOperator(principal, "Inspecting delivery operations", projectId);
     const events = await this.repository.listOutboxEvents(projectId);
     const deliveries = await this.repository.listOutboxDeliveries(projectId);
     const nowTime = this.now().getTime();
@@ -1277,7 +1455,7 @@ export class BridgeService {
     query: ProjectAnalyticsQuery,
   ): Promise<ProjectAnalyticsView> {
     await this.requireProject(principal, projectId);
-    this.assertProjectOperator(principal, "Reading project analytics");
+    this.assertProjectOperator(principal, "Reading project analytics", projectId);
     const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
       this.repository.listRuns(projectId),
       this.repository.listContextSnapshots(projectId),
@@ -1342,12 +1520,12 @@ export class BridgeService {
     input: ReplayOutboxEventInput,
   ): Promise<OutboxEvent> {
     return this.repository.transaction(async (repository) => {
-      this.assertProjectOperator(principal, "Replaying a delivery event");
       const event = await repository.getOutboxEvent(eventId);
       if (!event || event.organizationId !== principal.organizationId) {
         throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Delivery event not found.", 404);
       }
       await this.requireProject(principal, event.projectId, repository);
+      this.assertProjectOperator(principal, "Replaying a delivery event", event.projectId);
       if (event.status !== "failed" && event.status !== "dead_letter") {
         throw new BridgeError(
           "CONFLICT",
@@ -1499,7 +1677,7 @@ export class BridgeService {
   ): Promise<AgentRun> {
     const run = await this.requireRun(principal, runId, repository);
     const mayOperate = run.agentId === principal.id ||
-      (principal.type === "human" && principal.roles.includes("project-admin"));
+      (principal.type === "human" && principalHasRole(principal, "project-admin", run.projectId));
     if (!mayOperate) {
       throw new BridgeError("FORBIDDEN", "Only the run principal or a project administrator can update this run.", 403);
     }
@@ -1779,7 +1957,10 @@ export class BridgeService {
       assertHuman(principal, "Resolving an assumption");
       const assumption = await this.requireAssumption(principal, assumptionId, repository);
       const project = await this.requireProject(principal, assumption.projectId, repository);
-      if (!project.decisionOwnerIds.includes(principal.id) && !principal.roles.includes("project-admin")) {
+      if (
+        !project.decisionOwnerIds.includes(principal.id) &&
+        !principalHasRole(principal, "project-admin", project.id)
+      ) {
         throw new BridgeError(
           "FORBIDDEN",
           "Only a configured decision owner or project administrator can resolve an assumption.",
@@ -2214,7 +2395,7 @@ export class BridgeService {
     if (question.risk !== "protected") {
       throw new BridgeError("POLICY_BLOCKED", "Separate security review is required only for protected questions.", 422);
     }
-    if (!principal.roles.some((role) => normalizeRoleName(role) === "security-reviewer")) {
+    if (!principalHasRole(principal, "security-reviewer", question.projectId)) {
       throw new BridgeError("FORBIDDEN", "Only a configured security reviewer can review a protected question.", 403);
     }
     if (question.version !== input.expectedVersion) {
@@ -2523,7 +2704,7 @@ export class BridgeService {
     const project = await this.requireProject(principal, decision.projectId, repository);
     const mayManage = decision.ownerId === principal.id ||
       project.decisionOwnerIds.includes(principal.id) ||
-      principal.roles.some((role) => normalizeRoleName(role) === "project-admin");
+      principalHasRole(principal, "project-admin", decision.projectId);
     if (!mayManage) {
       throw new BridgeError(
         "FORBIDDEN",
@@ -3254,7 +3435,7 @@ export class BridgeService {
   ): Promise<AgentRun> {
     const run = await this.requireRun(principal, runId, repository);
     const mayLink = run.agentId === principal.id ||
-      (principal.type === "human" && principal.roles.includes("project-admin"));
+      (principal.type === "human" && principalHasRole(principal, "project-admin", run.projectId));
     if (!mayLink) {
       throw new BridgeError("FORBIDDEN", "Only the run principal can attach new run provenance.", 403);
     }
@@ -3306,9 +3487,9 @@ export class BridgeService {
     return project;
   }
 
-  private assertProjectOperator(principal: Principal, action: string): void {
+  private assertProjectOperator(principal: Principal, action: string, projectId?: string): void {
     assertHuman(principal, action);
-    if (!principal.roles.some((role) => normalizeRoleName(role) === "project-admin")) {
+    if (!principalHasRole(principal, "project-admin", projectId)) {
       throw new BridgeError("FORBIDDEN", `${action} requires a project administrator.`, 403);
     }
   }

@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import { developmentAuthConfiguration, type AuthenticationProvider } from "@bridge/auth";
 import {
   acceptAnswerInputSchema,
   approveArtifactVersionInputSchema,
@@ -41,14 +42,27 @@ import { ZodError } from "zod";
 export interface BuildAppOptions {
   readonly service: BridgeService;
   readonly principals: Readonly<Record<string, Principal>>;
+  readonly authenticator?: AuthenticationProvider;
+  readonly allowDevelopmentPrincipalHeader?: boolean;
+  readonly corsOrigin?: string;
   readonly logger?: boolean;
   readonly metrics?: BridgeMetrics;
 }
 
-function resolvePrincipal(
+async function resolvePrincipal(
   request: FastifyRequest,
-  principals: Readonly<Record<string, Principal>>,
-): Principal {
+  options: BuildAppOptions,
+): Promise<Principal> {
+  if (options.authenticator) {
+    const authorization = typeof request.headers.authorization === "string"
+      ? request.headers.authorization
+      : undefined;
+    const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
+    return options.authenticator.authenticateRequest({
+      ...(authorization ? { authorization } : {}),
+      ...(cookie ? { cookie } : {}),
+    });
+  }
   const principalId = request.headers["x-bridge-principal-id"];
   if (typeof principalId !== "string") {
     throw new BridgeError(
@@ -57,7 +71,7 @@ function resolvePrincipal(
       401,
     );
   }
-  const principal = principals[principalId];
+  const principal = options.principals[principalId];
   if (!principal) {
     throw new BridgeError("UNAUTHENTICATED", "Unknown local principal.", 401);
   }
@@ -65,13 +79,22 @@ function resolvePrincipal(
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+  const developmentPrincipalHeaderAllowed = options.allowDevelopmentPrincipalHeader ??
+    process.env.NODE_ENV !== "production";
+  if (!options.authenticator && !developmentPrincipalHeaderAllowed) {
+    throw new Error("OIDC authentication is required when NODE_ENV=production.");
+  }
+  if (options.authenticator && process.env.NODE_ENV === "production" && !options.corsOrigin) {
+    throw new Error("A fixed CORS origin is required for production OIDC sessions.");
+  }
   const app = Fastify({ logger: false });
   const metrics = options.metrics ?? new BridgeMetrics();
   const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
   await app.register(cors, {
-    origin: true,
-    allowedHeaders: ["content-type", "x-bridge-principal-id", correlationIdHeader],
+    origin: options.corsOrigin ?? true,
+    credentials: true,
+    allowedHeaders: ["authorization", "content-type", "x-bridge-principal-id", correlationIdHeader],
     exposedHeaders: [correlationIdHeader],
   });
 
@@ -143,10 +166,58 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       .send({ service: "bridge-api", ...readiness });
   });
 
+  app.get("/v1/auth/config", async () => options.authenticator
+    ? options.authenticator.publicConfiguration()
+    : developmentAuthConfiguration());
+
+  if (options.authenticator) {
+    app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/login", async (request, reply) => {
+      const login = await options.authenticator!.beginWebLogin(request.query.returnTo);
+      return reply
+        .header("set-cookie", login.transactionCookie)
+        .redirect(login.authorizationUrl);
+    });
+    app.get<{
+      Querystring: { code?: string; state?: string; error?: string };
+    }>("/v1/auth/callback", async (request, reply) => {
+      if (request.query.error) {
+        throw new BridgeError("UNAUTHENTICATED", "The identity provider did not complete sign-in.", 401);
+      }
+      const callback = await options.authenticator!.completeWebLogin({
+        ...(request.query.code ? { code: request.query.code } : {}),
+        ...(request.query.state ? { state: request.query.state } : {}),
+        ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
+      });
+      return reply
+        .header("set-cookie", [callback.sessionCookie, callback.clearTransactionCookie])
+        .redirect(callback.redirectUrl);
+    });
+    app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/logout", async (request, reply) => {
+      const logout = options.authenticator!.endWebSession(request.query.returnTo);
+      return reply
+        .header("set-cookie", logout.clearSessionCookie)
+        .redirect(logout.redirectUrl);
+    });
+  }
+
+  app.get("/v1/auth/me", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return {
+      id: principal.id,
+      type: principal.type,
+      displayName: principal.displayName,
+      organizationId: principal.organizationId,
+      roles: principal.roles,
+      projectRoles: principal.projectRoles ?? {},
+      projectIds: principal.projectIds,
+      allProjects: principal.allProjects ?? false,
+    };
+  });
+
   app.get<{ Querystring: Record<string, string | undefined> }>(
     "/v1/notifications",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const query = notificationListQuerySchema.parse({
         projectId: request.query.projectId,
         unreadOnly: request.query.unreadOnly === "true",
@@ -159,7 +230,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { notificationId: string } }>(
     "/v1/notifications/:notificationId/read",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return options.service.markNotificationRead(principal, request.params.notificationId);
     },
   );
@@ -167,7 +238,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Body: unknown }>(
     "/v1/notifications/read-all",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = notificationReadAllInputSchema.parse(request.body ?? {});
       return options.service.markAllNotificationsRead(principal, input);
     },
@@ -177,7 +248,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     Params: { projectId: string };
     Querystring: Record<string, string | undefined>;
   }>("/v1/admin/projects/:projectId/outbox", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     const query = outboxOperationsQuerySchema.parse(request.query);
     return options.service.inspectProjectOutbox(principal, request.params.projectId, query);
   });
@@ -186,7 +257,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     Params: { projectId: string };
     Querystring: Record<string, string | undefined>;
   }>("/v1/admin/projects/:projectId/analytics", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     const query = projectAnalyticsQuerySchema.parse(request.query);
     return options.service.getProjectAnalytics(principal, request.params.projectId, query);
   });
@@ -194,28 +265,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { eventId: string }; Body: unknown }>(
     "/v1/admin/outbox/:eventId/replay",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = replayOutboxEventInputSchema.parse(request.body);
       return options.service.replayOutboxEvent(principal, request.params.eventId, input);
     },
   );
 
   app.get("/v1/principals", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return {
-      items: Object.values(options.principals)
-        .filter((candidate) => candidate.type === "human" && candidate.organizationId === principal.organizationId)
-        .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      items: (await options.service.listOrganizationPrincipals(principal))
         .map((candidate) => ({
           id: candidate.id,
           displayName: candidate.displayName,
           roles: candidate.roles,
+          projectRoles: candidate.projectRoles ?? {},
         })),
     };
   });
 
   app.post<{ Body: unknown }>("/v1/projects", async (request, reply) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     const input = registerProjectInputSchema.parse(request.body);
     const registration = await options.service.registerProject(principal, input);
     return reply
@@ -224,19 +294,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.get("/v1/projects", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return { items: await options.service.listProjects(principal) };
   });
 
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return options.service.getProject(principal, request.params.projectId);
   });
 
   app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/context",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const query = contextQuerySchema.parse({
         runId: request.query.runId,
         task: request.query.task,
@@ -257,7 +327,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/runs",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = startAgentRunInputSchema.parse(request.body);
       const registration = await options.service.startRun(principal, request.params.projectId, input);
       return reply.status(201).send(registration);
@@ -267,20 +337,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/runs",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listRuns(principal, request.params.projectId) };
     },
   );
 
   app.get<{ Params: { runId: string } }>("/v1/runs/:runId", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return options.service.getRun(principal, request.params.runId);
   });
 
   app.patch<{ Params: { runId: string }; Body: unknown }>(
     "/v1/runs/:runId",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = reportAgentRunInputSchema.parse(request.body);
       return options.service.reportRun(principal, request.params.runId, input);
     },
@@ -289,7 +359,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { runId: string }; Body: unknown }>(
     "/v1/runs/:runId/continuation",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = continuationQuerySchema.parse(request.body);
       return options.service.getContinuation(
         principal,
@@ -302,7 +372,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { decisionId: string }; Body: unknown }>(
     "/v1/decisions/:decisionId/lifecycle",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = changeDecisionLifecycleInputSchema.parse(request.body);
       return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
     },
@@ -313,7 +383,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     app.post<{ Params: { decisionId: string }; Body: unknown }>(
       `/v1/decisions/:decisionId/${action}`,
       async (request) => {
-        const principal = resolvePrincipal(request, options.principals);
+        const principal = await resolvePrincipal(request, options);
         const body = typeof request.body === "object" && request.body !== null
           ? request.body as Record<string, unknown>
           : {};
@@ -326,7 +396,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/questions",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = createQuestionInputSchema.parse(request.body);
       const question = await options.service.createQuestion(principal, request.params.projectId, input);
       const created = question.submissionDisposition === "created";
@@ -337,7 +407,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/questions/matches",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = findQuestionMatchesInputSchema.parse(request.body);
       return {
         items: await options.service.findQuestionMatches(
@@ -352,7 +422,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/assumptions",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = recordAssumptionInputSchema.parse(request.body);
       const assumption = await options.service.recordAssumption(
         principal,
@@ -366,7 +436,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/assumptions",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listAssumptions(principal, request.params.projectId) };
     },
   );
@@ -374,7 +444,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { assumptionId: string } }>(
     "/v1/assumptions/:assumptionId",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return options.service.getAssumption(principal, request.params.assumptionId);
     },
   );
@@ -382,7 +452,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { assumptionId: string }; Body: unknown }>(
     "/v1/assumptions/:assumptionId/resolve",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = resolveAssumptionInputSchema.parse(request.body);
       return options.service.resolveAssumption(principal, request.params.assumptionId, input);
     },
@@ -391,7 +461,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/questions",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listQuestions(principal, request.params.projectId) };
     },
   );
@@ -399,7 +469,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/inbox",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const filters = questionInboxQuerySchema.parse({
         status: request.query.status,
         risk: request.query.risk,
@@ -413,14 +483,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   );
 
   app.get<{ Params: { questionId: string } }>("/v1/questions/:questionId", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return options.service.getQuestion(principal, request.params.questionId);
   });
 
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/responses",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = proposeAnswerInputSchema.parse(request.body);
       const response = await options.service.proposeAnswer(principal, request.params.questionId, input);
       return reply.status(201).send(response);
@@ -430,7 +500,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/reviews",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = questionReviewInputSchema.parse(request.body);
       const review = await options.service.reviewQuestion(principal, request.params.questionId, input);
       return reply.status(201).send(review);
@@ -440,7 +510,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/comments",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = questionCommentInputSchema.parse(request.body);
       const comment = await options.service.addQuestionComment(principal, request.params.questionId, input);
       return reply.status(201).send(comment);
@@ -450,7 +520,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/accept",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = acceptAnswerInputSchema.parse(request.body);
       const decision = await options.service.acceptAnswer(principal, request.params.questionId, input);
       return reply.status(201).send(decision);
@@ -460,7 +530,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/decisions",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const query = decisionListQuerySchema.parse({
         includeHistory: request.query.includeHistory === undefined
           ? undefined
@@ -490,7 +560,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/artifacts",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = publishArtifactInputSchema.parse(request.body);
       const publication = await options.service.publishArtifact(principal, request.params.projectId, input);
       return reply.status(201).send(publication);
@@ -500,20 +570,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/artifacts",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listArtifacts(principal, request.params.projectId) };
     },
   );
 
   app.get<{ Params: { artifactId: string } }>("/v1/artifacts/:artifactId", async (request) => {
-    const principal = resolvePrincipal(request, options.principals);
+    const principal = await resolvePrincipal(request, options);
     return options.service.getArtifact(principal, request.params.artifactId);
   });
 
   app.get<{ Params: { artifactId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/artifacts/:artifactId/diff",
     async (request) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const query = artifactVersionDiffQuerySchema.parse(request.query);
       return options.service.diffArtifactVersions(principal, request.params.artifactId, query);
     },
@@ -522,7 +592,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/reviews",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = artifactReviewInputSchema.parse(request.body);
       const result = await options.service.reviewArtifactVersion(principal, request.params.versionId, input);
       return reply.status(201).send(result);
@@ -532,7 +602,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.post<{ Params: { versionId: string }; Body: unknown }>(
     "/v1/artifact-versions/:versionId/approve",
     async (request, reply) => {
-      const principal = resolvePrincipal(request, options.principals);
+      const principal = await resolvePrincipal(request, options);
       const input = approveArtifactVersionInputSchema.parse(request.body);
       const publication = await options.service.approveArtifactVersion(
         principal,
