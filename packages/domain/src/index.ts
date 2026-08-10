@@ -41,6 +41,9 @@ export type BridgeErrorCode =
   | "ASSUMPTION_NOT_FOUND"
   | "NOTIFICATION_NOT_FOUND"
   | "OUTBOX_EVENT_NOT_FOUND"
+  | "MEMBER_NOT_FOUND"
+  | "IDENTITY_NOT_CONFIGURED"
+  | "LAST_ORGANIZATION_ADMIN"
   | "CONTINUATION_INVALID"
   | "VALIDATION_FAILED"
   | "POLICY_BLOCKED"
@@ -65,7 +68,61 @@ export interface Principal {
   readonly projectIds: readonly string[];
   readonly allProjects?: boolean;
   readonly roles: readonly string[];
+  readonly projectRoles?: Readonly<Record<string, readonly string[]>>;
   readonly displayName: string;
+}
+
+export type MembershipStatus = "active" | "disabled";
+
+export interface Organization {
+  readonly id: string;
+  readonly externalIdentityProviderId: string;
+  readonly slug: string;
+  readonly name: string;
+  readonly createdAt: string;
+}
+
+export interface PrincipalIdentity {
+  readonly id: string;
+  readonly type: PrincipalType;
+  readonly displayName: string;
+  readonly oidcIssuer: string;
+  readonly oidcSubject: string;
+  readonly createdAt: string;
+}
+
+export interface OrganizationMembership {
+  readonly organizationId: string;
+  readonly principalId: string;
+  readonly status: MembershipStatus;
+  readonly roles: readonly string[];
+  readonly allProjects: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface ProjectMembership {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly principalId: string;
+  readonly status: MembershipStatus;
+  readonly roles: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface OrganizationAuditEvent {
+  readonly id: string;
+  readonly correlationId: string;
+  readonly organizationId: string;
+  readonly actorId: string;
+  readonly actorType: PrincipalType;
+  readonly action: "organization_member.created" | "organization_member.updated";
+  readonly subjectType: "organization_membership";
+  readonly subjectId: string;
+  readonly createdAt: string;
 }
 
 export interface Project {
@@ -391,21 +448,24 @@ export function normalizeRoleName(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function hasPrincipalRole(principal: Principal, role: string): boolean {
+export function principalHasRole(principal: Principal, role: string, projectId?: string): boolean {
   const normalizedRole = normalizeRoleName(role);
-  return principal.roles.some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
+  return [
+    ...principal.roles,
+    ...(projectId ? principal.projectRoles?.[projectId] ?? [] : []),
+  ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
 }
 
 function hasQuestionOwnerMatch(principal: Principal, question: Question): boolean {
   return question.ownerIds.includes(principal.id) ||
-    question.ownerRoles.some((role) => hasPrincipalRole(principal, role)) ||
-    hasPrincipalRole(principal, "project-admin");
+    question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId)) ||
+    principalHasRole(principal, "project-admin", question.projectId);
 }
 
 export function canAcceptQuestion(principal: Principal, question: Question): boolean {
   if (principal.type !== "human" || !hasQuestionOwnerMatch(principal, question)) return false;
   return question.risk !== "protected" ||
-    hasPrincipalRole(principal, "security-reviewer") ||
+    principalHasRole(principal, "security-reviewer", question.projectId) ||
     question.reviews.some((review) => review.status === "approved" && normalizeRoleName(review.reviewerRole) === "security-reviewer");
 }
 
@@ -416,9 +476,9 @@ export function questionInboxReasons(
   if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
   const reasons: QuestionInboxReason[] = [];
   if (question.ownerIds.includes(principal.id)) reasons.push("direct_owner");
-  if (question.ownerRoles.some((role) => hasPrincipalRole(principal, role))) reasons.push("role_owner");
-  if (hasPrincipalRole(principal, "project-admin")) reasons.push("project_admin");
-  if (question.risk === "protected" && hasPrincipalRole(principal, "security-reviewer")) {
+  if (question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId))) reasons.push("role_owner");
+  if (principalHasRole(principal, "project-admin", question.projectId)) reasons.push("project_admin");
+  if (question.risk === "protected" && principalHasRole(principal, "security-reviewer", question.projectId)) {
     reasons.push("protected_review");
   }
   return reasons;
@@ -431,7 +491,7 @@ export function assertCanAccept(principal: Principal, question: Question): void 
   }
   if (
     question.risk === "protected" &&
-    !hasPrincipalRole(principal, "security-reviewer") &&
+    !principalHasRole(principal, "security-reviewer", question.projectId) &&
     !question.reviews.some(
       (review) => review.status === "approved" && normalizeRoleName(review.reviewerRole) === "security-reviewer",
     )
@@ -447,7 +507,7 @@ export function assertCanAccept(principal: Principal, question: Question): void 
 export function assertCanApproveArtifact(principal: Principal, artifact: Artifact): void {
   assertHuman(principal, "Approving a specification");
   const isReviewer = artifact.reviewerIds.includes(principal.id);
-  const isProjectAdmin = principal.roles.includes("project-admin");
+  const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isProjectAdmin) {
     throw new BridgeError(
       "FORBIDDEN",
@@ -460,7 +520,7 @@ export function assertCanApproveArtifact(principal: Principal, artifact: Artifac
 export function assertCanReviewArtifact(principal: Principal, artifact: Artifact): void {
   assertHuman(principal, "Reviewing a specification");
   const isReviewer = artifact.reviewerIds.includes(principal.id);
-  const isProjectAdmin = principal.roles.includes("project-admin");
+  const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isProjectAdmin) {
     throw new BridgeError(
       "FORBIDDEN",

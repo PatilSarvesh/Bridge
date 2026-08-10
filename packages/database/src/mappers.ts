@@ -7,9 +7,14 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  Organization,
+  OrganizationAuditEvent,
+  OrganizationMembership,
   OutboxDelivery,
   OutboxEvent,
+  PrincipalIdentity,
   Project,
+  ProjectMembership,
   Question,
   QuestionResponse,
 } from "@bridge/domain";
@@ -26,10 +31,20 @@ import {
   questionResponses,
   questions,
   notifications,
+  organizations,
+  organizationMemberships,
+  organizationAuditEvents,
   outboxDeliveries,
   outboxEvents,
+  principalIdentities,
+  projectMemberships,
 } from "./schema.js";
 
+export type OrganizationRow = typeof organizations.$inferSelect;
+export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
+export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
+export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -43,6 +58,68 @@ export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 export type OutboxDeliveryRow = typeof outboxDeliveries.$inferSelect;
+
+export function organizationToRow(organization: Organization): typeof organizations.$inferInsert {
+  return {
+    id: organization.id,
+    externalIdentityProviderId: organization.externalIdentityProviderId,
+    slug: organization.slug,
+    name: organization.name,
+    createdAt: organization.createdAt,
+  };
+}
+
+export function organizationFromRow(row: OrganizationRow): Organization {
+  return { ...row };
+}
+
+export function principalIdentityToRow(
+  identity: PrincipalIdentity,
+): typeof principalIdentities.$inferInsert {
+  return { ...identity };
+}
+
+export function principalIdentityFromRow(row: PrincipalIdentityRow): PrincipalIdentity {
+  return { ...row };
+}
+
+export function organizationMembershipToRow(
+  membership: OrganizationMembership,
+): typeof organizationMemberships.$inferInsert {
+  return { ...membership };
+}
+
+export function organizationMembershipFromRow(
+  row: OrganizationMembershipRow,
+): OrganizationMembership {
+  return { ...row };
+}
+
+export function projectMembershipToRow(
+  membership: ProjectMembership,
+): typeof projectMemberships.$inferInsert {
+  return { ...membership };
+}
+
+export function projectMembershipFromRow(row: ProjectMembershipRow): ProjectMembership {
+  return { ...row };
+}
+
+export function organizationAuditEventToRow(
+  event: OrganizationAuditEvent,
+): typeof organizationAuditEvents.$inferInsert {
+  return { ...event };
+}
+
+export function organizationAuditEventFromRow(
+  row: OrganizationAuditEventRow,
+): OrganizationAuditEvent {
+  return {
+    ...row,
+    action: row.action as OrganizationAuditEvent["action"],
+    subjectType: row.subjectType as OrganizationAuditEvent["subjectType"],
+  };
+}
 
 export function projectToRow(project: Project): typeof projects.$inferInsert {
   return {

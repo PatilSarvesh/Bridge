@@ -25,7 +25,9 @@ pnpm dev
 
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below.
 
-The vertical slice uses fixed local principals. Organization onboarding and authentication are intentionally not implemented. They remain outside the active build scope until explicitly reconsidered.
+The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, and the CLI can use public-client Authorization Code + PKCE with operating-system credential storage. MCP OAuth and enterprise provisioning remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
+
+Human organization administrators can use the web **Organization** area to provision an exact OIDC subject, disable or reactivate access, assign organization roles, and configure per-project membership roles. Changes use optimistic membership versions, preserve at least one active organization administrator, and create organization-level audit records.
 
 For contributors and coding agents, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/working-context.md`](docs/working-context.md). Root [`AGENTS.md`](AGENTS.md) is also referenced by [`CLAUDE.md`](CLAUDE.md) so Claude-based contributors receive the same architecture and scope constraints. Every push and pull request runs typecheck, tests, production builds, and the isolated PostgreSQL check through GitHub Actions.
 
@@ -92,7 +94,17 @@ Bridge is a shared service, not an SDK that must be embedded into every agent or
 - Let an operator or CI job run `bridge sync` and `bridge spec pull` when the agent itself cannot access the network.
 - Use the web UI and manually relay structured records when no agent-side integration is approved.
 
-The prototype packages an installable CLI tarball with `pnpm cli:pack`; `pnpm check` now installs and executes that artifact under a temporary global prefix. The tagged release workflow and operator steps are documented in [`docs/distribution.md`](docs/distribution.md). Public or organization-registry publication remains a later owner decision. No authentication or organization onboarding is being added in this phase.
+The prototype packages an installable CLI tarball with `pnpm cli:pack`; `pnpm check` now installs and executes that artifact under a temporary global prefix. The tagged release workflow and operator steps are documented in [`docs/distribution.md`](docs/distribution.md). Public or organization-registry publication remains a later owner decision.
+
+Against an OIDC-configured Bridge API, authenticate once before using repository or operator commands:
+
+```bash
+bridge login --api-url https://api.bridge.example
+bridge auth status --api-url https://api.bridge.example
+bridge logout --api-url https://api.bridge.example
+```
+
+The CLI uses a separate public/native OIDC client, an exact `127.0.0.1` callback, S256 PKCE, state validation, and API-side token/membership verification. Access and refresh tokens are stored in macOS Keychain or Linux Secret Service rather than `.bridge`, environment variables, or repository files. An expired access token refreshes when the provider issued a refresh token; otherwise the CLI removes the expired session and requests a new login. Windows Credential Manager and noninteractive service identities remain pending.
 
 After a repository is initialized, use the adapter-only command when changing clients or regenerating the managed instruction block without registering another project:
 
@@ -160,15 +172,15 @@ Pass means Bridge found a matching task run, a linked context snapshot, at least
 
 This is an instruction-driven adapter, not a universal interception of every vendor's native prompt UI. Meaningful business, architecture, QA, data, privacy, security, and operational questions are in scope; private reasoning, raw transcripts, and trivial implementation chatter are not. MCP is optional: omit `--mcp-url` for the CLI/instruction-only path, or configure it to let `bridge doctor` verify an MCP `initialize` response.
 
-On each question detail page, human contributors can add an answer with an optional selected option and rationale, or post a version-checked clarification comment/reply. Bridge keeps those responses and threads visible to the configured decision owner, who alone can accept the authoritative answer and create the Decision. The current prototype UI uses the fixed local `usr_architect` browser identity; the REST policy still distinguishes contributor discussion from owner acceptance.
+On each question detail page, human contributors can add an answer with an optional selected option and rationale, or post a version-checked clarification comment/reply. Bridge keeps those responses and threads visible to the configured decision owner, who alone can accept the authoritative answer and create the Decision. Development mode starts with the fixed `usr_architect` identity; OIDC mode uses the signed-in member and resolves roles from active server-side memberships.
 
 On the **Decisions** page, active decisions are shown by default. Human project members can search answer, rationale, and category text, explicitly include history, and filter by lifecycle state, category, owner, creation date, or exact component scope. PostgreSQL uses a weighted full-text index while dependency-free local mode uses deterministic token ranking through the same authorized application query. The decision owner, a configured project decision owner, or a project administrator can supersede, expire, or revoke an active decision with a rationale. Supersession selects another active decision in the same category and exact scope. Bridge preserves the original answer, records lifecycle provenance, removes retired decisions from default agent context, and reports directly linked specifications, assumptions, runs, and work items that may need review. Direct links and lifecycle notifications automatically include history so retired records remain reachable.
 
 On the **Specifications** page, configured reviewers and project administrators can add formal comments or request changes on the current immutable version. A change request blocks approval of that exact version; the author must publish a new version that addresses the feedback. The previous approved version, if any, remains the agent-facing authority until the replacement version is approved. Reviewers can also compare any two immutable versions: Bridge safely renders added and removed Markdown lines with provenance, uses a bounded fallback for unusually large documents, and never rewrites the stored bodies.
 
-Agents can target a question to role names with `intendedOwnerRoles` in the structured question payload, for example `['QA Lead']`, `['Business Analyst']`, or `['Security Reviewer']`. Bridge normalizes those names and permits a matching human role to accept the decision. This is a fixed-principal policy seam for the prototype, not organization role administration.
+Agents can target a question to role names with `intendedOwnerRoles` in the structured question payload, for example `['QA Lead']`, `['Business Analyst']`, or `['Security Reviewer']`. Bridge normalizes those names and permits a matching human role to accept the decision. OIDC principals can receive project-scoped roles from durable memberships; administrator-managed role assignment is the next organization-management slice.
 
-For local policy testing, the web UI exposes a **Reviewing as** selector backed by `GET /v1/principals`. Switching to QA Lead or Business Analyst reloads the project-scoped views under that fixed human principal and makes role-based acceptance easy to exercise. It is deliberately a reviewer-context switcher, not authentication.
+For local policy testing, development mode exposes a **Reviewing as** selector backed by `GET /v1/principals`. Switching to QA Lead or Business Analyst reloads the project-scoped views under that fixed human principal and makes role-based acceptance easy to exercise. OIDC mode hides this switcher and shows only the authenticated member.
 
 The UI separates **My Inbox** from shared **Questions**. The inbox is personalized by direct owner, assigned role, project-admin fallback, and protected-review role, with State, Risk, Category, and Role filters; the shared Questions view remains available to every authorized project participant so contributors can read and propose responses.
 

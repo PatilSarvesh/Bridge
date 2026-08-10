@@ -4,6 +4,10 @@ import { pathToFileURL } from "node:url";
 import postgres from "postgres";
 
 export const restoreRequiredTables = [
+  "bridge_organizations",
+  "bridge_principal_identities",
+  "bridge_organization_memberships",
+  "bridge_project_memberships",
   "bridge_projects",
   "bridge_agent_runs",
   "bridge_run_continuation_locators",
@@ -15,6 +19,7 @@ export const restoreRequiredTables = [
   "bridge_artifact_versions",
   "bridge_context_snapshots",
   "bridge_audit_events",
+  "bridge_organization_audit_events",
   "bridge_notifications",
   "bridge_outbox_events",
   "bridge_outbox_deliveries",
@@ -109,7 +114,11 @@ export async function verifyRestoredDatabase(
     }
 
     const countRows = await client<{ readonly tableName: string; readonly count: number }[]>`
-      select 'bridge_projects' as "tableName", count(*)::integer as count from bridge_projects
+      select 'bridge_organizations' as "tableName", count(*)::integer as count from bridge_organizations
+      union all select 'bridge_principal_identities', count(*)::integer from bridge_principal_identities
+      union all select 'bridge_organization_memberships', count(*)::integer from bridge_organization_memberships
+      union all select 'bridge_project_memberships', count(*)::integer from bridge_project_memberships
+      union all select 'bridge_projects', count(*)::integer from bridge_projects
       union all select 'bridge_agent_runs', count(*)::integer from bridge_agent_runs
       union all select 'bridge_questions', count(*)::integer from bridge_questions
       union all select 'bridge_decisions', count(*)::integer from bridge_decisions
@@ -117,6 +126,7 @@ export async function verifyRestoredDatabase(
       union all select 'bridge_artifacts', count(*)::integer from bridge_artifacts
       union all select 'bridge_artifact_versions', count(*)::integer from bridge_artifact_versions
       union all select 'bridge_audit_events', count(*)::integer from bridge_audit_events
+      union all select 'bridge_organization_audit_events', count(*)::integer from bridge_organization_audit_events
       union all select 'bridge_notifications', count(*)::integer from bridge_notifications
       union all select 'bridge_outbox_events', count(*)::integer from bridge_outbox_events
       union all select 'bridge_outbox_deliveries', count(*)::integer from bridge_outbox_deliveries
@@ -144,6 +154,7 @@ export async function verifyRestoredDatabase(
           (select count(*) from bridge_audit_events record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_notifications record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_outbox_events record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
+          (select count(*) from bridge_project_memberships record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_outbox_deliveries delivery join bridge_outbox_events event on event.id = delivery.outbox_event_id where delivery.organization_id <> event.organization_id or delivery.project_id <> event.project_id)
         )::integer as "tenantScopeMismatchCount",
         (

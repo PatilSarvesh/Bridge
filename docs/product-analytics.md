@@ -16,7 +16,7 @@ GET /v1/admin/projects/:projectId/analytics?client=&startedFrom=&startedTo=
 - All returned activity is attributed to that run cohort through durable run links.
 - A human project administrator with access to the project is required. Agent and non-admin human principals are denied by the application layer.
 
-The **Analytics** web view exposes the same project/client/date filters, summary cards, activity counts, guardrails, client breakdown, and collection notice. The current identity is still a fixed prototype principal; this endpoint is not production authentication or organization onboarding.
+The **Analytics** web view exposes the same project/client/date filters, summary cards, activity counts, guardrails, client breakdown, and collection notice. OIDC mode resolves the signed-in member through active organization/project membership; development mode retains fixed fixtures. Analytics authorization still requires a human project administrator.
 
 ## Metric definitions
 

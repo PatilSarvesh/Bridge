@@ -4,7 +4,25 @@ import {
   type BridgeRepository,
   type BridgeServiceOptions,
 } from "@bridge/application";
-import type { Principal, Project } from "@bridge/domain";
+import type { Organization, Principal, PrincipalIdentity, Project } from "@bridge/domain";
+
+export const demoOidcIssuer = "https://bridge.local/";
+
+export const demoOrganization: Organization = {
+  id: "org_acme",
+  externalIdentityProviderId: "dev_org_acme",
+  slug: "acme",
+  name: "Acme",
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+export const outsiderOrganization: Organization = {
+  id: "org_other",
+  externalIdentityProviderId: "dev_org_other",
+  slug: "other",
+  name: "Other Organization",
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
 
 export const demoProject: Project = {
   id: "prj_payments",
@@ -29,7 +47,7 @@ export const demoPrincipals = {
     organizationId: "org_acme",
     projectIds: [demoProject.id],
     allProjects: true,
-    roles: ["architecture-owner", "project-admin", "security-reviewer"],
+    roles: ["architecture-owner", "organization-admin", "project-admin", "security-reviewer"],
     displayName: "Sarvesh Patil",
   },
   contributor: {
@@ -96,6 +114,7 @@ export interface DemoRuntime {
 }
 
 export interface DemoRuntimeOptions {
+  readonly seedFixtures?: boolean;
   readonly seedQuestion?: boolean;
   readonly seedArtifact?: boolean;
   readonly serviceOptions?: BridgeServiceOptions;
@@ -112,8 +131,54 @@ export async function createDemoRuntimeWithRepository(
   repository: BridgeRepository,
   options: DemoRuntimeOptions = {},
 ): Promise<DemoRuntime> {
+  const service = new BridgeService(repository, {
+    identityIssuer: demoOidcIssuer,
+    ...options.serviceOptions,
+  });
+  if (options.seedFixtures === false) {
+    return {
+      repository,
+      service,
+      principals: demoPrincipalsById,
+    };
+  }
+  await repository.saveOrganization(demoOrganization);
+  await repository.saveOrganization(outsiderOrganization);
   await repository.saveProject(demoProject);
-  const service = new BridgeService(repository, options.serviceOptions);
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  for (const principal of Object.values(demoPrincipals)) {
+    const identity: PrincipalIdentity = {
+      id: principal.id,
+      type: principal.type,
+      displayName: principal.displayName,
+      oidcIssuer: demoOidcIssuer,
+      oidcSubject: principal.id,
+      createdAt: timestamp,
+    };
+    await repository.savePrincipalIdentity(identity);
+    await repository.saveOrganizationMembership({
+      organizationId: principal.organizationId,
+      principalId: principal.id,
+      status: "active",
+      roles: principal.roles,
+      allProjects: principal.allProjects ?? false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
+    });
+    if (principal.organizationId === demoProject.organizationId) {
+      await repository.saveProjectMembership({
+        organizationId: principal.organizationId,
+        projectId: demoProject.id,
+        principalId: principal.id,
+        status: "active",
+        roles: principal.roles,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      });
+    }
+  }
   let sampleRunId: string | undefined;
   let sampleQuestionId: string | undefined;
   let sampleArtifactId: string | undefined;

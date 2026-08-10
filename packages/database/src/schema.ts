@@ -1,6 +1,7 @@
 import type { Scope } from "@bridge/contracts";
 import type {
   ArtifactReview,
+  OrganizationAuditEvent,
   OutboxPayload,
   QuestionComment,
   QuestionOption,
@@ -16,6 +17,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -104,12 +106,90 @@ export const assumptionStatusEnum = pgEnum("bridge_assumption_status", [
   "superseded",
 ]);
 
+export const membershipStatusEnum = pgEnum("bridge_membership_status", ["active", "disabled"]);
+
+export const organizations = pgTable("bridge_organizations", {
+  id: text("id").primaryKey(),
+  externalIdentityProviderId: text("external_identity_provider_id").notNull().unique(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+});
+
+export const principalIdentities = pgTable(
+  "bridge_principal_identities",
+  {
+    id: text("id").primaryKey(),
+    type: principalTypeEnum("type").notNull(),
+    displayName: text("display_name").notNull(),
+    oidcIssuer: text("oidc_issuer").notNull(),
+    oidcSubject: text("oidc_subject").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    unique("bridge_principal_identities_oidc_unique").on(table.oidcIssuer, table.oidcSubject),
+  ],
+);
+
+export const organizationMemberships = pgTable(
+  "bridge_organization_memberships",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => principalIdentities.id, { onDelete: "cascade" }),
+    status: membershipStatusEnum("status").notNull(),
+    roles: jsonb("roles").$type<readonly string[]>().notNull(),
+    allProjects: boolean("all_projects").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").default(1).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.principalId] }),
+    index("bridge_organization_memberships_principal_idx").on(table.principalId),
+  ],
+);
+
 export const projects = pgTable("bridge_projects", {
   id: text("id").primaryKey(),
-  organizationId: text("organization_id").notNull(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organizations.id, { onDelete: "restrict" }),
   name: text("name").notNull(),
   decisionOwnerIds: jsonb("decision_owner_ids").$type<readonly string[]>().notNull(),
 });
+
+export const projectMemberships = pgTable(
+  "bridge_project_memberships",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => principalIdentities.id, { onDelete: "cascade" }),
+    status: membershipStatusEnum("status").notNull(),
+    roles: jsonb("roles").$type<readonly string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").default(1).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId, table.principalId] }),
+    index("bridge_project_memberships_principal_idx").on(table.principalId),
+    foreignKey({
+      name: "bridge_project_memberships_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+  ],
+);
 
 export const agentRuns = pgTable(
   "bridge_agent_runs",
@@ -392,6 +472,30 @@ export const auditEvents = pgTable(
   (table) => [
     index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_audit_events_correlation_idx").on(table.correlationId),
+  ],
+);
+
+export const organizationAuditEvents = pgTable(
+  "bridge_organization_audit_events",
+  {
+    id: text("id").primaryKey(),
+    correlationId: text("correlation_id").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    actorId: text("actor_id").notNull(),
+    actorType: principalTypeEnum("actor_type").notNull(),
+    action: text("action").$type<OrganizationAuditEvent["action"]>().notNull(),
+    subjectType: text("subject_type").$type<OrganizationAuditEvent["subjectType"]>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("bridge_organization_audit_events_org_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
   ],
 );
 

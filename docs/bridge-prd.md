@@ -307,7 +307,7 @@ Priority uses **P0** for launch-critical, **P1** for near-term, and **P2** for l
 
 ### 12.1 Identity and organization
 
-> **Prototype scope override (2026-08-07):** Organization onboarding and authentication are deferred by founder direction. The requirements below describe a possible later production phase and are not authorized implementation work in the active prototype.
+> **Scope update (2026-08-10):** The founder reopened organization and authentication work. AUTH-01 and the durable membership foundation are active; AUTH-02/03 agent flows and AUTH-05 enterprise provisioning remain staged follow-up work.
 
 | ID | Priority | Requirement |
 |---|---|---|

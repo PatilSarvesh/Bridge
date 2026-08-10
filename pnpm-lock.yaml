@@ -26,6 +26,9 @@ importers:
       '@bridge/application':
         specifier: workspace:*
         version: link:../../packages/application
+      '@bridge/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@bridge/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -138,6 +141,15 @@ importers:
       '@bridge/observability':
         specifier: workspace:*
         version: link:../observability
+
+  packages/auth:
+    dependencies:
+      '@bridge/domain':
+        specifier: workspace:*
+        version: link:../domain
+      jose:
+        specifier: 6.2.8
+        version: 6.2.8
 
   packages/contracts:
     dependencies:

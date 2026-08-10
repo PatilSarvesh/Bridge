@@ -18,6 +18,10 @@
     "bridge": "dist/index.js"
   },
   "files": [
+    "dist/auth.js",
+    "dist/auth.js.map",
+    "dist/auth.d.ts",
+    "dist/auth.d.ts.map",
     "dist/index.js",
     "dist/index.js.map",
     "dist/index.d.ts",

@@ -1,7 +1,9 @@
 import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
+import type { AuthenticationProvider } from "@bridge/auth";
+import { BridgeError, type Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 
@@ -9,7 +11,15 @@ describe("Bridge API vertical slice", () => {
   const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(apps.splice(0).map((app) => app.close()));
+  });
+
+  it("fails closed when production starts without OIDC", async () => {
+    const runtime = await createDemoRuntime();
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(buildApp({ service: runtime.service, principals: runtime.principals }))
+      .rejects.toThrow("OIDC authentication is required");
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
@@ -92,6 +102,72 @@ describe("Bridge API vertical slice", () => {
     );
     expect(response.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id))
       .not.toContain(demoPrincipals.outsider.id);
+  });
+
+  it("lets a human organization admin provision and version-update project membership", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeader = { "x-bridge-principal-id": demoPrincipals.architect.id };
+
+    const denied = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/members",
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/members",
+      headers: adminHeader,
+      payload: {
+        oidcSubject: "auth0|api-member",
+        displayName: "API Member",
+        roles: ["organization-member"],
+        allProjects: false,
+        projectMemberships: [{ projectId: demoProject.id, roles: ["QA Lead"] }],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const member = created.json<{ member: { id: string; version: number } }>().member;
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: `/v1/admin/organization/members/${member.id}`,
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        "access-control-request-method": "PATCH",
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("PATCH");
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/v1/admin/organization/members/${member.id}`,
+      headers: adminHeader,
+      payload: {
+        expectedVersion: member.version,
+        status: "disabled",
+        roles: ["organization-member"],
+        allProjects: false,
+        projectMemberships: [],
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ status: "disabled", version: 2 });
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/members",
+      headers: adminHeader,
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: member.id, status: "disabled" })]),
+      projects: [expect.objectContaining({ id: demoProject.id })],
+    });
   });
 
   it("lists and marks scoped human notifications without exposing them to agents", async () => {
@@ -1400,5 +1476,76 @@ describe("Bridge API vertical slice", () => {
     });
     expect(detail.json<{ versions: Array<{ reviews: Array<{ status: string }> }> }>().versions[0]?.reviews)
       .toEqual([expect.objectContaining({ status: "changes_requested" })]);
+  });
+
+  it("uses authenticated sessions or bearer tokens instead of the development principal header", async () => {
+    const runtime = await createDemoRuntime();
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({
+        mode: "oidc",
+        loginUrl: "https://api.bridge.example/v1/auth/login",
+        logoutUrl: "https://api.bridge.example/v1/auth/logout",
+      }),
+      authenticateRequest: async ({ authorization, cookie }) => {
+        if (authorization === "Bearer valid-token" || cookie === "bridge_session=valid") {
+          return demoPrincipals.architect;
+        }
+        throw new BridgeError("UNAUTHENTICATED", "Authentication is required.", 401);
+      },
+      beginWebLogin: async () => ({
+        authorizationUrl: "https://identity.example/authorize?state=safe-state",
+        transactionCookie: "bridge_oidc_transaction=encrypted; HttpOnly; SameSite=Lax; Secure",
+      }),
+      completeWebLogin: async () => ({
+        redirectUrl: "https://bridge.example/",
+        sessionCookie: "bridge_session=encrypted; HttpOnly; SameSite=Lax; Secure",
+        clearTransactionCookie: "bridge_oidc_transaction=; Max-Age=0",
+      }),
+      endWebSession: () => ({
+        redirectUrl: "https://identity.example/v2/logout",
+        clearSessionCookie: "bridge_session=; Max-Age=0",
+      }),
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      authenticator,
+    });
+    apps.push(app);
+
+    const config = await app.inject({ method: "GET", url: "/v1/auth/config" });
+    expect(config.json()).toMatchObject({ mode: "oidc", loginUrl: expect.stringContaining("/login") });
+    const developmentHeader = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(developmentHeader.statusCode).toBe(401);
+
+    const bearer = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(bearer.statusCode).toBe(200);
+    expect(bearer.json<{ items: Project[] }>().items)
+      .toEqual([expect.objectContaining({ id: demoProject.id })]);
+
+    const me = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: { cookie: "bridge_session=valid" },
+    });
+    expect(me.json()).toMatchObject({
+      id: demoPrincipals.architect.id,
+      organizationId: demoProject.organizationId,
+      projectRoles: {},
+    });
+
+    const login = await app.inject({ method: "GET", url: "/v1/auth/login" });
+    expect(login.statusCode).toBe(302);
+    expect(login.headers.location).toContain("identity.example/authorize");
+    expect(login.headers["set-cookie"]).toContain("HttpOnly");
   });
 });

@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Active scope override:** Organization onboarding and authentication are not authorized implementation work. Related stories remain design references only until the founder explicitly reopens that scope. The prototype uses fixed local principals and must not be treated as production-secure.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, and durable membership administration are active; fixed principals are development-only, and unfinished MCP OAuth/scopes, service identities, RLS, and provisioning work prevents a production-security claim.
 
 ## 2. Planning conventions
 
@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed local principals are used for the prototype; Auth0 and organization onboarding are deferred.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, and durable organization-member administration are implemented, while MCP OAuth/scopes, noninteractive identities, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -207,7 +207,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Later — not authorized in active scope
+- **Status:** Partial — Auth0-compatible Authorization Code + PKCE web sign-in/sign-out, encrypted bounded sessions, issuer/audience/signature/expiry/state/nonce validation, active organization membership resolution, disabled-member denial, and safe correlation-aware request logging are implemented; live-tenant validation and durable authentication audit events remain
 - **Dependencies:** BRG-001, BRG-002
 - **PRD references:** AUTH-01, AUTH-04
 
@@ -225,7 +225,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Implemented for the fixed-principal prototype; production identity and token-derived scope are intentionally deferred
+- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, and project roles are target-project scoped; explicit OAuth scope/capability enforcement remains
 - **Dependencies:** BRG-002
 - **PRD references:** AUTH-03, AUTH-04, QST-05, ADM-01
 
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Later — not authorized in active scope
+- **Status:** Partial — the API accepts audience-validated bearer tokens and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented, while MCP OAuth metadata/audience/scopes and noninteractive service-identity grants remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 
@@ -283,7 +283,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Later — organization onboarding is not authorized in active scope
+- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, and version-checked member/project-access administration UI are implemented; repository records remain
 - **Dependencies:** BRG-010, BRG-012
 - **PRD references:** PRJ-01, PRJ-03
 
@@ -301,7 +301,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — fixed prototype principals, normalized roles, explicit owners, scoped defaults, and separate protected reviewers are implemented; administrator-managed teams/rules and versioned configuration remain
+- **Status:** Partial — normalized roles, explicit owners, scoped defaults, separate protected reviewers, and audited administrator-managed organization/project membership roles are implemented; reusable teams, ownership rules, and versioned role definitions remain
 - **Dependencies:** BRG-020
 - **PRD references:** PRJ-02, QST-03, QST-05
 
@@ -569,7 +569,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Streamable HTTP initialization and versioned tools run with a fixed prototype principal and shared PostgreSQL state; OAuth/audience/scope authentication is not authorized in the current scope
+- **Status:** Partial — Streamable HTTP initialization and versioned tools run with a fixed development principal and shared PostgreSQL state; the shared OIDC verifier exists for the API, but standalone MCP audience/scope authentication and metadata remain
 - **Dependencies:** BRG-013, BRG-051
 - **PRD references:** AUTH-02, CTX-01, MCP contract
 
@@ -644,7 +644,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Later — not authorized in active scope
+- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, and revoking logout are implemented; Windows Credential Manager and noninteractive service identities remain
 - **Dependencies:** BRG-013
 - **PRD references:** AUTH-02, CLI contract
 
@@ -652,10 +652,10 @@ As a CLI user, I need browser login with credentials stored in the operating-sys
 
 Acceptance criteria:
 
-1. `bridge login`, `bridge logout`, and session status work on pilot operating systems.
-2. Tokens are stored in the OS credential facility, not repository files.
-3. Expired sessions refresh or request login safely.
-4. Logs and errors never reveal tokens.
+1. `bridge login`, `bridge logout`, and session status work on pilot operating systems. **Implemented for macOS Keychain and Linux Secret Service.**
+2. Tokens are stored in the OS credential facility, not repository files. **Implemented.**
+3. Expired sessions refresh or request login safely. **Implemented and covered for refresh-token preservation/rotation.**
+4. Logs and errors never reveal tokens. **Implemented for CLI output/errors and existing structured API logging.**
 5. Noninteractive mode requires a separate service-identity mechanism.
 
 ### BRG-061 — Initialize repository project configuration
@@ -916,7 +916,7 @@ As a user, I need email notification for important Bridge events so that I do no
 Acceptance criteria:
 
 1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
-2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context and an auth-ready Bridge review URL are implemented; production signed-in behavior awaits the explicitly deferred identity scope.**
+2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context, an auth-ready review URL, and OIDC web sign-in are implemented; hosted callback/link validation remains deployment work.**
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
 4. Ordinary events honor notification preferences. **Immediate, muted, and digest outcomes are implemented through an injected directory; digest batching/sending remains. Protected review mail bypasses muting.**
 5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
@@ -1200,7 +1200,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 
 | Risk | Backlog response |
 |---|---|
-| Deferred identity scope is mistaken for production security | Keep fixed principals explicitly development-only and require a new founder decision before production identity work |
+| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI OAuth, scopes, RLS, administration, and deployment validation explicitly |
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |

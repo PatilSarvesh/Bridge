@@ -86,6 +86,41 @@ export const scopeSchema = z.object({
 
 export const ownerRoleSchema = z.string().trim().min(2).max(80);
 
+export const membershipStatusSchema = z.enum(["active", "disabled"]);
+
+export const projectMembershipConfigurationSchema = z.object({
+  projectId: z.string().trim().min(1).max(100),
+  roles: z.array(ownerRoleSchema).max(30).default([]),
+});
+
+const memberConfigurationSchema = z.object({
+  roles: z.array(ownerRoleSchema).max(30).default(["organization-member"]),
+  allProjects: z.boolean().default(false),
+  projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
+}).superRefine((value, context) => {
+  const projectIds = new Set<string>();
+  for (const [index, membership] of value.projectMemberships.entries()) {
+    if (projectIds.has(membership.projectId)) {
+      context.addIssue({
+        code: "custom",
+        message: "Each project can appear only once.",
+        path: ["projectMemberships", index, "projectId"],
+      });
+    }
+    projectIds.add(membership.projectId);
+  }
+});
+
+export const createOrganizationMemberInputSchema = memberConfigurationSchema.and(z.object({
+  oidcSubject: z.string().trim().min(1).max(300),
+  displayName: z.string().trim().min(2).max(200),
+}));
+
+export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and(z.object({
+  expectedVersion: z.number().int().positive(),
+  status: membershipStatusSchema,
+}));
+
 export const registerProjectInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   name: z.string().trim().min(2).max(200),
@@ -414,6 +449,10 @@ export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
 export type AssumptionConfidence = z.infer<typeof assumptionConfidenceSchema>;
 export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
+export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
+export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
+export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
+export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;

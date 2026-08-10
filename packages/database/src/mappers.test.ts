@@ -7,9 +7,14 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  Organization,
+  OrganizationAuditEvent,
+  OrganizationMembership,
   OutboxDelivery,
   OutboxEvent,
+  PrincipalIdentity,
   Project,
+  ProjectMembership,
   Question,
 } from "@bridge/domain";
 import { describe, expect, it } from "vitest";
@@ -28,10 +33,20 @@ import {
   projectToRow,
   notificationFromRow,
   notificationToRow,
+  organizationFromRow,
+  organizationAuditEventFromRow,
+  organizationAuditEventToRow,
+  organizationMembershipFromRow,
+  organizationMembershipToRow,
+  organizationToRow,
   outboxEventFromRow,
   outboxEventToRow,
   outboxDeliveryFromRow,
   outboxDeliveryToRow,
+  principalIdentityFromRow,
+  principalIdentityToRow,
+  projectMembershipFromRow,
+  projectMembershipToRow,
   questionFromRows,
   questionToRow,
   responseToRow,
@@ -49,6 +64,11 @@ import {
   type NotificationRow,
   type OutboxEventRow,
   type OutboxDeliveryRow,
+  type OrganizationMembershipRow,
+  type OrganizationAuditEventRow,
+  type OrganizationRow,
+  type PrincipalIdentityRow,
+  type ProjectMembershipRow,
 } from "./mappers.js";
 
 const project: Project = {
@@ -288,6 +308,67 @@ const outboxDelivery: OutboxDelivery = {
 };
 
 describe("PostgreSQL domain mappings", () => {
+  it("round-trips organizations, identities, and memberships", () => {
+    const organization: Organization = {
+      id: "org_mapping",
+      externalIdentityProviderId: "auth0-org-mapping",
+      slug: "mapping",
+      name: "Mapping Organization",
+      createdAt: "2026-08-07T09:00:00.000Z",
+    };
+    const identity: PrincipalIdentity = {
+      id: "usr_mapping",
+      type: "human",
+      displayName: "Mapping User",
+      oidcIssuer: "https://identity.example/",
+      oidcSubject: "auth0|mapping",
+      createdAt: organization.createdAt,
+    };
+    const organizationMembership: OrganizationMembership = {
+      organizationId: organization.id,
+      principalId: identity.id,
+      status: "active",
+      roles: ["organization-member"],
+      allProjects: false,
+      createdAt: organization.createdAt,
+      updatedAt: organization.createdAt,
+      version: 1,
+    };
+    const projectMembership: ProjectMembership = {
+      organizationId: organization.id,
+      projectId: project.id,
+      principalId: identity.id,
+      status: "active",
+      roles: ["project-admin"],
+      createdAt: organization.createdAt,
+      updatedAt: organization.createdAt,
+      version: 1,
+    };
+    const organizationAuditEvent: OrganizationAuditEvent = {
+      id: "oaud_mapping",
+      correlationId: "cor_mapping",
+      organizationId: organization.id,
+      actorId: identity.id,
+      actorType: "human",
+      action: "organization_member.updated",
+      subjectType: "organization_membership",
+      subjectId: identity.id,
+      createdAt: organization.createdAt,
+    };
+
+    expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
+    expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
+    expect(organizationMembershipFromRow(
+      organizationMembershipToRow(organizationMembership) as OrganizationMembershipRow,
+    )).toEqual(organizationMembership);
+    expect(projectMembershipFromRow(
+      projectMembershipToRow(projectMembership) as ProjectMembershipRow,
+    )).toEqual(projectMembership);
+    expect(organizationAuditEventFromRow(
+      organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
+    )).toEqual(organizationAuditEvent);
+  });
+
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
@@ -450,5 +531,25 @@ describe("PostgreSQL domain mappings", () => {
     expect(correlationMigration).toContain("bridge_audit_events_correlation_check");
     expect(correlationMigration).toContain("bridge_outbox_events_correlation_check");
     expect(correlationMigration).toContain("bridge_outbox_correlation_idx");
+
+    const identityMigration = readFileSync(
+      new URL("../drizzle/0015_spooky_bulldozer.sql", import.meta.url),
+      "utf8",
+    );
+    expect(identityMigration).toContain("CREATE TABLE \"bridge_organizations\"");
+    expect(identityMigration).toContain("CREATE TABLE \"bridge_organization_memberships\"");
+    expect(identityMigration).toContain("CREATE TABLE \"bridge_project_memberships\"");
+    expect(identityMigration.indexOf("INSERT INTO \"bridge_organizations\""))
+      .toBeLessThan(identityMigration.indexOf("bridge_projects_organization_id_bridge_organizations_id_fk"));
+
+    const memberAdministrationMigration = readFileSync(
+      new URL("../drizzle/0016_charming_siren.sql", import.meta.url),
+      "utf8",
+    );
+    expect(memberAdministrationMigration).toContain("CREATE TABLE \"bridge_organization_audit_events\"");
+    expect(memberAdministrationMigration).toContain("bridge_organization_memberships_positive_version_check");
+    expect(memberAdministrationMigration).toContain("bridge_project_memberships_positive_version_check");
+    expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_action_check");
+    expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_correlation_check");
   });
 });

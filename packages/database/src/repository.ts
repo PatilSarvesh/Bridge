@@ -13,9 +13,15 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  Organization,
+  OrganizationAuditEvent,
+  OrganizationMembership,
   OutboxDelivery,
   OutboxEvent,
+  Principal,
+  PrincipalIdentity,
   Project,
+  ProjectMembership,
   Question,
 } from "@bridge/domain";
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
@@ -35,10 +41,20 @@ import {
   decisionToRow,
   notificationFromRow,
   notificationToRow,
+  organizationFromRow,
+  organizationAuditEventFromRow,
+  organizationAuditEventToRow,
+  organizationMembershipFromRow,
+  organizationMembershipToRow,
+  organizationToRow,
   outboxDeliveryFromRow,
   outboxDeliveryToRow,
   outboxEventFromRow,
   outboxEventToRow,
+  principalIdentityFromRow,
+  principalIdentityToRow,
+  projectMembershipFromRow,
+  projectMembershipToRow,
   projectFromRow,
   projectToRow,
   questionFromRows,
@@ -62,8 +78,13 @@ import {
   questions,
   runContinuationLocators,
   notifications,
+  organizations,
+  organizationAuditEvents,
+  organizationMemberships,
   outboxDeliveries,
   outboxEvents,
+  principalIdentities,
+  projectMemberships,
 } from "./schema.js";
 
 type BridgeDatabase = PostgresJsDatabase<typeof schema>;
@@ -118,6 +139,241 @@ export class PostgresBridgeRepository implements BridgeRepository {
         durationMs: Math.max(0, performance.now() - startedAt),
       });
     }
+  }
+
+  async getOrganizationByExternalId(
+    externalIdentityProviderId: string,
+  ): Promise<Organization | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(organizations)
+      .where(eq(organizations.externalIdentityProviderId, externalIdentityProviderId))
+      .limit(1);
+    return row ? organizationFromRow(row) : undefined;
+  }
+
+  async saveOrganization(organization: Organization): Promise<void> {
+    const row = organizationToRow(organization);
+    await this.database.insert(organizations).values(row).onConflictDoUpdate({
+      target: organizations.id,
+      set: {
+        externalIdentityProviderId: row.externalIdentityProviderId,
+        slug: row.slug,
+        name: row.name,
+      },
+    });
+  }
+
+  async getPrincipalIdentityByOidc(
+    issuer: string,
+    subject: string,
+  ): Promise<PrincipalIdentity | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(principalIdentities)
+      .where(and(
+        eq(principalIdentities.oidcIssuer, issuer),
+        eq(principalIdentities.oidcSubject, subject),
+      ))
+      .limit(1);
+    return row ? principalIdentityFromRow(row) : undefined;
+  }
+
+  async getPrincipalIdentity(principalId: string): Promise<PrincipalIdentity | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(principalIdentities)
+      .where(eq(principalIdentities.id, principalId))
+      .limit(1);
+    return row ? principalIdentityFromRow(row) : undefined;
+  }
+
+  async savePrincipalIdentity(identity: PrincipalIdentity): Promise<void> {
+    const row = principalIdentityToRow(identity);
+    await this.database.insert(principalIdentities).values(row).onConflictDoUpdate({
+      target: principalIdentities.id,
+      set: {
+        type: row.type,
+        displayName: row.displayName,
+        oidcIssuer: row.oidcIssuer,
+        oidcSubject: row.oidcSubject,
+      },
+    });
+  }
+
+  async getOrganizationMembership(
+    organizationId: string,
+    principalId: string,
+  ): Promise<OrganizationMembership | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(organizationMemberships)
+      .where(and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.principalId, principalId),
+      ))
+      .limit(1);
+    return row ? organizationMembershipFromRow(row) : undefined;
+  }
+
+  async listOrganizationMemberships(
+    organizationId: string,
+  ): Promise<readonly OrganizationMembership[]> {
+    const rows = await this.database
+      .select()
+      .from(organizationMemberships)
+      .where(eq(organizationMemberships.organizationId, organizationId))
+      .orderBy(asc(organizationMemberships.principalId));
+    return rows.map(organizationMembershipFromRow);
+  }
+
+  async saveOrganizationMembership(
+    membership: OrganizationMembership,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = organizationMembershipToRow(membership);
+    if (expectedVersion !== undefined) {
+      const updated = await this.database.update(organizationMemberships).set({
+        status: row.status,
+        roles: row.roles,
+        allProjects: row.allProjects,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      }).where(and(
+        eq(organizationMemberships.organizationId, membership.organizationId),
+        eq(organizationMemberships.principalId, membership.principalId),
+        eq(organizationMemberships.version, expectedVersion),
+      )).returning({ principalId: organizationMemberships.principalId });
+      return updated.length === 1;
+    }
+    await this.database.insert(organizationMemberships).values(row).onConflictDoUpdate({
+      target: [organizationMemberships.organizationId, organizationMemberships.principalId],
+      set: {
+        status: row.status,
+        roles: row.roles,
+        allProjects: row.allProjects,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      },
+    });
+    return true;
+  }
+
+  async listProjectMemberships(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly ProjectMembership[]> {
+    const rows = await this.database
+      .select()
+      .from(projectMemberships)
+      .where(and(
+        eq(projectMemberships.organizationId, organizationId),
+        eq(projectMemberships.principalId, principalId),
+      ))
+      .orderBy(asc(projectMemberships.projectId));
+    return rows.map(projectMembershipFromRow);
+  }
+
+  async saveProjectMembership(
+    membership: ProjectMembership,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = projectMembershipToRow(membership);
+    if (expectedVersion !== undefined) {
+      const updated = await this.database.update(projectMemberships).set({
+        status: row.status,
+        roles: row.roles,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      }).where(and(
+        eq(projectMemberships.organizationId, membership.organizationId),
+        eq(projectMemberships.projectId, membership.projectId),
+        eq(projectMemberships.principalId, membership.principalId),
+        eq(projectMemberships.version, expectedVersion),
+      )).returning({ principalId: projectMemberships.principalId });
+      return updated.length === 1;
+    }
+    await this.database.insert(projectMemberships).values(row).onConflictDoUpdate({
+      target: [
+        projectMemberships.organizationId,
+        projectMemberships.projectId,
+        projectMemberships.principalId,
+      ],
+      set: {
+        status: row.status,
+        roles: row.roles,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      },
+    });
+    return true;
+  }
+
+  async resolveOidcPrincipal(identity: {
+    readonly issuer: string;
+    readonly subject: string;
+    readonly organizationExternalId: string;
+  }): Promise<Principal | undefined> {
+    const [principalIdentity, organization] = await Promise.all([
+      this.getPrincipalIdentityByOidc(identity.issuer, identity.subject),
+      this.getOrganizationByExternalId(identity.organizationExternalId),
+    ]);
+    if (!principalIdentity || !organization) return undefined;
+    const organizationMembership = await this.getOrganizationMembership(
+      organization.id,
+      principalIdentity.id,
+    );
+    if (!organizationMembership || organizationMembership.status !== "active") return undefined;
+    const memberships = (await this.listProjectMemberships(
+      organization.id,
+      principalIdentity.id,
+    )).filter((membership) => membership.status === "active");
+    return {
+      id: principalIdentity.id,
+      type: principalIdentity.type,
+      organizationId: organization.id,
+      projectIds: memberships.map((membership) => membership.projectId),
+      allProjects: organizationMembership.allProjects,
+      roles: organizationMembership.roles,
+      projectRoles: Object.fromEntries(
+        memberships.map((membership) => [membership.projectId, membership.roles]),
+      ),
+      displayName: principalIdentity.displayName,
+    };
+  }
+
+  async listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]> {
+    const rows = await this.database
+      .select({
+        identity: principalIdentities,
+        membership: organizationMemberships,
+      })
+      .from(organizationMemberships)
+      .innerJoin(
+        principalIdentities,
+        eq(organizationMemberships.principalId, principalIdentities.id),
+      )
+      .where(and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.status, "active"),
+      ));
+    const principals = await Promise.all(rows.map(async (row): Promise<Principal> => {
+      const memberships = (await this.listProjectMemberships(organizationId, row.identity.id))
+        .filter((membership) => membership.status === "active");
+      return {
+        id: row.identity.id,
+        type: row.identity.type,
+        organizationId,
+        projectIds: memberships.map((membership) => membership.projectId),
+        allProjects: row.membership.allProjects,
+        roles: row.membership.roles,
+        projectRoles: Object.fromEntries(
+          memberships.map((membership) => [membership.projectId, membership.roles]),
+        ),
+        displayName: row.identity.displayName,
+      };
+    }));
+    return principals.sort((left, right) => left.displayName.localeCompare(right.displayName));
   }
 
   async getProject(projectId: string): Promise<Project | undefined> {
@@ -503,6 +759,24 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .where(eq(auditEvents.projectId, projectId))
       .orderBy(asc(auditEvents.createdAt));
     return rows.map(auditEventFromRow);
+  }
+
+  async saveOrganizationAuditEvent(event: OrganizationAuditEvent): Promise<void> {
+    await this.database
+      .insert(organizationAuditEvents)
+      .values(organizationAuditEventToRow(event))
+      .onConflictDoNothing({ target: organizationAuditEvents.id });
+  }
+
+  async listOrganizationAuditEvents(
+    organizationId: string,
+  ): Promise<readonly OrganizationAuditEvent[]> {
+    const rows = await this.database
+      .select()
+      .from(organizationAuditEvents)
+      .where(eq(organizationAuditEvents.organizationId, organizationId))
+      .orderBy(desc(organizationAuditEvents.createdAt), desc(organizationAuditEvents.id));
+    return rows.map(organizationAuditEventFromRow);
   }
 
   async getNotification(notificationId: string): Promise<Notification | undefined> {
