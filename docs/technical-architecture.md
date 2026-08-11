@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, and durable membership administration are active; fixed principals remain development-only. MCP OAuth/scopes, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, and coarse REST bearer-capability enforcement are active; fixed principals remain development-only. Endpoint-specific/MCP OAuth scopes, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE | Server-side membership remains authoritative; MCP OAuth/scopes and service identities remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE and coarse REST bearer capabilities | Server-side membership remains authoritative; endpoint-specific/MCP OAuth scopes and service identities remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -219,7 +219,7 @@ The domain package must not depend on web frameworks, MCP transports, SQL client
 
 ## 7. Tenant and identity model
 
-The web/API foundation implements the human OIDC portion of this model. Other principal flows remain the target architecture and are identified below where incomplete.
+The web/API foundation implements the human OIDC portion of this model and a coarse capability gate for non-human bearer principals. Other principal flows and endpoint-specific grants remain the target architecture and are identified below where incomplete.
 
 ### 7.1 Principal types
 
@@ -569,7 +569,7 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Additional OAuth admin scopes remain deferred.
+Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the coarse REST capability boundary (`bridge:read`, `bridge:write`, or `bridge:admin`); endpoint-specific OAuth admin scopes remain deferred.
 
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
@@ -856,7 +856,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 ### 20.2 Required controls
 
 - TLS for all network communication.
-- Strict token audience, issuer, signature, expiry, and scope validation.
+- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific and MCP scopes remain future work.
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.

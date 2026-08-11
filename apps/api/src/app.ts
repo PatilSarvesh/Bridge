@@ -29,7 +29,13 @@ import {
   startAgentRunInputSchema,
   updateOrganizationMemberInputSchema,
 } from "@bridge/contracts";
-import { BridgeError, type Principal } from "@bridge/domain";
+import {
+  assertPrincipalScope,
+  bridgeScopes,
+  BridgeError,
+  type BridgeScope,
+  type Principal,
+} from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
 import {
   BridgeMetrics,
@@ -60,10 +66,13 @@ async function resolvePrincipal(
       ? request.headers.authorization
       : undefined;
     const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
-    return options.authenticator.authenticateRequest({
+    const principal = await options.authenticator.authenticateRequest({
       ...(authorization ? { authorization } : {}),
       ...(cookie ? { cookie } : {}),
     });
+    const requiredScope = requiredScopeForRequest(request);
+    if (requiredScope) assertPrincipalScope(principal, requiredScope, "This API operation");
+    return principal;
   }
   const principalId = request.headers["x-bridge-principal-id"];
   if (typeof principalId !== "string") {
@@ -78,6 +87,14 @@ async function resolvePrincipal(
     throw new BridgeError("UNAUTHENTICATED", "Unknown local principal.", 401);
   }
   return principal;
+}
+
+function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (!route.startsWith("/v1/") || route.startsWith("/v1/auth/")) return undefined;
+  return request.method === "GET" || request.method === "HEAD"
+    ? bridgeScopes.read
+    : bridgeScopes.write;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -214,6 +231,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       projectRoles: principal.projectRoles ?? {},
       projectIds: principal.projectIds,
       allProjects: principal.allProjects ?? false,
+      scopes: principal.scopes ?? [],
     };
   });
 

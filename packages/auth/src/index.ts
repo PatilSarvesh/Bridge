@@ -172,6 +172,21 @@ function validateCliRedirectUri(value: string): void {
   }
 }
 
+function accessTokenScopes(payload: JWTPayload): readonly string[] {
+  if (payload.scope === undefined) return [];
+  if (typeof payload.scope !== "string") {
+    throw new BridgeError("UNAUTHENTICATED", "The access token has an invalid scope claim.", 401);
+  }
+  const scopes = [...new Set(payload.scope.split(/\s+/).filter(Boolean))];
+  if (
+    scopes.length > 100 ||
+    scopes.some((scope) => scope.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(scope))
+  ) {
+    throw new BridgeError("UNAUTHENTICATED", "The access token has an invalid scope claim.", 401);
+  }
+  return scopes;
+}
+
 function isLoginTransaction(value: unknown): value is LoginTransaction {
   return typeof value === "object" && value !== null &&
     "state" in value && typeof value.state === "string" &&
@@ -263,6 +278,7 @@ export class OidcAuthenticator implements AuthenticationProvider {
     if (!payload.sub || typeof organizationExternalId !== "string" || organizationExternalId.length === 0) {
       throw new BridgeError("UNAUTHENTICATED", "The access token is missing required identity claims.", 401);
     }
+    const scopes = accessTokenScopes(payload);
     const principal = await this.directory.resolveOidcPrincipal({
       issuer: this.config.issuer,
       subject: payload.sub,
@@ -271,7 +287,8 @@ export class OidcAuthenticator implements AuthenticationProvider {
     if (!principal) {
       throw new BridgeError("UNAUTHENTICATED", "No active organization membership was found.", 401);
     }
-    return principal;
+    const { scopes: _directoryScopes, ...principalWithoutScopes } = principal;
+    return scopes.length > 0 ? { ...principalWithoutScopes, scopes } : principalWithoutScopes;
   }
 
   async beginWebLogin(returnTo?: string): Promise<WebLoginResult> {

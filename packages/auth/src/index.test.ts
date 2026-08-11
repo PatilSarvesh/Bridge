@@ -93,6 +93,36 @@ describe("OIDC authentication", () => {
     });
   });
 
+  it("carries validated scope claims only for the resolved non-human principal", async () => {
+    const agent: Principal = {
+      ...principal,
+      id: "agt_bridge",
+      type: "agent",
+      roles: ["agent"],
+      displayName: "Bridge Agent",
+    };
+    const { authenticator, sign } = await fixture(agent);
+    const token = await sign({ org_id: "auth0-org-acme", scope: "bridge:read bridge:write" });
+    await expect(authenticator.authenticateAccessToken(token)).resolves.toMatchObject({
+      id: agent.id,
+      type: "agent",
+      scopes: ["bridge:read", "bridge:write"],
+    });
+  });
+
+  it("rejects malformed or oversized scope claims", async () => {
+    const { authenticator, sign } = await fixture({ ...principal, type: "agent" });
+    const malformed = await sign({ org_id: "auth0-org-acme", scope: 42 });
+    await expect(authenticator.authenticateAccessToken(malformed))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
+    const oversized = await sign({
+      org_id: "auth0-org-acme",
+      scope: Array.from({ length: 101 }, (_, index) => `scope-${index}`).join(" "),
+    });
+    await expect(authenticator.authenticateAccessToken(oversized))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
+  });
+
   it("fails closed for invalid audience, missing organization, and inactive membership", async () => {
     const validFixture = await fixture();
     const wrongAudience = await validFixture.sign({ org_id: "auth0-org-acme" }, "wrong-audience");

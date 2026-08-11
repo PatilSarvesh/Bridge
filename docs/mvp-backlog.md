@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, and durable membership administration are active; fixed principals are development-only, and unfinished MCP OAuth/scopes, service identities, RLS, and provisioning work prevents a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, and coarse REST bearer-capability enforcement are active; fixed principals are development-only, and unfinished endpoint-specific/MCP OAuth scopes, service identities, RLS, and provisioning work prevents a production-security claim.
 
 ## 2. Planning conventions
 
@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, and durable organization-member administration are implemented, while MCP OAuth/scopes, noninteractive identities, and enterprise provisioning remain.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, and coarse REST bearer capabilities are implemented, while endpoint-specific/MCP OAuth scopes, noninteractive identities, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -225,7 +225,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, and project roles are target-project scoped; explicit OAuth scope/capability enforcement remains
+- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, project roles are target-project scoped, and non-human REST bearer principals now require coarse `bridge:read`/`bridge:write` (or `bridge:admin`) capabilities; endpoint-specific scopes and service-identity grants remain
 - **Dependencies:** BRG-002
 - **PRD references:** AUTH-03, AUTH-04, QST-05, ADM-01
 
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — the API accepts audience-validated bearer tokens and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented, while MCP OAuth metadata/audience/scopes and noninteractive service-identity grants remain
+- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented, while MCP OAuth metadata/audience/scopes and noninteractive service-identity grants remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 

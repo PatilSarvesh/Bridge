@@ -1,6 +1,6 @@
 import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
 import type { AuthenticationProvider } from "@bridge/auth";
-import { BridgeError, type Project } from "@bridge/domain";
+import { BridgeError, type Principal, type Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +20,57 @@ describe("Bridge API vertical slice", () => {
     vi.stubEnv("NODE_ENV", "production");
     await expect(buildApp({ service: runtime.service, principals: runtime.principals }))
       .rejects.toThrow("OIDC authentication is required");
+  });
+
+  it("enforces explicit read/write scopes for non-human bearer principals", async () => {
+    const runtime = await createDemoRuntime();
+    let currentPrincipal: Principal = {
+      ...demoPrincipals.agent,
+      scopes: [],
+    };
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => currentPrincipal,
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
+    };
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, authenticator });
+    apps.push(app);
+
+    const missingRead = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(missingRead.statusCode).toBe(403);
+    expect(missingRead.json()).toMatchObject({
+      code: "FORBIDDEN",
+      details: { requiredScope: "bridge:read" },
+    });
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:read"] };
+    const read = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(read.statusCode).toBe(200);
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:write"] };
+    const missingReadWithWriteOnly = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(missingReadWithWriteOnly.statusCode).toBe(403);
+    const write = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {},
+    });
+    expect(write.statusCode).toBe(400);
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:admin"] };
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+
+    currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {

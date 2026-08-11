@@ -5,11 +5,11 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration and interactive CLI public-client authentication are implemented; MCP OAuth metadata/scope enforcement, noninteractive service identities, provider-backed invitations, enterprise provisioning, and durable authentication audit events remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, and coarse REST bearer-capability enforcement are implemented; MCP OAuth metadata/scope enforcement, noninteractive service identities, provider-backed invitations, enterprise provisioning, and durable authentication audit events remain separate work.
 
 ## Security boundary
 
-The access token supplies only the verified issuer, subject, audience, expiry, and external organization identifier. Bridge does not trust token role or project claims. It resolves each request through these durable records:
+The access token supplies the verified issuer, subject, audience, expiry, external organization identifier, and optional space-delimited `scope` claim. Bridge does not trust token role or project claims. It resolves each request through these durable records:
 
 1. `bridge_organizations`
 2. `bridge_principal_identities`
@@ -19,6 +19,15 @@ The access token supplies only the verified issuer, subject, audience, expiry, a
 A disabled organization membership fails the next request. Project roles are evaluated only for the target project; a project administrator in one project does not become an administrator in another.
 
 Browser sign-in uses Authorization Code with PKCE. Bridge keeps the verifier, state, nonce, and bounded same-origin return URL in a short-lived encrypted `HttpOnly`, `SameSite=Lax` cookie. The callback validates state, exchanges the code server-side, verifies the ID-token nonce and signature, re-verifies the access token, and creates an encrypted `HttpOnly` session cookie. The session cannot outlive the access token. Bearer tokens use the same verifier and directory lookup.
+
+For non-human bearer principals, Bridge validates the optional scope claim and applies coarse capabilities at the REST boundary:
+
+- `bridge:read` is required for `GET` and `HEAD` requests under `/v1` (except `/v1/auth/*`).
+- `bridge:write` is required for mutating `/v1` requests.
+- `bridge:admin` satisfies both coarse capabilities.
+- Human principals continue to use server-side membership and role policy; provider scopes do not replace those checks.
+
+Missing capabilities return `403` with the required capability in structured error details. Malformed scope claims return `401`. This is intentionally a first coarse boundary; endpoint-specific scopes, service-identity grants, and standalone MCP scopes remain separate work.
 
 ## Auth0 pilot setup
 
@@ -144,7 +153,7 @@ This is an interactive delegated-human flow. CI and unattended agents must not r
 ## Remaining limitations
 
 - The standalone MCP process still uses its fixed development principal and is not production-authenticated.
-- Access tokens are audience-validated, but application scopes and service-identity grants are not yet enforced.
+- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities are enforced for non-human REST bearer principals. Endpoint-specific scopes, service-identity grants, standalone MCP OAuth metadata/audience/scope enforcement, and live-provider validation remain pending.
 - Windows Credential Manager is not supported by the current CLI build; the implemented pilot stores are macOS Keychain and Linux Secret Service.
 - Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.
