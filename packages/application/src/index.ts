@@ -76,11 +76,14 @@ import {
   type ServiceTokenResolution,
 } from "@bridge/domain";
 import {
+  type BridgeSecretContentType,
   type BridgeMetrics,
   createCorrelationId,
   currentCorrelationId,
   runWithCorrelationContextIfAbsent,
 } from "@bridge/observability";
+
+import { detectSecret } from "./content-security.js";
 
 export interface BridgeRepository {
   checkHealth(): Promise<{ readonly backend: string }>;
@@ -1365,6 +1368,25 @@ export class BridgeService {
     return url.toString();
   }
 
+  private assertSecretSafe(contentType: BridgeSecretContentType, value: unknown): void {
+    const detection = detectSecret(value);
+    if (!detection) return;
+    this.metrics?.recordContentSecretDetection({
+      contentType,
+      secretType: detection.secretType,
+    });
+    throw new BridgeError(
+      "SECRET_DETECTED",
+      "Potential credential detected in content. Remove it and retry; Bridge did not store this request.",
+      422,
+      {
+        contentType,
+        fieldPath: detection.fieldPath,
+        secretType: detection.secretType,
+      },
+    );
+  }
+
   async checkReadiness(): Promise<BridgeReadiness> {
     try {
       const health = await this.repository.checkHealth();
@@ -1396,6 +1418,7 @@ export class BridgeService {
       ) {
         throw new BridgeError("FORBIDDEN", "Project registration requires an organization administrator.", 403);
       }
+      this.assertSecretSafe("administration", input);
       const projectId = `prj_${createHash("sha256")
         .update(`${principal.organizationId}:${input.idempotencyKey}`)
         .digest("hex")
@@ -1523,6 +1546,7 @@ export class BridgeService {
   ): Promise<ServiceIdentityRegistration> {
     return this.repository.transaction(async (repository) => {
       this.assertOrganizationAdministrator(principal, "Creating a service identity");
+      this.assertSecretSafe("administration", input);
       const configuredProjects = await this.configuredProjectMemberships(
         principal,
         input.projectMemberships,
@@ -1712,6 +1736,7 @@ export class BridgeService {
   ): Promise<OrganizationMemberRegistration> {
     return this.repository.transaction(async (repository) => {
       this.assertOrganizationAdministrator(principal, "Creating an organization member");
+      this.assertSecretSafe("administration", input);
       if (!this.identityIssuer) {
         throw new BridgeError(
           "IDENTITY_NOT_CONFIGURED",
@@ -1811,6 +1836,7 @@ export class BridgeService {
   ): Promise<OrganizationMember> {
     return this.repository.transaction(async (repository) => {
       this.assertOrganizationAdministrator(principal, "Updating an organization member");
+      this.assertSecretSafe("administration", input);
       const identity = await repository.getPrincipalIdentity(memberId);
       const current = await repository.getOrganizationMembership(principal.organizationId, memberId);
       if (!identity || identity.type !== "human" || !current) {
@@ -2191,6 +2217,7 @@ export class BridgeService {
     if (principal.type === "human") {
       throw new BridgeError("FORBIDDEN", "Only an agent, CI, or integration principal can start an agent run.", 403);
     }
+    this.assertSecretSafe("run", input);
 
     const idempotencyKey = `run:${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
     const requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
@@ -2289,6 +2316,7 @@ export class BridgeService {
     if (!mayOperate) {
       throw new BridgeError("FORBIDDEN", "Only the run principal or a project administrator can update this run.", 403);
     }
+    this.assertSecretSafe("run", input);
     if (run.version !== input.expectedVersion) {
       throw new BridgeError("CONFLICT", "The run changed after it was read.", 409, {
         expectedVersion: input.expectedVersion,
@@ -2417,6 +2445,7 @@ export class BridgeService {
     input: RecordAssumptionInput,
   ): Promise<Assumption> {
     await this.requireProject(principal, projectId, repository);
+    this.assertSecretSafe("assumption", input);
     const protectedCategories = new Set([
       "security",
       "privacy",
@@ -2575,6 +2604,7 @@ export class BridgeService {
           403,
         );
       }
+      this.assertSecretSafe("assumption", input);
       if (assumption.version !== input.expectedVersion) {
         throw new BridgeError("CONFLICT", "The assumption changed after it was read.", 409, {
           expectedVersion: input.expectedVersion,
@@ -2671,6 +2701,7 @@ export class BridgeService {
     input: CreateQuestionInput,
   ): Promise<QuestionSubmission> {
     const project = await this.requireProject(principal, projectId, repository);
+    this.assertSecretSafe("question", input);
     const protectedCategories = new Set(["security", "privacy", "authentication", "legal", "production-deletion"]);
     const effectiveRisk = protectedCategories.has(input.category) ? "protected" : input.risk;
     if (effectiveRisk === "protected" && input.fallback) {
@@ -3006,6 +3037,7 @@ export class BridgeService {
     if (!principalHasRole(principal, "security-reviewer", question.projectId)) {
       throw new BridgeError("FORBIDDEN", "Only a configured security reviewer can review a protected question.", 403);
     }
+    this.assertSecretSafe("question", input);
     if (question.version !== input.expectedVersion) {
       throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
         expectedVersion: input.expectedVersion,
@@ -3064,6 +3096,7 @@ export class BridgeService {
   ): Promise<QuestionComment> {
     assertHuman(principal, "Commenting on a question");
     const question = await this.requireQuestion(principal, questionId, repository);
+    this.assertSecretSafe("question", input);
     if (!["open", "in_discussion"].includes(question.status)) {
       throw new BridgeError("CONFLICT", "Resolved questions do not accept new clarification comments.", 409);
     }
@@ -3145,6 +3178,7 @@ export class BridgeService {
   ): Promise<QuestionResponse> {
     assertHuman(principal, "Proposing an answer");
     const question = await this.requireQuestion(principal, questionId, repository);
+    this.assertSecretSafe("question", input);
     if (!["open", "in_discussion"].includes(question.status)) {
       throw new BridgeError("CONFLICT", "This question no longer accepts responses.", 409);
     }
@@ -3198,6 +3232,7 @@ export class BridgeService {
   ): Promise<Decision> {
     const question = await this.requireQuestion(principal, questionId, repository);
     assertCanAccept(principal, question);
+    this.assertSecretSafe("decision", input);
     if (!["open", "in_discussion"].includes(question.status)) {
       throw new BridgeError("CONFLICT", "This question has already been resolved.", 409);
     }
@@ -3320,6 +3355,7 @@ export class BridgeService {
         403,
       );
     }
+    this.assertSecretSafe("decision", input);
     if (decision.status !== "active") {
       throw new BridgeError("CONFLICT", "Only an active decision can change lifecycle state.", 409);
     }
@@ -3461,6 +3497,7 @@ export class BridgeService {
     input: PublishArtifactInput,
   ): Promise<ArtifactPublication> {
     const project = await this.requireProject(principal, projectId, repository);
+    this.assertSecretSafe("artifact", input);
     const idempotencyKey = `artifact:${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
     const requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const existingVersionId = await repository.getIdempotentArtifactVersionId(idempotencyKey);
@@ -3645,6 +3682,7 @@ export class BridgeService {
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
     await this.requireProject(principal, artifact.projectId, repository);
     assertCanReviewArtifact(principal, artifact);
+    this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
     if (artifact.currentVersionId !== versionId) {
@@ -3720,6 +3758,7 @@ export class BridgeService {
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
     await this.requireProject(principal, artifact.projectId, repository);
     assertCanApproveArtifact(principal, artifact);
+    this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
     if (artifact.currentVersionId !== versionId) {
@@ -3808,6 +3847,7 @@ export class BridgeService {
     readonly candidateCount: number;
   }> {
     await this.requireProject(principal, projectId, repository);
+    this.assertSecretSafe("context", query);
     const sourceRun = query.runId
       ? await this.requireLinkableRun(principal, query.runId, repository)
       : undefined;

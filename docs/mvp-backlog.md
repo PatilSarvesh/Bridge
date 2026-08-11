@@ -963,7 +963,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, and URL validation are implemented; secret detection/redaction, richer per-tenant quotas, and explicit untrusted-content labeling remain
+- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, URL validation, and shared high-confidence secret blocking with privacy-safe metrics are implemented; broader DLP/redaction policy, richer per-tenant quotas, and explicit untrusted-content labeling remain
 - **Dependencies:** BRG-030, BRG-052, BRG-080
 - **PRD references:** Security and privacy requirements
 
@@ -1054,7 +1054,7 @@ Acceptance criteria:
 4. Metrics can be filtered by project and agent client without exposing user content.
 5. Pilot dashboard reports the PRD's primary product and guardrail metrics that are technically available.
 
-Implementation note: project and controlled-client filtering, lifecycle attribution, the administrator collection notice, REST policy tests, and the web dashboard are implemented. Routing coverage measures owner/role presence rather than subjective correctness; rework, question-quality, unsubscribe, and secret-detection metrics remain unavailable and are not inferred.
+Implementation note: project and controlled-client filtering, lifecycle attribution, the administrator collection notice, REST policy tests, and the web dashboard are implemented. Routing coverage measures owner/role presence rather than subjective correctness; rework, question-quality, and unsubscribe metrics remain unavailable and are not inferred. Secret rejections are exposed only as process-level operational counters without tenant/project labels and are intentionally not attributed to analytics cohorts.
 
 ### BRG-111 — Provide pilot administration and support view
 

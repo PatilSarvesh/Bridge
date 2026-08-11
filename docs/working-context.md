@@ -7,8 +7,8 @@
 | Last updated | 2026-08-11, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, and coarse non-human REST/MCP capability checks are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, RLS, deployment, and live provider/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and shared high-confidence secret blocking complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, and pre-persistence high-confidence credential detection are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, RLS, broader DLP, deployment, and live provider/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -1677,6 +1677,22 @@ Deliberate boundaries:
 - Tokens are bearer credentials and should be injected through a CI secret manager, never committed, logged, or copied from a human interactive session. Bridge does not store raw agent transcripts or private reasoning.
 - Capability enforcement remains coarse (`bridge:read`, `bridge:write`, `bridge:admin`); endpoint-specific scopes, PostgreSQL RLS, rate limits, and live provider/deployment validation remain pending.
 
+### 20.40 Implemented high-confidence secret blocking for durable content
+
+Implemented and locally verified:
+
+1. A shared application-layer detector runs after tenant/role authorization and before every durable free-form write for administration labels, runs, context tasks, assumptions, questions/discussion/answers/reviews, decisions, and specification publication/review/approval.
+2. The bounded detector recognizes Bridge service tokens, common provider-token formats, AWS/Google credential identifiers, private-key headers, bearer credentials, credential-bearing database URLs, and long secret URL parameters. Documentation placeholders and ordinary credential-free URLs remain valid.
+3. A detection rejects the transaction with stable `SECRET_DETECTED`/`422` behavior. The message and details contain only the controlled content type, field path, and detector type; the matched value is never returned, logged, audited, notified, or persisted.
+4. REST, CLI, and optional MCP inherit the same application policy. Tests prove secret-bearing questions/specifications are not stored and the submitted value is absent from API, CLI, and MCP errors.
+5. `bridge_content_secret_detections_total` records only bounded content/detector labels. It contains no organization, project, principal, record, or secret labels and is not joined to product-analytics cohorts.
+
+Deliberate boundaries:
+
+- Bridge rejects instead of silently redacting because questions, decisions, assumptions, and specification versions are governance records whose meaning must not be changed invisibly.
+- This is a high-confidence accidental-leak guardrail, not comprehensive entropy scanning, enterprise DLP, malware inspection, attachment scanning, or repository secret scanning. Broader policy remains BRG-101 follow-up work.
+- Existing accepted records are not retroactively scanned or rewritten. A future migration/backfill would require explicit policy for false positives, quarantine, retention, and audit evidence.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1691,6 +1707,7 @@ Deliberate boundaries:
 - Authentication and organization operator guide: `docs/authentication.md`
 - Shared schemas: `packages/contracts/src/index.ts`
 - Application service/repository interface: `packages/application/src/index.ts`
+- Persisted-content secret detector: `packages/application/src/content-security.ts`
 - Database schema: `packages/database/src/schema.ts`
 - PostgreSQL repository: `packages/database/src/repository.ts`
 - Initial migration: `packages/database/drizzle/0000_nice_bulldozer.sql`
@@ -1761,4 +1778,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata; endpoint-specific tool scopes, MCP-side token issuance, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and pre-persistence high-confidence secret blocking; endpoint-specific tool scopes, MCP-side token issuance, RLS, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
