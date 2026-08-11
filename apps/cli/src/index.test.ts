@@ -12,6 +12,9 @@ interface MockState {
   artifacts: Array<Record<string, unknown>>;
   assumptions: Array<Record<string, unknown>>;
   projects?: Array<Record<string, unknown>>;
+  serviceIdentities?: Array<Record<string, unknown>>;
+  serviceRequestBodies?: Array<Record<string, unknown>>;
+  serviceToken?: string;
   run?: Record<string, unknown>;
   mcpAvailable?: boolean;
   mcpMalformed?: boolean;
@@ -24,6 +27,35 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/health") return json({ status: "ok", service: "bridge-api" });
     if (url.pathname === "/v1/auth/config") return json({ mode: "development" });
+    if (url.pathname === "/v1/admin/organization/service-identities" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      state.serviceRequestBodies = [...(state.serviceRequestBodies ?? []), body];
+      const serviceIdentity = {
+        id: "scr_cli_1",
+        principalId: "svc_cli_1",
+        name: body.name,
+        type: body.type,
+        scopes: body.scopes,
+        roles: body.roles,
+        allProjects: body.allProjects,
+        projectMemberships: body.projectMemberships,
+        createdAt: "2026-08-11T00:00:00.000Z",
+        expiresAt: body.expiresAt ?? "2026-11-09T00:00:00.000Z",
+        version: 1,
+      };
+      state.serviceIdentities = [serviceIdentity];
+      state.serviceToken ??= `brg_srv_${"a".repeat(43)}`;
+      return json({ serviceIdentity, token: state.serviceToken }, 201);
+    }
+    if (url.pathname === "/v1/admin/organization/service-identities") {
+      return json({ items: state.serviceIdentities ?? [] });
+    }
+    if (url.pathname.endsWith("/service-identities/scr_cli_1/revoke") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      state.serviceRequestBodies = [...(state.serviceRequestBodies ?? []), body];
+      const current = state.serviceIdentities?.[0] ?? { id: "scr_cli_1", version: 1 };
+      return json({ ...current, version: 2, revokedAt: "2026-08-11T00:01:00.000Z" });
+    }
     if (url.hostname === "mcp.test" && url.pathname === "/mcp") {
       if (!state.mcpAvailable) {
         return json({ jsonrpc: "2.0", error: { code: -32000, message: "MCP unavailable" } }, 503);
@@ -577,6 +609,83 @@ describe("Bridge CLI fallback adapter", () => {
 
     expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.success);
     expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions"');
+    expect(stderr).toEqual([]);
+  });
+
+  it("creates, lists, and revokes service identities without persisting the one-time token", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-service-identity-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+    };
+
+    expect(await runCli([
+      "service",
+      "identity",
+      "create",
+      "--name",
+      "Hospital CI",
+      "--type",
+      "ci",
+      "--scope",
+      "bridge:read",
+      "--scope",
+      "bridge:write",
+      "--role",
+      "agent",
+      "--project",
+      "prj_hospital=contributor,qa",
+      "--all-projects",
+      "--expires-at",
+      "2026-12-01T00:00:00Z",
+      "--api-url",
+      "http://bridge.test",
+    ], runtime)).toBe(0);
+    const created = JSON.parse(stdout.at(-1) ?? "{}");
+    expect(created).toMatchObject({
+      token: state.serviceToken,
+      tokenNotice: "Store this token now; Bridge will not show it again.",
+      serviceIdentity: { name: "Hospital CI", type: "ci", version: 1 },
+    });
+    expect(state.serviceRequestBodies?.[0]).toEqual({
+      name: "Hospital CI",
+      type: "ci",
+      roles: ["agent"],
+      allProjects: true,
+      projectMemberships: [{ projectId: "prj_hospital", roles: ["contributor", "qa"] }],
+      scopes: ["bridge:read", "bridge:write"],
+      expiresAt: "2026-12-01T00:00:00Z",
+    });
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8").catch(() => "")).toBe("");
+
+    expect(await runCli([
+      "service",
+      "identity",
+      "list",
+      "--api-url",
+      "http://bridge.test",
+    ], runtime)).toBe(0);
+    expect(stdout.at(-1)).toContain("scr_cli_1");
+    expect(stdout.at(-1)).not.toContain(state.serviceToken!);
+
+    expect(await runCli([
+      "service",
+      "identity",
+      "revoke",
+      "scr_cli_1",
+      "--version",
+      "1",
+      "--api-url",
+      "http://bridge.test",
+    ], runtime)).toBe(0);
+    expect(stdout.at(-1)).toContain('"version": 2');
+    expect(state.serviceRequestBodies?.at(-1)).toEqual({ expectedVersion: 1 });
     expect(stderr).toEqual([]);
   });
 

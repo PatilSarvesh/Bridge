@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata are implemented, while endpoint-specific tool scopes, MCP-side authorization-server/token issuance, noninteractive identities, and enterprise provisioning remain.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, REST-administered/CLI-managed revocable service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata are implemented, while endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -273,7 +273,7 @@ Acceptance criteria:
 1. CLI browser login uses a public-client-safe flow.
 2. MCP accepts only the configured MCP audience and scopes.
 3. Agent identities are distinguishable from delegated human users.
-4. CI can use a narrowly scoped noninteractive identity. **Implemented through REST-created, expiring, revocable Bridge service tokens; CLI ergonomics and workload-identity federation remain pending.**
+4. CI can use a narrowly scoped noninteractive identity. **Implemented through REST-created and CLI-managed expiring, revocable Bridge service tokens; workload-identity federation remains pending.**
 5. Refresh, expiry, revocation, and invalid-token behavior are tested.
 6. Tokens and authorization headers never appear in application logs.
 
@@ -644,7 +644,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, and revoking logout are implemented; Windows Credential Manager, dedicated CLI service-token ergonomics, and workload-identity federation remain
+- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, revoking logout, and service-identity create/list/revoke commands are implemented; Windows Credential Manager and workload-identity federation remain
 - **Dependencies:** BRG-013
 - **PRD references:** AUTH-02, CLI contract
 

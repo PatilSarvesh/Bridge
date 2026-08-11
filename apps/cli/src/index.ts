@@ -117,6 +117,29 @@ function optionValue(args: readonly string[], name: string): string | undefined 
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+function optionValues(args: readonly string[], name: string): readonly string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== name) continue;
+    const value = args[index + 1];
+    if (value && !value.startsWith("--")) values.push(value);
+  }
+  return values;
+}
+
+function commaSeparatedOptionValues(args: readonly string[], name: string): readonly string[] {
+  return optionValues(args, name)
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function requiredOptionValue(args: readonly string[], name: string, message: string): string {
+  const value = optionValue(args, name)?.trim();
+  if (!value) throw new CliError("OPTION_REQUIRED", message, cliExitCodes.usage);
+  return value;
+}
+
 function firstPositional(args: readonly string[], start = 1): string | undefined {
   const candidate = args[start];
   return candidate && !candidate.startsWith("--") ? candidate : undefined;
@@ -129,6 +152,9 @@ Usage:
   bridge login [--api-url <url>] [--no-browser]
   bridge logout [--api-url <url>]
   bridge auth status [--api-url <url>]
+  bridge service identity list [--api-url <url>]
+  bridge service identity create --name <name> --type <agent|ci|integration> --scope <scope>[,<scope>...] [--role <role>] [--project <project-id[=role,...]>] [--all-projects] [--expires-at <ISO datetime>] [--api-url <url>]
+  bridge service identity revoke <credential-id> --version <number> [--api-url <url>]
   bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
   bridge install [--client <client>] [--dry-run]
   bridge doctor
@@ -952,6 +978,172 @@ async function runLogout(
     invalidSessionRemoved,
     credentialStore: runtime.credentialStore.kind,
   });
+}
+
+type ServiceIdentityType = "agent" | "ci" | "integration";
+type ServiceCapabilityScope = "bridge:read" | "bridge:write" | "bridge:admin";
+
+function parseServiceIdentityType(value: string): ServiceIdentityType {
+  if (value !== "agent" && value !== "ci" && value !== "integration") {
+    throw new CliError(
+      "INVALID_SERVICE_IDENTITY_TYPE",
+      "--type must be agent, ci, or integration.",
+      cliExitCodes.usage,
+    );
+  }
+  return value;
+}
+
+function parseServiceScopes(args: readonly string[]): readonly ServiceCapabilityScope[] {
+  const supported = new Set<ServiceCapabilityScope>(["bridge:read", "bridge:write", "bridge:admin"]);
+  const values = commaSeparatedOptionValues(args, "--scope");
+  if (values.length === 0) {
+    throw new CliError(
+      "SERVICE_SCOPES_REQUIRED",
+      "service identity create requires at least one --scope (bridge:read, bridge:write, or bridge:admin).",
+      cliExitCodes.usage,
+    );
+  }
+  for (const value of values) {
+    if (!supported.has(value as ServiceCapabilityScope)) {
+      throw new CliError(
+        "INVALID_SERVICE_SCOPE",
+        "--scope values must be bridge:read, bridge:write, or bridge:admin.",
+        cliExitCodes.usage,
+      );
+    }
+  }
+  return [...new Set(values)] as ServiceCapabilityScope[];
+}
+
+function parseServiceProjectMemberships(args: readonly string[]): readonly {
+  readonly projectId: string;
+  readonly roles: readonly string[];
+}[] {
+  return optionValues(args, "--project").map((value) => {
+    const separator = value.indexOf("=");
+    const projectId = (separator < 0 ? value : value.slice(0, separator)).trim();
+    const rolesValue = separator < 0 ? "" : value.slice(separator + 1);
+    const roles = rolesValue
+      .split(",")
+      .map((role) => role.trim())
+      .filter(Boolean);
+    if (!projectId) {
+      throw new CliError(
+        "INVALID_SERVICE_PROJECT",
+        "Each --project value must include a project ID, optionally followed by =role,role.",
+        cliExitCodes.usage,
+      );
+    }
+    return { projectId, roles };
+  });
+}
+
+function parseServiceExpiry(args: readonly string[]): string | undefined {
+  const value = optionValue(args, "--expires-at")?.trim();
+  if (!value) return undefined;
+  if (!Number.isFinite(Date.parse(value)) || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    throw new CliError(
+      "INVALID_SERVICE_EXPIRY",
+      "--expires-at must be an ISO-8601 datetime with a timezone offset.",
+      cliExitCodes.usage,
+    );
+  }
+  return value;
+}
+
+async function runServiceIdentityCommand(
+  args: readonly string[],
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const action = args[2];
+  if (action === "list") {
+    output(runtime, await bridgeFetch(
+      "/v1/admin/organization/service-identities",
+      connection,
+      runtime,
+    ));
+    return;
+  }
+
+  if (action === "create") {
+    const name = requiredOptionValue(
+      args,
+      "--name",
+      "service identity create requires --name.",
+    );
+    if (name.length < 2 || name.length > 120) {
+      throw new CliError(
+        "INVALID_SERVICE_NAME",
+        "--name must contain between 2 and 120 characters.",
+        cliExitCodes.usage,
+      );
+    }
+    const type = parseServiceIdentityType(requiredOptionValue(
+      args,
+      "--type",
+      "service identity create requires --type.",
+    ));
+    const roles = commaSeparatedOptionValues(args, "--role");
+    const projectMemberships = parseServiceProjectMemberships(args);
+    const expiresAt = parseServiceExpiry(args);
+    const registration = await bridgeFetch(
+      "/v1/admin/organization/service-identities",
+      connection,
+      runtime,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          type,
+          roles,
+          allProjects: args.includes("--all-projects"),
+          projectMemberships,
+          scopes: parseServiceScopes(args),
+          ...(expiresAt ? { expiresAt } : {}),
+        }),
+      },
+    );
+    const record = asRecord(registration);
+    if (!record || typeof record.token !== "string" || !asRecord(record.serviceIdentity)) {
+      throw new CliError(
+        "INVALID_SERVICE_RESPONSE",
+        "Bridge returned an invalid service-identity registration response.",
+        cliExitCodes.connection,
+      );
+    }
+    output(runtime, {
+      ...record,
+      tokenNotice: "Store this token now; Bridge will not show it again.",
+    });
+    return;
+  }
+
+  if (action === "revoke") {
+    const serviceCredentialId = firstPositional(args, 3);
+    const expectedVersion = Number(optionValue(args, "--version"));
+    if (!serviceCredentialId || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+      throw new CliError(
+        "SERVICE_REVOCATION_REQUIRED",
+        "service identity revoke requires a credential ID and positive --version.",
+        cliExitCodes.usage,
+      );
+    }
+    output(runtime, await bridgeFetch(
+      `/v1/admin/organization/service-identities/${encodeURIComponent(serviceCredentialId)}/revoke`,
+      connection,
+      runtime,
+      { method: "POST", body: JSON.stringify({ expectedVersion }) },
+    ));
+    return;
+  }
+
+  throw new CliError(
+    "UNKNOWN_SERVICE_IDENTITY_COMMAND",
+    "Use `bridge service identity list`, `create`, or `revoke`.",
+    cliExitCodes.usage,
+  );
 }
 
 function itemsFrom(value: unknown): readonly unknown[] {
@@ -1827,6 +2019,18 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
       throw new CliError("UNKNOWN_AUTH_COMMAND", "Use `bridge auth status`.", cliExitCodes.usage);
     }
     await runAuthStatus(connection, runtime);
+    return;
+  }
+
+  if (command === "service") {
+    if (args[1] !== "identity") {
+      throw new CliError(
+        "UNKNOWN_SERVICE_COMMAND",
+        "Use `bridge service identity list`, `create`, or `revoke`.",
+        cliExitCodes.usage,
+      );
+    }
+    await runServiceIdentityCommand(args, connection, runtime);
     return;
   }
 

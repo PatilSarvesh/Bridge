@@ -134,7 +134,24 @@ The creation body selects `type` (`agent`, `ci`, or `integration`), normalized r
 
 Service-token resolution re-checks expiry, revocation, active organization membership, and active project memberships on every request. Revoking the credential or disabling its identity's organization membership therefore takes effect without waiting for a provider token cache. The same bearer path works for REST and optional MCP; JWT/OIDC MCP tokens still require the configured MCP audience, while the opaque Bridge service-token prefix is resolved by the Bridge directory.
 
-This is a credential-management foundation, not workload identity federation. Token rotation, a dedicated CLI command, provider-side exchange, rate limits, and endpoint-specific scopes remain follow-up work. Never commit, print, or log a service token.
+This is a credential-management foundation, not workload identity federation. Token rotation, provider-side exchange, rate limits, and endpoint-specific scopes remain follow-up work. Never commit, print, or log a service token.
+
+The CLI provides the same REST-backed administration path for an organization administrator:
+
+```bash
+bridge service identity create \
+  --name "Hospital CI" \
+  --type ci \
+  --scope bridge:read \
+  --scope bridge:write \
+  --project prj_hospital=contributor \
+  --expires-at 2026-12-01T00:00:00Z \
+  --api-url https://api.bridge.example
+bridge service identity list --api-url https://api.bridge.example
+bridge service identity revoke scr_... --version 1 --api-url https://api.bridge.example
+```
+
+`create` prints the token exactly once in its success response and never writes it to `.bridge`, the repository, or the CLI credential store. Copy it directly into the CI platform's secret manager. `--project project-id=role1,role2` may be repeated; `--all-projects` grants organization-wide project visibility. The API remains authoritative for membership, expiry, and organization-admin authorization.
 
 ## Public authentication endpoints
 

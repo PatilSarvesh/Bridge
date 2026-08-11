@@ -104,7 +104,7 @@ bridge auth status --api-url https://api.bridge.example
 bridge logout --api-url https://api.bridge.example
 ```
 
-The CLI uses a separate public/native OIDC client, an exact `127.0.0.1` callback, S256 PKCE, state validation, and API-side token/membership verification. Access and refresh tokens are stored in macOS Keychain or Linux Secret Service rather than `.bridge`, environment variables, or repository files. An expired access token refreshes when the provider issued a refresh token; otherwise the CLI removes the expired session and requests a new login. Windows Credential Manager and dedicated CLI service-token ergonomics remain pending. CI can use the REST-administered, expiring service-identity path documented in [`docs/authentication.md`](docs/authentication.md).
+The CLI uses a separate public/native OIDC client, an exact `127.0.0.1` callback, S256 PKCE, state validation, and API-side token/membership verification. Access and refresh tokens are stored in macOS Keychain or Linux Secret Service rather than `.bridge`, environment variables, or repository files. An expired access token refreshes when the provider issued a refresh token; otherwise the CLI removes the expired session and requests a new login. Windows Credential Manager and workload-identity federation remain pending. Organization administrators can manage expiring service identities with `bridge service identity ...`; the one-time token must be copied into a CI secret manager. See [`docs/authentication.md`](docs/authentication.md).
 
 After a repository is initialized, use the adapter-only command when changing clients or regenerating the managed instruction block without registering another project:
 
