@@ -10,7 +10,12 @@ import {
   reportAgentRunInputSchema,
   startAgentRunInputSchema,
 } from "@bridge/contracts";
-import type { Principal } from "@bridge/domain";
+import {
+  assertPrincipalScope,
+  bridgeScopes,
+  type BridgeScope,
+  type Principal,
+} from "@bridge/domain";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
@@ -31,6 +36,10 @@ export function createBridgeMcpServer(
   options: BridgeMcpServerOptions = {},
 ): McpServer {
   const publicWebUrl = options.publicWebUrl ?? "http://127.0.0.1:3000";
+  const enforceCapabilities = principal.type !== "human" && principal.scopes !== undefined;
+  const requireScope = (scope: BridgeScope, action: string): void => {
+    if (enforceCapabilities) assertPrincipalScope(principal, scope, action);
+  };
   const recordUrl = (parameters: Readonly<Record<string, string>>): string => {
     const url = new URL(publicWebUrl);
     for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
@@ -61,6 +70,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
+      requireScope(bridgeScopes.write, "Starting an MCP run");
       const input = startAgentRunInputSchema.parse(rawInput);
       const registration = await service.startRun(principal, projectId, input);
       return result({
@@ -91,6 +101,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ runId, ...rawInput }) => {
+      requireScope(bridgeScopes.write, "Reporting an MCP run");
       const input = reportAgentRunInputSchema.parse(rawInput);
       return result({ run: await service.reportRun(principal, runId, input) });
     },
@@ -109,7 +120,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ runId }) => result({ run: await service.getRun(principal, runId) }),
+    async ({ runId }) => {
+      requireScope(bridgeScopes.read, "Reading an MCP run");
+      return result({ run: await service.getRun(principal, runId) });
+    },
   );
 
   server.registerTool(
@@ -128,8 +142,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ runId, resumeContextKey }) =>
-      result({ ...(await service.getContinuation(principal, runId, resumeContextKey)) }),
+    async ({ runId, resumeContextKey }) => {
+      requireScope(bridgeScopes.read, "Reading MCP continuation");
+      return result({ ...(await service.getContinuation(principal, runId, resumeContextKey)) });
+    },
   );
 
   server.registerTool(
@@ -149,6 +165,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawQuery }) => {
+      requireScope(bridgeScopes.read, "Reading MCP context");
       const query = contextQuerySchema.parse(rawQuery);
       return result(await service.getContext(principal, projectId, query));
     },
@@ -171,6 +188,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
+      requireScope(bridgeScopes.write, "Recording an MCP assumption");
       const input = recordAssumptionInputSchema.parse(rawInput);
       const assumption = await service.recordAssumption(principal, projectId, input);
       return result({
@@ -197,8 +215,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ assumptionId }) =>
-      result({ assumption: await service.getAssumption(principal, assumptionId) }),
+    async ({ assumptionId }) => {
+      requireScope(bridgeScopes.read, "Reading an MCP assumption");
+      return result({ assumption: await service.getAssumption(principal, assumptionId) });
+    },
   );
 
   server.registerTool(
@@ -214,8 +234,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ projectId }) =>
-      result({ items: await service.listAssumptions(principal, projectId) }),
+    async ({ projectId }) => {
+      requireScope(bridgeScopes.read, "Listing MCP assumptions");
+      return result({ items: await service.listAssumptions(principal, projectId) });
+    },
   );
 
   server.registerTool(
@@ -235,6 +257,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, query }) => {
+      requireScope(bridgeScopes.read, "Searching MCP decisions");
       const decisions = await service.listDecisions(principal, projectId, {
         includeHistory: false,
         search: query,
@@ -261,6 +284,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
+      requireScope(bridgeScopes.read, "Finding MCP question matches");
       const input = findQuestionMatchesInputSchema.parse(rawInput);
       const items = await service.findQuestionMatches(principal, projectId, input);
       return result({ items });
@@ -284,6 +308,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
+      requireScope(bridgeScopes.write, "Creating an MCP question");
       const input = createQuestionInputSchema.parse(rawInput);
       const question = await service.createQuestion(principal, projectId, input);
       return result({
@@ -317,6 +342,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ questionId }) => {
+      requireScope(bridgeScopes.read, "Reading an MCP question");
       const question = await service.getQuestion(principal, questionId);
       return result({ question });
     },
@@ -339,6 +365,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, runId }) => {
+      requireScope(bridgeScopes.read, "Listing MCP questions");
       const questions = (await service.listQuestions(principal, projectId)).filter(
         (question) =>
           ["open", "in_discussion"].includes(question.status) && (!runId || question.runId === runId),
@@ -365,6 +392,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawFilters }) => {
+      requireScope(bridgeScopes.read, "Listing the MCP reviewer inbox");
       const filters = questionInboxQuerySchema.parse(rawFilters);
       return result({ items: await service.listQuestionInbox(principal, projectId, filters) });
     },
@@ -387,6 +415,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
+      requireScope(bridgeScopes.write, "Publishing an MCP specification");
       const input = publishArtifactInputSchema.parse(rawInput);
       const publication = await service.publishArtifact(principal, projectId, input);
       return result({
@@ -414,7 +443,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ artifactId }) => result({ artifact: await service.getArtifact(principal, artifactId) }),
+    async ({ artifactId }) => {
+      requireScope(bridgeScopes.read, "Reading an MCP specification");
+      return result({ artifact: await service.getArtifact(principal, artifactId) });
+    },
   );
 
   server.registerTool(
@@ -430,7 +462,10 @@ export function createBridgeMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ projectId }) => result({ items: await service.listArtifacts(principal, projectId) }),
+    async ({ projectId }) => {
+      requireScope(bridgeScopes.read, "Listing MCP specifications");
+      return result({ items: await service.listArtifacts(principal, projectId) });
+    },
   );
 
   return server;

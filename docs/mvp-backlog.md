@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, and coarse REST bearer-capability enforcement are active; fixed principals are development-only, and unfinished endpoint-specific/MCP OAuth scopes, service identities, RLS, and provisioning work prevents a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, service identities, RLS, and provisioning work prevents a production-security claim.
 
 ## 2. Planning conventions
 
@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, and coarse REST bearer capabilities are implemented, while endpoint-specific/MCP OAuth scopes, noninteractive identities, and enterprise provisioning remain.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata are implemented, while endpoint-specific tool scopes, MCP-side authorization-server/token issuance, noninteractive identities, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented, while MCP OAuth metadata/audience/scopes and noninteractive service-identity grants remain
+- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented; standalone MCP bearer validation, dedicated audience checks, protected-resource metadata, and coarse per-tool capabilities are also implemented, while MCP-side token issuance, fine-grained tool scopes, and noninteractive service-identity grants remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 
@@ -569,7 +569,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Streamable HTTP initialization and versioned tools run with a fixed development principal and shared PostgreSQL state; the shared OIDC verifier exists for the API, but standalone MCP audience/scope authentication and metadata remain
+- **Status:** Partial — Streamable HTTP initialization and versioned tools run through shared PostgreSQL state; standalone MCP now validates external OIDC bearer tokens against a dedicated audience, resolves active membership through the shared directory, publishes protected-resource metadata, and enforces coarse per-tool capabilities, while MCP-side authorization-server/token issuance, fine-grained tool scopes, and live-provider validation remain
 - **Dependencies:** BRG-013, BRG-051
 - **PRD references:** AUTH-02, CTX-01, MCP contract
 
@@ -1200,7 +1200,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 
 | Risk | Backlog response |
 |---|---|
-| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI OAuth, scopes, RLS, administration, and deployment validation explicitly |
+| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS, administration, and deployment validation explicitly |
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |

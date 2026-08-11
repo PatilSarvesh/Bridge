@@ -7,7 +7,12 @@ import {
 } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OidcAuthenticator, type OidcConfiguration, type PrincipalDirectory } from "./index.js";
+import {
+  OidcAccessTokenVerifier,
+  OidcAuthenticator,
+  type OidcConfiguration,
+  type PrincipalDirectory,
+} from "./index.js";
 
 const issuer = "https://identity.example/";
 const audience = "https://api.bridge.example";
@@ -40,10 +45,11 @@ async function fixture(directoryResult: Principal | null = principal) {
     loginOrganization: "auth0-org-acme",
     secureCookies: true,
   };
+  const jwks = createLocalJWKSet({ keys: [{ ...publicJwk, kid: "test-key", use: "sig", alg: "RS256" }] });
   const authenticator = new OidcAuthenticator(
     configuration,
     directory,
-    createLocalJWKSet({ keys: [{ ...publicJwk, kid: "test-key", use: "sig", alg: "RS256" }] }),
+    jwks,
   );
   const sign = (
     claims: Record<string, unknown>,
@@ -57,7 +63,7 @@ async function fixture(directoryResult: Principal | null = principal) {
     .setIssuedAt()
     .setExpirationTime("5m")
     .sign(privateKey);
-  return { authenticator, configuration, directory, sign };
+  return { authenticator, configuration, directory, jwks, sign };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -107,6 +113,23 @@ describe("OIDC authentication", () => {
       id: agent.id,
       type: "agent",
       scopes: ["bridge:read", "bridge:write"],
+    });
+  });
+
+  it("supports verifier-only MCP/API bearer validation without session secrets", async () => {
+    const agent: Principal = {
+      ...principal,
+      id: "agt_mcp",
+      type: "agent",
+      roles: ["agent"],
+      displayName: "MCP Agent",
+    };
+    const { directory, jwks, sign } = await fixture(agent);
+    const verifier = new OidcAccessTokenVerifier({ issuer, audience }, directory, jwks);
+    const token = await sign({ org_id: "auth0-org-acme", scope: "bridge:read" });
+    await expect(verifier.authenticateAccessToken(token)).resolves.toMatchObject({
+      id: agent.id,
+      scopes: ["bridge:read"],
     });
   });
 

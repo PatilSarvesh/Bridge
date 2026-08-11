@@ -305,4 +305,57 @@ describe("Bridge MCP tools", () => {
     });
     expect(agentInboxResult.structuredContent).toEqual({ items: [] });
   });
+
+  it("enforces bearer capabilities for authenticated non-human MCP principals", async () => {
+    const runtime = await createDemoRuntime();
+    const readOnlyAgent = { ...demoPrincipals.agent, scopes: ["bridge:read"] } as const;
+    const server = createBridgeMcpServer(runtime.service, readOnlyAgent);
+    const client = new Client({ name: "bridge-scope-test-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    const readResult = await client.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    expect(readResult.isError).not.toBe(true);
+
+    const writeResult = await client.callTool({
+      name: "bridge_start_run",
+      arguments: {
+        projectId: demoProject.id,
+        idempotencyKey: "mcp-scope-write-denial-001",
+        client: "codex",
+        capability: "mcp",
+        taskSummary: "Attempt a write with a read-only MCP token",
+        scope: { component: "transfers" },
+        externalLinks: [],
+      },
+    });
+    expect(writeResult.isError).toBe(true);
+    expect((writeResult.content as Array<{ readonly text?: string }>)[0])
+      .toMatchObject({ text: expect.stringContaining("bridge:write") });
+
+    const noScopeServer = createBridgeMcpServer(runtime.service, { ...demoPrincipals.agent, scopes: [] });
+    const noScopeClient = new Client({ name: "bridge-missing-scope-test-client", version: "0.1.0" });
+    const [noScopeClientTransport, noScopeServerTransport] = InMemoryTransport.createLinkedPair();
+    await noScopeServer.connect(noScopeServerTransport);
+    await noScopeClient.connect(noScopeClientTransport);
+    cleanup.push(async () => {
+      await noScopeClient.close();
+      await noScopeServer.close();
+    });
+    const noScopeResult = await noScopeClient.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    expect(noScopeResult.isError).toBe(true);
+    expect((noScopeResult.content as Array<{ readonly text?: string }>)[0])
+      .toMatchObject({ text: expect.stringContaining("bridge:read") });
+  });
 });

@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, and coarse REST bearer-capability enforcement are active; fixed principals remain development-only. Endpoint-specific/MCP OAuth scopes, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE and coarse REST bearer capabilities | Server-side membership remains authoritative; endpoint-specific/MCP OAuth scopes and service identities remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes, MCP-side token issuance, and service identities remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -579,6 +579,9 @@ Administrative endpoints are separated under `/v1/admin`. Outbox operations and 
 
 - Serve Streamable HTTP at a versioned endpoint such as `/mcp` with protocol negotiation handled by the MCP library.
 - Authenticate before MCP initialization completes.
+- In OIDC mode, validate `Authorization: Bearer` through the shared issuer/JWKS verifier, require the dedicated `BRIDGE_MCP_OIDC_AUDIENCE`, resolve the subject and organization claim through active Bridge membership, and expose protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`.
+- Enforce coarse capabilities per tool: `bridge:read` for reads, `bridge:write` for writes, and `bridge:admin` for both. Human principals remain governed by server-side membership and role policy.
+- In local development only, permit the explicit fixed principal fallback when OIDC is not configured. Production startup fails closed without MCP OIDC configuration.
 - Attach a stable agent identity and optional delegated human operator.
 - Keep MCP sessions stateless with respect to domain data; durable state lives in Bridge.
 - Enforce shorter read timeouts and bounded write timeouts.
@@ -612,7 +615,15 @@ Human acceptance and approval operations are intentionally absent from ordinary 
 
 Tools should declare accurate read/write behavior so clients can apply approval policies. The server must still enforce authorization even if a client auto-approves a tool call.
 
-Recommended logical scopes:
+The first implemented capability boundary uses these coarse scopes:
+
+```text
+bridge:read
+bridge:write
+bridge:admin
+```
+
+Recommended future endpoint-specific scopes:
 
 ```text
 bridge:context:read
@@ -856,7 +867,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 ### 20.2 Required controls
 
 - TLS for all network communication.
-- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific and MCP scopes remain future work.
+- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific tool scopes and MCP-side token issuance remain future work.
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.
