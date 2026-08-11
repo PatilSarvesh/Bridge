@@ -4,11 +4,11 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-10, Asia/Kolkata |
+| Last updated | 2026-08-11, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, and versioned audited organization/project member administration complement the governed decision/specification MVP; MCP OAuth/scopes, noninteractive identities, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification and membership enforcement are implemented for web/API and interactive CLI use, but the product is not fully production-secure until token scopes, MCP/noninteractive identities, RLS, deployment, and audit work are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, and coarse non-human REST/MCP capability checks are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, RLS, deployment, and live provider/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -107,7 +107,7 @@ The decisive MVP test is:
 
 “All questions” means all structured questions that require shared human knowledge or authority. Bridge must not capture private chain-of-thought, raw transcripts, or inconsequential implementation chatter.
 
-Current status against this journey: the infrastructure path and the first real Codex-first path pass end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI drives run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged simulation produced one protected question and all four specification types, and a separate independent Codex CLI session given only the ordinary Hospital prompt produced the same observable governed records and stopped at `waiting_for_human`. Claude Code remains the second-client validation. Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook.
+Current status against this journey: the infrastructure path and the first real Codex-first path pass end to end. `bridge init --name` registers a distinct project, writes repository configuration, safely merges a client-recognized instruction block, and the packaged CLI drives run/question/specification creation without MCP. The web UI lists registered projects and scopes questions and specifications to the selected project. A packaged simulation produced one protected question and all four specification types, and a separate independent Codex CLI session given only the ordinary Hospital prompt produced the same observable governed records and stopped at `waiting_for_human`. Claude Code remains the second-client validation. Bridge cannot universally intercept a vendor's private/native clarification UI when that vendor provides no enforcement hook. Organization administrators can now create short-lived, scoped service identities for CI/unattended agents through REST; the raw token is returned once and only its hash is persisted.
 
 ### 3.3 Product boundary
 
@@ -247,7 +247,7 @@ If no automated integration is permitted, humans can use the web UI and manually
 | Queue | Typed transactional outbox claim/lease/retry cycle implemented; pg-boss or a scheduled worker runtime remains a deployment choice |
 | Object storage | S3 planned for large/binary artifacts, not implemented |
 | Search | Deterministic ranking now; PostgreSQL text/trigram planned |
-| Authentication | OIDC web sessions, API bearer verification, and interactive CLI public-client PKCE implemented; MCP OAuth/scopes and noninteractive identities remain |
+| Authentication | OIDC web sessions, API bearer verification, interactive CLI public-client PKCE, revocable scoped service credentials, and optional standalone MCP bearer validation implemented; endpoint-specific tool scopes and MCP-side token issuance remain |
 | Organization onboarding | Durable organizations/memberships, protected first-admin bootstrap, and versioned member/project-access administration UI implemented; provider invitations and enterprise provisioning remain |
 
 ### 6.3 Architectural rules
@@ -914,9 +914,9 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 
 ### 17.3 Security
 
-- OIDC web/API authentication and encrypted bounded sessions are implemented; CLI and standalone MCP OAuth are not.
+- OIDC web/API authentication and encrypted bounded sessions, interactive CLI PKCE, and optional standalone MCP bearer validation are implemented; MCP-side authorization-server/token issuance is not.
 - Durable organization/project membership, protected first-admin bootstrap, versioned member administration, project-role assignment, and organization audit events are implemented.
-- OAuth scopes, refresh/revocation administration, durable authentication audits, RLS, and deployment-provider validation remain incomplete.
+- Endpoint-specific OAuth scopes, refresh/revocation administration, durable authentication audits, RLS, and deployment-provider validation remain incomplete.
 - Fixed local principals remain development-only.
 - Application organization/project checks are active for both identity modes, but this is not yet complete production tenant security.
 
@@ -1583,9 +1583,9 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - This slice completes the BRG-010 code foundation but not live Auth0 tenant validation or durable authentication audit events.
-- The standalone MCP server still uses its fixed development principal; dedicated MCP audience/scope enforcement remains BRG-013/052 work. Noninteractive CLI/CI service identities remain separate from the implemented delegated-human CLI flow.
+- The standalone MCP server now supports external OIDC bearer validation with a dedicated audience and coarse per-tool scopes; its fixed principal remains development-only. Noninteractive CLI/CI service identities use the separate REST-administered Bridge credential path rather than the delegated-human CLI flow.
 - Provider-backed organization invitations and enterprise group provisioning remain BRG-127 work; versioned member/role/project-access administration is recorded in section 20.35.
-- OAuth scope enforcement, CI/service grants, web refresh/revocation administration, PostgreSQL RLS, and maintenance roles remain incomplete.
+- Coarse REST capability enforcement is now implemented for non-human bearer principals, but endpoint-specific OAuth scopes, CI/service grants, web refresh/revocation administration, PostgreSQL RLS, and maintenance roles remain incomplete.
 - Secrets belong only in environment/deployment secret management. No client secret, access token, session token, raw identity-provider response, or customer identity data is recorded in repository documentation.
 
 ### 20.35 Implemented versioned organization member administration
@@ -1607,7 +1607,7 @@ Deliberate boundaries:
 - Provisioning currently requires the exact provider subject; Bridge does not send provider email invitations or synchronize identity profile changes.
 - Reusable teams, ownership-rule configuration, custom role-definition lifecycle, SCIM/group provisioning, and enterprise directory reconciliation remain future slices.
 - Organization audit retrieval has a repository boundary but no separate operator audit-view UI yet.
-- Authentication audits, OAuth scope enforcement, MCP authentication, noninteractive service identities, RLS, provider-side refresh/revocation administration, and live-provider validation remain incomplete.
+- Endpoint-specific authentication audits, MCP-side token issuance, RLS, provider-side refresh/revocation administration, and live-provider validation remain incomplete; REST/MCP bearer capabilities and the service-identity foundation are implemented in sections 20.37-20.39.
 
 ### 20.36 Implemented interactive CLI public-client authentication
 
@@ -1627,7 +1627,55 @@ Deliberate boundaries:
 - Windows Credential Manager is not supported by this build. The pilot operating-system implementations are macOS Keychain and Linux Secret Service (`secret-tool`).
 - Refresh-token issuance and rotation must be enabled on the external native OIDC client; otherwise the CLI safely asks the user to log in again after access-token expiry.
 - The interactive session represents a delegated human. CI and unattended agents need a separate narrowly scoped service-identity flow and must not copy a person's keychain credential.
-- API OAuth scope enforcement, MCP protected-resource/authorization-server metadata, dedicated MCP audiences, durable authentication audits, and live-provider validation remain pending.
+- Endpoint-specific API/tool scopes, MCP-side authorization-server/token issuance, durable authentication audits, and live-provider validation remain pending; REST/MCP bearer capabilities and protected-resource metadata are covered in sections 20.37-20.38.
+
+### 20.37 Implemented coarse REST bearer capability enforcement
+
+Implemented and locally verified:
+
+1. OIDC access-token `scope` claims are parsed as bounded, whitespace-delimited capability names. Invalid types, empty/oversized names, and unsupported characters fail authentication with a stable `401` rather than being ignored.
+2. Resolved non-human bearer principals carry only the validated token scopes for the request; directory metadata cannot silently broaden or preserve stale token capabilities. Human principals continue to use membership and role policy and are not blocked by the coarse provider scope gate.
+3. Every authenticated `/v1` `GET`/`HEAD` operation except `/v1/auth/*` requires `bridge:read`; mutating `/v1` operations require `bridge:write`; `bridge:admin` satisfies both. Missing capabilities return a structured `403` with the required capability.
+4. `/v1/auth/me` exposes the validated scope list for CLI/UI diagnostics without returning tokens. Development-mode fixed-principal requests remain unchanged.
+5. Auth, API, and MCP regressions cover valid scopes, malformed claims, missing read/write capabilities, admin wildcard behavior, human-session compatibility, verifier-only validation, development fallback, and validation ordering after a capability check. MCP remains optional.
+
+Deliberate boundaries:
+
+- This is a coarse REST/MCP boundary, not a complete endpoint-specific OAuth authorization model. Fine-grained tool scopes, MCP-side token issuance, token rotation, and live-provider validation remain pending.
+- Scope strings are capability hints from the verified token; server-side organization membership, project access, human approval rules, and record-specific policy remain authoritative.
+- The implementation does not add raw transcript capture, private reasoning storage, secrets, or customer data.
+
+### 20.38 Implemented standalone MCP bearer authentication
+
+Implemented and locally verified:
+
+1. `@bridge/auth` now exposes a verifier-only OIDC path that needs only issuer, audience, optional organization claim/JWKS URI, and the existing principal directory; MCP does not receive or invent web client/session secrets.
+2. The standalone MCP process accepts `Authorization: Bearer` before MCP initialization, validates the token with the shared issuer/JWKS rules, requires `BRIDGE_MCP_OIDC_AUDIENCE`, and resolves active organization membership through the canonical PostgreSQL directory.
+3. MCP publishes protected-resource metadata at `/.well-known/oauth-protected-resource/mcp` (and the origin fallback), advertises the Bridge coarse scopes, and returns `401` plus a `WWW-Authenticate` metadata reference when credentials are missing or malformed.
+4. MCP tool callbacks enforce `bridge:read` for reads and `bridge:write` for writes for authenticated non-human principals; `bridge:admin` satisfies both. Human principals continue through membership and role policy. The fixed `BRIDGE_MCP_PRINCIPAL_ID` fallback is explicitly development-only and production startup fails closed.
+5. The MCP package links the shared auth package, avoids demo fixture seeding in OIDC mode, and retains the CLI/REST paths when an organization does not approve MCP.
+
+Deliberate boundaries:
+
+- MCP validates tokens issued by an external OIDC authorization server; Bridge does not yet implement MCP-side dynamic client registration, authorization-code/token issuance, refresh/revocation administration, or provider-specific live conformance.
+- Tool authorization is intentionally coarse. Endpoint-specific scopes, delegated human/operator binding, PostgreSQL RLS, rate limits, and workload-identity federation remain follow-up work.
+- MCP authentication does not expand Bridge’s data boundary: raw transcripts, private reasoning, secrets, and customer data remain excluded.
+
+### 20.39 Implemented revocable service identities for unattended agents
+
+Implemented and locally verified:
+
+1. Human organization administrators can create `agent`, `ci`, or `integration` identities through `POST /v1/admin/organization/service-identities`, assigning normalized roles, all-project access or explicit project memberships, and one or more coarse capabilities.
+2. Bridge returns a generated `brg_srv_...` token only in creation/rotation responses. PostgreSQL and the in-memory repository persist only a SHA-256 hash, expiry, scopes, version, and optional rotation/revocation times; list responses never expose token material.
+3. API and standalone MCP bearer authentication recognize service tokens through the shared directory, re-check expiry, revocation, active organization membership, and active project membership on every resolution, and attach only the credential's server-side scopes.
+4. `POST /v1/admin/organization/service-identities/:serviceCredentialId/rotate` and `.../revoke` use optimistic version checks, immediately invalidate replaced/revoked tokens, and write organization audit records with the `service_credential` subject type. Replacement tokens are returned once; revoking or disabling the identity's membership blocks subsequent bearer requests.
+5. The forward-only `0017_cooing_slipstream.sql` and `0018_brainy_blonde_phantom.sql` migrations add the credential table, token-hash uniqueness, positive-version/scope checks, rotation metadata, and organization-audit action/subject checks. Application, auth, API, CLI, mapper, and restore-verification tests cover creation, one-time token exposure, resolution, rotation, scope assignment, listing, and revocation.
+
+Deliberate boundaries:
+
+- Service identities are administered through REST or the equivalent `bridge service identity` CLI commands (and can be driven by a CI secret manager); versioned token rotation is implemented, while provider-side workload identity exchange remains a follow-up capability.
+- Tokens are bearer credentials and should be injected through a CI secret manager, never committed, logged, or copied from a human interactive session. Bridge does not store raw agent transcripts or private reasoning.
+- Capability enforcement remains coarse (`bridge:read`, `bridge:write`, `bridge:admin`); endpoint-specific scopes, PostgreSQL RLS, rate limits, and live provider/deployment validation remain pending.
 
 ## 21. Important implementation files
 
@@ -1713,4 +1761,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, and audited organization/project membership administration; MCP OAuth/scopes, noninteractive identities, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata; endpoint-specific tool scopes, MCP-side token issuance, RLS, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

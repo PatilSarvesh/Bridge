@@ -7,7 +7,13 @@ import {
 } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OidcAuthenticator, type OidcConfiguration, type PrincipalDirectory } from "./index.js";
+import {
+  OidcAccessTokenVerifier,
+  OidcAuthenticator,
+  hashServiceToken,
+  type OidcConfiguration,
+  type PrincipalDirectory,
+} from "./index.js";
 
 const issuer = "https://identity.example/";
 const audience = "https://api.bridge.example";
@@ -40,10 +46,11 @@ async function fixture(directoryResult: Principal | null = principal) {
     loginOrganization: "auth0-org-acme",
     secureCookies: true,
   };
+  const jwks = createLocalJWKSet({ keys: [{ ...publicJwk, kid: "test-key", use: "sig", alg: "RS256" }] });
   const authenticator = new OidcAuthenticator(
     configuration,
     directory,
-    createLocalJWKSet({ keys: [{ ...publicJwk, kid: "test-key", use: "sig", alg: "RS256" }] }),
+    jwks,
   );
   const sign = (
     claims: Record<string, unknown>,
@@ -57,7 +64,7 @@ async function fixture(directoryResult: Principal | null = principal) {
     .setIssuedAt()
     .setExpirationTime("5m")
     .sign(privateKey);
-  return { authenticator, configuration, directory, sign };
+  return { authenticator, configuration, directory, jwks, sign };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -91,6 +98,94 @@ describe("OIDC authentication", () => {
       subject: "auth0|member",
       organizationExternalId: "auth0-org-acme",
     });
+  });
+
+  it("carries validated scope claims only for the resolved non-human principal", async () => {
+    const agent: Principal = {
+      ...principal,
+      id: "agt_bridge",
+      type: "agent",
+      roles: ["agent"],
+      displayName: "Bridge Agent",
+    };
+    const { authenticator, sign } = await fixture(agent);
+    const token = await sign({ org_id: "auth0-org-acme", scope: "bridge:read bridge:write" });
+    await expect(authenticator.authenticateAccessToken(token)).resolves.toMatchObject({
+      id: agent.id,
+      type: "agent",
+      scopes: ["bridge:read", "bridge:write"],
+    });
+  });
+
+  it("supports verifier-only MCP/API bearer validation without session secrets", async () => {
+    const agent: Principal = {
+      ...principal,
+      id: "agt_mcp",
+      type: "agent",
+      roles: ["agent"],
+      displayName: "MCP Agent",
+    };
+    const { directory, jwks, sign } = await fixture(agent);
+    const verifier = new OidcAccessTokenVerifier({ issuer, audience }, directory, jwks);
+    const token = await sign({ org_id: "auth0-org-acme", scope: "bridge:read" });
+    await expect(verifier.authenticateAccessToken(token)).resolves.toMatchObject({
+      id: agent.id,
+      scopes: ["bridge:read"],
+    });
+  });
+
+  it("rejects malformed or oversized scope claims", async () => {
+    const { authenticator, sign } = await fixture({ ...principal, type: "agent" });
+    const malformed = await sign({ org_id: "auth0-org-acme", scope: 42 });
+    await expect(authenticator.authenticateAccessToken(malformed))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
+    const oversized = await sign({
+      org_id: "auth0-org-acme",
+      scope: Array.from({ length: 101 }, (_, index) => `scope-${index}`).join(" "),
+    });
+    await expect(authenticator.authenticateAccessToken(oversized))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
+  });
+
+  it("authenticates revocable service tokens through the bearer path", async () => {
+    const { authenticator, directory } = await fixture({
+      ...principal,
+      id: "svc_ci",
+      type: "ci",
+      displayName: "Hospital CI",
+    });
+    const token = `brg_srv_${"a".repeat(43)}`;
+    const servicePrincipal: Principal = {
+      ...principal,
+      id: "svc_ci",
+      type: "ci",
+      displayName: "Hospital CI",
+    };
+    directory.resolveServiceToken = vi.fn(async (tokenHash) => tokenHash === hashServiceToken(token)
+      ? {
+          principal: servicePrincipal,
+          credential: {
+            id: "scr_ci",
+            organizationId: servicePrincipal.organizationId,
+            principalId: servicePrincipal.id,
+            name: "Hospital CI",
+            tokenHash,
+            scopes: ["bridge:read"],
+            createdAt: "2026-08-11T00:00:00.000Z",
+            expiresAt: "2026-08-12T00:00:00.000Z",
+            version: 1,
+          },
+        }
+      : undefined);
+
+    await expect(authenticator.authenticateRequest({ authorization: `Bearer ${token}` }))
+      .resolves.toMatchObject({ id: "svc_ci", type: "ci", scopes: ["bridge:read"] });
+    await expect(new OidcAccessTokenVerifier({ issuer, audience }, directory)
+      .authenticateBearerToken(token)).resolves.toMatchObject({ scopes: ["bridge:read"] });
+
+    directory.resolveServiceToken = vi.fn(async () => undefined);
+    await expect(authenticator.authenticateRequest({ authorization: `Bearer ${token}` }))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
   });
 
   it("fails closed for invalid audience, missing organization, and inactive membership", async () => {

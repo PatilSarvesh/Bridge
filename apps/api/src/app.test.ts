@@ -1,6 +1,6 @@
 import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
 import type { AuthenticationProvider } from "@bridge/auth";
-import { BridgeError, type Project } from "@bridge/domain";
+import { BridgeError, type Principal, type Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +20,57 @@ describe("Bridge API vertical slice", () => {
     vi.stubEnv("NODE_ENV", "production");
     await expect(buildApp({ service: runtime.service, principals: runtime.principals }))
       .rejects.toThrow("OIDC authentication is required");
+  });
+
+  it("enforces explicit read/write scopes for non-human bearer principals", async () => {
+    const runtime = await createDemoRuntime();
+    let currentPrincipal: Principal = {
+      ...demoPrincipals.agent,
+      scopes: [],
+    };
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => currentPrincipal,
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
+    };
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, authenticator });
+    apps.push(app);
+
+    const missingRead = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(missingRead.statusCode).toBe(403);
+    expect(missingRead.json()).toMatchObject({
+      code: "FORBIDDEN",
+      details: { requiredScope: "bridge:read" },
+    });
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:read"] };
+    const read = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(read.statusCode).toBe(200);
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:write"] };
+    const missingReadWithWriteOnly = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(missingReadWithWriteOnly.statusCode).toBe(403);
+    const write = await app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      payload: {},
+    });
+    expect(write.statusCode).toBe(400);
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:admin"] };
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+
+    currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
@@ -168,6 +219,66 @@ describe("Bridge API vertical slice", () => {
       items: expect.arrayContaining([expect.objectContaining({ id: member.id, status: "disabled" })]),
       projects: [expect.objectContaining({ id: demoProject.id })],
     });
+  });
+
+  it("provisions a one-time service token and supports versioned revocation", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeader = { "x-bridge-principal-id": demoPrincipals.architect.id };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/service-identities",
+      headers: adminHeader,
+      payload: {
+        name: "Hospital CI",
+        type: "ci",
+        roles: ["agent"],
+        allProjects: false,
+        projectMemberships: [{ projectId: demoProject.id, roles: ["contributor"] }],
+        scopes: ["bridge:read"],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<{ token: string; serviceIdentity: { id: string; version: number } }>();
+    expect(body.token).toMatch(/^brg_srv_/);
+    expect(body.serviceIdentity.version).toBe(1);
+    expect(created.body).not.toContain("tokenHash");
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/service-identities",
+      headers: adminHeader,
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.body).not.toContain(body.token);
+    expect(listed.body).not.toContain("tokenHash");
+    expect(listed.json()).toMatchObject({
+      items: [expect.objectContaining({ id: body.serviceIdentity.id, name: "Hospital CI", version: 1 })],
+    });
+
+    const rotated = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/service-identities/${body.serviceIdentity.id}/rotate`,
+      headers: adminHeader,
+      payload: { expectedVersion: 1 },
+    });
+    expect(rotated.statusCode).toBe(200);
+    const rotatedBody = rotated.json<{ token: string; serviceIdentity: { version: number; rotatedAt: string } }>();
+    expect(rotatedBody.token).toMatch(/^brg_srv_/);
+    expect(rotatedBody.token).not.toBe(body.token);
+    expect(rotatedBody.serviceIdentity).toMatchObject({ version: 2, rotatedAt: expect.any(String) });
+    expect(rotated.body).not.toContain("tokenHash");
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/service-identities/${body.serviceIdentity.id}/revoke`,
+      headers: adminHeader,
+      payload: { expectedVersion: 2 },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ version: 3, rotatedAt: expect.any(String), revokedAt: expect.any(String) });
   });
 
   it("lists and marks scoped human notifications without exposing them to agents", async () => {

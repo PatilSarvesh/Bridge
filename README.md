@@ -25,7 +25,7 @@ pnpm dev
 
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below.
 
-The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, and the CLI can use public-client Authorization Code + PKCE with operating-system credential storage. MCP OAuth and enterprise provisioning remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
+The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, the CLI can use public-client Authorization Code + PKCE with operating-system credential storage, and standalone MCP can validate bearer tokens against a dedicated OIDC audience. Full MCP authorization-server provisioning and enterprise identity remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
 
 Human organization administrators can use the web **Organization** area to provision an exact OIDC subject, disable or reactivate access, assign organization roles, and configure per-project membership roles. Changes use optimistic membership versions, preserve at least one active organization administrator, and create organization-level audit records.
 
@@ -104,7 +104,7 @@ bridge auth status --api-url https://api.bridge.example
 bridge logout --api-url https://api.bridge.example
 ```
 
-The CLI uses a separate public/native OIDC client, an exact `127.0.0.1` callback, S256 PKCE, state validation, and API-side token/membership verification. Access and refresh tokens are stored in macOS Keychain or Linux Secret Service rather than `.bridge`, environment variables, or repository files. An expired access token refreshes when the provider issued a refresh token; otherwise the CLI removes the expired session and requests a new login. Windows Credential Manager and noninteractive service identities remain pending.
+The CLI uses a separate public/native OIDC client, an exact `127.0.0.1` callback, S256 PKCE, state validation, and API-side token/membership verification. Access and refresh tokens are stored in macOS Keychain or Linux Secret Service rather than `.bridge`, environment variables, or repository files. An expired access token refreshes when the provider issued a refresh token; otherwise the CLI removes the expired session and requests a new login. Windows Credential Manager and workload-identity federation remain pending. Organization administrators can manage expiring service identities with `bridge service identity ...`, including versioned token rotation; one-time tokens must be copied into a CI secret manager. See [`docs/authentication.md`](docs/authentication.md).
 
 After a repository is initialized, use the adapter-only command when changing clients or regenerating the managed instruction block without registering another project:
 

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { BridgeError, type Principal } from "@bridge/domain";
+import { BridgeError, type Principal, type ServiceTokenResolution } from "@bridge/domain";
 import {
   CompactEncrypt,
   compactDecrypt,
@@ -17,8 +17,16 @@ export interface OidcIdentity {
   readonly organizationExternalId: string;
 }
 
+export interface OidcAccessTokenConfiguration {
+  readonly issuer: string;
+  readonly audience: string;
+  readonly organizationClaim?: string;
+  readonly jwksUri?: string;
+}
+
 export interface PrincipalDirectory {
   resolveOidcPrincipal(identity: OidcIdentity): Promise<Principal | undefined>;
+  resolveServiceToken?(tokenHash: string): Promise<ServiceTokenResolution | undefined>;
 }
 
 export interface OidcConfiguration {
@@ -172,6 +180,113 @@ function validateCliRedirectUri(value: string): void {
   }
 }
 
+function accessTokenScopes(payload: JWTPayload): readonly string[] {
+  if (payload.scope === undefined) return [];
+  if (typeof payload.scope !== "string") {
+    throw new BridgeError("UNAUTHENTICATED", "The access token has an invalid scope claim.", 401);
+  }
+  const scopes = [...new Set(payload.scope.split(/\s+/).filter(Boolean))];
+  if (
+    scopes.length > 100 ||
+    scopes.some((scope) => scope.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(scope))
+  ) {
+    throw new BridgeError("UNAUTHENTICATED", "The access token has an invalid scope claim.", 401);
+  }
+  return scopes;
+}
+
+export function hashServiceToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function isServiceToken(token: string): boolean {
+  return /^brg_srv_[A-Za-z0-9_-]{43}$/.test(token);
+}
+
+async function resolveServicePrincipal(
+  token: string,
+  directory: PrincipalDirectory,
+): Promise<Principal> {
+  if (!isServiceToken(token) || !directory.resolveServiceToken) {
+    throw new BridgeError("UNAUTHENTICATED", "The service token is invalid or expired.", 401);
+  }
+  const resolved = await directory.resolveServiceToken(hashServiceToken(token));
+  const expiresAt = resolved ? Date.parse(resolved.credential.expiresAt) : Number.NaN;
+  if (!resolved || resolved.credential.revokedAt || !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now() || resolved.principal.type === "human") {
+    throw new BridgeError("UNAUTHENTICATED", "The service token is invalid or expired.", 401);
+  }
+  return { ...resolved.principal, scopes: [...new Set(resolved.credential.scopes)] };
+}
+
+async function verifyAccessToken(
+  token: string,
+  configuration: OidcAccessTokenConfiguration,
+  directory: PrincipalDirectory,
+  jwks: JWTVerifyGetKey,
+): Promise<Principal> {
+  let payload: JWTPayload;
+  const issuer = normalizedIssuer(configuration.issuer);
+  try {
+    ({ payload } = await jwtVerify(token, jwks, {
+      issuer,
+      audience: configuration.audience,
+      algorithms: ["RS256"],
+    }));
+  } catch {
+    throw new BridgeError("UNAUTHENTICATED", "The access token is invalid or expired.", 401);
+  }
+  const organizationClaim = configuration.organizationClaim ?? "org_id";
+  const organizationExternalId = payload[organizationClaim];
+  if (!payload.sub || typeof organizationExternalId !== "string" || organizationExternalId.length === 0) {
+    throw new BridgeError("UNAUTHENTICATED", "The access token is missing required identity claims.", 401);
+  }
+  const scopes = accessTokenScopes(payload);
+  const principal = await directory.resolveOidcPrincipal({
+    issuer,
+    subject: payload.sub,
+    organizationExternalId,
+  });
+  if (!principal) {
+    throw new BridgeError("UNAUTHENTICATED", "No active organization membership was found.", 401);
+  }
+  const { scopes: _directoryScopes, ...principalWithoutScopes } = principal;
+  if (principal.type === "human") {
+    return scopes.length > 0 ? { ...principalWithoutScopes, scopes } : principalWithoutScopes;
+  }
+  return { ...principalWithoutScopes, scopes };
+}
+
+export class OidcAccessTokenVerifier {
+  private readonly configuration: OidcAccessTokenConfiguration;
+  private readonly jwks: JWTVerifyGetKey;
+
+  constructor(
+    configuration: OidcAccessTokenConfiguration,
+    private readonly directory: PrincipalDirectory,
+    jwks?: JWTVerifyGetKey,
+  ) {
+    this.configuration = {
+      ...configuration,
+      issuer: normalizedIssuer(configuration.issuer),
+      organizationClaim: configuration.organizationClaim ?? "org_id",
+    };
+    this.jwks = jwks ?? createRemoteJWKSet(new URL(
+      configuration.jwksUri ?? `${this.configuration.issuer}.well-known/jwks.json`,
+    ));
+  }
+
+  async authenticateAccessToken(token: string): Promise<Principal> {
+    return verifyAccessToken(token, this.configuration, this.directory, this.jwks);
+  }
+
+  async authenticateBearerToken(token: string): Promise<Principal> {
+    return isServiceToken(token)
+      ? resolveServicePrincipal(token, this.directory)
+      : this.authenticateAccessToken(token);
+  }
+}
+
 function isLoginTransaction(value: unknown): value is LoginTransaction {
   return typeof value === "object" && value !== null &&
     "state" in value && typeof value.state === "string" &&
@@ -192,6 +307,7 @@ export class OidcAuthenticator implements AuthenticationProvider {
   private readonly config: Required<Pick<OidcConfiguration, "organizationClaim" | "secureCookies">> & OidcConfiguration;
   private readonly key: Uint8Array;
   private readonly jwks: JWTVerifyGetKey;
+  private readonly accessTokenVerifier: OidcAccessTokenVerifier;
 
   constructor(
     configuration: OidcConfiguration,
@@ -215,6 +331,16 @@ export class OidcAuthenticator implements AuthenticationProvider {
     this.jwks = jwks ?? createRemoteJWKSet(new URL(
       configuration.jwksUri ?? `${this.config.issuer}.well-known/jwks.json`,
     ));
+    this.accessTokenVerifier = new OidcAccessTokenVerifier(
+      {
+        issuer: this.config.issuer,
+        audience: this.config.audience,
+        organizationClaim: this.config.organizationClaim,
+        ...(this.config.jwksUri ? { jwksUri: this.config.jwksUri } : {}),
+      },
+      directory,
+      this.jwks,
+    );
   }
 
   publicConfiguration(): Readonly<Record<string, string>> {
@@ -245,33 +371,12 @@ export class OidcAuthenticator implements AuthenticationProvider {
     if (!accessToken) {
       throw new BridgeError("UNAUTHENTICATED", "Authentication is required.", 401);
     }
-    return this.authenticateAccessToken(accessToken);
+    return bearer ? this.accessTokenVerifier.authenticateBearerToken(accessToken) :
+      this.authenticateAccessToken(accessToken);
   }
 
   async authenticateAccessToken(token: string): Promise<Principal> {
-    let payload: JWTPayload;
-    try {
-      ({ payload } = await jwtVerify(token, this.jwks, {
-        issuer: this.config.issuer,
-        audience: this.config.audience,
-        algorithms: ["RS256"],
-      }));
-    } catch {
-      throw new BridgeError("UNAUTHENTICATED", "The access token is invalid or expired.", 401);
-    }
-    const organizationExternalId = payload[this.config.organizationClaim];
-    if (!payload.sub || typeof organizationExternalId !== "string" || organizationExternalId.length === 0) {
-      throw new BridgeError("UNAUTHENTICATED", "The access token is missing required identity claims.", 401);
-    }
-    const principal = await this.directory.resolveOidcPrincipal({
-      issuer: this.config.issuer,
-      subject: payload.sub,
-      organizationExternalId,
-    });
-    if (!principal) {
-      throw new BridgeError("UNAUTHENTICATED", "No active organization membership was found.", 401);
-    }
-    return principal;
+    return this.accessTokenVerifier.authenticateAccessToken(token);
   }
 
   async beginWebLogin(returnTo?: string): Promise<WebLoginResult> {

@@ -10,6 +10,7 @@ import type {
   ChangeDecisionLifecycleInput,
   ContextQuery,
   CreateOrganizationMemberInput,
+  CreateServiceIdentityInput,
   DecisionListQuery,
   CreateQuestionInput,
   FindQuestionMatchesInput,
@@ -23,6 +24,8 @@ import type {
   Scope,
   StartAgentRunInput,
   UpdateOrganizationMemberInput,
+  RevokeServiceIdentityInput,
+  RotateServiceIdentityInput,
   NotificationListQuery,
   NotificationReadAllInput,
   OutboxOperationsQuery,
@@ -69,6 +72,8 @@ import {
   type OutboxEvent,
   type PrincipalIdentity,
   type ProjectMembership,
+  type ServiceCredential,
+  type ServiceTokenResolution,
 } from "@bridge/domain";
 import {
   type BridgeMetrics,
@@ -85,6 +90,18 @@ export interface BridgeRepository {
   getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined>;
   getPrincipalIdentity(principalId: string): Promise<PrincipalIdentity | undefined>;
   savePrincipalIdentity(identity: PrincipalIdentity): Promise<void>;
+  getServiceCredential(serviceCredentialId: string): Promise<ServiceCredential | undefined>;
+  getServiceCredentialByTokenHash(tokenHash: string): Promise<ServiceCredential | undefined>;
+  listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]>;
+  saveServiceCredential(credential: ServiceCredential): Promise<void>;
+  revokeServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean>;
+  rotateServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean>;
   getOrganizationMembership(
     organizationId: string,
     principalId: string,
@@ -104,6 +121,7 @@ export interface BridgeRepository {
     readonly subject: string;
     readonly organizationExternalId: string;
   }): Promise<Principal | undefined>;
+  resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined>;
   listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]>;
   getProject(projectId: string): Promise<Project | undefined>;
   listProjects(organizationId: string): Promise<readonly Project[]>;
@@ -228,6 +246,27 @@ export interface OrganizationMember {
 export interface OrganizationMemberRegistration {
   readonly member: OrganizationMember;
   readonly disposition: "created" | "idempotent_replay";
+}
+
+export interface ServiceIdentity {
+  readonly id: string;
+  readonly principalId: string;
+  readonly name: string;
+  readonly type: Principal["type"];
+  readonly scopes: readonly string[];
+  readonly roles: readonly string[];
+  readonly allProjects: boolean;
+  readonly projectMemberships: readonly ProjectMembership[];
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly rotatedAt?: string;
+  readonly revokedAt?: string;
+  readonly version: number;
+}
+
+export interface ServiceIdentityRegistration {
+  readonly serviceIdentity: ServiceIdentity;
+  readonly token: string;
 }
 
 export interface ContinuationDescriptor {
@@ -641,6 +680,7 @@ function buildArtifactVersionDiff(
 export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly organizations = new Map<string, Organization>();
   private readonly principalIdentities = new Map<string, PrincipalIdentity>();
+  private readonly serviceCredentials = new Map<string, ServiceCredential>();
   private readonly organizationMemberships = new Map<string, OrganizationMembership>();
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
@@ -684,6 +724,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     const snapshot = {
       organizations: new Map(this.organizations),
       principalIdentities: new Map(this.principalIdentities),
+      serviceCredentials: new Map(this.serviceCredentials),
       organizationMemberships: new Map(this.organizationMemberships),
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
@@ -711,6 +752,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       outcome = "error";
       this.restoreMap(this.organizations, snapshot.organizations);
       this.restoreMap(this.principalIdentities, snapshot.principalIdentities);
+      this.restoreMap(this.serviceCredentials, snapshot.serviceCredentials);
       this.restoreMap(this.organizationMemberships, snapshot.organizationMemberships);
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
@@ -773,6 +815,44 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async savePrincipalIdentity(identity: PrincipalIdentity): Promise<void> {
     this.principalIdentities.set(identity.id, identity);
+  }
+
+  async getServiceCredential(serviceCredentialId: string): Promise<ServiceCredential | undefined> {
+    return this.serviceCredentials.get(serviceCredentialId);
+  }
+
+  async getServiceCredentialByTokenHash(tokenHash: string): Promise<ServiceCredential | undefined> {
+    return [...this.serviceCredentials.values()].find((credential) => credential.tokenHash === tokenHash);
+  }
+
+  async listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]> {
+    return [...this.serviceCredentials.values()]
+      .filter((credential) => credential.organizationId === organizationId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async saveServiceCredential(credential: ServiceCredential): Promise<void> {
+    this.serviceCredentials.set(credential.id, credential);
+  }
+
+  async revokeServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.serviceCredentials.get(credential.id);
+    if (!current || (expectedVersion !== undefined && current.version !== expectedVersion)) return false;
+    this.serviceCredentials.set(credential.id, credential);
+    return true;
+  }
+
+  async rotateServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.serviceCredentials.get(credential.id);
+    if (!current || (expectedVersion !== undefined && current.version !== expectedVersion)) return false;
+    this.serviceCredentials.set(credential.id, credential);
+    return true;
   }
 
   async getOrganizationMembership(
@@ -854,6 +934,37 @@ export class InMemoryBridgeRepository implements BridgeRepository {
         projectMemberships.map((membership) => [membership.projectId, membership.roles]),
       ),
       displayName: principalIdentity.displayName,
+    };
+  }
+
+  async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
+    const credential = await this.getServiceCredentialByTokenHash(tokenHash);
+    const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
+    if (!credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    const principalIdentity = await this.getPrincipalIdentity(credential.principalId);
+    const organizationMembership = principalIdentity
+      ? await this.getOrganizationMembership(credential.organizationId, principalIdentity.id)
+      : undefined;
+    if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
+      organizationMembership.status !== "active") return undefined;
+    const projectMemberships = (await this.listProjectMemberships(
+      credential.organizationId,
+      principalIdentity.id,
+    )).filter((membership) => membership.status === "active");
+    return {
+      credential,
+      principal: {
+        id: principalIdentity.id,
+        type: principalIdentity.type,
+        organizationId: credential.organizationId,
+        projectIds: projectMemberships.map((membership) => membership.projectId),
+        allProjects: organizationMembership.allProjects,
+        roles: organizationMembership.roles,
+        projectRoles: Object.fromEntries(
+          projectMemberships.map((membership) => [membership.projectId, membership.roles]),
+        ),
+        displayName: principalIdentity.displayName,
+      },
     };
   }
 
@@ -1384,6 +1495,215 @@ export class BridgeService {
   async listOrganizationProjectsForAdministration(principal: Principal): Promise<readonly Project[]> {
     this.assertOrganizationAdministrator(principal, "Reading organization projects");
     return this.repository.listProjects(principal.organizationId);
+  }
+
+  async listServiceIdentities(principal: Principal): Promise<readonly ServiceIdentity[]> {
+    this.assertOrganizationAdministrator(principal, "Reading service identities");
+    const credentials = await this.repository.listServiceCredentials(principal.organizationId);
+    const identities = await Promise.all(credentials.map(async (credential) => {
+      const identity = await this.repository.getPrincipalIdentity(credential.principalId);
+      const membership = await this.repository.getOrganizationMembership(
+        principal.organizationId,
+        credential.principalId,
+      );
+      if (!identity || !membership || identity.type === "human") return undefined;
+      return this.serviceIdentity(credential, identity, membership, await this.repository.listProjectMemberships(
+        principal.organizationId,
+        credential.principalId,
+      ));
+    }));
+    return identities
+      .filter((identity): identity is ServiceIdentity => Boolean(identity))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async createServiceIdentity(
+    principal: Principal,
+    input: CreateServiceIdentityInput,
+  ): Promise<ServiceIdentityRegistration> {
+    return this.repository.transaction(async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Creating a service identity");
+      const configuredProjects = await this.configuredProjectMemberships(
+        principal,
+        input.projectMemberships,
+        repository,
+      );
+      const timestamp = this.now().toISOString();
+      const expiresAt = input.expiresAt ?? new Date(this.now().getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      const expiresDate = new Date(expiresAt);
+      if (Number.isNaN(expiresDate.getTime()) || expiresDate.toISOString() <= timestamp) {
+        throw new BridgeError("VALIDATION_FAILED", "Service identity expiry must be in the future.", 400);
+      }
+      if (expiresDate.getTime() > this.now().getTime() + 365 * 24 * 60 * 60 * 1000) {
+        throw new BridgeError("VALIDATION_FAILED", "Service identity expiry cannot exceed one year.", 400);
+      }
+      const identityId = `svc_${this.id()}`;
+      const credentialId = `scr_${this.id()}`;
+      const identity: PrincipalIdentity = {
+        id: identityId,
+        type: input.type,
+        displayName: input.name,
+        oidcIssuer: "bridge-service",
+        oidcSubject: identityId,
+        createdAt: timestamp,
+      };
+      const membership: OrganizationMembership = {
+        organizationId: principal.organizationId,
+        principalId: identityId,
+        status: "active",
+        roles: this.normalizedRoles(input.roles),
+        allProjects: input.allProjects,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      const projectMembershipRecords: ProjectMembership[] = [];
+      for (const configured of configuredProjects) {
+        projectMembershipRecords.push({
+          organizationId: principal.organizationId,
+          projectId: configured.projectId,
+          principalId: identityId,
+          status: "active",
+          roles: configured.roles,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          version: 1,
+        });
+      }
+      const token = `brg_srv_${randomBytes(32).toString("base64url")}`;
+      const credential: ServiceCredential = {
+        id: credentialId,
+        organizationId: principal.organizationId,
+        principalId: identityId,
+        name: input.name,
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+        scopes: [...new Set(input.scopes)],
+        createdAt: timestamp,
+        expiresAt: expiresDate.toISOString(),
+        version: 1,
+      };
+      await repository.savePrincipalIdentity(identity);
+      await repository.saveOrganizationMembership(membership);
+      for (const projectMembership of projectMembershipRecords) {
+        await repository.saveProjectMembership(projectMembership);
+      }
+      await repository.saveServiceCredential(credential);
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "service_identity.created",
+        credential.id,
+        timestamp,
+        "service_credential",
+      );
+      return {
+        serviceIdentity: this.serviceIdentity(credential, identity, membership, projectMembershipRecords),
+        token,
+      };
+    });
+  }
+
+  async revokeServiceIdentity(
+    principal: Principal,
+    serviceCredentialId: string,
+    input: RevokeServiceIdentityInput,
+  ): Promise<ServiceIdentity> {
+    return this.repository.transaction(async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Revoking a service identity");
+      const credential = await repository.getServiceCredential(serviceCredentialId);
+      if (!credential || credential.organizationId !== principal.organizationId) {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      if (credential.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The service identity changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: credential.version,
+        });
+      }
+      const identity = await repository.getPrincipalIdentity(credential.principalId);
+      const membership = await repository.getOrganizationMembership(principal.organizationId, credential.principalId);
+      if (!identity || !membership || identity.type === "human") {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      const revokedAt = credential.revokedAt ?? this.now().toISOString();
+      const revoked = { ...credential, revokedAt, version: credential.version + 1 };
+      if (!await repository.revokeServiceCredential(revoked, credential.version)) {
+        throw new BridgeError("CONFLICT", "The service identity changed while it was being revoked.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "service_identity.revoked",
+        credential.id,
+        revokedAt,
+        "service_credential",
+      );
+      return this.serviceIdentity(
+        revoked,
+        identity,
+        membership,
+        await repository.listProjectMemberships(principal.organizationId, credential.principalId),
+      );
+    });
+  }
+
+  async rotateServiceIdentity(
+    principal: Principal,
+    serviceCredentialId: string,
+    input: RotateServiceIdentityInput,
+  ): Promise<ServiceIdentityRegistration> {
+    return this.repository.transaction(async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Rotating a service identity");
+      const credential = await repository.getServiceCredential(serviceCredentialId);
+      if (!credential || credential.organizationId !== principal.organizationId) {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      if (credential.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The service identity changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: credential.version,
+        });
+      }
+      if (credential.revokedAt) {
+        throw new BridgeError("CONFLICT", "A revoked service identity cannot be rotated.", 409);
+      }
+      const expiresAt = Date.parse(credential.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) {
+        throw new BridgeError("VALIDATION_FAILED", "An expired service identity cannot be rotated; create a new identity.", 400);
+      }
+      const identity = await repository.getPrincipalIdentity(credential.principalId);
+      const membership = await repository.getOrganizationMembership(principal.organizationId, credential.principalId);
+      if (!identity || !membership || identity.type === "human") {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      const projectMemberships = (await repository.listProjectMemberships(
+        principal.organizationId,
+        credential.principalId,
+      )).filter((projectMembership) => projectMembership.status === "active");
+      const timestamp = this.now().toISOString();
+      const token = `brg_srv_${randomBytes(32).toString("base64url")}`;
+      const rotated: ServiceCredential = {
+        ...credential,
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+        rotatedAt: timestamp,
+        version: credential.version + 1,
+      };
+      if (!await repository.rotateServiceCredential(rotated, credential.version)) {
+        throw new BridgeError("CONFLICT", "The service identity changed while it was being rotated.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "service_identity.rotated",
+        credential.id,
+        timestamp,
+        "service_credential",
+      );
+      return {
+        serviceIdentity: this.serviceIdentity(rotated, identity, membership, projectMemberships),
+        token,
+      };
+    });
   }
 
   async createOrganizationMember(
@@ -3837,12 +4157,54 @@ export class BridgeService {
     };
   }
 
+  private serviceIdentity(
+    credential: ServiceCredential,
+    identity: PrincipalIdentity,
+    membership: OrganizationMembership,
+    projectMemberships: readonly ProjectMembership[],
+  ): ServiceIdentity {
+    return {
+      id: credential.id,
+      principalId: identity.id,
+      name: credential.name,
+      type: identity.type,
+      scopes: credential.scopes,
+      roles: membership.roles,
+      allProjects: membership.allProjects,
+      projectMemberships: [...projectMemberships].sort((left, right) =>
+        left.projectId.localeCompare(right.projectId)),
+      createdAt: credential.createdAt,
+      expiresAt: credential.expiresAt,
+      ...(credential.rotatedAt ? { rotatedAt: credential.rotatedAt } : {}),
+      ...(credential.revokedAt ? { revokedAt: credential.revokedAt } : {}),
+      version: credential.version,
+    };
+  }
+
   private async auditOrganizationMember(
     repository: BridgeRepository,
     principal: Principal,
     action: OrganizationAuditEvent["action"],
     memberId: string,
     createdAt: string,
+  ): Promise<void> {
+    return this.auditOrganizationEvent(
+      repository,
+      principal,
+      action,
+      memberId,
+      createdAt,
+      "organization_membership",
+    );
+  }
+
+  private async auditOrganizationEvent(
+    repository: BridgeRepository,
+    principal: Principal,
+    action: OrganizationAuditEvent["action"],
+    subjectId: string,
+    createdAt: string,
+    subjectType: OrganizationAuditEvent["subjectType"],
   ): Promise<void> {
     await repository.saveOrganizationAuditEvent({
       id: `oaud_${this.id()}`,
@@ -3851,8 +4213,8 @@ export class BridgeService {
       actorId: principal.id,
       actorType: principal.type,
       action,
-      subjectType: "organization_membership",
-      subjectId: memberId,
+      subjectType,
+      subjectId,
       createdAt,
     });
   }

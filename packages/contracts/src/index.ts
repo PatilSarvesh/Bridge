@@ -87,6 +87,8 @@ export const scopeSchema = z.object({
 export const ownerRoleSchema = z.string().trim().min(2).max(80);
 
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
+export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
+export const serviceCapabilityScopeSchema = z.enum(["bridge:read", "bridge:write", "bridge:admin"]);
 
 export const projectMembershipConfigurationSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -120,6 +122,36 @@ export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and
   expectedVersion: z.number().int().positive(),
   status: membershipStatusSchema,
 }));
+
+const serviceIdentityConfigurationSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  type: serviceIdentityTypeSchema,
+  roles: z.array(ownerRoleSchema).max(30).default([]),
+  allProjects: z.boolean().default(false),
+  projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
+  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(3),
+  expiresAt: z.string().datetime({ offset: true }).optional(),
+}).superRefine((value, context) => {
+  const projectIds = new Set<string>();
+  for (const [index, membership] of value.projectMemberships.entries()) {
+    if (projectIds.has(membership.projectId)) {
+      context.addIssue({
+        code: "custom",
+        message: "Each project can appear only once.",
+        path: ["projectMemberships", index, "projectId"],
+      });
+    }
+    projectIds.add(membership.projectId);
+  }
+});
+
+export const createServiceIdentityInputSchema = serviceIdentityConfigurationSchema;
+export const revokeServiceIdentityInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
+export const rotateServiceIdentityInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
 
 export const registerProjectInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
@@ -450,9 +482,14 @@ export type AssumptionConfidence = z.infer<typeof assumptionConfidenceSchema>;
 export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
+export type ServiceIdentityType = z.infer<typeof serviceIdentityTypeSchema>;
+export type ServiceCapabilityScope = z.infer<typeof serviceCapabilityScopeSchema>;
 export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
+export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;
+export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
+export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;

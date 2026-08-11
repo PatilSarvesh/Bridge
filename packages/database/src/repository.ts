@@ -23,6 +23,8 @@ import type {
   Project,
   ProjectMembership,
   Question,
+  ServiceCredential,
+  ServiceTokenResolution,
 } from "@bridge/domain";
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -57,6 +59,8 @@ import {
   projectMembershipToRow,
   projectFromRow,
   projectToRow,
+  serviceCredentialFromRow,
+  serviceCredentialToRow,
   questionFromRows,
   questionToRow,
   responseToRow,
@@ -85,6 +89,7 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  serviceCredentials,
 } from "./schema.js";
 
 type BridgeDatabase = PostgresJsDatabase<typeof schema>;
@@ -199,6 +204,76 @@ export class PostgresBridgeRepository implements BridgeRepository {
         oidcSubject: row.oidcSubject,
       },
     });
+  }
+
+  async getServiceCredential(serviceCredentialId: string): Promise<ServiceCredential | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(serviceCredentials)
+      .where(eq(serviceCredentials.id, serviceCredentialId))
+      .limit(1);
+    return row ? serviceCredentialFromRow(row) : undefined;
+  }
+
+  async getServiceCredentialByTokenHash(tokenHash: string): Promise<ServiceCredential | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(serviceCredentials)
+      .where(eq(serviceCredentials.tokenHash, tokenHash))
+      .limit(1);
+    return row ? serviceCredentialFromRow(row) : undefined;
+  }
+
+  async listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]> {
+    const rows = await this.database
+      .select()
+      .from(serviceCredentials)
+      .where(eq(serviceCredentials.organizationId, organizationId))
+      .orderBy(asc(serviceCredentials.createdAt));
+    return rows.map(serviceCredentialFromRow);
+  }
+
+  async saveServiceCredential(credential: ServiceCredential): Promise<void> {
+    const row = serviceCredentialToRow(credential);
+    await this.database.insert(serviceCredentials).values(row).onConflictDoUpdate({
+      target: serviceCredentials.id,
+      set: {
+        name: row.name,
+        scopes: row.scopes,
+        expiresAt: row.expiresAt,
+        revokedAt: row.revokedAt,
+        version: row.version,
+      },
+    });
+  }
+
+  async revokeServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = serviceCredentialToRow(credential);
+    const conditions = [eq(serviceCredentials.id, credential.id)];
+    if (expectedVersion !== undefined) conditions.push(eq(serviceCredentials.version, expectedVersion));
+    const updated = await this.database.update(serviceCredentials).set({
+      revokedAt: row.revokedAt,
+      version: row.version,
+    }).where(and(...conditions)).returning({ id: serviceCredentials.id });
+    return updated.length === 1;
+  }
+
+  async rotateServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = serviceCredentialToRow(credential);
+    const conditions = [eq(serviceCredentials.id, credential.id)];
+    if (expectedVersion !== undefined) conditions.push(eq(serviceCredentials.version, expectedVersion));
+    const updated = await this.database.update(serviceCredentials).set({
+      tokenHash: row.tokenHash,
+      rotatedAt: row.rotatedAt,
+      version: row.version,
+    }).where(and(...conditions)).returning({ id: serviceCredentials.id });
+    return updated.length === 1;
   }
 
   async getOrganizationMembership(
@@ -339,6 +414,37 @@ export class PostgresBridgeRepository implements BridgeRepository {
         memberships.map((membership) => [membership.projectId, membership.roles]),
       ),
       displayName: principalIdentity.displayName,
+    };
+  }
+
+  async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
+    const credential = await this.getServiceCredentialByTokenHash(tokenHash);
+    const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
+    if (!credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    const principalIdentity = await this.getPrincipalIdentity(credential.principalId);
+    const organizationMembership = principalIdentity
+      ? await this.getOrganizationMembership(credential.organizationId, principalIdentity.id)
+      : undefined;
+    if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
+      organizationMembership.status !== "active") return undefined;
+    const memberships = (await this.listProjectMemberships(
+      credential.organizationId,
+      principalIdentity.id,
+    )).filter((membership) => membership.status === "active");
+    return {
+      credential,
+      principal: {
+        id: principalIdentity.id,
+        type: principalIdentity.type,
+        organizationId: credential.organizationId,
+        projectIds: memberships.map((membership) => membership.projectId),
+        allProjects: organizationMembership.allProjects,
+        roles: organizationMembership.roles,
+        projectRoles: Object.fromEntries(
+          memberships.map((membership) => [membership.projectId, membership.roles]),
+        ),
+        displayName: principalIdentity.displayName,
+      },
     };
   }
 

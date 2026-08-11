@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, and durable membership administration are active; fixed principals remain development-only. MCP OAuth/scopes, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE | Server-side membership remains authoritative; MCP OAuth/scopes and service identities remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes and MCP-side token issuance remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -155,7 +155,7 @@ Responsibilities:
 - `doctor` diagnostics for API reachability, project mapping, generated instructions, and adapter markers.
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Interactive `login`, `logout`, and authentication status through public-client Authorization Code + S256 PKCE, a hardened exact loopback callback, and API-side bearer-token/membership validation.
-- API-specific token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; Windows and noninteractive identities remain future work.
+- API-specific human-token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; organization-admin service-identity create/list/rotate/revoke commands use the REST boundary and do not persist one-time bearer tokens.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
 - Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.
@@ -219,7 +219,7 @@ The domain package must not depend on web frameworks, MCP transports, SQL client
 
 ## 7. Tenant and identity model
 
-The web/API foundation implements the human OIDC portion of this model. Other principal flows remain the target architecture and are identified below where incomplete.
+The web/API foundation implements the human OIDC portion of this model and a coarse capability gate for non-human bearer principals. Other principal flows and endpoint-specific grants remain the target architecture and are identified below where incomplete.
 
 ### 7.1 Principal types
 
@@ -251,12 +251,12 @@ MCP tokens must use a dedicated audience and should not be reusable as unrestric
 - Web: Auth0 Authorization Code flow.
 - CLI: Authorization Code with PKCE and a localhost callback.
 - MCP: Auth0-backed OAuth using protected-resource and authorization-server metadata.
-- CI: Client Credentials for a dedicated Bridge service identity.
+- CI: a short-lived, scoped Bridge service identity created by an organization administrator; workload-identity exchange remains a later deployment option.
 - Enterprise SSO: Auth0 federation to the customer's identity provider.
 
 The CLI does not use Device Authorization Flow because organization-scoped behavior is required for Bridge tenancy.
 
-The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. Interactive human credentials are not a substitute for the still-pending scoped CI/agent identity flow.
+The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. CI and unattended agents use a separate REST-administered Bridge service identity; they must not copy a human's keychain credential.
 
 ### 7.3 Authorization model
 
@@ -323,7 +323,7 @@ agent_identities
 service_identities
 ```
 
-The current implementation uses versioned organization and project membership rows plus a separate organization-level audit stream for member creation and access changes. Organization administrators may manage membership but do not gain decision-owner or specification-approver authority merely from that role.
+The current implementation uses versioned organization and project membership rows, a separate `bridge_service_credentials` table that stores only token hashes and expiry/revocation metadata, plus an organization-level audit stream for member and service-identity changes. Organization administrators may manage membership and service credentials but do not gain decision-owner or specification-approver authority merely from that role.
 
 #### Work and knowledge
 
@@ -569,7 +569,7 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Additional OAuth admin scopes remain deferred.
+Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the coarse REST capability boundary (`bridge:read`, `bridge:write`, or `bridge:admin`); endpoint-specific OAuth admin scopes remain deferred.
 
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
@@ -579,6 +579,9 @@ Administrative endpoints are separated under `/v1/admin`. Outbox operations and 
 
 - Serve Streamable HTTP at a versioned endpoint such as `/mcp` with protocol negotiation handled by the MCP library.
 - Authenticate before MCP initialization completes.
+- In OIDC mode, validate `Authorization: Bearer` through the shared issuer/JWKS verifier, require the dedicated `BRIDGE_MCP_OIDC_AUDIENCE`, resolve the subject and organization claim through active Bridge membership, and expose protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`.
+- Enforce coarse capabilities per tool: `bridge:read` for reads, `bridge:write` for writes, and `bridge:admin` for both. Human principals remain governed by server-side membership and role policy.
+- In local development only, permit the explicit fixed principal fallback when OIDC is not configured. Production startup fails closed without MCP OIDC configuration.
 - Attach a stable agent identity and optional delegated human operator.
 - Keep MCP sessions stateless with respect to domain data; durable state lives in Bridge.
 - Enforce shorter read timeouts and bounded write timeouts.
@@ -612,7 +615,15 @@ Human acceptance and approval operations are intentionally absent from ordinary 
 
 Tools should declare accurate read/write behavior so clients can apply approval policies. The server must still enforce authorization even if a client auto-approves a tool call.
 
-Recommended logical scopes:
+The first implemented capability boundary uses these coarse scopes:
+
+```text
+bridge:read
+bridge:write
+bridge:admin
+```
+
+Recommended future endpoint-specific scopes:
 
 ```text
 bridge:context:read
@@ -856,7 +867,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 ### 20.2 Required controls
 
 - TLS for all network communication.
-- Strict token audience, issuer, signature, expiry, and scope validation.
+- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific tool scopes and MCP-side token issuance remain future work.
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.

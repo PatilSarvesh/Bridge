@@ -69,6 +69,7 @@ export interface Principal {
   readonly allProjects?: boolean;
   readonly roles: readonly string[];
   readonly projectRoles?: Readonly<Record<string, readonly string[]>>;
+  readonly scopes?: readonly string[];
   readonly displayName: string;
 }
 
@@ -89,6 +90,25 @@ export interface PrincipalIdentity {
   readonly oidcIssuer: string;
   readonly oidcSubject: string;
   readonly createdAt: string;
+}
+
+export interface ServiceCredential {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly principalId: string;
+  readonly name: string;
+  readonly tokenHash: string;
+  readonly scopes: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly rotatedAt?: string;
+  readonly revokedAt?: string;
+  readonly version: number;
+}
+
+export interface ServiceTokenResolution {
+  readonly credential: ServiceCredential;
+  readonly principal: Principal;
 }
 
 export interface OrganizationMembership {
@@ -119,8 +139,13 @@ export interface OrganizationAuditEvent {
   readonly organizationId: string;
   readonly actorId: string;
   readonly actorType: PrincipalType;
-  readonly action: "organization_member.created" | "organization_member.updated";
-  readonly subjectType: "organization_membership";
+  readonly action:
+    | "organization_member.created"
+    | "organization_member.updated"
+    | "service_identity.created"
+    | "service_identity.rotated"
+    | "service_identity.revoked";
+  readonly subjectType: "organization_membership" | "service_credential";
   readonly subjectId: string;
   readonly createdAt: string;
 }
@@ -454,6 +479,32 @@ export function principalHasRole(principal: Principal, role: string, projectId?:
     ...principal.roles,
     ...(projectId ? principal.projectRoles?.[projectId] ?? [] : []),
   ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
+}
+
+export const bridgeScopes = {
+  read: "bridge:read",
+  write: "bridge:write",
+} as const;
+
+export type BridgeScope = (typeof bridgeScopes)[keyof typeof bridgeScopes];
+
+export function principalHasScope(principal: Principal, scope: BridgeScope): boolean {
+  if (principal.type === "human") return true;
+  return principal.scopes?.includes(scope) === true || principal.scopes?.includes("bridge:admin") === true;
+}
+
+export function assertPrincipalScope(
+  principal: Principal,
+  scope: BridgeScope,
+  action: string,
+): void {
+  if (principalHasScope(principal, scope)) return;
+  throw new BridgeError(
+    "FORBIDDEN",
+    `${action} requires the ${scope} capability.`,
+    403,
+    { requiredScope: scope },
+  );
 }
 
 function hasQuestionOwnerMatch(principal: Principal, question: Question): boolean {

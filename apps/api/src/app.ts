@@ -9,6 +9,7 @@ import {
   contextQuerySchema,
   continuationQuerySchema,
   createOrganizationMemberInputSchema,
+  createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
   findQuestionMatchesInputSchema,
@@ -28,8 +29,16 @@ import {
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
   updateOrganizationMemberInputSchema,
+  revokeServiceIdentityInputSchema,
+  rotateServiceIdentityInputSchema,
 } from "@bridge/contracts";
-import { BridgeError, type Principal } from "@bridge/domain";
+import {
+  assertPrincipalScope,
+  bridgeScopes,
+  BridgeError,
+  type BridgeScope,
+  type Principal,
+} from "@bridge/domain";
 import type { BridgeService } from "@bridge/application";
 import {
   BridgeMetrics,
@@ -60,10 +69,13 @@ async function resolvePrincipal(
       ? request.headers.authorization
       : undefined;
     const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
-    return options.authenticator.authenticateRequest({
+    const principal = await options.authenticator.authenticateRequest({
       ...(authorization ? { authorization } : {}),
       ...(cookie ? { cookie } : {}),
     });
+    const requiredScope = requiredScopeForRequest(request);
+    if (requiredScope) assertPrincipalScope(principal, requiredScope, "This API operation");
+    return principal;
   }
   const principalId = request.headers["x-bridge-principal-id"];
   if (typeof principalId !== "string") {
@@ -78,6 +90,14 @@ async function resolvePrincipal(
     throw new BridgeError("UNAUTHENTICATED", "Unknown local principal.", 401);
   }
   return principal;
+}
+
+function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (!route.startsWith("/v1/") || route.startsWith("/v1/auth/")) return undefined;
+  return request.method === "GET" || request.method === "HEAD"
+    ? bridgeScopes.read
+    : bridgeScopes.write;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -214,6 +234,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       projectRoles: principal.projectRoles ?? {},
       projectIds: principal.projectIds,
       allProjects: principal.allProjects ?? false,
+      scopes: principal.scopes ?? [],
     };
   });
 
@@ -313,6 +334,36 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return options.service.updateOrganizationMember(principal, request.params.memberId, input);
     },
   );
+
+  app.get("/v1/admin/organization/service-identities", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listServiceIdentities(principal) };
+  });
+
+  app.post<{ Body: unknown }>("/v1/admin/organization/service-identities", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = createServiceIdentityInputSchema.parse(request.body);
+    const registration = await options.service.createServiceIdentity(principal, input);
+    return reply.status(201).send(registration);
+  });
+
+  app.post<{
+    Params: { serviceCredentialId: string };
+    Body: unknown;
+  }>("/v1/admin/organization/service-identities/:serviceCredentialId/revoke", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = revokeServiceIdentityInputSchema.parse(request.body);
+    return options.service.revokeServiceIdentity(principal, request.params.serviceCredentialId, input);
+  });
+
+  app.post<{
+    Params: { serviceCredentialId: string };
+    Body: unknown;
+  }>("/v1/admin/organization/service-identities/:serviceCredentialId/rotate", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = rotateServiceIdentityInputSchema.parse(request.body);
+    return options.service.rotateServiceIdentity(principal, request.params.serviceCredentialId, input);
+  });
 
   app.post<{ Body: unknown }>("/v1/projects", async (request, reply) => {
     const principal = await resolvePrincipal(request, options);
