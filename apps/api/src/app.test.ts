@@ -281,6 +281,51 @@ describe("Bridge API vertical slice", () => {
     expect(revoked.json()).toMatchObject({ version: 3, rotatedAt: expect.any(String), revokedAt: expect.any(String) });
   });
 
+  it("rejects secret-bearing content without storing or reflecting the credential", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const secret = `brg_srv_${"A".repeat(43)}`;
+    const before = await runtime.repository.listQuestions(demoProject.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-secret-question-001",
+        title: "Which credential policy should the worker follow?",
+        type: "decision",
+        category: "security",
+        context: `The proposed implementation embeds ${secret} in durable configuration.`,
+        whyItMatters: "Persisting a bearer credential would expose privileged access to later readers.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "protected",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "secret-manager", label: "Use a secret manager", tradeoffs: "Requires deployment integration." },
+          { key: "environment", label: "Use an environment variable", tradeoffs: "Requires runtime injection." },
+        ],
+        recommendationKey: "secret-manager",
+        scope: { component: "worker" },
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({
+      code: "SECRET_DETECTED",
+      message: "Potential credential detected in content. Remove it and retry; Bridge did not store this request.",
+      details: {
+        contentType: "question",
+        fieldPath: "content.context",
+        secretType: "bridge_service_token",
+      },
+    });
+    expect(response.body).not.toContain(secret);
+    expect(await runtime.repository.listQuestions(demoProject.id)).toEqual(before);
+  });
+
   it("lists and marks scoped human notifications without exposing them to agents", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

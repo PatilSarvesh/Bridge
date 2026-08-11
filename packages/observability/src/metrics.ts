@@ -8,6 +8,26 @@ export type BridgeNotificationOutcome =
   | "suppressed"
   | "deferred"
   | "skipped";
+export type BridgeDetectedSecretType =
+  | "bridge_service_token"
+  | "github_token"
+  | "aws_access_key"
+  | "google_api_key"
+  | "slack_token"
+  | "stripe_live_key"
+  | "ai_provider_key"
+  | "private_key"
+  | "bearer_token"
+  | "credential_url"
+  | "secret_url_parameter";
+export type BridgeSecretContentType =
+  | "administration"
+  | "run"
+  | "context"
+  | "assumption"
+  | "question"
+  | "decision"
+  | "artifact";
 
 type MetricLabels = Readonly<Record<string, string>>;
 
@@ -92,6 +112,11 @@ export interface NotificationDeliveryMetric {
   readonly durationMs: number;
 }
 
+export interface ContentSecretDetectionMetric {
+  readonly contentType: BridgeSecretContentType;
+  readonly secretType: BridgeDetectedSecretType;
+}
+
 const secondsBuckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] as const;
 const countBuckets = [0, 1, 2, 5, 10, 20, 50, 100, 250] as const;
 const maxOperationLabels = 128;
@@ -162,6 +187,10 @@ const definitions = {
     name: "bridge_notification_delivery_duration_seconds",
     help: "Bridge notification delivery handling duration in seconds.",
     buckets: secondsBuckets,
+  },
+  contentSecretDetections: {
+    name: "bridge_content_secret_detections_total",
+    help: "Bridge content writes rejected after high-confidence secret detection.",
   },
 } as const;
 
@@ -307,6 +336,13 @@ export class BridgeMetrics {
       labels,
       finiteNonNegative(metric.durationMs) / 1_000,
     );
+  }
+
+  recordContentSecretDetection(metric: ContentSecretDetectionMetric): void {
+    this.increment(definitions.contentSecretDetections, {
+      content_type: metric.contentType,
+      secret_type: metric.secretType,
+    });
   }
 
   snapshot(): BridgeMetricsSnapshot {

@@ -237,6 +237,42 @@ describe("Bridge MCP tools", () => {
     );
   });
 
+  it("rejects secret-bearing tool content without reflecting or storing the credential", async () => {
+    const runtime = await createDemoRuntime();
+    const server = createBridgeMcpServer(runtime.service, demoPrincipals.agent);
+    const client = new Client({ name: "bridge-secret-test-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+    const secret = `brg_srv_${"A".repeat(43)}`;
+
+    const response = await client.callTool({
+      name: "bridge_publish_artifact",
+      arguments: {
+        projectId: demoProject.id,
+        idempotencyKey: "mcp-secret-artifact-001",
+        title: "Unsafe credential configuration",
+        type: "adr",
+        summary: "Documents a proposed credential configuration that must not be persisted.",
+        body: `# Unsafe configuration\n\nThe credential is ${secret}.`,
+        intendedReviewerIds: [demoPrincipals.architect.id],
+        citedDecisionIds: [],
+        requestReview: true,
+        scope: { component: "worker" },
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    const errorText = (response.content as Array<{ readonly text?: string }>)[0]?.text ?? "";
+    expect(errorText).toContain("Potential credential detected in content");
+    expect(errorText).not.toContain(secret);
+    expect(await runtime.repository.listArtifacts(demoProject.id)).toEqual([]);
+  });
+
   it("lists the current human reviewer's routed inbox with filters", async () => {
     const runtime = await createDemoRuntime();
     const question = await runtime.service.createQuestion(demoPrincipals.agent, demoProject.id, {

@@ -107,6 +107,10 @@ describe("Bridge observability primitives", () => {
       observedAtMs: 1_786_320_000_000,
     });
     metrics.recordNotificationDelivery({ channel: "email", outcome: "delivered", durationMs: 30 });
+    metrics.recordContentSecretDetection({
+      contentType: "artifact",
+      secretType: "private_key",
+    });
 
     const snapshot = metrics.snapshot();
     expect(snapshot.counters).toEqual(expect.arrayContaining([
@@ -118,6 +122,11 @@ describe("Bridge observability primitives", () => {
       expect.objectContaining({
         name: "bridge_outbox_events_total",
         labels: { outcome: "dead_lettered" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "artifact", secret_type: "private_key" },
         value: 1,
       }),
     ]));
@@ -135,6 +144,7 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain("# TYPE bridge_http_requests_total counter");
     expect(rendered).toContain('bridge_http_requests_total{operation="/v1/projects/:projectId/context",outcome="client_error",service="api"} 1');
     expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
+    expect(rendered).toContain('bridge_content_secret_detections_total{content_type="artifact",secret_type="private_key"} 1');
     expect(rendered).not.toContain("ignored=true");
     expect(rendered).not.toContain("organizationId");
     expect(rendered).not.toContain("projectId=prj_");

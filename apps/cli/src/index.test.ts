@@ -15,6 +15,7 @@ interface MockState {
   serviceIdentities?: Array<Record<string, unknown>>;
   serviceRequestBodies?: Array<Record<string, unknown>>;
   serviceToken?: string;
+  rejectSecretWrites?: boolean;
   run?: Record<string, unknown>;
   mcpAvailable?: boolean;
   mcpMalformed?: boolean;
@@ -168,6 +169,17 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       });
     }
     if (url.pathname.endsWith("/questions") && init?.method === "POST") {
+      if (state.rejectSecretWrites) {
+        return json({
+          code: "SECRET_DETECTED",
+          message: "Potential credential detected in content. Remove it and retry; Bridge did not store this request.",
+          details: {
+            contentType: "question",
+            fieldPath: "content.context",
+            secretType: "bridge_service_token",
+          },
+        }, 422);
+      }
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       state.question = {
         ...body,
@@ -353,7 +365,7 @@ describe("Bridge CLI fallback adapter", () => {
       stderr: () => undefined,
     };
 
-    expect(await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime)).toBe(0);
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
     await writeFile(join(cwd, "CLAUDE.md"), "# Existing Claude guidance\n");
     expect(await runCli(["install", "--client", "claude_code"], runtime)).toBe(0);
     expect(state.projects).toEqual([]);
@@ -433,7 +445,7 @@ describe("Bridge CLI fallback adapter", () => {
       stdout: (text) => stdout.push(text),
       stderr: () => undefined,
     };
-    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+    expect(await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime)).toBe(0);
 
     expect(await runCli([
       "run",
@@ -731,6 +743,57 @@ describe("Bridge CLI fallback adapter", () => {
       code: "INVALID_OUTPUT_MODE",
       exitCode: cliExitCodes.usage,
     });
+  });
+
+  it("surfaces a secret rejection without printing the submitted credential", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-secret-rejection-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = {
+      question: {},
+      artifacts: [],
+      assumptions: [],
+      projects: [],
+      rejectSecretWrites: true,
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+    };
+    expect(await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime)).toBe(0);
+    const secret = `brg_srv_${"A".repeat(43)}`;
+    const questionPath = join(cwd, "secret-question.json");
+    await writeFile(questionPath, JSON.stringify({
+      idempotencyKey: "cli-secret-question-001",
+      title: "Which credential policy should the worker follow?",
+      type: "decision",
+      category: "security",
+      context: `The proposed configuration embeds ${secret} in a durable file.`,
+      whyItMatters: "Persisting the credential would expose privileged access to later readers.",
+      intendedOwnerIds: ["usr_architect"],
+      risk: "protected",
+      reversible: false,
+      blocking: true,
+      options: [
+        { key: "manager", label: "Use a secret manager", tradeoffs: "Requires deployment integration." },
+        { key: "environment", label: "Use runtime injection", tradeoffs: "Requires environment configuration." },
+      ],
+      recommendationKey: "manager",
+      scope: { component: "worker" },
+    }));
+
+    expect(await runCli(["ask", "--file", questionPath], runtime)).toBe(cliExitCodes.usage);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "SECRET_DETECTED",
+      message: "Potential credential detected in content. Remove it and retry; Bridge did not store this request.",
+      exitCode: cliExitCodes.usage,
+      details: { status: 422 },
+    });
+    expect(stderr.join("\n")).not.toContain(secret);
+    expect(state.question).toEqual({});
   });
 
   it("initializes a repository, asks a question, reads its answer, and synchronizes context", async () => {

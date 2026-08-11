@@ -403,6 +403,222 @@ describe("Bridge decision workflow", () => {
     })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("rejects high-confidence secrets before durable writes and records only controlled metrics", async () => {
+    const metrics = new BridgeMetrics();
+    const { repository, service } = await runtime(metrics);
+    await seedOrganizationAdministrator(repository);
+    const bridgeToken = `brg_srv_${"A".repeat(43)}`;
+    const githubToken = `ghp_${"B".repeat(36)}`;
+    const awsAccessKey = `AKIA${"E".repeat(16)}`;
+    const privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    const secretUrl = `https://example.test/callback?access_token=${"C".repeat(32)}`;
+
+    await expect(service.createServiceIdentity(organizationAdmin, {
+      name: bridgeToken,
+      type: "ci",
+      roles: [],
+      allProjects: false,
+      projectMemberships: [],
+      scopes: ["bridge:read"],
+    })).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      statusCode: 422,
+      details: {
+        contentType: "administration",
+        fieldPath: "content.name",
+        secretType: "bridge_service_token",
+      },
+    });
+    await expect(service.startRun(agent, project.id, {
+      idempotencyKey: "secret-run-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: `Use ${bridgeToken} while implementing retries`,
+      scope: { component: "transfers" },
+      externalLinks: [],
+    })).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      details: { contentType: "run", fieldPath: "content.taskSummary" },
+    });
+    await expect(service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "secret-question-001",
+      options: [
+        { key: "transient", label: "Retry transient failures", tradeoffs: `Requires ${githubToken}` },
+        { key: "all", label: "Retry every failure", tradeoffs: "Can retry permanent failures." },
+      ],
+    }))).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      details: {
+        contentType: "question",
+        fieldPath: "content.options[0].tradeoffs",
+        secretType: "github_token",
+      },
+    });
+    await expect(service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "secret-assumption-001",
+      rationale: `The deployment notes referenced ${awsAccessKey}.`,
+    }))).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      details: {
+        contentType: "assumption",
+        fieldPath: "content.rationale",
+        secretType: "aws_access_key",
+      },
+    });
+    await expect(service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "secret-artifact-001",
+      body: `# Unsafe specification\n\n${privateKey}`,
+    }))).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      details: { contentType: "artifact", fieldPath: "content.body", secretType: "private_key" },
+    });
+    await expect(service.getContext(agent, project.id, {
+      task: `Review callback ${secretUrl}`,
+      scope: {},
+      categories: [],
+      maxItems: 20,
+    })).rejects.toMatchObject({
+      code: "SECRET_DETECTED",
+      details: { contentType: "context", fieldPath: "content.task", secretType: "secret_url_parameter" },
+    });
+
+    expect(await repository.listServiceCredentials(project.organizationId)).toEqual([]);
+    expect(await repository.listRuns(project.id)).toEqual([]);
+    expect(await repository.listAssumptions(project.id)).toEqual([]);
+    expect(await repository.listQuestions(project.id)).toEqual([]);
+    expect(await repository.listArtifacts(project.id)).toEqual([]);
+    expect(await repository.listContextSnapshots(project.id)).toEqual([]);
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "administration", secret_type: "bridge_service_token" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "run", secret_type: "bridge_service_token" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "question", secret_type: "github_token" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "assumption", secret_type: "aws_access_key" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "artifact", secret_type: "private_key" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_content_secret_detections_total",
+        labels: { content_type: "context", secret_type: "secret_url_parameter" },
+        value: 1,
+      }),
+    ]));
+  });
+
+  it("enforces secret blocking across run, assumption, decision, discussion, and review mutations", async () => {
+    const { repository, service } = await runtime();
+    const secret = `Authorization: Bearer ${"D".repeat(32)}`;
+    const run = await service.startRun(agent, project.id, {
+      idempotencyKey: "secret-mutation-run-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Exercise content mutation policy",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    await expect(service.reportRun(agent, run.run.id, {
+      expectedVersion: 1,
+      status: "failed",
+      summary: `Failure output included ${secret}`,
+      resultLinks: [],
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "run" } });
+    expect(await repository.getRun(run.run.id)).toMatchObject({ status: "running", version: 1 });
+
+    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "secret-mutation-assumption-001",
+      runId: run.run.id,
+    }));
+    await expect(service.resolveAssumption(owner, assumption.id, {
+      expectedVersion: 1,
+      status: "rejected",
+      rationale: `The validation notes included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "assumption" } });
+    expect(await repository.getAssumption(assumption.id)).toMatchObject({ status: "active", version: 1 });
+
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "secret-mutation-question-001",
+    }));
+    await expect(service.addQuestionComment(owner, question.id, {
+      expectedVersion: 1,
+      body: `Clarification included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    await expect(service.proposeAnswer(owner, question.id, {
+      answer: "Retry transient failures only.",
+      rationale: `The evidence included ${secret}`,
+      optionKey: "transient",
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    await expect(service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: `The approval notes included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
+    expect(await repository.getQuestion(question.id)).toMatchObject({
+      status: "open",
+      version: 1,
+      comments: [],
+      responses: [],
+    });
+    expect(await repository.listDecisions(project.id)).toEqual([]);
+
+    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "secret-mutation-protected-question-001",
+      title: "Which credential retention policy should protect the worker?",
+      category: "security",
+      risk: "protected",
+    }));
+    await expect(service.reviewQuestion(owner, protectedQuestion.id, {
+      expectedVersion: 1,
+      status: "approved",
+      rationale: `The security review included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    expect(await repository.getQuestion(protectedQuestion.id)).toMatchObject({ version: 1, reviews: [] });
+
+    const decisionQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "secret-mutation-decision-question-001",
+      title: "Which retry policy should govern the settlement worker?",
+    }));
+    const decision = await service.acceptAnswer(owner, decisionQuestion.id, {
+      optionKey: "transient",
+      rationale: "Only transient failures should be retried with bounded exponential backoff.",
+    });
+    await expect(service.changeDecisionLifecycle(owner, decision.id, {
+      expectedVersion: 1,
+      status: "revoked",
+      rationale: `The retirement rationale included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
+    expect(await repository.getDecision(decision.id)).toMatchObject({ status: "active", version: 1 });
+
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "secret-mutation-artifact-001",
+    }));
+    await expect(service.reviewArtifactVersion(owner, publication.version.id, {
+      status: "commented",
+      body: `The review included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
+    await expect(service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: `The approval included ${secret}`,
+    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
+    expect(await repository.getArtifact(publication.artifact.id)).toMatchObject({
+      versions: [expect.objectContaining({ status: "in_review", reviews: [] })],
+    });
+  });
+
   it("records, ranks, expires, and human-resolves visible assumptions", async () => {
     const metrics = new BridgeMetrics();
     const { repository, service } = await runtime(metrics);

@@ -59,6 +59,7 @@ The registry records:
 - in-memory/PostgreSQL transaction count, outcome, and duration;
 - most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
 - email delivery/policy outcome and handler duration.
+- high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
 
 API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle` and `createNotificationEmailHandler`; its long-running scheduling/export host remains deployment-owned because the repository worker entry point is not yet a durable daemon.
 

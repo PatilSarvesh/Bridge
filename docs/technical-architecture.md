@@ -872,13 +872,15 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.
 - Rate limits by organization, principal, endpoint, and tool.
-- Secret and malware scanning for content and attachments.
+- High-confidence secret blocking at the shared application boundary for durable text writes; broader DLP and malware scanning remain deployment/content-pipeline controls.
 - Signed webhook verification and replay protection.
 - SSRF protection for integration and external-link fetchers.
 - Parameterized SQL and migration review.
 - Dependency and container scanning in CI.
 - Encryption using managed keys, with a path to tenant-specific keys later.
 - Break-glass administration that is time-bound, justified, and audited.
+
+The implemented secret policy rejects recognized Bridge/service-provider tokens, private-key headers, bearer credentials, credential-bearing connection URLs, and long secret URL parameters before persistence. It deliberately does not mutate immutable questions, decisions, assumptions, runs, or specification versions. Errors expose only a controlled content type, detector type, and field path. The operational counter uses those bounded labels and never includes organization, project, principal, record, or matched content. Detection is an accidental-leak guardrail rather than a claim of entropy-based scanning, comprehensive DLP, or malware inspection.
 
 ### 20.3 Agent-specific threats
 
