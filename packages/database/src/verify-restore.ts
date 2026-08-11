@@ -6,6 +6,7 @@ import postgres from "postgres";
 export const restoreRequiredTables = [
   "bridge_organizations",
   "bridge_principal_identities",
+  "bridge_service_credentials",
   "bridge_organization_memberships",
   "bridge_project_memberships",
   "bridge_projects",
@@ -116,6 +117,7 @@ export async function verifyRestoredDatabase(
     const countRows = await client<{ readonly tableName: string; readonly count: number }[]>`
       select 'bridge_organizations' as "tableName", count(*)::integer as count from bridge_organizations
       union all select 'bridge_principal_identities', count(*)::integer from bridge_principal_identities
+      union all select 'bridge_service_credentials', count(*)::integer from bridge_service_credentials
       union all select 'bridge_organization_memberships', count(*)::integer from bridge_organization_memberships
       union all select 'bridge_project_memberships', count(*)::integer from bridge_project_memberships
       union all select 'bridge_projects', count(*)::integer from bridge_projects

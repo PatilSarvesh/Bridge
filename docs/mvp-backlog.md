@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, service identities, RLS, and provisioning work prevents a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, RLS, and provisioning work prevents a production-security claim.
 
 ## 2. Planning conventions
 
@@ -225,7 +225,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, project roles are target-project scoped, and non-human REST bearer principals now require coarse `bridge:read`/`bridge:write` (or `bridge:admin`) capabilities; endpoint-specific scopes and service-identity grants remain
+- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, project roles are target-project scoped, non-human REST bearer principals require coarse `bridge:read`/`bridge:write` (or `bridge:admin`) capabilities, and organization admins can provision versioned scoped service identities; endpoint-specific scopes remain
 - **Dependencies:** BRG-002
 - **PRD references:** AUTH-03, AUTH-04, QST-05, ADM-01
 
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented; standalone MCP bearer validation, dedicated audience checks, protected-resource metadata, and coarse per-tool capabilities are also implemented, while MCP-side token issuance, fine-grained tool scopes, and noninteractive service-identity grants remain
+- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented; standalone MCP bearer validation, dedicated audience checks, protected-resource metadata, coarse per-tool capabilities, and a REST-administered revocable scoped service-identity path are also implemented, while MCP-side token issuance, fine-grained tool scopes, and workload-identity federation remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 
@@ -273,7 +273,7 @@ Acceptance criteria:
 1. CLI browser login uses a public-client-safe flow.
 2. MCP accepts only the configured MCP audience and scopes.
 3. Agent identities are distinguishable from delegated human users.
-4. CI can use a narrowly scoped noninteractive identity.
+4. CI can use a narrowly scoped noninteractive identity. **Implemented through REST-created, expiring, revocable Bridge service tokens; CLI ergonomics and workload-identity federation remain pending.**
 5. Refresh, expiry, revocation, and invalid-token behavior are tested.
 6. Tokens and authorization headers never appear in application logs.
 
@@ -644,7 +644,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, and revoking logout are implemented; Windows Credential Manager and noninteractive service identities remain
+- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, and revoking logout are implemented; Windows Credential Manager, dedicated CLI service-token ergonomics, and workload-identity federation remain
 - **Dependencies:** BRG-013
 - **PRD references:** AUTH-02, CLI contract
 

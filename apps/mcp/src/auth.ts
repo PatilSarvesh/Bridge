@@ -3,7 +3,8 @@ import { BridgeError } from "@bridge/domain";
 import type { Response } from "express";
 
 export interface McpAccessTokenVerifier {
-  authenticateAccessToken(token: string): Promise<Principal>;
+  authenticateBearerToken?(token: string): Promise<Principal>;
+  authenticateAccessToken?(token: string): Promise<Principal>;
 }
 
 export interface McpRequestLike {
@@ -30,7 +31,11 @@ export async function resolveMcpPrincipal(
     if (!token) {
       throw new BridgeError("UNAUTHENTICATED", "A bearer token is required for the MCP endpoint.", 401);
     }
-    return options.verifier.authenticateAccessToken(token);
+    const authenticate = options.verifier.authenticateBearerToken ?? options.verifier.authenticateAccessToken;
+    if (!authenticate) {
+      throw new BridgeError("IDENTITY_NOT_CONFIGURED", "MCP authentication is not configured.", 503);
+    }
+    return authenticate.call(options.verifier, token);
   }
   if (options.production) {
     throw new BridgeError(

@@ -221,6 +221,53 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("provisions a one-time service token and supports versioned revocation", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeader = { "x-bridge-principal-id": demoPrincipals.architect.id };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/service-identities",
+      headers: adminHeader,
+      payload: {
+        name: "Hospital CI",
+        type: "ci",
+        roles: ["agent"],
+        allProjects: false,
+        projectMemberships: [{ projectId: demoProject.id, roles: ["contributor"] }],
+        scopes: ["bridge:read"],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<{ token: string; serviceIdentity: { id: string; version: number } }>();
+    expect(body.token).toMatch(/^brg_srv_/);
+    expect(body.serviceIdentity.version).toBe(1);
+    expect(created.body).not.toContain("tokenHash");
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/service-identities",
+      headers: adminHeader,
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.body).not.toContain(body.token);
+    expect(listed.body).not.toContain("tokenHash");
+    expect(listed.json()).toMatchObject({
+      items: [expect.objectContaining({ id: body.serviceIdentity.id, name: "Hospital CI", version: 1 })],
+    });
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/service-identities/${body.serviceIdentity.id}/revoke`,
+      headers: adminHeader,
+      payload: { expectedVersion: 1 },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ version: 2, revokedAt: expect.any(String) });
+  });
+
   it("lists and marks scoped human notifications without exposing them to agents", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -92,6 +92,24 @@ export interface PrincipalIdentity {
   readonly createdAt: string;
 }
 
+export interface ServiceCredential {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly principalId: string;
+  readonly name: string;
+  readonly tokenHash: string;
+  readonly scopes: readonly string[];
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly revokedAt?: string;
+  readonly version: number;
+}
+
+export interface ServiceTokenResolution {
+  readonly credential: ServiceCredential;
+  readonly principal: Principal;
+}
+
 export interface OrganizationMembership {
   readonly organizationId: string;
   readonly principalId: string;
@@ -120,8 +138,12 @@ export interface OrganizationAuditEvent {
   readonly organizationId: string;
   readonly actorId: string;
   readonly actorType: PrincipalType;
-  readonly action: "organization_member.created" | "organization_member.updated";
-  readonly subjectType: "organization_membership";
+  readonly action:
+    | "organization_member.created"
+    | "organization_member.updated"
+    | "service_identity.created"
+    | "service_identity.revoked";
+  readonly subjectType: "organization_membership" | "service_credential";
   readonly subjectId: string;
   readonly createdAt: string;
 }

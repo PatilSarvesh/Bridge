@@ -5,7 +5,7 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse REST bearer-capability enforcement, and standalone MCP bearer validation are implemented; MCP authorization-server provisioning, noninteractive service identities, provider-backed invitations, enterprise provisioning, and durable authentication audit events remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse REST bearer-capability enforcement, standalone MCP bearer validation, and revocable scoped service identities are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, and durable authentication audit events remain separate work.
 
 ## Security boundary
 
@@ -27,7 +27,7 @@ For non-human bearer principals, Bridge validates the optional scope claim and a
 - `bridge:admin` satisfies both coarse capabilities.
 - Human principals continue to use server-side membership and role policy; provider scopes do not replace those checks.
 
-Missing capabilities return `403` with the required capability in structured error details. Malformed scope claims return `401`. This is intentionally a first coarse boundary; endpoint-specific tool scopes, service-identity grants, and MCP-side token issuance remain separate work.
+Missing capabilities return `403` with the required capability in structured error details. Malformed scope claims return `401`. This is intentionally a first coarse boundary; endpoint-specific tool scopes and MCP-side token issuance remain separate work.
 
 ## Standalone MCP bearer authentication
 
@@ -120,6 +120,22 @@ Creating a member provisions a human identity for the configured OIDC issuer usi
 
 Disabling an organization membership denies the member's next authenticated request. Bridge also prevents disabling or demoting the final active organization administrator. The operator bootstrap creates the first administrator only when that membership is absent; leaving bootstrap variables configured no longer overwrites later versioned administration changes.
 
+## Unattended service identities
+
+An active human organization administrator can provision a narrowly scoped non-human credential for CI or an unattended agent:
+
+```text
+GET  /v1/admin/organization/service-identities
+POST /v1/admin/organization/service-identities
+POST /v1/admin/organization/service-identities/:serviceCredentialId/revoke
+```
+
+The creation body selects `type` (`agent`, `ci`, or `integration`), normalized roles, optional all-project or explicit project memberships, one or more capabilities (`bridge:read`, `bridge:write`, or `bridge:admin`), and an expiry no more than one year away. The response includes a generated `brg_srv_...` bearer token once. Bridge stores only its SHA-256 hash; list and revoke responses never contain the token or hash. Save the token immediately in the CI platform's secret manager and send it as `Authorization: Bearer <token>`.
+
+Service-token resolution re-checks expiry, revocation, active organization membership, and active project memberships on every request. Revoking the credential or disabling its identity's organization membership therefore takes effect without waiting for a provider token cache. The same bearer path works for REST and optional MCP; JWT/OIDC MCP tokens still require the configured MCP audience, while the opaque Bridge service-token prefix is resolved by the Bridge directory.
+
+This is a credential-management foundation, not workload identity federation. Token rotation, a dedicated CLI command, provider-side exchange, rate limits, and endpoint-specific scopes remain follow-up work. Never commit, print, or log a service token.
+
 ## Public authentication endpoints
 
 ```text
@@ -156,12 +172,12 @@ The versioned session contains only the API URL, access token, optional refresh 
 
 Before an authenticated API call, the CLI discovers whether the server is in development or OIDC mode. Development servers retain the fixed-principal header. OIDC servers receive only the bearer token. When an access token is near expiry, the CLI uses refresh-token rotation when available, validates the new access token through Bridge, and atomically replaces the keychain record. A missing or rejected refresh token removes the expired local session and requires login. Logout attempts provider refresh-token revocation and removes the local keychain entry even when remote revocation is unavailable.
 
-This is an interactive delegated-human flow. CI and unattended agents must not reuse a person's keychain session; their separate scoped service-identity mechanism remains pending.
+This is an interactive delegated-human flow. CI and unattended agents must use a separate service identity and must not reuse a person's keychain session.
 
 ## Remaining limitations
 
 - The standalone MCP process now validates external OIDC bearer tokens when configured; development may still use the fixed principal. Dynamic client registration, MCP-side authorization-server/token issuance, fine-grained tool scopes, and live-provider validation remain pending.
-- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities are enforced for non-human REST and MCP bearer principals. Endpoint-specific tool scopes, service-identity grants, MCP-side authorization-server/token issuance, and live-provider validation remain pending.
+- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities are enforced for non-human REST and MCP bearer principals, including revocable Bridge service tokens. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and live-provider validation remain pending.
 - Windows Credential Manager is not supported by the current CLI build; the implemented pilot stores are macOS Keychain and Linux Secret Service.
 - Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.

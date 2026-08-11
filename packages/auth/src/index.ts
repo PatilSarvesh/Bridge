@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { BridgeError, type Principal } from "@bridge/domain";
+import { BridgeError, type Principal, type ServiceTokenResolution } from "@bridge/domain";
 import {
   CompactEncrypt,
   compactDecrypt,
@@ -26,6 +26,7 @@ export interface OidcAccessTokenConfiguration {
 
 export interface PrincipalDirectory {
   resolveOidcPrincipal(identity: OidcIdentity): Promise<Principal | undefined>;
+  resolveServiceToken?(tokenHash: string): Promise<ServiceTokenResolution | undefined>;
 }
 
 export interface OidcConfiguration {
@@ -194,6 +195,30 @@ function accessTokenScopes(payload: JWTPayload): readonly string[] {
   return scopes;
 }
 
+export function hashServiceToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function isServiceToken(token: string): boolean {
+  return /^brg_srv_[A-Za-z0-9_-]{43}$/.test(token);
+}
+
+async function resolveServicePrincipal(
+  token: string,
+  directory: PrincipalDirectory,
+): Promise<Principal> {
+  if (!isServiceToken(token) || !directory.resolveServiceToken) {
+    throw new BridgeError("UNAUTHENTICATED", "The service token is invalid or expired.", 401);
+  }
+  const resolved = await directory.resolveServiceToken(hashServiceToken(token));
+  const expiresAt = resolved ? Date.parse(resolved.credential.expiresAt) : Number.NaN;
+  if (!resolved || resolved.credential.revokedAt || !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now() || resolved.principal.type === "human") {
+    throw new BridgeError("UNAUTHENTICATED", "The service token is invalid or expired.", 401);
+  }
+  return { ...resolved.principal, scopes: [...new Set(resolved.credential.scopes)] };
+}
+
 async function verifyAccessToken(
   token: string,
   configuration: OidcAccessTokenConfiguration,
@@ -253,6 +278,12 @@ export class OidcAccessTokenVerifier {
 
   async authenticateAccessToken(token: string): Promise<Principal> {
     return verifyAccessToken(token, this.configuration, this.directory, this.jwks);
+  }
+
+  async authenticateBearerToken(token: string): Promise<Principal> {
+    return isServiceToken(token)
+      ? resolveServicePrincipal(token, this.directory)
+      : this.authenticateAccessToken(token);
   }
 }
 
@@ -340,7 +371,8 @@ export class OidcAuthenticator implements AuthenticationProvider {
     if (!accessToken) {
       throw new BridgeError("UNAUTHENTICATED", "Authentication is required.", 401);
     }
-    return this.authenticateAccessToken(accessToken);
+    return bearer ? this.accessTokenVerifier.authenticateBearerToken(accessToken) :
+      this.authenticateAccessToken(accessToken);
   }
 
   async authenticateAccessToken(token: string): Promise<Principal> {

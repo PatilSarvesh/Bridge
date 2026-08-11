@@ -131,6 +131,31 @@ export const principalIdentities = pgTable(
   ],
 );
 
+export const serviceCredentials = pgTable(
+  "bridge_service_credentials",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => principalIdentities.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    scopes: jsonb("scopes").$type<readonly string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    version: integer("version").default(1).notNull(),
+  },
+  (table) => [
+    uniqueIndex("bridge_service_credentials_token_hash_unique").on(table.tokenHash),
+    index("bridge_service_credentials_org_created_idx").on(table.organizationId, table.createdAt),
+    index("bridge_service_credentials_principal_idx").on(table.principalId),
+  ],
+);
+
 export const organizationMemberships = pgTable(
   "bridge_organization_memberships",
   {

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OidcAccessTokenVerifier,
   OidcAuthenticator,
+  hashServiceToken,
   type OidcConfiguration,
   type PrincipalDirectory,
 } from "./index.js";
@@ -143,6 +144,47 @@ describe("OIDC authentication", () => {
       scope: Array.from({ length: 101 }, (_, index) => `scope-${index}`).join(" "),
     });
     await expect(authenticator.authenticateAccessToken(oversized))
+      .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
+  });
+
+  it("authenticates revocable service tokens through the bearer path", async () => {
+    const { authenticator, directory } = await fixture({
+      ...principal,
+      id: "svc_ci",
+      type: "ci",
+      displayName: "Hospital CI",
+    });
+    const token = `brg_srv_${"a".repeat(43)}`;
+    const servicePrincipal: Principal = {
+      ...principal,
+      id: "svc_ci",
+      type: "ci",
+      displayName: "Hospital CI",
+    };
+    directory.resolveServiceToken = vi.fn(async (tokenHash) => tokenHash === hashServiceToken(token)
+      ? {
+          principal: servicePrincipal,
+          credential: {
+            id: "scr_ci",
+            organizationId: servicePrincipal.organizationId,
+            principalId: servicePrincipal.id,
+            name: "Hospital CI",
+            tokenHash,
+            scopes: ["bridge:read"],
+            createdAt: "2026-08-11T00:00:00.000Z",
+            expiresAt: "2026-08-12T00:00:00.000Z",
+            version: 1,
+          },
+        }
+      : undefined);
+
+    await expect(authenticator.authenticateRequest({ authorization: `Bearer ${token}` }))
+      .resolves.toMatchObject({ id: "svc_ci", type: "ci", scopes: ["bridge:read"] });
+    await expect(new OidcAccessTokenVerifier({ issuer, audience }, directory)
+      .authenticateBearerToken(token)).resolves.toMatchObject({ scopes: ["bridge:read"] });
+
+    directory.resolveServiceToken = vi.fn(async () => undefined);
+    await expect(authenticator.authenticateRequest({ authorization: `Bearer ${token}` }))
       .rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
   });
 

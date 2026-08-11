@@ -9,6 +9,7 @@ import {
   contextQuerySchema,
   continuationQuerySchema,
   createOrganizationMemberInputSchema,
+  createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
   findQuestionMatchesInputSchema,
@@ -28,6 +29,7 @@ import {
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
   updateOrganizationMemberInputSchema,
+  revokeServiceIdentityInputSchema,
 } from "@bridge/contracts";
 import {
   assertPrincipalScope,
@@ -331,6 +333,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return options.service.updateOrganizationMember(principal, request.params.memberId, input);
     },
   );
+
+  app.get("/v1/admin/organization/service-identities", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listServiceIdentities(principal) };
+  });
+
+  app.post<{ Body: unknown }>("/v1/admin/organization/service-identities", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = createServiceIdentityInputSchema.parse(request.body);
+    const registration = await options.service.createServiceIdentity(principal, input);
+    return reply.status(201).send(registration);
+  });
+
+  app.post<{
+    Params: { serviceCredentialId: string };
+    Body: unknown;
+  }>("/v1/admin/organization/service-identities/:serviceCredentialId/revoke", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = revokeServiceIdentityInputSchema.parse(request.body);
+    return options.service.revokeServiceIdentity(principal, request.params.serviceCredentialId, input);
+  });
 
   app.post<{ Body: unknown }>("/v1/projects", async (request, reply) => {
     const principal = await resolvePrincipal(request, options);

@@ -16,6 +16,7 @@ import type {
   Project,
   ProjectMembership,
   Question,
+  ServiceCredential,
 } from "@bridge/domain";
 import { describe, expect, it } from "vitest";
 
@@ -47,6 +48,8 @@ import {
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
+  serviceCredentialFromRow,
+  serviceCredentialToRow,
   questionFromRows,
   questionToRow,
   responseToRow,
@@ -69,6 +72,7 @@ import {
   type OrganizationRow,
   type PrincipalIdentityRow,
   type ProjectMembershipRow,
+  type ServiceCredentialRow,
 } from "./mappers.js";
 
 const project: Project = {
@@ -344,6 +348,17 @@ describe("PostgreSQL domain mappings", () => {
       updatedAt: organization.createdAt,
       version: 1,
     };
+    const serviceCredential: ServiceCredential = {
+      id: "scr_mapping",
+      organizationId: organization.id,
+      principalId: "agt_mapping",
+      name: "Mapping CI",
+      tokenHash: "b".repeat(64),
+      scopes: ["bridge:read"],
+      createdAt: organization.createdAt,
+      expiresAt: "2026-08-08T09:00:00.000Z",
+      version: 1,
+    };
     const organizationAuditEvent: OrganizationAuditEvent = {
       id: "oaud_mapping",
       correlationId: "cor_mapping",
@@ -364,6 +379,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(projectMembershipFromRow(
       projectMembershipToRow(projectMembership) as ProjectMembershipRow,
     )).toEqual(projectMembership);
+    expect(serviceCredentialFromRow(
+      serviceCredentialToRow(serviceCredential) as ServiceCredentialRow,
+    )).toEqual(serviceCredential);
     expect(organizationAuditEventFromRow(
       organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
     )).toEqual(organizationAuditEvent);
@@ -551,5 +569,14 @@ describe("PostgreSQL domain mappings", () => {
     expect(memberAdministrationMigration).toContain("bridge_project_memberships_positive_version_check");
     expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_action_check");
     expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_correlation_check");
+
+    const serviceIdentityMigration = readFileSync(
+      new URL("../drizzle/0017_cooing_slipstream.sql", import.meta.url),
+      "utf8",
+    );
+    expect(serviceIdentityMigration).toContain("CREATE TABLE \"bridge_service_credentials\"");
+    expect(serviceIdentityMigration).toContain("bridge_service_credentials_token_hash_unique");
+    expect(serviceIdentityMigration).toContain("bridge_service_credentials_positive_version_check");
+    expect(serviceIdentityMigration).toContain("service_identity.created");
   });
 });

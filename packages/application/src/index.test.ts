@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   CreateQuestionInput,
   PublishArtifactInput,
@@ -332,6 +334,52 @@ describe("Bridge decision workflow", () => {
       allProjects: false,
       projectMemberships: [],
     })).rejects.toMatchObject({ code: "LAST_ORGANIZATION_ADMIN" });
+  });
+
+  it("creates, resolves, lists, and revokes a scoped service identity", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    const registration = await service.createServiceIdentity(organizationAdmin, {
+      name: "Hospital CI",
+      type: "ci",
+      roles: ["agent"],
+      allProjects: false,
+      projectMemberships: [{ projectId: project.id, roles: ["contributor"] }],
+      scopes: ["bridge:read"],
+      expiresAt: "2026-12-01T00:00:00.000Z",
+    });
+    expect(registration.token).toMatch(/^brg_srv_[A-Za-z0-9_-]{43}$/);
+    expect(registration.serviceIdentity).toMatchObject({
+      name: "Hospital CI",
+      type: "ci",
+      scopes: ["bridge:read"],
+      projectMemberships: [{ projectId: project.id, status: "active" }],
+      version: 1,
+    });
+    expect(JSON.stringify(registration.serviceIdentity)).not.toContain(registration.token);
+
+    const resolution = await repository.resolveServiceToken(
+      createHash("sha256").update(registration.token).digest("hex"),
+    );
+    expect(resolution?.principal).toMatchObject({
+      id: registration.serviceIdentity.principalId,
+      type: "ci",
+      projectIds: [project.id],
+    });
+    await expect(service.listServiceIdentities(organizationAdmin)).resolves.toMatchObject([
+      { id: registration.serviceIdentity.id, name: "Hospital CI", version: 1 },
+    ]);
+
+    const revoked = await service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+      expectedVersion: 1,
+    });
+    expect(revoked).toMatchObject({ version: 2, revokedAt: expect.any(String) });
+    await expect(repository.resolveServiceToken(
+      createHash("sha256").update(registration.token).digest("hex"),
+    )).resolves.toBeUndefined();
+    await expect(service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+      expectedVersion: 1,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("records, ranks, expires, and human-resolves visible assumptions", async () => {

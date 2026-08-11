@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, noninteractive identities, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes, MCP-side token issuance, and service identities remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes and MCP-side token issuance remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -251,12 +251,12 @@ MCP tokens must use a dedicated audience and should not be reusable as unrestric
 - Web: Auth0 Authorization Code flow.
 - CLI: Authorization Code with PKCE and a localhost callback.
 - MCP: Auth0-backed OAuth using protected-resource and authorization-server metadata.
-- CI: Client Credentials for a dedicated Bridge service identity.
+- CI: a short-lived, scoped Bridge service identity created by an organization administrator; workload-identity exchange remains a later deployment option.
 - Enterprise SSO: Auth0 federation to the customer's identity provider.
 
 The CLI does not use Device Authorization Flow because organization-scoped behavior is required for Bridge tenancy.
 
-The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. Interactive human credentials are not a substitute for the still-pending scoped CI/agent identity flow.
+The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. CI and unattended agents use a separate REST-administered Bridge service identity; they must not copy a human's keychain credential.
 
 ### 7.3 Authorization model
 
@@ -323,7 +323,7 @@ agent_identities
 service_identities
 ```
 
-The current implementation uses versioned organization and project membership rows plus a separate organization-level audit stream for member creation and access changes. Organization administrators may manage membership but do not gain decision-owner or specification-approver authority merely from that role.
+The current implementation uses versioned organization and project membership rows, a separate `bridge_service_credentials` table that stores only token hashes and expiry/revocation metadata, plus an organization-level audit stream for member and service-identity changes. Organization administrators may manage membership and service credentials but do not gain decision-owner or specification-approver authority merely from that role.
 
 #### Work and knowledge
 

@@ -17,6 +17,7 @@ import type {
   ProjectMembership,
   Question,
   QuestionResponse,
+  ServiceCredential,
 } from "@bridge/domain";
 
 import {
@@ -38,6 +39,7 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  serviceCredentials,
 } from "./schema.js";
 
 export type OrganizationRow = typeof organizations.$inferSelect;
@@ -45,6 +47,7 @@ export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
 export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
+export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -103,6 +106,38 @@ export function projectMembershipToRow(
 
 export function projectMembershipFromRow(row: ProjectMembershipRow): ProjectMembership {
   return { ...row };
+}
+
+export function serviceCredentialToRow(
+  credential: ServiceCredential,
+): typeof serviceCredentials.$inferInsert {
+  return {
+    id: credential.id,
+    organizationId: credential.organizationId,
+    principalId: credential.principalId,
+    name: credential.name,
+    tokenHash: credential.tokenHash,
+    scopes: credential.scopes,
+    createdAt: credential.createdAt,
+    expiresAt: credential.expiresAt,
+    revokedAt: credential.revokedAt ?? null,
+    version: credential.version,
+  };
+}
+
+export function serviceCredentialFromRow(row: ServiceCredentialRow): ServiceCredential {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    principalId: row.principalId,
+    name: row.name,
+    tokenHash: row.tokenHash,
+    scopes: row.scopes,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    ...(row.revokedAt === null ? {} : { revokedAt: row.revokedAt }),
+    version: row.version,
+  };
 }
 
 export function organizationAuditEventToRow(
