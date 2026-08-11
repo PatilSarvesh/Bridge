@@ -120,6 +120,7 @@ export function serviceCredentialToRow(
     scopes: credential.scopes,
     createdAt: credential.createdAt,
     expiresAt: credential.expiresAt,
+    rotatedAt: credential.rotatedAt ?? null,
     revokedAt: credential.revokedAt ?? null,
     version: credential.version,
   };
@@ -135,6 +136,7 @@ export function serviceCredentialFromRow(row: ServiceCredentialRow): ServiceCred
     scopes: row.scopes,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
+    ...(row.rotatedAt === null ? {} : { rotatedAt: row.rotatedAt }),
     ...(row.revokedAt === null ? {} : { revokedAt: row.revokedAt }),
     version: row.version,
   };

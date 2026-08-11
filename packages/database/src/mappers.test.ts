@@ -357,6 +357,7 @@ describe("PostgreSQL domain mappings", () => {
       scopes: ["bridge:read"],
       createdAt: organization.createdAt,
       expiresAt: "2026-08-08T09:00:00.000Z",
+      rotatedAt: "2026-08-07T10:00:00.000Z",
       version: 1,
     };
     const organizationAuditEvent: OrganizationAuditEvent = {
@@ -578,5 +579,12 @@ describe("PostgreSQL domain mappings", () => {
     expect(serviceIdentityMigration).toContain("bridge_service_credentials_token_hash_unique");
     expect(serviceIdentityMigration).toContain("bridge_service_credentials_positive_version_check");
     expect(serviceIdentityMigration).toContain("service_identity.created");
+
+    const rotationMigration = readFileSync(
+      new URL("../drizzle/0018_brainy_blonde_phantom.sql", import.meta.url),
+      "utf8",
+    );
+    expect(rotationMigration).toContain("ADD COLUMN \"rotated_at\"");
+    expect(rotationMigration).toContain("service_identity.rotated");
   });
 });

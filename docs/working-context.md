@@ -1666,14 +1666,14 @@ Deliberate boundaries:
 Implemented and locally verified:
 
 1. Human organization administrators can create `agent`, `ci`, or `integration` identities through `POST /v1/admin/organization/service-identities`, assigning normalized roles, all-project access or explicit project memberships, and one or more coarse capabilities.
-2. Bridge returns a generated `brg_srv_...` token only in the creation response. PostgreSQL and the in-memory repository persist only a SHA-256 hash, expiry, scopes, version, and optional revocation time; list responses never expose token material.
+2. Bridge returns a generated `brg_srv_...` token only in creation/rotation responses. PostgreSQL and the in-memory repository persist only a SHA-256 hash, expiry, scopes, version, and optional rotation/revocation times; list responses never expose token material.
 3. API and standalone MCP bearer authentication recognize service tokens through the shared directory, re-check expiry, revocation, active organization membership, and active project membership on every resolution, and attach only the credential's server-side scopes.
-4. `POST /v1/admin/organization/service-identities/:serviceCredentialId/revoke` uses optimistic version checks and writes organization audit records with the `service_credential` subject type. Revoking or disabling the identity's membership blocks subsequent bearer requests.
-5. The forward-only `0017_cooing_slipstream.sql` migration adds the credential table, token-hash uniqueness, positive-version/scope checks, and expands the organization-audit action/subject checks. Application, auth, API, CLI, mapper, and restore-verification tests cover creation, one-time token exposure, resolution, scope assignment, listing, and revocation.
+4. `POST /v1/admin/organization/service-identities/:serviceCredentialId/rotate` and `.../revoke` use optimistic version checks, immediately invalidate replaced/revoked tokens, and write organization audit records with the `service_credential` subject type. Replacement tokens are returned once; revoking or disabling the identity's membership blocks subsequent bearer requests.
+5. The forward-only `0017_cooing_slipstream.sql` and `0018_brainy_blonde_phantom.sql` migrations add the credential table, token-hash uniqueness, positive-version/scope checks, rotation metadata, and organization-audit action/subject checks. Application, auth, API, CLI, mapper, and restore-verification tests cover creation, one-time token exposure, resolution, rotation, scope assignment, listing, and revocation.
 
 Deliberate boundaries:
 
-- Service identities are administered through REST or the equivalent `bridge service identity` CLI commands (and can be driven by a CI secret manager); token rotation and provider-side workload identity exchange remain follow-up ergonomics.
+- Service identities are administered through REST or the equivalent `bridge service identity` CLI commands (and can be driven by a CI secret manager); versioned token rotation is implemented, while provider-side workload identity exchange remains a follow-up capability.
 - Tokens are bearer credentials and should be injected through a CI secret manager, never committed, logged, or copied from a human interactive session. Bridge does not store raw agent transcripts or private reasoning.
 - Capability enforcement remains coarse (`bridge:read`, `bridge:write`, `bridge:admin`); endpoint-specific scopes, PostgreSQL RLS, rate limits, and live provider/deployment validation remain pending.
 

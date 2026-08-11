@@ -155,7 +155,7 @@ Responsibilities:
 - `doctor` diagnostics for API reachability, project mapping, generated instructions, and adapter markers.
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Interactive `login`, `logout`, and authentication status through public-client Authorization Code + S256 PKCE, a hardened exact loopback callback, and API-side bearer-token/membership validation.
-- API-specific human-token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; organization-admin service-identity create/list/revoke commands use the REST boundary and do not persist the one-time bearer token.
+- API-specific human-token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; organization-admin service-identity create/list/rotate/revoke commands use the REST boundary and do not persist one-time bearer tokens.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
 - Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.

@@ -370,15 +370,36 @@ describe("Bridge decision workflow", () => {
       { id: registration.serviceIdentity.id, name: "Hospital CI", version: 1 },
     ]);
 
-    const revoked = await service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+    const rotated = await service.rotateServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
       expectedVersion: 1,
     });
-    expect(revoked).toMatchObject({ version: 2, revokedAt: expect.any(String) });
+    expect(rotated).toMatchObject({
+      serviceIdentity: { version: 2, rotatedAt: expect.any(String) },
+      token: expect.stringMatching(/^brg_srv_[A-Za-z0-9_-]{43}$/),
+    });
     await expect(repository.resolveServiceToken(
       createHash("sha256").update(registration.token).digest("hex"),
     )).resolves.toBeUndefined();
-    await expect(service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+    await expect(repository.resolveServiceToken(
+      createHash("sha256").update(rotated.token).digest("hex"),
+    )).resolves.toMatchObject({ credential: { version: 2, rotatedAt: expect.any(String) } });
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
+      { action: "service_identity.rotated", subjectId: registration.serviceIdentity.id },
+      { action: "service_identity.created", subjectId: registration.serviceIdentity.id },
+    ]);
+    await expect(service.rotateServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
       expectedVersion: 1,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const revoked = await service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+      expectedVersion: 2,
+    });
+    expect(revoked).toMatchObject({ version: 3, revokedAt: expect.any(String), rotatedAt: expect.any(String) });
+    await expect(repository.resolveServiceToken(
+      createHash("sha256").update(rotated.token).digest("hex"),
+    )).resolves.toBeUndefined();
+    await expect(service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+      expectedVersion: 2,
     })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 

@@ -30,6 +30,7 @@ import {
   startAgentRunInputSchema,
   updateOrganizationMemberInputSchema,
   revokeServiceIdentityInputSchema,
+  rotateServiceIdentityInputSchema,
 } from "@bridge/contracts";
 import {
   assertPrincipalScope,
@@ -353,6 +354,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = await resolvePrincipal(request, options);
     const input = revokeServiceIdentityInputSchema.parse(request.body);
     return options.service.revokeServiceIdentity(principal, request.params.serviceCredentialId, input);
+  });
+
+  app.post<{
+    Params: { serviceCredentialId: string };
+    Body: unknown;
+  }>("/v1/admin/organization/service-identities/:serviceCredentialId/rotate", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = rotateServiceIdentityInputSchema.parse(request.body);
+    return options.service.rotateServiceIdentity(principal, request.params.serviceCredentialId, input);
   });
 
   app.post<{ Body: unknown }>("/v1/projects", async (request, reply) => {

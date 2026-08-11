@@ -101,6 +101,7 @@ export interface ServiceCredential {
   readonly scopes: readonly string[];
   readonly createdAt: string;
   readonly expiresAt: string;
+  readonly rotatedAt?: string;
   readonly revokedAt?: string;
   readonly version: number;
 }
@@ -142,6 +143,7 @@ export interface OrganizationAuditEvent {
     | "organization_member.created"
     | "organization_member.updated"
     | "service_identity.created"
+    | "service_identity.rotated"
     | "service_identity.revoked";
   readonly subjectType: "organization_membership" | "service_credential";
   readonly subjectId: string;

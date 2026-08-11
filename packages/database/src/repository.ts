@@ -261,6 +261,21 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return updated.length === 1;
   }
 
+  async rotateServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = serviceCredentialToRow(credential);
+    const conditions = [eq(serviceCredentials.id, credential.id)];
+    if (expectedVersion !== undefined) conditions.push(eq(serviceCredentials.version, expectedVersion));
+    const updated = await this.database.update(serviceCredentials).set({
+      tokenHash: row.tokenHash,
+      rotatedAt: row.rotatedAt,
+      version: row.version,
+    }).where(and(...conditions)).returning({ id: serviceCredentials.id });
+    return updated.length === 1;
+  }
+
   async getOrganizationMembership(
     organizationId: string,
     principalId: string,

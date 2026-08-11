@@ -644,7 +644,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, revoking logout, and service-identity create/list/revoke commands are implemented; Windows Credential Manager and workload-identity federation remain
+- **Status:** Partial — CLI Authorization Code + S256 PKCE, exact `127.0.0.1` callback hardening, macOS Keychain/Linux Secret Service storage, refresh-or-login behavior, status, token-safe output, revoking logout, and service-identity create/list/rotate/revoke commands are implemented; Windows Credential Manager and workload-identity federation remain
 - **Dependencies:** BRG-013
 - **PRD references:** AUTH-02, CLI contract
 

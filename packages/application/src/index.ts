@@ -25,6 +25,7 @@ import type {
   StartAgentRunInput,
   UpdateOrganizationMemberInput,
   RevokeServiceIdentityInput,
+  RotateServiceIdentityInput,
   NotificationListQuery,
   NotificationReadAllInput,
   OutboxOperationsQuery,
@@ -94,6 +95,10 @@ export interface BridgeRepository {
   listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]>;
   saveServiceCredential(credential: ServiceCredential): Promise<void>;
   revokeServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean>;
+  rotateServiceCredential(
     credential: ServiceCredential,
     expectedVersion?: number,
   ): Promise<boolean>;
@@ -254,6 +259,7 @@ export interface ServiceIdentity {
   readonly projectMemberships: readonly ProjectMembership[];
   readonly createdAt: string;
   readonly expiresAt: string;
+  readonly rotatedAt?: string;
   readonly revokedAt?: string;
   readonly version: number;
 }
@@ -830,6 +836,16 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   }
 
   async revokeServiceCredential(
+    credential: ServiceCredential,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.serviceCredentials.get(credential.id);
+    if (!current || (expectedVersion !== undefined && current.version !== expectedVersion)) return false;
+    this.serviceCredentials.set(credential.id, credential);
+    return true;
+  }
+
+  async rotateServiceCredential(
     credential: ServiceCredential,
     expectedVersion?: number,
   ): Promise<boolean> {
@@ -1628,6 +1644,65 @@ export class BridgeService {
         membership,
         await repository.listProjectMemberships(principal.organizationId, credential.principalId),
       );
+    });
+  }
+
+  async rotateServiceIdentity(
+    principal: Principal,
+    serviceCredentialId: string,
+    input: RotateServiceIdentityInput,
+  ): Promise<ServiceIdentityRegistration> {
+    return this.repository.transaction(async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Rotating a service identity");
+      const credential = await repository.getServiceCredential(serviceCredentialId);
+      if (!credential || credential.organizationId !== principal.organizationId) {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      if (credential.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The service identity changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: credential.version,
+        });
+      }
+      if (credential.revokedAt) {
+        throw new BridgeError("CONFLICT", "A revoked service identity cannot be rotated.", 409);
+      }
+      const expiresAt = Date.parse(credential.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) {
+        throw new BridgeError("VALIDATION_FAILED", "An expired service identity cannot be rotated; create a new identity.", 400);
+      }
+      const identity = await repository.getPrincipalIdentity(credential.principalId);
+      const membership = await repository.getOrganizationMembership(principal.organizationId, credential.principalId);
+      if (!identity || !membership || identity.type === "human") {
+        throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
+      }
+      const projectMemberships = (await repository.listProjectMemberships(
+        principal.organizationId,
+        credential.principalId,
+      )).filter((projectMembership) => projectMembership.status === "active");
+      const timestamp = this.now().toISOString();
+      const token = `brg_srv_${randomBytes(32).toString("base64url")}`;
+      const rotated: ServiceCredential = {
+        ...credential,
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+        rotatedAt: timestamp,
+        version: credential.version + 1,
+      };
+      if (!await repository.rotateServiceCredential(rotated, credential.version)) {
+        throw new BridgeError("CONFLICT", "The service identity changed while it was being rotated.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "service_identity.rotated",
+        credential.id,
+        timestamp,
+        "service_credential",
+      );
+      return {
+        serviceIdentity: this.serviceIdentity(rotated, identity, membership, projectMemberships),
+        token,
+      };
     });
   }
 
@@ -4100,6 +4175,7 @@ export class BridgeService {
         left.projectId.localeCompare(right.projectId)),
       createdAt: credential.createdAt,
       expiresAt: credential.expiresAt,
+      ...(credential.rotatedAt ? { rotatedAt: credential.rotatedAt } : {}),
       ...(credential.revokedAt ? { revokedAt: credential.revokedAt } : {}),
       version: credential.version,
     };

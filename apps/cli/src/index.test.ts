@@ -50,11 +50,24 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
     if (url.pathname === "/v1/admin/organization/service-identities") {
       return json({ items: state.serviceIdentities ?? [] });
     }
+    if (url.pathname.endsWith("/service-identities/scr_cli_1/rotate") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      state.serviceRequestBodies = [...(state.serviceRequestBodies ?? []), body];
+      const current = state.serviceIdentities?.[0] ?? { id: "scr_cli_1", version: 1 };
+      state.serviceToken = `brg_srv_${"b".repeat(43)}`;
+      const serviceIdentity = {
+        ...current,
+        version: 2,
+        rotatedAt: "2026-08-11T00:01:00.000Z",
+      };
+      state.serviceIdentities = [serviceIdentity];
+      return json({ serviceIdentity, token: state.serviceToken });
+    }
     if (url.pathname.endsWith("/service-identities/scr_cli_1/revoke") && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       state.serviceRequestBodies = [...(state.serviceRequestBodies ?? []), body];
       const current = state.serviceIdentities?.[0] ?? { id: "scr_cli_1", version: 1 };
-      return json({ ...current, version: 2, revokedAt: "2026-08-11T00:01:00.000Z" });
+      return json({ ...current, version: 3, revokedAt: "2026-08-11T00:02:00.000Z" });
     }
     if (url.hostname === "mcp.test" && url.pathname === "/mcp") {
       if (!state.mcpAvailable) {
@@ -612,7 +625,7 @@ describe("Bridge CLI fallback adapter", () => {
     expect(stderr).toEqual([]);
   });
 
-  it("creates, lists, and revokes service identities without persisting the one-time token", async () => {
+  it("creates, lists, rotates, and revokes service identities without persisting tokens", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-service-identity-"));
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -674,18 +687,37 @@ describe("Bridge CLI fallback adapter", () => {
     expect(stdout.at(-1)).toContain("scr_cli_1");
     expect(stdout.at(-1)).not.toContain(state.serviceToken!);
 
+    const firstToken = created.token;
     expect(await runCli([
       "service",
       "identity",
-      "revoke",
+      "rotate",
       "scr_cli_1",
       "--version",
       "1",
       "--api-url",
       "http://bridge.test",
     ], runtime)).toBe(0);
-    expect(stdout.at(-1)).toContain('"version": 2');
+    const rotated = JSON.parse(stdout.at(-1) ?? "{}");
+    expect(rotated).toMatchObject({
+      tokenNotice: "Store this token now; Bridge will not show it again.",
+      serviceIdentity: { id: "scr_cli_1", version: 2, rotatedAt: "2026-08-11T00:01:00.000Z" },
+    });
+    expect(rotated.token).not.toBe(firstToken);
     expect(state.serviceRequestBodies?.at(-1)).toEqual({ expectedVersion: 1 });
+
+    expect(await runCli([
+      "service",
+      "identity",
+      "revoke",
+      "scr_cli_1",
+      "--version",
+      "2",
+      "--api-url",
+      "http://bridge.test",
+    ], runtime)).toBe(0);
+    expect(stdout.at(-1)).toContain('"version": 3');
+    expect(state.serviceRequestBodies?.at(-1)).toEqual({ expectedVersion: 2 });
     expect(stderr).toEqual([]);
   });
 

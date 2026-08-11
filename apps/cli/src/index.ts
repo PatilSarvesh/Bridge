@@ -154,6 +154,7 @@ Usage:
   bridge auth status [--api-url <url>]
   bridge service identity list [--api-url <url>]
   bridge service identity create --name <name> --type <agent|ci|integration> --scope <scope>[,<scope>...] [--role <role>] [--project <project-id[=role,...]>] [--all-projects] [--expires-at <ISO datetime>] [--api-url <url>]
+  bridge service identity rotate <credential-id> --version <number> [--api-url <url>]
   bridge service identity revoke <credential-id> --version <number> [--api-url <url>]
   bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
   bridge install [--client <client>] [--dry-run]
@@ -1139,9 +1140,40 @@ async function runServiceIdentityCommand(
     return;
   }
 
+  if (action === "rotate") {
+    const serviceCredentialId = firstPositional(args, 3);
+    const expectedVersion = Number(optionValue(args, "--version"));
+    if (!serviceCredentialId || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+      throw new CliError(
+        "SERVICE_ROTATION_REQUIRED",
+        "service identity rotate requires a credential ID and positive --version.",
+        cliExitCodes.usage,
+      );
+    }
+    const registration = await bridgeFetch(
+      `/v1/admin/organization/service-identities/${encodeURIComponent(serviceCredentialId)}/rotate`,
+      connection,
+      runtime,
+      { method: "POST", body: JSON.stringify({ expectedVersion }) },
+    );
+    const record = asRecord(registration);
+    if (!record || typeof record.token !== "string" || !asRecord(record.serviceIdentity)) {
+      throw new CliError(
+        "INVALID_SERVICE_RESPONSE",
+        "Bridge returned an invalid service-identity rotation response.",
+        cliExitCodes.connection,
+      );
+    }
+    output(runtime, {
+      ...record,
+      tokenNotice: "Store this token now; Bridge will not show it again.",
+    });
+    return;
+  }
+
   throw new CliError(
     "UNKNOWN_SERVICE_IDENTITY_COMMAND",
-    "Use `bridge service identity list`, `create`, or `revoke`.",
+    "Use `bridge service identity list`, `create`, `rotate`, or `revoke`.",
     cliExitCodes.usage,
   );
 }
@@ -2026,7 +2058,7 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
     if (args[1] !== "identity") {
       throw new CliError(
         "UNKNOWN_SERVICE_COMMAND",
-        "Use `bridge service identity list`, `create`, or `revoke`.",
+        "Use `bridge service identity list`, `create`, `rotate`, or `revoke`.",
         cliExitCodes.usage,
       );
     }

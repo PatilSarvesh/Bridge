@@ -258,14 +258,27 @@ describe("Bridge API vertical slice", () => {
       items: [expect.objectContaining({ id: body.serviceIdentity.id, name: "Hospital CI", version: 1 })],
     });
 
+    const rotated = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/service-identities/${body.serviceIdentity.id}/rotate`,
+      headers: adminHeader,
+      payload: { expectedVersion: 1 },
+    });
+    expect(rotated.statusCode).toBe(200);
+    const rotatedBody = rotated.json<{ token: string; serviceIdentity: { version: number; rotatedAt: string } }>();
+    expect(rotatedBody.token).toMatch(/^brg_srv_/);
+    expect(rotatedBody.token).not.toBe(body.token);
+    expect(rotatedBody.serviceIdentity).toMatchObject({ version: 2, rotatedAt: expect.any(String) });
+    expect(rotated.body).not.toContain("tokenHash");
+
     const revoked = await app.inject({
       method: "POST",
       url: `/v1/admin/organization/service-identities/${body.serviceIdentity.id}/revoke`,
       headers: adminHeader,
-      payload: { expectedVersion: 1 },
+      payload: { expectedVersion: 2 },
     });
     expect(revoked.statusCode).toBe(200);
-    expect(revoked.json()).toMatchObject({ version: 2, revokedAt: expect.any(String) });
+    expect(revoked.json()).toMatchObject({ version: 3, rotatedAt: expect.any(String), revokedAt: expect.any(String) });
   });
 
   it("lists and marks scoped human notifications without exposing them to agents", async () => {

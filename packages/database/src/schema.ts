@@ -146,6 +146,7 @@ export const serviceCredentials = pgTable(
     scopes: jsonb("scopes").$type<readonly string[]>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true, mode: "string" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
     version: integer("version").default(1).notNull(),
   },

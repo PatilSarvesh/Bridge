@@ -149,6 +149,9 @@ export const createServiceIdentityInputSchema = serviceIdentityConfigurationSche
 export const revokeServiceIdentityInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
 });
+export const rotateServiceIdentityInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+});
 
 export const registerProjectInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
@@ -486,6 +489,7 @@ export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMem
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;
 export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
+export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;

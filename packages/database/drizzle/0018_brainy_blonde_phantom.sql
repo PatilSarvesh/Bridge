@@ -1,0 +1,5 @@
+ALTER TABLE "bridge_service_credentials" ADD COLUMN "rotated_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "bridge_organization_audit_events" DROP CONSTRAINT IF EXISTS "bridge_organization_audit_events_action_check";--> statement-breakpoint
+ALTER TABLE "bridge_organization_audit_events" DROP CONSTRAINT IF EXISTS "bridge_organization_audit_events_subject_check";--> statement-breakpoint
+ALTER TABLE "bridge_organization_audit_events" ADD CONSTRAINT "bridge_organization_audit_events_action_check" CHECK ("action" IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked'));--> statement-breakpoint
+ALTER TABLE "bridge_organization_audit_events" ADD CONSTRAINT "bridge_organization_audit_events_subject_check" CHECK (("action" IN ('organization_member.created', 'organization_member.updated') AND "subject_type" = 'organization_membership') OR ("action" IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND "subject_type" = 'service_credential'));
