@@ -145,8 +145,9 @@ export interface OrganizationAuditEvent {
     | "organization_member.updated"
     | "service_identity.created"
     | "service_identity.rotated"
-    | "service_identity.revoked";
-  readonly subjectType: "organization_membership" | "service_credential";
+    | "service_identity.revoked"
+    | "audit.exported";
+  readonly subjectType: "organization_membership" | "service_credential" | "audit_export";
   readonly subjectId: string;
   readonly createdAt: string;
 }
@@ -446,7 +447,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event";
+  readonly subjectType: "project" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
   readonly createdAt: string;
 }

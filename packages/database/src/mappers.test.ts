@@ -586,5 +586,13 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(rotationMigration).toContain("ADD COLUMN \"rotated_at\"");
     expect(rotationMigration).toContain("service_identity.rotated");
+
+    const auditExportMigration = readFileSync(
+      new URL("../drizzle/0019_luxuriant_wallop.sql", import.meta.url),
+      "utf8",
+    );
+    expect(auditExportMigration).toContain("DROP CONSTRAINT IF EXISTS \"bridge_organization_audit_events_action_check\"");
+    expect(auditExportMigration).toContain("'audit.exported'");
+    expect(auditExportMigration).toContain("'audit_export'");
   });
 });

@@ -310,6 +310,41 @@ export const projectAnalyticsQuerySchema = z
     }
   });
 
+const auditFilterFields = {
+  action: z.string().trim().min(1).max(200).optional(),
+  actorId: z.string().trim().min(1).max(100).optional(),
+  subjectType: z.string().trim().min(1).max(100).optional(),
+  subjectId: z.string().trim().min(1).max(100).optional(),
+  correlationId: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
+  createdFrom: z.string().datetime({ offset: true }).optional(),
+  createdTo: z.string().datetime({ offset: true }).optional(),
+};
+
+function validateAuditDateRange(
+  value: { readonly createdFrom?: string | undefined; readonly createdTo?: string | undefined },
+  context: z.RefinementCtx,
+): void {
+  if (value.createdFrom && value.createdTo && Date.parse(value.createdFrom) > Date.parse(value.createdTo)) {
+    context.addIssue({
+      code: "custom",
+      message: "createdFrom must not be after createdTo.",
+      path: ["createdFrom"],
+    });
+  }
+}
+
+export const auditListQuerySchema = z.object({
+  ...auditFilterFields,
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+}).superRefine(validateAuditDateRange);
+
+export const auditExportInputSchema = z.object({
+  ...auditFilterFields,
+  format: z.enum(["json", "csv"]).default("json"),
+  maxItems: z.number().int().min(1).max(5_000).default(1_000),
+}).superRefine(validateAuditDateRange);
+
 export const replayOutboxEventInputSchema = z.object({
   expectedAttempts: z.number().int().nonnegative(),
 });
@@ -505,6 +540,8 @@ export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
 export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
 export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
+export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
+export type AuditExportInput = z.infer<typeof auditExportInputSchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;

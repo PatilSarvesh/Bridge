@@ -336,6 +336,72 @@ describe("Bridge decision workflow", () => {
     })).rejects.toMatchObject({ code: "LAST_ORGANIZATION_ADMIN" });
   });
 
+  it("provides tenant-scoped audit browsing and self-auditing metadata-only exports", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    const createdQuestion = await service.createQuestion(agent, project.id, questionInput({
+      title: "Sensitive product body that must never enter the audit export",
+      context: "Customer workflow details belong only to the governed question record.",
+    }));
+    await service.createOrganizationMember(organizationAdmin, {
+      oidcSubject: "auth0|audit-member",
+      displayName: "Audit Member",
+      roles: ["organization-member"],
+      allProjects: false,
+      projectMemberships: [],
+    });
+
+    const projectPage = await service.listProjectAudit(owner, project.id, {
+      action: "question.created",
+      offset: 0,
+      limit: 1,
+    });
+    expect(projectPage).toMatchObject({
+      totalMatching: 1,
+      offset: 0,
+      limit: 1,
+      items: [{ scope: "project", subjectId: createdQuestion.id, action: "question.created" }],
+    });
+    await expect(service.listProjectAudit(contributor, project.id, { offset: 0, limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.listProjectAudit(outsider, project.id, { offset: 0, limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const projectExport = await service.exportProjectAudit(owner, project.id, {
+      format: "json",
+      maxItems: 1_000,
+    });
+    expect(projectExport).toMatchObject({ itemCount: 1, contentType: "application/json; charset=utf-8" });
+    expect(projectExport.body).toContain("question.created");
+    expect(projectExport.body).not.toContain(createdQuestion.title);
+    expect(projectExport.body).not.toContain(createdQuestion.context);
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "audit.exported", subjectType: "audit_export", actorId: owner.id }),
+    ]));
+
+    const organizationPage = await service.listOrganizationAudit(organizationAdmin, {
+      actorId: organizationAdmin.id,
+      offset: 0,
+      limit: 50,
+    });
+    expect(organizationPage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: "organization", action: "organization_member.created" }),
+    ]));
+    await expect(service.listOrganizationAudit(owner, { offset: 0, limit: 50 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    const organizationExport = await service.exportOrganizationAudit(organizationAdmin, {
+      format: "csv",
+      maxItems: 1_000,
+    });
+    expect(organizationExport.contentType).toBe("text/csv; charset=utf-8");
+    expect(organizationExport.body).toContain("organization_member.created");
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" }),
+      ]),
+    );
+  });
+
   it("creates, resolves, lists, and revokes a scoped service identity", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);

@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 
 import type {
   AcceptAnswerInput,
+  AuditExportInput,
+  AuditListQuery,
   ApproveArtifactVersionInput,
   ArtifactDiffLine,
   ArtifactReviewInput,
@@ -310,6 +312,35 @@ export interface OutboxOperationsView {
   readonly deliveries: readonly OutboxDelivery[];
   readonly totalMatching: number;
   readonly metrics: OutboxOperationsMetrics;
+}
+
+export interface AuditRecord {
+  readonly id: string;
+  readonly scope: "organization" | "project";
+  readonly correlationId: string;
+  readonly organizationId: string;
+  readonly projectId?: string;
+  readonly actorId: string;
+  readonly actorType: Principal["type"];
+  readonly action: string;
+  readonly subjectType: string;
+  readonly subjectId: string;
+  readonly createdAt: string;
+}
+
+export interface AuditPage {
+  readonly items: readonly AuditRecord[];
+  readonly offset: number;
+  readonly limit: number;
+  readonly totalMatching: number;
+  readonly nextOffset?: number;
+}
+
+export interface AuditExport {
+  readonly filename: string;
+  readonly contentType: "application/json; charset=utf-8" | "text/csv; charset=utf-8";
+  readonly body: string;
+  readonly itemCount: number;
 }
 
 export interface ProjectAnalyticsActivity {
@@ -2146,6 +2177,78 @@ export class BridgeService {
         ],
       },
     };
+  }
+
+  async listOrganizationAudit(principal: Principal, query: AuditListQuery): Promise<AuditPage> {
+    this.assertOrganizationAdministrator(principal, "Reading organization audit events");
+    const events = (await this.repository.listOrganizationAuditEvents(principal.organizationId))
+      .map((event): AuditRecord => ({ ...event, scope: "organization" }));
+    return this.auditPage(events, query);
+  }
+
+  async listProjectAudit(
+    principal: Principal,
+    projectId: string,
+    query: AuditListQuery,
+  ): Promise<AuditPage> {
+    await this.requireProject(principal, projectId);
+    this.assertProjectOperator(principal, "Reading project audit events", projectId);
+    const events = (await this.repository.listAuditEvents(projectId))
+      .map((event): AuditRecord => ({ ...event, scope: "project" }));
+    return this.auditPage(events, query);
+  }
+
+  async exportOrganizationAudit(
+    principal: Principal,
+    input: AuditExportInput,
+  ): Promise<AuditExport> {
+    return this.repository.transaction(async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Exporting organization audit events");
+      const records = this.filterAuditRecords(
+        (await repository.listOrganizationAuditEvents(principal.organizationId))
+          .map((event): AuditRecord => ({ ...event, scope: "organization" })),
+        input,
+      ).slice(0, input.maxItems);
+      const timestamp = this.now().toISOString();
+      const exportId = `aex_${this.id()}`;
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "audit.exported",
+        exportId,
+        timestamp,
+        "audit_export",
+      );
+      return this.renderAuditExport("organization", principal.organizationId, records, input.format, timestamp);
+    });
+  }
+
+  async exportProjectAudit(
+    principal: Principal,
+    projectId: string,
+    input: AuditExportInput,
+  ): Promise<AuditExport> {
+    return this.repository.transaction(async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Exporting project audit events", projectId);
+      const records = this.filterAuditRecords(
+        (await repository.listAuditEvents(projectId))
+          .map((event): AuditRecord => ({ ...event, scope: "project" })),
+        input,
+      ).slice(0, input.maxItems);
+      const timestamp = this.now().toISOString();
+      const exportId = `aex_${this.id()}`;
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "audit.exported",
+        "audit_export",
+        exportId,
+        timestamp,
+      );
+      return this.renderAuditExport("project", projectId, records, input.format, timestamp);
+    });
   }
 
   async replayOutboxEvent(
@@ -4127,6 +4230,72 @@ export class BridgeService {
     if (!principalHasRole(principal, "organization-admin")) {
       throw new BridgeError("FORBIDDEN", `${action} requires an organization administrator.`, 403);
     }
+  }
+
+  private filterAuditRecords(
+    records: readonly AuditRecord[],
+    query: Pick<AuditListQuery, "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
+  ): readonly AuditRecord[] {
+    return records
+      .filter((event) =>
+        (!query.action || event.action === query.action) &&
+        (!query.actorId || event.actorId === query.actorId) &&
+        (!query.subjectType || event.subjectType === query.subjectType) &&
+        (!query.subjectId || event.subjectId === query.subjectId) &&
+        (!query.correlationId || event.correlationId === query.correlationId) &&
+        (!query.createdFrom || Date.parse(event.createdAt) >= Date.parse(query.createdFrom)) &&
+        (!query.createdTo || Date.parse(event.createdAt) <= Date.parse(query.createdTo)),
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+  }
+
+  private auditPage(records: readonly AuditRecord[], query: AuditListQuery): AuditPage {
+    const matching = this.filterAuditRecords(records, query);
+    const items = matching.slice(query.offset, query.offset + query.limit);
+    const nextOffset = query.offset + items.length < matching.length
+      ? query.offset + items.length
+      : undefined;
+    return {
+      items,
+      offset: query.offset,
+      limit: query.limit,
+      totalMatching: matching.length,
+      ...(nextOffset === undefined ? {} : { nextOffset }),
+    };
+  }
+
+  private renderAuditExport(
+    scope: AuditRecord["scope"],
+    scopeId: string,
+    records: readonly AuditRecord[],
+    format: AuditExportInput["format"],
+    exportedAt: string,
+  ): AuditExport {
+    const safeTimestamp = exportedAt.replace(/[:.]/g, "-");
+    if (format === "json") {
+      return {
+        filename: `bridge-${scope}-audit-${safeTimestamp}.json`,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({ scope, scopeId, exportedAt, itemCount: records.length, items: records }, null, 2),
+        itemCount: records.length,
+      };
+    }
+    const fields: readonly (keyof AuditRecord)[] = [
+      "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
+      "action", "subjectType", "subjectId", "createdAt",
+    ];
+    const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const body = [
+      fields.map(csvCell).join(","),
+      ...records.map((record) => fields.map((field) => csvCell(record[field])).join(",")),
+    ].join("\n");
+    return {
+      filename: `bridge-${scope}-audit-${safeTimestamp}.csv`,
+      contentType: "text/csv; charset=utf-8",
+      body,
+      itemCount: records.length,
+    };
   }
 
   private normalizedRoles(roles: readonly string[]): readonly string[] {

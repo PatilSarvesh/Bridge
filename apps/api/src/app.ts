@@ -2,6 +2,8 @@ import cors from "@fastify/cors";
 import { developmentAuthConfiguration, type AuthenticationProvider } from "@bridge/auth";
 import {
   acceptAnswerInputSchema,
+  auditExportInputSchema,
+  auditListQuerySchema,
   approveArtifactVersionInputSchema,
   artifactReviewInputSchema,
   artifactVersionDiffQuerySchema,
@@ -286,6 +288,28 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return options.service.getProjectAnalytics(principal, request.params.projectId, query);
   });
 
+  app.get<{
+    Params: { projectId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/admin/projects/:projectId/audit", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const query = auditListQuerySchema.parse(request.query);
+    return options.service.listProjectAudit(principal, request.params.projectId, query);
+  });
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/audit/export",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = auditExportInputSchema.parse(request.body ?? {});
+      const result = await options.service.exportProjectAudit(principal, request.params.projectId, input);
+      return reply
+        .header("content-disposition", `attachment; filename="${result.filename}"`)
+        .type(result.contentType)
+        .send(result.body);
+    },
+  );
+
   app.post<{ Params: { eventId: string }; Body: unknown }>(
     "/v1/admin/outbox/:eventId/replay",
     async (request) => {
@@ -315,6 +339,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       options.service.listOrganizationProjectsForAdministration(principal),
     ]);
     return { items, projects };
+  });
+
+  app.get<{ Querystring: Record<string, string | undefined> }>(
+    "/v1/admin/organization/audit",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.listOrganizationAudit(principal, auditListQuerySchema.parse(request.query));
+    },
+  );
+
+  app.post<{ Body: unknown }>("/v1/admin/organization/audit/export", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const result = await options.service.exportOrganizationAudit(
+      principal,
+      auditExportInputSchema.parse(request.body ?? {}),
+    );
+    return reply
+      .header("content-disposition", `attachment; filename="${result.filename}"`)
+      .type(result.contentType)
+      .send(result.body);
   });
 
   app.post<{ Body: unknown }>("/v1/admin/organization/members", async (request, reply) => {

@@ -945,7 +945,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only audit records cover implemented material commands with actor/source/scope/correlation metadata; a permission-restricted audit browser/export and broader administrative-event coverage remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, and self-auditing exports are implemented; broader policy/assignment/authentication event coverage and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
