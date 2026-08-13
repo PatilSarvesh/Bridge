@@ -17,6 +17,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  pgPolicy,
   pgTable,
   primaryKey,
   text,
@@ -107,6 +108,29 @@ export const assumptionStatusEnum = pgEnum("bridge_assumption_status", [
   "superseded",
 ]);
 
+const currentOrganizationId = sql`nullif(current_setting('bridge.organization_id', true), '')`;
+
+function tenantPolicy(name: string, organizationId: AnyPgColumn) {
+  const matchesTenant = sql`${organizationId} = ${currentOrganizationId}`;
+  return pgPolicy(name, {
+    as: "permissive",
+    for: "all",
+    to: "public",
+    using: matchesTenant,
+    withCheck: matchesTenant,
+  });
+}
+
+function relatedTenantPolicy(name: string, matchesTenant: ReturnType<typeof sql>) {
+  return pgPolicy(name, {
+    as: "permissive",
+    for: "all",
+    to: "public",
+    using: matchesTenant,
+    withCheck: matchesTenant,
+  });
+}
+
 export const membershipStatusEnum = pgEnum("bridge_membership_status", ["active", "disabled"]);
 
 export const organizations = pgTable("bridge_organizations", {
@@ -177,17 +201,22 @@ export const organizationMemberships = pgTable(
   (table) => [
     primaryKey({ columns: [table.organizationId, table.principalId] }),
     index("bridge_organization_memberships_principal_idx").on(table.principalId),
+    tenantPolicy("bridge_organization_memberships_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
-export const projects = pgTable("bridge_projects", {
-  id: text("id").primaryKey(),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organizations.id, { onDelete: "restrict" }),
-  name: text("name").notNull(),
-  decisionOwnerIds: jsonb("decision_owner_ids").$type<readonly string[]>().notNull(),
-});
+export const projects = pgTable(
+  "bridge_projects",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    decisionOwnerIds: jsonb("decision_owner_ids").$type<readonly string[]>().notNull(),
+  },
+  (table) => [tenantPolicy("bridge_projects_tenant", table.organizationId)],
+).enableRLS();
 
 export const projectMemberships = pgTable(
   "bridge_project_memberships",
@@ -215,8 +244,9 @@ export const projectMemberships = pgTable(
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
+    tenantPolicy("bridge_project_memberships_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const agentRuns = pgTable(
   "bridge_agent_runs",
@@ -249,16 +279,28 @@ export const agentRuns = pgTable(
   (table) => [
     index("bridge_agent_runs_project_started_idx").on(table.projectId, table.startedAt),
     index("bridge_agent_runs_project_status_idx").on(table.projectId, table.status),
+    tenantPolicy("bridge_agent_runs_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
-export const runContinuationLocators = pgTable("bridge_run_continuation_locators", {
-  runId: text("run_id")
-    .primaryKey()
-    .references(() => agentRuns.id, { onDelete: "cascade" }),
-  resumeContextKey: text("resume_context_key").notNull().unique(),
-  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
-});
+export const runContinuationLocators = pgTable(
+  "bridge_run_continuation_locators",
+  {
+    runId: text("run_id")
+      .primaryKey()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    resumeContextKey: text("resume_context_key").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => [relatedTenantPolicy(
+    "bridge_run_continuation_locators_tenant",
+    sql`exists (
+      select 1 from ${agentRuns}
+      where ${agentRuns.id} = ${table.runId}
+        and ${agentRuns.organizationId} = ${currentOrganizationId}
+    )`,
+  )],
+).enableRLS();
 
 export const questions = pgTable(
   "bridge_questions",
@@ -296,8 +338,9 @@ export const questions = pgTable(
   (table) => [
     index("bridge_questions_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_questions_project_status_idx").on(table.projectId, table.status),
+    tenantPolicy("bridge_questions_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const questionResponses = pgTable(
   "bridge_question_responses",
@@ -313,8 +356,18 @@ export const questionResponses = pgTable(
     optionKey: text("option_key"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [index("bridge_question_responses_question_created_idx").on(table.questionId, table.createdAt)],
-);
+  (table) => [
+    index("bridge_question_responses_question_created_idx").on(table.questionId, table.createdAt),
+    relatedTenantPolicy(
+      "bridge_question_responses_tenant",
+      sql`exists (
+        select 1 from ${questions}
+        where ${questions.id} = ${table.questionId}
+          and ${questions.organizationId} = ${currentOrganizationId}
+      )`,
+    ),
+  ],
+).enableRLS();
 
 export const decisions = pgTable(
   "bridge_decisions",
@@ -366,8 +419,9 @@ export const decisions = pgTable(
       columns: [table.organizationId, table.projectId, table.replacementDecisionId],
       foreignColumns: [table.organizationId, table.projectId, table.id],
     }).onDelete("restrict"),
+    tenantPolicy("bridge_decisions_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const assumptions = pgTable(
   "bridge_assumptions",
@@ -411,8 +465,9 @@ export const assumptions = pgTable(
       table.status,
       table.expiresAt,
     ),
+    tenantPolicy("bridge_assumptions_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const artifacts = pgTable(
   "bridge_artifacts",
@@ -432,8 +487,11 @@ export const artifacts = pgTable(
     currentVersionId: text("current_version_id").notNull(),
     approvedVersionId: text("approved_version_id"),
   },
-  (table) => [index("bridge_artifacts_project_created_idx").on(table.projectId, table.createdAt)],
-);
+  (table) => [
+    index("bridge_artifacts_project_created_idx").on(table.projectId, table.createdAt),
+    tenantPolicy("bridge_artifacts_tenant", table.organizationId),
+  ],
+).enableRLS();
 
 export const artifactVersions = pgTable(
   "bridge_artifact_versions",
@@ -460,8 +518,16 @@ export const artifactVersions = pgTable(
   (table) => [
     uniqueIndex("bridge_artifact_versions_number_unique").on(table.artifactId, table.version),
     index("bridge_artifact_versions_artifact_status_idx").on(table.artifactId, table.status),
+    relatedTenantPolicy(
+      "bridge_artifact_versions_tenant",
+      sql`exists (
+        select 1 from ${artifacts}
+        where ${artifacts.id} = ${table.artifactId}
+          and ${artifacts.organizationId} = ${currentOrganizationId}
+      )`,
+    ),
   ],
-);
+).enableRLS();
 
 export const contextSnapshots = pgTable(
   "bridge_context_snapshots",
@@ -477,8 +543,11 @@ export const contextSnapshots = pgTable(
     itemIds: jsonb("item_ids").$type<readonly string[]>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [index("bridge_context_snapshots_project_created_idx").on(table.projectId, table.createdAt)],
-);
+  (table) => [
+    index("bridge_context_snapshots_project_created_idx").on(table.projectId, table.createdAt),
+    tenantPolicy("bridge_context_snapshots_tenant", table.organizationId),
+  ],
+).enableRLS();
 
 export const auditEvents = pgTable(
   "bridge_audit_events",
@@ -499,8 +568,9 @@ export const auditEvents = pgTable(
   (table) => [
     index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_audit_events_correlation_idx").on(table.correlationId),
+    tenantPolicy("bridge_audit_events_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const organizationAuditEvents = pgTable(
   "bridge_organization_audit_events",
@@ -531,8 +601,9 @@ export const organizationAuditEvents = pgTable(
       "bridge_organization_audit_events_subject_check",
       sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export'))`,
     ),
+    tenantPolicy("bridge_organization_audit_events_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const notifications = pgTable(
   "bridge_notifications",
@@ -563,8 +634,9 @@ export const notifications = pgTable(
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
+    tenantPolicy("bridge_notifications_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const outboxEvents = pgTable(
   "bridge_outbox_events",
@@ -603,8 +675,9 @@ export const outboxEvents = pgTable(
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
+    tenantPolicy("bridge_outbox_events_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const outboxDeliveries = pgTable(
   "bridge_outbox_deliveries",
@@ -632,17 +705,26 @@ export const outboxDeliveries = pgTable(
       columns: [table.organizationId, table.projectId, table.outboxEventId],
       foreignColumns: [outboxEvents.organizationId, outboxEvents.projectId, outboxEvents.id],
     }).onDelete("cascade"),
+    tenantPolicy("bridge_outbox_deliveries_tenant", table.organizationId),
   ],
-);
+).enableRLS();
 
 export const idempotencyRecords = pgTable(
   "bridge_idempotency_records",
   {
-    key: text("key").primaryKey(),
+    key: text("key").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     kind: idempotencyKindEnum("kind").notNull(),
     requestHash: text("request_hash").notNull(),
     resourceId: text("resource_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
-  (table) => [index("bridge_idempotency_resource_idx").on(table.kind, table.resourceId)],
-);
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.key] }),
+    index("bridge_idempotency_resource_idx").on(table.kind, table.resourceId),
+    index("bridge_idempotency_organization_idx").on(table.organizationId),
+    tenantPolicy("bridge_idempotency_records_tenant", table.organizationId),
+  ],
+).enableRLS();

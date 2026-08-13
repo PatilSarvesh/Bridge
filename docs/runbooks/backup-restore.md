@@ -65,6 +65,8 @@ export BRIDGE_RESTORE_DATABASE_URL='postgresql://.../bridge_restore_exercise'
 pnpm restore:verify
 ```
 
+Authenticate `BRIDGE_RESTORE_DATABASE_URL` with Bridge's separately provisioned maintenance role. RLS is forced on tenant tables, so an application-role connection cannot perform a complete cross-tenant verification. Do not reuse this credential for the API or MCP process; see [`../database-security.md`](../database-security.md).
+
 If `DATABASE_URL` is also present, the verifier refuses to run when both URLs identify the same host, port, and database. The verifier issues only `SELECT` statements and reports:
 
 - required Bridge tables and Drizzle migration history;

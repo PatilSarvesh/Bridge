@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { principalHasRole, reviewDateFor, type Principal } from "./index.js";
+import {
+  assertCanApproveArtifact,
+  assertProjectAccess,
+  principalHasRole,
+  reviewDateFor,
+  type Artifact,
+  type Principal,
+  type Project,
+} from "./index.js";
 
 describe("decision review policy", () => {
   const createdAt = new Date("2026-01-01T00:00:00.000Z");
@@ -28,5 +36,65 @@ describe("project-scoped roles", () => {
   it("does not leak a role from one project into another", () => {
     expect(principalHasRole(principal, "project-admin", "prj_one")).toBe(true);
     expect(principalHasRole(principal, "project-admin", "prj_two")).toBe(false);
+  });
+
+  it("lets an organization administrator operate every project in only their organization", () => {
+    const organizationAdmin: Principal = {
+      ...principal,
+      projectIds: [],
+      roles: ["organization-admin"],
+      projectRoles: {},
+    };
+    const sameOrganization: Project = {
+      id: "prj_three",
+      organizationId: organizationAdmin.organizationId,
+      name: "Project Three",
+      decisionOwnerIds: [],
+    };
+    const otherOrganization: Project = {
+      ...sameOrganization,
+      id: "prj_other",
+      organizationId: "org_other",
+    };
+
+    expect(() => assertProjectAccess(organizationAdmin, sameOrganization)).not.toThrow();
+    expect(principalHasRole(organizationAdmin, "project-admin", sameOrganization.id)).toBe(true);
+    expect(() => assertProjectAccess(organizationAdmin, otherOrganization)).toThrowError(
+      expect.objectContaining({ code: "FORBIDDEN" }),
+    );
+  });
+
+  it("allows a configured project decision owner to approve but never an agent", () => {
+    const artifact: Artifact = {
+      id: "art_one",
+      organizationId: "org_one",
+      projectId: "prj_one",
+      title: "Architecture decision",
+      type: "adr",
+      scope: {},
+      reviewerIds: ["usr_reviewer"],
+      createdById: "agt_one",
+      createdByType: "agent",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      currentVersionId: "av_one",
+      versions: [],
+    };
+    const decisionOwner: Principal = {
+      ...principal,
+      id: "usr_decision_owner",
+      roles: ["contributor"],
+      projectRoles: {},
+    };
+    const publishingAgent: Principal = {
+      ...decisionOwner,
+      id: "agt_one",
+      type: "agent",
+      roles: ["agent"],
+    };
+
+    expect(() => assertCanApproveArtifact(decisionOwner, artifact, [decisionOwner.id])).not.toThrow();
+    expect(() => assertCanApproveArtifact(publishingAgent, artifact, [publishingAgent.id])).toThrowError(
+      expect.objectContaining({ code: "FORBIDDEN" }),
+    );
   });
 });

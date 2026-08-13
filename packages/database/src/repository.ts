@@ -1,4 +1,4 @@
-import type { BridgeRepository } from "@bridge/application";
+import type { BridgeRepository, RepositoryTransactionContext } from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
 import {
   type BridgeMetrics,
@@ -106,27 +106,73 @@ export class PostgresBridgeRepository implements BridgeRepository {
     private readonly database: BridgeDatabase,
     private readonly lockAggregateReads = false,
     private readonly metrics?: BridgeMetrics,
+    private readonly transactionContext?: RepositoryTransactionContext,
+    private readonly allowMaintenance = false,
   ) {}
 
   async checkHealth(): Promise<{ readonly backend: string }> {
-    await this.database.execute(sql`select 1`);
+    const rows = await this.database.execute<{ readonly bypassesRls: boolean }>(sql`
+      select (rolsuper or rolbypassrls) as "bypassesRls"
+      from pg_roles
+      where rolname = current_user
+    `);
+    const bypassesRls = rows[0]?.bypassesRls;
+    if (bypassesRls === undefined) {
+      throw new Error("The active PostgreSQL role could not be inspected.");
+    }
+    if (this.allowMaintenance ? !bypassesRls : bypassesRls) {
+      throw new Error(this.allowMaintenance
+        ? "The maintenance PostgreSQL role must have BYPASSRLS."
+        : "The application PostgreSQL role must be non-superuser and NOBYPASSRLS.");
+    }
     return { backend: "postgresql" };
   }
 
-  async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+  async transaction<T>(
+    work: (repository: BridgeRepository) => Promise<T>,
+    context?: RepositoryTransactionContext,
+  ): Promise<T> {
     if (!currentCorrelationId()) {
-      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
+      return runWithCorrelationContextIfAbsent("application", () => this.transaction(work, context));
     }
-    if (this.lockAggregateReads) return work(this);
+    if (context?.organizationId && context.maintenance) {
+      throw new BridgeError("VALIDATION_FAILED", "A database transaction cannot be tenant and maintenance scoped.", 500);
+    }
+    if (context?.maintenance && !this.allowMaintenance) {
+      throw new BridgeError("FORBIDDEN", "The database connection is not configured for maintenance access.", 403);
+    }
+    if (this.lockAggregateReads) {
+      if (
+        context?.organizationId &&
+        this.transactionContext?.organizationId !== context.organizationId
+      ) {
+        throw new BridgeError("FORBIDDEN", "A nested database transaction cannot change tenant scope.", 403);
+      }
+      if (context?.maintenance && !this.transactionContext?.maintenance) {
+        throw new BridgeError("FORBIDDEN", "A nested database transaction cannot elevate to maintenance access.", 403);
+      }
+      return work(this);
+    }
 
     const startedAt = performance.now();
     let outcome: "success" | "error" = "success";
 
     try {
-      return await this.database.transaction(async (transaction) =>
-        work(new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true, this.metrics)),
-        { isolationLevel: "serializable" },
-      );
+      return await this.database.transaction(async (transaction) => {
+        const scopedDatabase = transaction as unknown as BridgeDatabase;
+        if (context?.organizationId) {
+          await scopedDatabase.execute(
+            sql`select set_config('bridge.organization_id', ${context.organizationId}, true)`,
+          );
+        }
+        return work(new PostgresBridgeRepository(
+          scopedDatabase,
+          true,
+          this.metrics,
+          context,
+          this.allowMaintenance,
+        ));
+      }, { isolationLevel: "serializable" });
     } catch (error) {
       outcome = "error";
       const code = databaseErrorCode(error);
@@ -394,49 +440,20 @@ export class PostgresBridgeRepository implements BridgeRepository {
       this.getOrganizationByExternalId(identity.organizationExternalId),
     ]);
     if (!principalIdentity || !organization) return undefined;
-    const organizationMembership = await this.getOrganizationMembership(
-      organization.id,
-      principalIdentity.id,
-    );
-    if (!organizationMembership || organizationMembership.status !== "active") return undefined;
-    const memberships = (await this.listProjectMemberships(
-      organization.id,
-      principalIdentity.id,
-    )).filter((membership) => membership.status === "active");
-    return {
-      id: principalIdentity.id,
-      type: principalIdentity.type,
-      organizationId: organization.id,
-      projectIds: memberships.map((membership) => membership.projectId),
-      allProjects: organizationMembership.allProjects,
-      roles: organizationMembership.roles,
-      projectRoles: Object.fromEntries(
-        memberships.map((membership) => [membership.projectId, membership.roles]),
-      ),
-      displayName: principalIdentity.displayName,
-    };
-  }
-
-  async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
-    const credential = await this.getServiceCredentialByTokenHash(tokenHash);
-    const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
-    if (!credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
-    const principalIdentity = await this.getPrincipalIdentity(credential.principalId);
-    const organizationMembership = principalIdentity
-      ? await this.getOrganizationMembership(credential.organizationId, principalIdentity.id)
-      : undefined;
-    if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
-      organizationMembership.status !== "active") return undefined;
-    const memberships = (await this.listProjectMemberships(
-      credential.organizationId,
-      principalIdentity.id,
-    )).filter((membership) => membership.status === "active");
-    return {
-      credential,
-      principal: {
+    return this.transaction(async (repository) => {
+      const organizationMembership = await repository.getOrganizationMembership(
+        organization.id,
+        principalIdentity.id,
+      );
+      if (!organizationMembership || organizationMembership.status !== "active") return undefined;
+      const memberships = (await repository.listProjectMemberships(
+        organization.id,
+        principalIdentity.id,
+      )).filter((membership) => membership.status === "active");
+      return {
         id: principalIdentity.id,
         type: principalIdentity.type,
-        organizationId: credential.organizationId,
+        organizationId: organization.id,
         projectIds: memberships.map((membership) => membership.projectId),
         allProjects: organizationMembership.allProjects,
         roles: organizationMembership.roles,
@@ -444,8 +461,41 @@ export class PostgresBridgeRepository implements BridgeRepository {
           memberships.map((membership) => [membership.projectId, membership.roles]),
         ),
         displayName: principalIdentity.displayName,
-      },
-    };
+      };
+    }, { organizationId: organization.id });
+  }
+
+  async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
+    const credential = await this.getServiceCredentialByTokenHash(tokenHash);
+    const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
+    if (!credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    return this.transaction(async (repository) => {
+      const principalIdentity = await repository.getPrincipalIdentity(credential.principalId);
+      const organizationMembership = principalIdentity
+        ? await repository.getOrganizationMembership(credential.organizationId, principalIdentity.id)
+        : undefined;
+      if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
+        organizationMembership.status !== "active") return undefined;
+      const memberships = (await repository.listProjectMemberships(
+        credential.organizationId,
+        principalIdentity.id,
+      )).filter((membership) => membership.status === "active");
+      return {
+        credential,
+        principal: {
+          id: principalIdentity.id,
+          type: principalIdentity.type,
+          organizationId: credential.organizationId,
+          projectIds: memberships.map((membership) => membership.projectId),
+          allProjects: organizationMembership.allProjects,
+          roles: organizationMembership.roles,
+          projectRoles: Object.fromEntries(
+            memberships.map((membership) => [membership.projectId, membership.roles]),
+          ),
+          displayName: principalIdentity.displayName,
+        },
+      };
+    }, { organizationId: credential.organizationId });
   }
 
   async listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]> {
@@ -1008,14 +1058,20 @@ export class PostgresBridgeRepository implements BridgeRepository {
 
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {
     if (limit <= 0) return [];
+    if (!this.allowMaintenance) {
+      throw new BridgeError("FORBIDDEN", "Claiming cross-tenant delivery work requires a maintenance database connection.", 403);
+    }
     if (this.lockAggregateReads) return this.claimOutboxEventsInTransaction(this.database, now, limit);
 
     return this.database.transaction(
       async (transaction) =>
-        new PostgresBridgeRepository(transaction as unknown as BridgeDatabase, true).claimOutboxEvents(
-          now,
-          limit,
-        ),
+        new PostgresBridgeRepository(
+          transaction as unknown as BridgeDatabase,
+          true,
+          this.metrics,
+          { maintenance: true },
+          true,
+        ).claimOutboxEvents(now, limit),
     );
   }
 
@@ -1070,6 +1126,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async completeOutboxEvent(eventId: string, processedAt: string): Promise<void> {
+    if (!this.allowMaintenance) {
+      throw new BridgeError("FORBIDDEN", "Completing cross-tenant delivery work requires a maintenance database connection.", 403);
+    }
     await this.database
       .update(outboxEvents)
       .set({ status: "processed", processedAt, leaseUntil: null, lastError: null })
@@ -1082,6 +1141,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
     availableAt: string,
     deadLetter: boolean,
   ): Promise<void> {
+    if (!this.allowMaintenance) {
+      throw new BridgeError("FORBIDDEN", "Failing cross-tenant delivery work requires a maintenance database connection.", 403);
+    }
     await this.database
       .update(outboxEvents)
       .set({
@@ -1095,10 +1157,22 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   private async getIdempotencyRecord(key: string, kind: IdempotencyKind) {
+    const organizationId = this.transactionContext?.organizationId;
+    if (!organizationId) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Reading an idempotency record requires a tenant-scoped database transaction.",
+        403,
+      );
+    }
     const query = this.database
       .select()
       .from(idempotencyRecords)
-      .where(and(eq(idempotencyRecords.key, key), eq(idempotencyRecords.kind, kind)))
+      .where(and(
+        eq(idempotencyRecords.organizationId, organizationId),
+        eq(idempotencyRecords.key, key),
+        eq(idempotencyRecords.kind, kind),
+      ))
       .limit(1);
     const rows = this.lockAggregateReads ? await query.for("update") : await query;
     return rows[0];
@@ -1110,10 +1184,20 @@ export class PostgresBridgeRepository implements BridgeRepository {
     resourceId: string,
     requestHash: string,
   ): Promise<void> {
+    const organizationId = this.transactionContext?.organizationId;
+    if (!organizationId) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Saving an idempotency record requires a tenant-scoped database transaction.",
+        403,
+      );
+    }
     const inserted = await this.database
       .insert(idempotencyRecords)
-      .values({ key, kind, resourceId, requestHash })
-      .onConflictDoNothing({ target: idempotencyRecords.key })
+      .values({ key, organizationId, kind, resourceId, requestHash })
+      .onConflictDoNothing({
+        target: [idempotencyRecords.organizationId, idempotencyRecords.key],
+      })
       .returning({ key: idempotencyRecords.key });
     if (inserted.length === 0) {
       throw new BridgeError(

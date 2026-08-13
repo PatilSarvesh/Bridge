@@ -4,11 +4,11 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-11, Asia/Kolkata |
+| Last updated | 2026-08-13, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and shared high-confidence secret blocking complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, and pre-persistence high-confidence credential detection are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, RLS, broader DLP, deployment, and live provider/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, and forced RLS on the core tenant data plane complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, production database-role provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, and transaction-scoped forced RLS are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until bootstrap-directory hardening, production role provisioning, endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -1715,7 +1715,43 @@ Deliberate boundaries:
 
 - The browser covers events already produced by implemented commands; completing BRG-100 still requires broader assignment, policy, permission, and authentication event coverage plus production retention/export governance.
 - Offset pagination is deliberately bounded for the pilot. A keyset cursor and repository-level filtered queries should replace in-memory filtering before very large tenant audit volumes.
-- PostgreSQL rows remain protected by application authorization and tenant predicates; database RLS, tamper-evident chaining/external WORM retention, and SIEM streaming remain deployment/security follow-up work.
+- PostgreSQL core tenant rows now also have forced RLS as recorded in section 20.43; tamper-evident chaining/external WORM retention and SIEM streaming remain deployment/security follow-up work.
+
+### 20.42 Verified the implemented authorization and tenant-isolation matrix
+
+Implemented and locally verified:
+
+1. `docs/authorization-matrix.md` maps every PRD permissions row to an implemented command or an explicit unavailable capability, and records transport behavior for REST, web, CLI, and optional MCP.
+2. Organization administrators now inherit project-administrator access and authority across projects in only their own organization. Configured project decision owners may approve an immutable specification even when they are not an artifact-specific reviewer. Both paths preserve the real human actor in approval/audit records.
+3. Non-human principals still cannot accept decisions, approve specifications, perform lifecycle actions, or satisfy a human role merely by receiving a human-looking owner/reviewer assignment. The MCP agent surface exposes none of those approval commands.
+4. Project, run, assumption, question, decision, artifact/version, notification, and outbox lookups return the same resource-specific `404` for an inaccessible real ID and an absent ID. Same-project role failures remain `403`.
+5. Application and REST regressions cover cross-organization and same-organization/unassigned ID guessing, collection/search/inbox/notification/outbox/audit isolation, ordinary and protected authority, and concurrent protected acceptance. Exactly one concurrent REST request can create the authoritative decision.
+
+Deliberate boundaries:
+
+- Reassignment and project-policy mutation are unavailable, so their future implementation still requires role, audit, and adversarial test slices.
+- RLS and the maintenance-store boundary are now implemented as recorded in section 20.43; bootstrap-directory hardening, production role provisioning, endpoint-specific non-human scopes, and live provider/isolated-database evidence remain BRG-012/BRG-011/BRG-013 work.
+- CLI and MCP are agent integration surfaces and intentionally do not implement human approval commands; humans approve through REST-backed UI/API workflows.
+
+### 20.43 Implemented forced tenant RLS and a separate maintenance boundary
+
+Implemented and locally verified:
+
+1. The repository transaction contract accepts immutable organization or maintenance context. Every principal-bearing application operation now executes inside an organization-scoped transaction; a nested transaction cannot change its tenant or elevate itself to maintenance.
+2. PostgreSQL sets `bridge.organization_id` with transaction-local `set_config`. Policies use missing-safe `current_setting`, so absent scope exposes no protected rows and rejects writes.
+3. Forward-only migration `0020_tenant_row_security.sql` enables and forces RLS on 18 core tenant/project tables. Direct tables compare organization ownership; artifact versions, question responses, and run continuation locators verify ownership through their RLS-protected parent.
+4. Idempotency records now store non-null organization ownership and use `(organization_id, key)` as their primary key so equal client keys cannot collide across tenants. The migration backfills existing question, artifact-version, run, and assumption records, discards only orphaned cache rows whose referenced resource no longer exists, then enforces the constraint; schema, repository behavior, migration metadata, and regression coverage match.
+5. The default PostgreSQL store rejects maintenance operations. A separately opted-in `mode: "maintenance"` store is required for cross-tenant outbox claims/completion/failure, and PostgreSQL itself must authenticate that connection with `BYPASSRLS`.
+6. Repository readiness rejects an API/MCP role that is a superuser or has `BYPASSRLS`, and rejects a maintenance configuration whose role cannot bypass RLS. The restore verifier also refuses a connection that cannot inspect all tenants and disables policy filtering as an additional fail-loud check. This prevents an unsafe or incomplete check without exposing credentials in health output.
+7. Static CI tests verify every expected `ENABLE`, `FORCE`, and policy statement plus safe idempotency backfill ordering. The isolated PostgreSQL integration test verifies catalog flags, missing-scope default denial, cross-tenant read/insert/update filtering, tenant switching, and maintenance-context rejection.
+8. `docs/database-security.md` records the three-role deployment model, grants, protected tables, bootstrap exceptions, restore requirement, and test procedure. REST remains canonical and MCP remains optional.
+
+Deliberate boundaries:
+
+- `bridge_organizations`, `bridge_principal_identities`, and `bridge_service_credentials` remain outside RLS because exact identity/token lookup occurs before Bridge can resolve an organization. Membership and project reads immediately continue inside the resolved tenant. Security-definer lookup functions or a separately permissioned identity directory remain a future hardening slice.
+- The live worker is still handler-injected. Its future database wiring must use a distinct maintenance secret and store mode; the API/MCP `DATABASE_URL` must never carry `BYPASSRLS`.
+- Static and opt-in integration coverage do not prove production role grants, RDS configuration, or every live ID-guessing path. BRG-012 and BRG-102 remain partial until dated isolated-database and deployment evidence exists.
+- PostgreSQL constraints can reveal conflicting-key existence even under RLS. Bridge retains opaque identifiers, composite tenant constraints, application authorization, and stable not-found masking alongside database policies.
 
 ## 21. Important implementation files
 
@@ -1724,11 +1760,13 @@ Deliberate boundaries:
 - CI workflow: `.github/workflows/ci.yml`
 - Founder/pilot decisions: `docs/pilot-decisions.md`
 - Technical architecture: `docs/technical-architecture.md`
+- Authorization evidence matrix: `docs/authorization-matrix.md`
 - Implementation backlog: `docs/mvp-backlog.md`
 - This living context: `docs/working-context.md`
 - Domain entities/policy: `packages/domain/src/index.ts`
 - OIDC verifier and encrypted web session: `packages/auth/src/index.ts`
 - Authentication and organization operator guide: `docs/authentication.md`
+- PostgreSQL tenant-isolation and role guide: `docs/database-security.md`
 - Shared schemas: `packages/contracts/src/index.ts`
 - Application service/repository interface: `packages/application/src/index.ts`
 - Persisted-content secret detector: `packages/application/src/content-security.ts`
@@ -1754,6 +1792,7 @@ Deliberate boundaries:
 - Service-identity migration: `packages/database/drizzle/0017_cooing_slipstream.sql`
 - Service-identity rotation/audit migration: `packages/database/drizzle/0018_brainy_blonde_phantom.sql`
 - Organization audit-export constraint migration: `packages/database/drizzle/0019_luxuriant_wallop.sql`
+- Tenant row-security migration: `packages/database/drizzle/0020_tenant_row_security.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1805,4 +1844,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and pre-persistence high-confidence secret blocking; endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, RLS, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, and forced transaction-scoped RLS on the core tenant data plane; bootstrap-directory hardening, production database-role provisioning, endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

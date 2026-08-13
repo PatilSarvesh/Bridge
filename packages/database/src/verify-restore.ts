@@ -82,6 +82,18 @@ export async function verifyRestoredDatabase(
     onnotice: () => undefined,
   });
   try {
+    const [runtimeRole] = await client<{ readonly bypassesRls: boolean }[]>`
+      select (rolsuper or rolbypassrls) as "bypassesRls"
+      from pg_roles
+      where rolname = current_user
+    `;
+    if (!runtimeRole?.bypassesRls) {
+      throw new Error(
+        "Restore verification requires a separately provisioned maintenance role with BYPASSRLS.",
+      );
+    }
+    await client`set row_security = off`;
+
     const tableRows = await client<{ readonly tableName: string }[]>`
       select table_name as "tableName"
       from information_schema.tables

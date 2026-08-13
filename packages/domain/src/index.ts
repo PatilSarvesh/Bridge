@@ -455,7 +455,11 @@ export interface AuditEvent {
 export function assertProjectAccess(principal: Principal, project: Project): void {
   if (
     principal.organizationId !== project.organizationId ||
-    (!principal.allProjects && !principal.projectIds.includes(project.id))
+    (
+      !principalHasRole(principal, "organization-admin") &&
+      !principal.allProjects &&
+      !principal.projectIds.includes(project.id)
+    )
   ) {
     throw new BridgeError("FORBIDDEN", "The principal cannot access this project.", 403);
   }
@@ -477,8 +481,16 @@ export function normalizeRoleName(value: string): string {
 
 export function principalHasRole(principal: Principal, role: string, projectId?: string): boolean {
   const normalizedRole = normalizeRoleName(role);
+  const organizationRoles = principal.roles.map(normalizeRoleName);
+  if (
+    projectId &&
+    normalizedRole === "project-admin" &&
+    organizationRoles.includes("organization-admin")
+  ) {
+    return true;
+  }
   return [
-    ...principal.roles,
+    ...organizationRoles,
     ...(projectId ? principal.projectRoles?.[projectId] ?? [] : []),
   ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
 }
@@ -557,14 +569,19 @@ export function assertCanAccept(principal: Principal, question: Question): void 
   }
 }
 
-export function assertCanApproveArtifact(principal: Principal, artifact: Artifact): void {
+export function assertCanApproveArtifact(
+  principal: Principal,
+  artifact: Artifact,
+  projectDecisionOwnerIds: readonly string[] = [],
+): void {
   assertHuman(principal, "Approving a specification");
   const isReviewer = artifact.reviewerIds.includes(principal.id);
+  const isDecisionOwner = projectDecisionOwnerIds.includes(principal.id);
   const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
-  if (!isReviewer && !isProjectAdmin) {
+  if (!isReviewer && !isDecisionOwner && !isProjectAdmin) {
     throw new BridgeError(
       "FORBIDDEN",
-      "Only a configured specification reviewer can approve this version.",
+      "Only a configured specification reviewer, decision owner, or project administrator can approve this version.",
       403,
     );
   }

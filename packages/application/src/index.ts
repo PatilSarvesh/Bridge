@@ -56,6 +56,7 @@ import {
   type Artifact,
   type ArtifactReview,
   type ArtifactVersion,
+  type BridgeErrorCode,
   type ContextItem,
   type ContextSnapshot,
   type Decision,
@@ -87,9 +88,17 @@ import {
 
 import { detectSecret } from "./content-security.js";
 
+export interface RepositoryTransactionContext {
+  readonly organizationId?: string;
+  readonly maintenance?: boolean;
+}
+
 export interface BridgeRepository {
   checkHealth(): Promise<{ readonly backend: string }>;
-  transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T>;
+  transaction<T>(
+    work: (repository: BridgeRepository) => Promise<T>,
+    context?: RepositoryTransactionContext,
+  ): Promise<T>;
   getOrganizationByExternalId(externalIdentityProviderId: string): Promise<Organization | undefined>;
   saveOrganization(organization: Organization): Promise<void>;
   getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined>;
@@ -742,7 +751,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return { backend: "memory" };
   }
 
-  async transaction<T>(work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+  async transaction<T>(
+    work: (repository: BridgeRepository) => Promise<T>,
+    _context?: RepositoryTransactionContext,
+  ): Promise<T> {
     if (!currentCorrelationId()) {
       return runWithCorrelationContextIfAbsent("application", () => this.transaction(work));
     }
@@ -1393,6 +1405,13 @@ export class BridgeService {
     this.metrics = options.metrics;
   }
 
+  private tenantTransaction<T>(
+    principal: Principal,
+    work: (repository: BridgeRepository) => Promise<T>,
+  ): Promise<T> {
+    return this.repository.transaction(work, { organizationId: principal.organizationId });
+  }
+
   private recordUrl(parameters: Readonly<Record<string, string>>): string {
     const url = new URL(this.publicBaseUrl);
     for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
@@ -1441,7 +1460,7 @@ export class BridgeService {
     principal: Principal,
     input: RegisterProjectInput,
   ): Promise<ProjectRegistration> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Registering a project");
       if (
         !principalHasRole(principal, "organization-admin") &&
@@ -1493,89 +1512,99 @@ export class BridgeService {
   }
 
   async listProjects(principal: Principal): Promise<readonly Project[]> {
-    const projects = await this.repository.listProjects(principal.organizationId);
-    return projects.filter((project) => {
-      try {
-        assertProjectAccess(principal, project);
-        return true;
-      } catch {
-        return false;
-      }
+    return this.tenantTransaction(principal, async (repository) => {
+      const projects = await repository.listProjects(principal.organizationId);
+      return projects.filter((project) => {
+        try {
+          assertProjectAccess(principal, project);
+          return true;
+        } catch {
+          return false;
+        }
+      });
     });
   }
 
   async listOrganizationPrincipals(principal: Principal): Promise<readonly Principal[]> {
-    assertHuman(principal, "Reading the organization directory");
-    const accessibleProjectIds = new Set(
-      (await this.repository.listProjects(principal.organizationId))
-        .filter((project) => {
-          try {
-            assertProjectAccess(principal, project);
-            return true;
-          } catch {
-            return false;
-          }
-        })
-        .map((project) => project.id),
-    );
-    return (await this.repository.listOrganizationPrincipals(principal.organizationId))
-      .filter((candidate) => candidate.type === "human")
-      .map((candidate) => ({
-        ...candidate,
-        projectIds: candidate.projectIds.filter((projectId) => accessibleProjectIds.has(projectId)),
-        projectRoles: Object.fromEntries(
-          Object.entries(candidate.projectRoles ?? {})
-            .filter(([projectId]) => accessibleProjectIds.has(projectId)),
-        ),
-      }));
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Reading the organization directory");
+      const accessibleProjectIds = new Set(
+        (await repository.listProjects(principal.organizationId))
+          .filter((project) => {
+            try {
+              assertProjectAccess(principal, project);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .map((project) => project.id),
+      );
+      return (await repository.listOrganizationPrincipals(principal.organizationId))
+        .filter((candidate) => candidate.type === "human")
+        .map((candidate) => ({
+          ...candidate,
+          projectIds: candidate.projectIds.filter((projectId) => accessibleProjectIds.has(projectId)),
+          projectRoles: Object.fromEntries(
+            Object.entries(candidate.projectRoles ?? {})
+              .filter(([projectId]) => accessibleProjectIds.has(projectId)),
+          ),
+        }));
+    });
   }
 
   async listOrganizationMembers(principal: Principal): Promise<readonly OrganizationMember[]> {
-    this.assertOrganizationAdministrator(principal, "Reading organization members");
-    const memberships = await this.repository.listOrganizationMemberships(principal.organizationId);
-    const members = await Promise.all(memberships.map(async (membership) => {
-      const identity = await this.repository.getPrincipalIdentity(membership.principalId);
-      if (!identity || identity.type !== "human") return undefined;
-      return this.organizationMember(identity, membership, await this.repository.listProjectMemberships(
-        principal.organizationId,
-        identity.id,
-      ));
-    }));
-    return members
-      .filter((member): member is OrganizationMember => Boolean(member))
-      .sort((left, right) => left.displayName.localeCompare(right.displayName));
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading organization members");
+      const memberships = await repository.listOrganizationMemberships(principal.organizationId);
+      const members = await Promise.all(memberships.map(async (membership) => {
+        const identity = await repository.getPrincipalIdentity(membership.principalId);
+        if (!identity || identity.type !== "human") return undefined;
+        return this.organizationMember(identity, membership, await repository.listProjectMemberships(
+          principal.organizationId,
+          identity.id,
+        ));
+      }));
+      return members
+        .filter((member): member is OrganizationMember => Boolean(member))
+        .sort((left, right) => left.displayName.localeCompare(right.displayName));
+    });
   }
 
   async listOrganizationProjectsForAdministration(principal: Principal): Promise<readonly Project[]> {
-    this.assertOrganizationAdministrator(principal, "Reading organization projects");
-    return this.repository.listProjects(principal.organizationId);
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading organization projects");
+      return repository.listProjects(principal.organizationId);
+    });
   }
 
   async listServiceIdentities(principal: Principal): Promise<readonly ServiceIdentity[]> {
-    this.assertOrganizationAdministrator(principal, "Reading service identities");
-    const credentials = await this.repository.listServiceCredentials(principal.organizationId);
-    const identities = await Promise.all(credentials.map(async (credential) => {
-      const identity = await this.repository.getPrincipalIdentity(credential.principalId);
-      const membership = await this.repository.getOrganizationMembership(
-        principal.organizationId,
-        credential.principalId,
-      );
-      if (!identity || !membership || identity.type === "human") return undefined;
-      return this.serviceIdentity(credential, identity, membership, await this.repository.listProjectMemberships(
-        principal.organizationId,
-        credential.principalId,
-      ));
-    }));
-    return identities
-      .filter((identity): identity is ServiceIdentity => Boolean(identity))
-      .sort((left, right) => left.name.localeCompare(right.name));
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading service identities");
+      const credentials = await repository.listServiceCredentials(principal.organizationId);
+      const identities = await Promise.all(credentials.map(async (credential) => {
+        const identity = await repository.getPrincipalIdentity(credential.principalId);
+        const membership = await repository.getOrganizationMembership(
+          principal.organizationId,
+          credential.principalId,
+        );
+        if (!identity || !membership || identity.type === "human") return undefined;
+        return this.serviceIdentity(credential, identity, membership, await repository.listProjectMemberships(
+          principal.organizationId,
+          credential.principalId,
+        ));
+      }));
+      return identities
+        .filter((identity): identity is ServiceIdentity => Boolean(identity))
+        .sort((left, right) => left.name.localeCompare(right.name));
+    });
   }
 
   async createServiceIdentity(
     principal: Principal,
     input: CreateServiceIdentityInput,
   ): Promise<ServiceIdentityRegistration> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Creating a service identity");
       this.assertSecretSafe("administration", input);
       const configuredProjects = await this.configuredProjectMemberships(
@@ -1663,7 +1692,7 @@ export class BridgeService {
     serviceCredentialId: string,
     input: RevokeServiceIdentityInput,
   ): Promise<ServiceIdentity> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Revoking a service identity");
       const credential = await repository.getServiceCredential(serviceCredentialId);
       if (!credential || credential.organizationId !== principal.organizationId) {
@@ -1707,7 +1736,7 @@ export class BridgeService {
     serviceCredentialId: string,
     input: RotateServiceIdentityInput,
   ): Promise<ServiceIdentityRegistration> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Rotating a service identity");
       const credential = await repository.getServiceCredential(serviceCredentialId);
       if (!credential || credential.organizationId !== principal.organizationId) {
@@ -1765,7 +1794,7 @@ export class BridgeService {
     principal: Principal,
     input: CreateOrganizationMemberInput,
   ): Promise<OrganizationMemberRegistration> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Creating an organization member");
       this.assertSecretSafe("administration", input);
       if (!this.identityIssuer) {
@@ -1865,7 +1894,7 @@ export class BridgeService {
     memberId: string,
     input: UpdateOrganizationMemberInput,
   ): Promise<OrganizationMember> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Updating an organization member");
       this.assertSecretSafe("administration", input);
       const identity = await repository.getPrincipalIdentity(memberId);
@@ -1958,39 +1987,42 @@ export class BridgeService {
   }
 
   async getProject(principal: Principal, projectId: string): Promise<Project> {
-    return this.requireProject(principal, projectId);
+    return this.tenantTransaction(principal, (repository) =>
+      this.requireProject(principal, projectId, repository));
   }
 
   async listNotifications(
     principal: Principal,
     query: Partial<NotificationListQuery> = {},
   ): Promise<readonly Notification[]> {
-    assertHuman(principal, "Reading notifications");
-    if (query.projectId) await this.requireProject(principal, query.projectId);
-    const notifications = await this.repository.listNotifications(
-      principal.organizationId,
-      principal.id,
-      query.projectId,
-      query.unreadOnly,
-    );
-    if (query.projectId) return notifications;
-    const accessibleProjectIds = new Set(
-      (await this.repository.listProjects(principal.organizationId))
-        .filter((project) => {
-          try {
-            assertProjectAccess(principal, project);
-            return true;
-          } catch {
-            return false;
-          }
-        })
-        .map((project) => project.id),
-    );
-    return notifications.filter((notification) => accessibleProjectIds.has(notification.projectId));
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Reading notifications");
+      if (query.projectId) await this.requireProject(principal, query.projectId, repository);
+      const notifications = await repository.listNotifications(
+        principal.organizationId,
+        principal.id,
+        query.projectId,
+        query.unreadOnly,
+      );
+      if (query.projectId) return notifications;
+      const accessibleProjectIds = new Set(
+        (await repository.listProjects(principal.organizationId))
+          .filter((project) => {
+            try {
+              assertProjectAccess(principal, project);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .map((project) => project.id),
+      );
+      return notifications.filter((notification) => accessibleProjectIds.has(notification.projectId));
+    });
   }
 
   async markNotificationRead(principal: Principal, notificationId: string): Promise<Notification> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Marking a notification read");
       const notification = await repository.getNotification(notificationId);
       if (
@@ -2000,7 +2032,13 @@ export class BridgeService {
       ) {
         throw new BridgeError("NOTIFICATION_NOT_FOUND", "Notification not found.", 404);
       }
-      await this.requireProject(principal, notification.projectId, repository);
+      await this.requireProjectForResource(
+        principal,
+        notification.projectId,
+        repository,
+        "NOTIFICATION_NOT_FOUND",
+        "Notification not found.",
+      );
       if (notification.readAt) return notification;
       const updated = { ...notification, readAt: this.now().toISOString() };
       await repository.saveNotification(updated);
@@ -2012,7 +2050,7 @@ export class BridgeService {
     principal: Principal,
     input: NotificationReadAllInput = {},
   ): Promise<{ readonly markedCount: number }> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Marking notifications read");
       if (input.projectId) await this.requireProject(principal, input.projectId, repository);
       const notifications = await repository.listNotifications(
@@ -2050,10 +2088,11 @@ export class BridgeService {
     projectId: string,
     query: OutboxOperationsQuery,
   ): Promise<OutboxOperationsView> {
-    await this.requireProject(principal, projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+    await this.requireProject(principal, projectId, repository);
     this.assertProjectOperator(principal, "Inspecting delivery operations", projectId);
-    const events = await this.repository.listOutboxEvents(projectId);
-    const deliveries = await this.repository.listOutboxDeliveries(projectId);
+    const events = await repository.listOutboxEvents(projectId);
+    const deliveries = await repository.listOutboxDeliveries(projectId);
     const nowTime = this.now().getTime();
     const statusCounts: Record<OutboxEvent["status"], number> = {
       pending: 0,
@@ -2112,6 +2151,7 @@ export class BridgeService {
           : {}),
       },
     };
+    });
   }
 
   async getProjectAnalytics(
@@ -2119,15 +2159,16 @@ export class BridgeService {
     projectId: string,
     query: ProjectAnalyticsQuery,
   ): Promise<ProjectAnalyticsView> {
-    await this.requireProject(principal, projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+    await this.requireProject(principal, projectId, repository);
     this.assertProjectOperator(principal, "Reading project analytics", projectId);
     const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
-      this.repository.listRuns(projectId),
-      this.repository.listContextSnapshots(projectId),
-      this.repository.listQuestions(projectId),
-      this.repository.listDecisions(projectId),
-      this.repository.listAssumptions(projectId),
-      this.repository.listArtifacts(projectId),
+      repository.listRuns(projectId),
+      repository.listContextSnapshots(projectId),
+      repository.listQuestions(projectId),
+      repository.listDecisions(projectId),
+      repository.listAssumptions(projectId),
+      repository.listArtifacts(projectId),
     ]);
     const runs = allRuns.filter((run) =>
       (!query.client || run.client === query.client) &&
@@ -2177,13 +2218,16 @@ export class BridgeService {
         ],
       },
     };
+    });
   }
 
   async listOrganizationAudit(principal: Principal, query: AuditListQuery): Promise<AuditPage> {
-    this.assertOrganizationAdministrator(principal, "Reading organization audit events");
-    const events = (await this.repository.listOrganizationAuditEvents(principal.organizationId))
-      .map((event): AuditRecord => ({ ...event, scope: "organization" }));
-    return this.auditPage(events, query);
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading organization audit events");
+      const events = (await repository.listOrganizationAuditEvents(principal.organizationId))
+        .map((event): AuditRecord => ({ ...event, scope: "organization" }));
+      return this.auditPage(events, query);
+    });
   }
 
   async listProjectAudit(
@@ -2191,18 +2235,20 @@ export class BridgeService {
     projectId: string,
     query: AuditListQuery,
   ): Promise<AuditPage> {
-    await this.requireProject(principal, projectId);
-    this.assertProjectOperator(principal, "Reading project audit events", projectId);
-    const events = (await this.repository.listAuditEvents(projectId))
-      .map((event): AuditRecord => ({ ...event, scope: "project" }));
-    return this.auditPage(events, query);
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Reading project audit events", projectId);
+      const events = (await repository.listAuditEvents(projectId))
+        .map((event): AuditRecord => ({ ...event, scope: "project" }));
+      return this.auditPage(events, query);
+    });
   }
 
   async exportOrganizationAudit(
     principal: Principal,
     input: AuditExportInput,
   ): Promise<AuditExport> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Exporting organization audit events");
       const records = this.filterAuditRecords(
         (await repository.listOrganizationAuditEvents(principal.organizationId))
@@ -2228,7 +2274,7 @@ export class BridgeService {
     projectId: string,
     input: AuditExportInput,
   ): Promise<AuditExport> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Exporting project audit events", projectId);
       const records = this.filterAuditRecords(
@@ -2256,12 +2302,18 @@ export class BridgeService {
     eventId: string,
     input: ReplayOutboxEventInput,
   ): Promise<OutboxEvent> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       const event = await repository.getOutboxEvent(eventId);
       if (!event || event.organizationId !== principal.organizationId) {
         throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Delivery event not found.", 404);
       }
-      await this.requireProject(principal, event.projectId, repository);
+      await this.requireProjectForResource(
+        principal,
+        event.projectId,
+        repository,
+        "OUTBOX_EVENT_NOT_FOUND",
+        "Delivery event not found.",
+      );
       this.assertProjectOperator(principal, "Replaying a delivery event", event.projectId);
       if (event.status !== "failed" && event.status !== "dead_letter") {
         throw new BridgeError(
@@ -2305,7 +2357,7 @@ export class BridgeService {
     projectId: string,
     input: StartAgentRunInput,
   ): Promise<RunRegistration> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.startRunInTransaction(repository, principal, projectId, input),
     );
   }
@@ -2389,12 +2441,15 @@ export class BridgeService {
   }
 
   async listRuns(principal: Principal, projectId: string): Promise<readonly AgentRun[]> {
-    await this.requireProject(principal, projectId);
-    return this.repository.listRuns(projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      return repository.listRuns(projectId);
+    });
   }
 
   async getRun(principal: Principal, runId: string): Promise<AgentRun> {
-    return this.requireRun(principal, runId, this.repository);
+    return this.tenantTransaction(principal, (repository) =>
+      this.requireRun(principal, runId, repository));
   }
 
   async reportRun(
@@ -2402,7 +2457,7 @@ export class BridgeService {
     runId: string,
     input: ReportAgentRunInput,
   ): Promise<AgentRun> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.reportRunInTransaction(repository, principal, runId, input),
     );
   }
@@ -2498,7 +2553,7 @@ export class BridgeService {
     runId: string,
     resumeContextKey: string,
   ): Promise<ContinuationDescriptor> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       const run = await this.requireRun(principal, runId, repository);
       await this.assertContinuationKey(repository, run.id, resumeContextKey);
       const blockingQuestions = await this.blockingQuestions(repository, run);
@@ -2536,7 +2591,7 @@ export class BridgeService {
     projectId: string,
     input: RecordAssumptionInput,
   ): Promise<Assumption> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.recordAssumptionInTransaction(repository, principal, projectId, input),
     );
   }
@@ -2670,7 +2725,7 @@ export class BridgeService {
   }
 
   async listAssumptions(principal: Principal, projectId: string): Promise<readonly Assumption[]> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       const assumptions = await repository.listAssumptions(projectId);
       const refreshed: Assumption[] = [];
@@ -2682,7 +2737,7 @@ export class BridgeService {
   }
 
   async getAssumption(principal: Principal, assumptionId: string): Promise<Assumption> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       const assumption = await this.requireAssumption(principal, assumptionId, repository);
       return this.expireAssumptionIfDue(repository, principal, assumption);
     });
@@ -2693,7 +2748,7 @@ export class BridgeService {
     assumptionId: string,
     input: ResolveAssumptionInput,
   ): Promise<Assumption> {
-    return this.repository.transaction(async (repository) => {
+    return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Resolving an assumption");
       const assumption = await this.requireAssumption(principal, assumptionId, repository);
       const project = await this.requireProject(principal, assumption.projectId, repository);
@@ -2792,7 +2847,7 @@ export class BridgeService {
     projectId: string,
     input: CreateQuestionInput,
   ): Promise<QuestionSubmission> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.createQuestionInTransaction(repository, principal, projectId, input),
     );
   }
@@ -2918,8 +2973,10 @@ export class BridgeService {
     projectId: string,
     input: FindQuestionMatchesInput,
   ): Promise<readonly QuestionMatch[]> {
-    await this.requireProject(principal, projectId);
-    return this.calculateQuestionMatches(this.repository, projectId, input);
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      return this.calculateQuestionMatches(repository, projectId, input);
+    });
   }
 
   private async calculateQuestionMatches(
@@ -3075,8 +3132,10 @@ export class BridgeService {
   }
 
   async listQuestions(principal: Principal, projectId: string): Promise<readonly Question[]> {
-    await this.requireProject(principal, projectId);
-    return this.repository.listQuestions(projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      return repository.listQuestions(projectId);
+    });
   }
 
   async listQuestionInbox(
@@ -3084,8 +3143,9 @@ export class BridgeService {
     projectId: string,
     filters: QuestionInboxQuery = {},
   ): Promise<readonly QuestionInboxItem[]> {
-    await this.requireProject(principal, projectId);
-    const questions = await this.repository.listQuestions(projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+    await this.requireProject(principal, projectId, repository);
+    const questions = await repository.listQuestions(projectId);
     const normalizedCategory = filters.category?.normalize("NFKC").toLocaleLowerCase("en");
     const normalizedRole = filters.role ? normalizeRoleName(filters.role) : undefined;
     return questions
@@ -3110,10 +3170,12 @@ export class BridgeService {
         if (discussionDifference !== 0) return discussionDifference;
         return Date.parse(right.createdAt) - Date.parse(left.createdAt);
       });
+    });
   }
 
   async getQuestion(principal: Principal, questionId: string): Promise<Question> {
-    return this.requireQuestion(principal, questionId, this.repository);
+    return this.tenantTransaction(principal, (repository) =>
+      this.requireQuestion(principal, questionId, repository));
   }
 
   async reviewQuestion(
@@ -3121,7 +3183,7 @@ export class BridgeService {
     questionId: string,
     input: QuestionReviewInput,
   ): Promise<QuestionReview> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.reviewQuestionInTransaction(repository, principal, questionId, input),
     );
   }
@@ -3186,7 +3248,7 @@ export class BridgeService {
     questionId: string,
     input: QuestionCommentInput,
   ): Promise<QuestionComment> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.addQuestionCommentInTransaction(repository, principal, questionId, input),
     );
   }
@@ -3259,7 +3321,13 @@ export class BridgeService {
     if (!question) {
       throw new BridgeError("QUESTION_NOT_FOUND", "Question not found.", 404);
     }
-    await this.requireProject(principal, question.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      question.projectId,
+      repository,
+      "QUESTION_NOT_FOUND",
+      "Question not found.",
+    );
     return question;
   }
 
@@ -3268,7 +3336,7 @@ export class BridgeService {
     questionId: string,
     input: ProposeAnswerInput,
   ): Promise<QuestionResponse> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.proposeAnswerInTransaction(repository, principal, questionId, input),
     );
   }
@@ -3322,7 +3390,7 @@ export class BridgeService {
     questionId: string,
     input: AcceptAnswerInput,
   ): Promise<Decision> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.acceptAnswerInTransaction(repository, principal, questionId, input),
     );
   }
@@ -3411,12 +3479,13 @@ export class BridgeService {
     projectId: string,
     query: DecisionListQuery = { includeHistory: false, scope: {} },
   ): Promise<readonly Decision[]> {
-    await this.requireProject(principal, projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+    await this.requireProject(principal, projectId, repository);
     const category = query.category?.toLocaleLowerCase("en");
     const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
     const candidates = query.search
-      ? await this.repository.searchDecisions(projectId, query.search)
-      : await this.repository.listDecisions(projectId);
+      ? await repository.searchDecisions(projectId, query.search)
+      : await repository.listDecisions(projectId);
     return candidates.filter((decision) => {
       if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
         return false;
@@ -3427,6 +3496,7 @@ export class BridgeService {
       if (query.createdTo && Date.parse(decision.createdAt) > Date.parse(query.createdTo)) return false;
       return scopeEntries.every(([key, value]) => decision.scope[key] === value);
     });
+    });
   }
 
   async changeDecisionLifecycle(
@@ -3434,7 +3504,7 @@ export class BridgeService {
     decisionId: string,
     input: ChangeDecisionLifecycleInput,
   ): Promise<DecisionLifecycleChange> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.changeDecisionLifecycleInTransaction(repository, principal, decisionId, input),
     );
   }
@@ -3588,7 +3658,7 @@ export class BridgeService {
     projectId: string,
     input: PublishArtifactInput,
   ): Promise<ArtifactPublication> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.publishArtifactInTransaction(repository, principal, projectId, input),
     );
   }
@@ -3728,12 +3798,15 @@ export class BridgeService {
   }
 
   async listArtifacts(principal: Principal, projectId: string): Promise<readonly Artifact[]> {
-    await this.requireProject(principal, projectId);
-    return this.repository.listArtifacts(projectId);
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      return repository.listArtifacts(projectId);
+    });
   }
 
   async getArtifact(principal: Principal, artifactId: string): Promise<Artifact> {
-    return this.requireArtifact(principal, artifactId, this.repository);
+    return this.tenantTransaction(principal, (repository) =>
+      this.requireArtifact(principal, artifactId, repository));
   }
 
   async diffArtifactVersions(
@@ -3741,7 +3814,8 @@ export class BridgeService {
     artifactId: string,
     query: ArtifactVersionDiffQuery,
   ): Promise<ArtifactVersionDiff> {
-    const artifact = await this.requireArtifact(principal, artifactId, this.repository);
+    return this.tenantTransaction(principal, async (repository) => {
+    const artifact = await this.requireArtifact(principal, artifactId, repository);
     const fromVersion = artifact.versions.find((version) => version.id === query.fromVersionId);
     const toVersion = artifact.versions.find((version) => version.id === query.toVersionId);
     if (!fromVersion || !toVersion) {
@@ -3752,6 +3826,7 @@ export class BridgeService {
       );
     }
     return buildArtifactVersionDiff(artifact.id, fromVersion, toVersion);
+    });
   }
 
   private async requireArtifact(
@@ -3761,7 +3836,13 @@ export class BridgeService {
   ): Promise<Artifact> {
     const artifact = await repository.getArtifact(artifactId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification not found.",
+    );
     return artifact;
   }
 
@@ -3770,7 +3851,7 @@ export class BridgeService {
     versionId: string,
     input: ArtifactReviewInput,
   ): Promise<ArtifactReviewResult> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.reviewArtifactVersionInTransaction(repository, principal, versionId, input),
     );
   }
@@ -3783,7 +3864,13 @@ export class BridgeService {
   ): Promise<ArtifactReviewResult> {
     const artifact = await repository.getArtifactByVersionId(versionId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification version not found.",
+    );
     assertCanReviewArtifact(principal, artifact);
     this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
@@ -3846,7 +3933,7 @@ export class BridgeService {
     versionId: string,
     input: ApproveArtifactVersionInput,
   ): Promise<ArtifactPublication> {
-    return this.repository.transaction((repository) =>
+    return this.tenantTransaction(principal, (repository) =>
       this.approveArtifactVersionInTransaction(repository, principal, versionId, input),
     );
   }
@@ -3859,8 +3946,14 @@ export class BridgeService {
   ): Promise<ArtifactPublication> {
     const artifact = await repository.getArtifactByVersionId(versionId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
-    assertCanApproveArtifact(principal, artifact);
+    const project = await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification version not found.",
+    );
+    assertCanApproveArtifact(principal, artifact, project.decisionOwnerIds);
     this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
@@ -3919,7 +4012,7 @@ export class BridgeService {
   ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
     const startedAt = performance.now();
     try {
-      const { candidateCount, ...result } = await this.repository.transaction((repository) =>
+      const { candidateCount, ...result } = await this.tenantTransaction(principal, (repository) =>
         this.getContextInTransaction(repository, principal, projectId, query),
       );
       this.metrics?.recordContextRetrieval({
@@ -4098,7 +4191,13 @@ export class BridgeService {
   ): Promise<AgentRun> {
     const run = await repository.getRun(runId);
     if (!run) throw new BridgeError("RUN_NOT_FOUND", "Agent run not found.", 404);
-    await this.requireProject(principal, run.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      run.projectId,
+      repository,
+      "RUN_NOT_FOUND",
+      "Agent run not found.",
+    );
     return run;
   }
 
@@ -4109,7 +4208,13 @@ export class BridgeService {
   ): Promise<Assumption> {
     const assumption = await repository.getAssumption(assumptionId);
     if (!assumption) throw new BridgeError("ASSUMPTION_NOT_FOUND", "Assumption not found.", 404);
-    await this.requireProject(principal, assumption.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      assumption.projectId,
+      repository,
+      "ASSUMPTION_NOT_FOUND",
+      "Assumption not found.",
+    );
     return assumption;
   }
 
@@ -4120,7 +4225,13 @@ export class BridgeService {
   ): Promise<Decision> {
     const decision = await repository.getDecision(decisionId);
     if (!decision) throw new BridgeError("DECISION_NOT_FOUND", "Decision not found.", 404);
-    await this.requireProject(principal, decision.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      decision.projectId,
+      repository,
+      "DECISION_NOT_FOUND",
+      "Decision not found.",
+    );
     return decision;
   }
 
@@ -4433,11 +4544,34 @@ export class BridgeService {
     projectId: string,
     repository: BridgeRepository = this.repository,
   ): Promise<Project> {
+    return this.requireProjectForResource(
+      principal,
+      projectId,
+      repository,
+      "PROJECT_NOT_FOUND",
+      "Project not found.",
+    );
+  }
+
+  private async requireProjectForResource(
+    principal: Principal,
+    projectId: string,
+    repository: BridgeRepository,
+    notFoundCode: BridgeErrorCode,
+    notFoundMessage: string,
+  ): Promise<Project> {
     const project = await repository.getProject(projectId);
     if (!project) {
-      throw new BridgeError("PROJECT_NOT_FOUND", "Project not found.", 404);
+      throw new BridgeError(notFoundCode, notFoundMessage, 404);
     }
-    assertProjectAccess(principal, project);
+    try {
+      assertProjectAccess(principal, project);
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === "FORBIDDEN") {
+        throw new BridgeError(notFoundCode, notFoundMessage, 404);
+      }
+      throw error;
+    }
     return project;
   }
 

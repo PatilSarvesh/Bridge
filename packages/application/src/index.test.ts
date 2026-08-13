@@ -365,7 +365,7 @@ describe("Bridge decision workflow", () => {
     await expect(service.listProjectAudit(contributor, project.id, { offset: 0, limit: 50 }))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(service.listProjectAudit(outsider, project.id, { offset: 0, limit: 50 }))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
 
     const projectExport = await service.exportProjectAudit(owner, project.id, {
       format: "json",
@@ -1280,7 +1280,7 @@ describe("Bridge decision workflow", () => {
       includeHistory: true,
       search: "transient failures",
       scope: {},
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
     expect((await service.listDecisions(owner, project.id, {
       includeHistory: true,
       scope: {},
@@ -1556,7 +1556,150 @@ describe("Bridge decision workflow", () => {
       ),
     ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
 
-    await expect(service.listQuestions(outsider, project.id)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.listQuestions(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+  });
+
+  it("applies organization-admin inheritance and project decision-owner artifact authority", async () => {
+    const { service } = await runtime();
+    const organizationAdminWithoutProjectGrant: Principal = {
+      ...organizationAdmin,
+      projectIds: [],
+      allProjects: false,
+    };
+    const decisionOwnerWithoutAdminRole: Principal = {
+      ...owner,
+      roles: ["contributor"],
+      projectRoles: {},
+    };
+
+    const ordinary = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "authorization-org-admin-question",
+      intendedOwnerIds: [qaLead.id],
+    }));
+    await expect(service.acceptAnswer(contributor, ordinary.id, {
+      optionKey: "transient",
+      rationale: "A contributor cannot accept an ordinary decision.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.acceptAnswer(organizationAdminWithoutProjectGrant, ordinary.id, {
+      optionKey: "transient",
+      rationale: "The organization administrator accepts within their own organization.",
+    })).resolves.toMatchObject({ ownerId: organizationAdmin.id });
+
+    const adminPublication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "authorization-org-admin-artifact",
+      intendedReviewerIds: [qaLead.id],
+    }));
+    await expect(service.approveArtifactVersion(contributor, adminPublication.version.id, {
+      rationale: "A contributor cannot approve a specification.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.approveArtifactVersion(organizationAdminWithoutProjectGrant, adminPublication.version.id, {
+      rationale: "The organization administrator approves within their own organization.",
+    })).resolves.toMatchObject({ version: { approvedById: organizationAdmin.id, status: "approved" } });
+
+    const ownerPublication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "authorization-decision-owner-artifact",
+      title: "Decision-owner specification",
+      intendedReviewerIds: [qaLead.id],
+    }));
+    await expect(service.approveArtifactVersion(decisionOwnerWithoutAdminRole, ownerPublication.version.id, {
+      rationale: "The configured project decision owner approves this immutable version.",
+    })).resolves.toMatchObject({ version: { approvedById: owner.id, status: "approved" } });
+  });
+
+  it("masks guessed project and object identifiers across organizations and project grants", async () => {
+    const { repository, service } = await runtime();
+    const run = (await service.startRun(agent, project.id, {
+      idempotencyKey: "authorization-object-guess-run",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Create records for tenant-isolation verification",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    })).run;
+    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "authorization-object-guess-assumption",
+      runId: run.id,
+    }));
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "authorization-object-guess-question",
+      blocking: false,
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Create an accepted decision for tenant-isolation verification.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "authorization-object-guess-artifact",
+    }));
+    const notification = (await repository.listNotifications(project.organizationId, owner.id))[0];
+    const outboxEvent = (await repository.listOutboxEvents(project.id))[0];
+    expect(notification).toBeDefined();
+    expect(outboxEvent).toBeDefined();
+
+    const sameOrganizationWithoutProjectGrant: Principal = {
+      ...owner,
+      projectIds: [],
+      allProjects: false,
+      roles: ["contributor"],
+      projectRoles: {},
+    };
+    for (const deniedPrincipal of [outsider, sameOrganizationWithoutProjectGrant]) {
+      const checks: Array<{ real: () => Promise<unknown>; absent: () => Promise<unknown>; code: string }> = [
+        {
+          real: () => service.getProject(deniedPrincipal, project.id),
+          absent: () => service.getProject(deniedPrincipal, "prj_absent"),
+          code: "PROJECT_NOT_FOUND",
+        },
+        {
+          real: () => service.getRun(deniedPrincipal, run.id),
+          absent: () => service.getRun(deniedPrincipal, "run_absent"),
+          code: "RUN_NOT_FOUND",
+        },
+        {
+          real: () => service.getAssumption(deniedPrincipal, assumption.id),
+          absent: () => service.getAssumption(deniedPrincipal, "asm_absent"),
+          code: "ASSUMPTION_NOT_FOUND",
+        },
+        {
+          real: () => service.getQuestion(deniedPrincipal, question.id),
+          absent: () => service.getQuestion(deniedPrincipal, "que_absent"),
+          code: "QUESTION_NOT_FOUND",
+        },
+        {
+          real: () => service.getArtifact(deniedPrincipal, publication.artifact.id),
+          absent: () => service.getArtifact(deniedPrincipal, "art_absent"),
+          code: "ARTIFACT_NOT_FOUND",
+        },
+        {
+          real: () => service.changeDecisionLifecycle(deniedPrincipal, decision.id, {
+            status: "revoked",
+            expectedVersion: decision.version,
+            rationale: "This inaccessible operation must fail before mutation.",
+          }),
+          absent: () => service.changeDecisionLifecycle(deniedPrincipal, "dec_absent", {
+            status: "revoked",
+            expectedVersion: 1,
+            rationale: "This absent operation must return the same resource class.",
+          }),
+          code: "DECISION_NOT_FOUND",
+        },
+        {
+          real: () => service.markNotificationRead(deniedPrincipal, notification!.id),
+          absent: () => service.markNotificationRead(deniedPrincipal, "ntf_absent"),
+          code: "NOTIFICATION_NOT_FOUND",
+        },
+        {
+          real: () => service.replayOutboxEvent(deniedPrincipal, outboxEvent!.id, { expectedAttempts: outboxEvent!.attempts }),
+          absent: () => service.replayOutboxEvent(deniedPrincipal, "obx_absent", { expectedAttempts: 0 }),
+          code: "OUTBOX_EVENT_NOT_FOUND",
+        },
+      ];
+
+      for (const check of checks) {
+        await expect(check.real()).rejects.toMatchObject({ code: check.code, statusCode: 404 });
+        await expect(check.absent()).rejects.toMatchObject({ code: check.code, statusCode: 404 });
+      }
+    }
   });
 
   it("personalizes the question inbox by owner, role, project admin, and protected review", async () => {
@@ -1757,7 +1900,7 @@ describe("Bridge decision workflow", () => {
     await expect(service.diffArtifactVersions(outsider, first.artifact.id, {
       fromVersionId: first.version.id,
       toVersionId: second.version.id,
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    })).rejects.toMatchObject({ code: "ARTIFACT_NOT_FOUND" });
     const artifact = await service.getArtifact(agent, first.artifact.id);
     expect(artifact.versions).toEqual([
       expect.objectContaining({
@@ -2018,7 +2161,7 @@ describe("Bridge decision workflow", () => {
     await expect(service.getProjectAnalytics(agent, project.id, {}))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(service.getProjectAnalytics(outsider, project.id, {}))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
   });
 
   it("resolves OIDC identities only through active organization and project memberships", async () => {

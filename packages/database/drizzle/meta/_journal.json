@@ -141,6 +141,13 @@
       "when": 1786585490885,
       "tag": "0019_luxuriant_wallop",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786588063844,
+      "tag": "0020_tenant_row_security",
+      "breakpoints": true
     }
   ]
 }
