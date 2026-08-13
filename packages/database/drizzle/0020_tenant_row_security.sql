@@ -1,28 +1,28 @@
 ALTER TABLE "bridge_idempotency_records" ADD COLUMN "organization_id" text;--> statement-breakpoint
 UPDATE "bridge_idempotency_records" AS "record"
-SET "organization_id" = CASE "record"."kind"
-  WHEN 'question' THEN (
+SET "organization_id" = COALESCE(
+  (
     SELECT "question"."organization_id"
     FROM "bridge_questions" AS "question"
     WHERE "question"."id" = "record"."resource_id"
-  )
-  WHEN 'artifact_version' THEN (
+  ),
+  (
     SELECT "artifact"."organization_id"
     FROM "bridge_artifact_versions" AS "version"
     JOIN "bridge_artifacts" AS "artifact" ON "artifact"."id" = "version"."artifact_id"
     WHERE "version"."id" = "record"."resource_id"
-  )
-  WHEN 'run' THEN (
+  ),
+  (
     SELECT "run"."organization_id"
     FROM "bridge_agent_runs" AS "run"
     WHERE "run"."id" = "record"."resource_id"
-  )
-  WHEN 'assumption' THEN (
+  ),
+  (
     SELECT "assumption"."organization_id"
     FROM "bridge_assumptions" AS "assumption"
     WHERE "assumption"."id" = "record"."resource_id"
   )
-END;--> statement-breakpoint
+);--> statement-breakpoint
 DELETE FROM "bridge_idempotency_records" WHERE "organization_id" IS NULL;--> statement-breakpoint
 ALTER TABLE "bridge_idempotency_records" ALTER COLUMN "organization_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "bridge_idempotency_records" DROP CONSTRAINT "bridge_idempotency_records_pkey";--> statement-breakpoint

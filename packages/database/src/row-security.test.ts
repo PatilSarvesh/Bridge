@@ -70,5 +70,6 @@ describe("tenant row-security migration", () => {
     expect(discardOrphans).toBeGreaterThan(backfill);
     expect(enforceNotNull).toBeGreaterThan(discardOrphans);
     expect(tenantPrimaryKey).toBeGreaterThan(enforceNotNull);
+    expect(migration).not.toContain('"record"."kind"');
   });
 });
