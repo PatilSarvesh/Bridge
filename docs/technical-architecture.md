@@ -497,7 +497,7 @@ Current prototype behavior adds these conservative rules:
 - Base path: `/v1`
 - JSON request and response bodies.
 - Schema validation at the transport boundary.
-- Cursor pagination for collections.
+- Cursor or explicitly bounded offset pagination for collections.
 - RFC-style problem details with stable Bridge error codes.
 - `Idempotency-Key` required for agent and integration create operations.
 - `If-Match` or expected-version field for concurrency-sensitive commands.
@@ -563,6 +563,10 @@ GET    /v1/projects/:projectId/audit-events
 GET    /v1/admin/projects/:projectId/outbox?status=&type=&limit=
 POST   /v1/admin/outbox/:eventId/replay
 GET    /v1/admin/projects/:projectId/analytics?client=&startedFrom=&startedTo=
+GET    /v1/admin/projects/:projectId/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
+POST   /v1/admin/projects/:projectId/audit/export
+GET    /v1/admin/organization/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
+POST   /v1/admin/organization/audit/export
 ```
 
 Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
@@ -570,6 +574,8 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
 Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the coarse REST capability boundary (`bridge:read`, `bridge:write`, or `bridge:admin`); endpoint-specific OAuth admin scopes remain deferred.
+
+Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, timestamp, and correlation metadata.
 
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 

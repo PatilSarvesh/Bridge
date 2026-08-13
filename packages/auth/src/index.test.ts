@@ -172,7 +172,7 @@ describe("OIDC authentication", () => {
             tokenHash,
             scopes: ["bridge:read"],
             createdAt: "2026-08-11T00:00:00.000Z",
-            expiresAt: "2026-08-12T00:00:00.000Z",
+            expiresAt: "2099-08-12T00:00:00.000Z",
             version: 1,
           },
         }

@@ -134,6 +134,13 @@
       "when": 1786460472581,
       "tag": "0018_brainy_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786585490885,
+      "tag": "0019_luxuriant_wallop",
+      "breakpoints": true
     }
   ]
 }

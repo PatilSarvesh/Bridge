@@ -221,6 +221,116 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("restricts audit views and returns metadata-only JSON and CSV exports", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeader = { "x-bridge-principal-id": demoPrincipals.architect.id };
+    await runtime.repository.saveAuditEvent({
+      id: "aud_api_audit_view",
+      correlationId: "api_audit_view_001",
+      organizationId: demoProject.organizationId,
+      projectId: demoProject.id,
+      actorId: demoPrincipals.agent.id,
+      actorType: demoPrincipals.agent.type,
+      action: "question.created",
+      subjectType: "question",
+      subjectId: "que_api_audit_view",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const createdMember = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/members",
+      headers: adminHeader,
+      payload: {
+        oidcSubject: "auth0|audit-api-member",
+        displayName: "Audit API Member",
+        roles: ["organization-member"],
+        allProjects: false,
+        projectMemberships: [],
+      },
+    });
+    expect(createdMember.statusCode).toBe(201);
+
+    const projectView = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/audit?limit=1&offset=0`,
+      headers: adminHeader,
+    });
+    expect(projectView.statusCode).toBe(200);
+    expect(projectView.json()).toMatchObject({ offset: 0, limit: 1, items: [expect.objectContaining({
+      scope: "project",
+      projectId: demoProject.id,
+    })] });
+
+    for (const principalId of [demoPrincipals.contributor.id, demoPrincipals.outsider.id]) {
+      const denied = await app.inject({
+        method: "GET",
+        url: `/v1/admin/projects/${demoProject.id}/audit`,
+        headers: { "x-bridge-principal-id": principalId },
+      });
+      expect(denied.statusCode).toBe(403);
+    }
+    const invalidRange = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/audit?createdFrom=2026-02-01T00%3A00%3A00.000Z&createdTo=2026-01-01T00%3A00%3A00.000Z`,
+      headers: adminHeader,
+    });
+    expect(invalidRange.statusCode).toBe(400);
+
+    const question = runtime.sampleQuestionId
+      ? await runtime.repository.getQuestion(runtime.sampleQuestionId)
+      : undefined;
+    const jsonExport = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/audit/export`,
+      headers: adminHeader,
+      payload: { format: "json", maxItems: 100 },
+    });
+    expect(jsonExport.statusCode).toBe(200);
+    expect(jsonExport.headers["content-disposition"]).toContain("bridge-project-audit-");
+    expect(jsonExport.headers["content-type"]).toContain("application/json");
+    expect(jsonExport.body).toContain('"scope": "project"');
+    if (question) {
+      expect(jsonExport.body).not.toContain(question.title);
+      expect(jsonExport.body).not.toContain(question.context);
+    }
+
+    const organizationView = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/audit?action=organization_member.created",
+      headers: adminHeader,
+    });
+    expect(organizationView.statusCode).toBe(200);
+    expect(organizationView.json()).toMatchObject({
+      totalMatching: 1,
+      items: [expect.objectContaining({ scope: "organization", action: "organization_member.created" })],
+    });
+    const organizationDenied = await app.inject({
+      method: "GET",
+      url: "/v1/admin/organization/audit",
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(organizationDenied.statusCode).toBe(403);
+
+    const csvExport = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/audit/export",
+      headers: adminHeader,
+      payload: { format: "csv", maxItems: 100 },
+    });
+    expect(csvExport.statusCode).toBe(200);
+    expect(csvExport.headers["content-type"]).toContain("text/csv");
+    expect(csvExport.body).toContain('"action"');
+    expect(csvExport.body).toContain('"organization_member.created"');
+    await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" }),
+      ]),
+    );
+  });
+
   it("provisions a one-time service token and supports versioned revocation", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

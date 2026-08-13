@@ -306,6 +306,31 @@ interface ProjectAnalytics {
   };
 }
 
+interface AuditRecord {
+  readonly id: string;
+  readonly scope: "organization" | "project";
+  readonly correlationId: string;
+  readonly organizationId: string;
+  readonly projectId?: string;
+  readonly actorId: string;
+  readonly actorType: string;
+  readonly action: string;
+  readonly subjectType: string;
+  readonly subjectId: string;
+  readonly createdAt: string;
+}
+
+interface AuditPage {
+  readonly items: readonly AuditRecord[];
+  readonly offset: number;
+  readonly limit: number;
+  readonly totalMatching: number;
+  readonly nextOffset?: number;
+}
+
+type AuditFilterKey = "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo";
+type AuditFilters = Partial<Record<AuditFilterKey, string>>;
+
 type View =
   | "inbox"
   | "questions"
@@ -315,7 +340,8 @@ type View =
   | "assumptions"
   | "runs"
   | "organization"
-  | "analytics";
+  | "analytics"
+  | "audit";
 
 async function bridgeFetch<T>(
   path: string,
@@ -341,6 +367,37 @@ async function bridgeFetch<T>(
     throw new Error(message);
   }
   return body as T;
+}
+
+async function bridgeDownload(
+  path: string,
+  body: unknown,
+  actingPrincipalId: string,
+): Promise<void> {
+  const response = await fetch(`${apiUrl}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      "x-bridge-correlation-id": `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      "x-bridge-principal-id": actingPrincipalId,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => undefined) as { readonly message?: string } | undefined;
+    throw new Error(errorBody?.message ?? "Bridge export failed.");
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? "bridge-audit-export";
+  const href = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(href);
 }
 
 function currentVersion(artifact: Artifact | undefined): ArtifactVersion | undefined {
@@ -398,6 +455,9 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
   const [analytics, setAnalytics] = useState<ProjectAnalytics>();
+  const [auditPage, setAuditPage] = useState<AuditPage>();
+  const [auditScope, setAuditScope] = useState<"project" | "organization">("project");
+  const [auditFilters, setAuditFilters] = useState<AuditFilters>({});
   const [organizationMembers, setOrganizationMembers] = useState<readonly OrganizationMember[]>([]);
   const [organizationProjects, setOrganizationProjects] = useState<readonly Project[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>();
@@ -446,6 +506,8 @@ export default function Home() {
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
   const [memberSubmitting, setMemberSubmitting] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -464,6 +526,7 @@ export default function Home() {
   const isOrganizationAdmin = activePrincipal?.roles.some(
     (role) => normalizedRole(role) === "organization-admin",
   ) ?? false;
+  const isProjectAdmin = activeRoles.some((role) => normalizedRole(role) === "project-admin");
   const selectedOrganizationMember = useMemo(
     () => organizationMembers.find((member) => member.id === selectedMemberId) ?? organizationMembers[0],
     [organizationMembers, selectedMemberId],
@@ -496,6 +559,15 @@ export default function Home() {
 
   const updateAnalyticsFilter = useCallback((key: AnalyticsFilterKey, value: string) => {
     setAnalyticsFilters((current) => {
+      const next = { ...current };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  }, []);
+
+  const updateAuditFilter = useCallback((key: AuditFilterKey, value: string) => {
+    setAuditFilters((current) => {
       const next = { ...current };
       if (value) next[key] = value;
       else delete next[key];
@@ -746,6 +818,69 @@ export default function Home() {
     }
   }, [activePrincipalId, analyticsFilters, selectedProjectId]);
 
+  const auditParameters = useCallback((offset?: number): URLSearchParams => {
+    const parameters = new URLSearchParams();
+    for (const key of ["action", "actorId", "subjectType", "subjectId", "correlationId"] as const) {
+      if (auditFilters[key]) parameters.set(key, auditFilters[key]);
+    }
+    if (auditFilters.createdFrom) parameters.set("createdFrom", `${auditFilters.createdFrom}T00:00:00.000Z`);
+    if (auditFilters.createdTo) parameters.set("createdTo", `${auditFilters.createdTo}T23:59:59.999Z`);
+    if (offset !== undefined) parameters.set("offset", String(offset));
+    parameters.set("limit", "50");
+    return parameters;
+  }, [auditFilters]);
+
+  const loadAudit = useCallback(async (offset = 0) => {
+    if ((auditScope === "organization" && !isOrganizationAdmin) || (auditScope === "project" && !isProjectAdmin)) {
+      setAuditPage(undefined);
+      return;
+    }
+    if (auditScope === "project" && !selectedProjectId) {
+      setAuditPage(undefined);
+      return;
+    }
+    setAuditLoading(true);
+    setError(undefined);
+    try {
+      const path = auditScope === "organization"
+        ? "/v1/admin/organization/audit"
+        : `/v1/admin/projects/${selectedProjectId}/audit`;
+      setAuditPage(await bridgeFetch<AuditPage>(
+        `${path}?${auditParameters(offset).toString()}`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setAuditPage(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to load audit events.");
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [activePrincipalId, auditParameters, auditScope, isOrganizationAdmin, isProjectAdmin, selectedProjectId]);
+
+  const exportAudit = useCallback(async (format: "json" | "csv") => {
+    if (auditScope === "project" && !selectedProjectId) return;
+    setAuditExporting(true);
+    setError(undefined);
+    try {
+      const filterBody: Record<string, string | number> = { format, maxItems: 1_000 };
+      for (const key of ["action", "actorId", "subjectType", "subjectId", "correlationId"] as const) {
+        if (auditFilters[key]) filterBody[key] = auditFilters[key];
+      }
+      if (auditFilters.createdFrom) filterBody.createdFrom = `${auditFilters.createdFrom}T00:00:00.000Z`;
+      if (auditFilters.createdTo) filterBody.createdTo = `${auditFilters.createdTo}T23:59:59.999Z`;
+      const path = auditScope === "organization"
+        ? "/v1/admin/organization/audit/export"
+        : `/v1/admin/projects/${selectedProjectId}/audit/export`;
+      await bridgeDownload(path, filterBody, activePrincipalId);
+      await loadAudit(0);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to export audit events.");
+    } finally {
+      setAuditExporting(false);
+    }
+  }, [activePrincipalId, auditFilters, auditScope, loadAudit, selectedProjectId]);
+
   const loadOrganizationMembers = useCallback(async () => {
     if (!isOrganizationAdmin) {
       setOrganizationMembers([]);
@@ -861,7 +996,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics", "audit"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -907,14 +1042,31 @@ export default function Home() {
   }, [authenticationReady, loadAnalytics, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
+  }, [authenticationReady, loadAudit, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "organization") void loadOrganizationMembers();
   }, [authenticationReady, loadOrganizationMembers, signedIn, view]);
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "organization" && !isOrganizationAdmin) {
+      setError(undefined);
       setView("inbox");
     }
   }, [authenticationReady, isOrganizationAdmin, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "audit" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (!isOrganizationAdmin && auditScope === "organization") setAuditScope("project");
+    if (!isProjectAdmin && isOrganizationAdmin && auditScope === "project") setAuditScope("organization");
+  }, [auditScope, isOrganizationAdmin, isProjectAdmin]);
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
     const updated = await bridgeFetch<Notification>(`/v1/notifications/${notificationId}/read`, {
@@ -982,6 +1134,7 @@ export default function Home() {
     runs: "Agent Runs",
     organization: "Organization",
     analytics: "Analytics",
+    audit: "Audit",
   };
 
   useEffect(() => {
@@ -1370,6 +1523,13 @@ export default function Home() {
             aria-current={view === "analytics" ? "page" : undefined}
             onClick={() => setView("analytics")}
           >Analytics</button>
+          {isOrganizationAdmin || isProjectAdmin ? (
+            <button
+              type="button"
+              aria-current={view === "audit" ? "page" : undefined}
+              onClick={() => setView("audit")}
+            >Audit</button>
+          ) : null}
         </nav>
         <div className="identity">
           <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
@@ -1383,7 +1543,11 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <strong>{viewTitle[view]}</strong>
-          <span>{view === "organization" ? "Member access and roles" : selectedProject?.name ?? "Select a project"}</span>
+          <span>{view === "organization"
+            ? "Member access and roles"
+            : view === "audit" && auditScope === "organization"
+              ? "Organization metadata events"
+              : selectedProject?.name ?? "Select a project"}</span>
         </header>
         <div className="content">
           {error ? <div className="error" role="alert">{error}</div> : null}
@@ -1543,6 +1707,70 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+              ) : null}
+            </>
+          ) : view === "audit" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Audit events</h1>
+                  <p>Permission-restricted operational metadata. Record bodies, prompts, answers, credentials, and private reasoning are excluded.</p>
+                </div>
+                <div className="audit-actions">
+                  <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("json")}>Export JSON</button>
+                  <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("csv")}>Export CSV</button>
+                  <button className="secondary" type="button" disabled={auditLoading} onClick={() => void loadAudit(0)}>Refresh</button>
+                </div>
+              </div>
+              <div className="audit-filter-panel" aria-label="Audit filters">
+                <label>Scope
+                  <select
+                    value={auditScope}
+                    onChange={(event) => {
+                      setAuditScope(event.target.value as "project" | "organization");
+                      setAuditPage(undefined);
+                    }}
+                  >
+                    {isProjectAdmin ? <option value="project">Selected project</option> : null}
+                    {isOrganizationAdmin ? <option value="organization">Organization administration</option> : null}
+                  </select>
+                </label>
+                <label>Action<input value={auditFilters.action ?? ""} onChange={(event) => updateAuditFilter("action", event.target.value)} placeholder="question.created" /></label>
+                <label>Actor ID<input value={auditFilters.actorId ?? ""} onChange={(event) => updateAuditFilter("actorId", event.target.value)} /></label>
+                <label>Subject type<input value={auditFilters.subjectType ?? ""} onChange={(event) => updateAuditFilter("subjectType", event.target.value)} placeholder="artifact_version" /></label>
+                <label>Subject ID<input value={auditFilters.subjectId ?? ""} onChange={(event) => updateAuditFilter("subjectId", event.target.value)} /></label>
+                <label>Correlation ID<input value={auditFilters.correlationId ?? ""} onChange={(event) => updateAuditFilter("correlationId", event.target.value)} /></label>
+                <label>Created from<input type="date" value={auditFilters.createdFrom ?? ""} onChange={(event) => updateAuditFilter("createdFrom", event.target.value)} /></label>
+                <label>Created to<input type="date" value={auditFilters.createdTo ?? ""} onChange={(event) => updateAuditFilter("createdTo", event.target.value)} /></label>
+              </div>
+              {auditLoading ? <div className="empty">Loading audit metadata…</div> : null}
+              {!auditLoading && auditPage?.items.length === 0 ? <div className="empty">No audit events match these filters.</div> : null}
+              {!auditLoading && auditPage && auditPage.items.length > 0 ? (
+                <section className="analytics-panel audit-panel">
+                  <div className="analytics-panel-heading">
+                    <div><h2>Immutable event stream</h2><p>{auditPage.totalMatching} matching events · showing {auditPage.offset + 1}–{auditPage.offset + auditPage.items.length}</p></div>
+                    <small>{auditScope === "project" ? selectedProject?.name : "Organization administration"}</small>
+                  </div>
+                  <div className="analytics-table-wrap">
+                    <table className="analytics-table audit-table">
+                      <thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Subject</th><th>Correlation</th></tr></thead>
+                      <tbody>{auditPage.items.map((event) => (
+                        <tr key={event.id}>
+                          <td>{new Date(event.createdAt).toLocaleString()}</td>
+                          <td><strong>{event.action}</strong><small>{event.actorType}</small></td>
+                          <td><code>{event.actorId}</code></td>
+                          <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
+                          <td><code>{event.correlationId}</code></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  <div className="audit-pagination">
+                    <button className="secondary" type="button" disabled={auditLoading || auditPage.offset === 0} onClick={() => void loadAudit(Math.max(0, auditPage.offset - auditPage.limit))}>Previous</button>
+                    <span>Offset {auditPage.offset} of {auditPage.totalMatching}</span>
+                    <button className="secondary" type="button" disabled={auditLoading || auditPage.nextOffset === undefined} onClick={() => void loadAudit(auditPage.nextOffset ?? auditPage.offset)}>Next</button>
+                  </div>
+                </section>
               ) : null}
             </>
           ) : view === "analytics" ? (

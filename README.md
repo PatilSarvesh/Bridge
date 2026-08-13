@@ -55,6 +55,8 @@ The API and standalone MCP service expose dependency-free Prometheus text metric
 
 Human project administrators can open the web **Analytics** view or call `GET /v1/admin/projects/:projectId/analytics` to inspect run/context/question/decision/assumption/specification outcomes. The cohort can be filtered by agent client and run-start range. Analytics is calculated from lifecycle metadata and never returns raw prompts, task summaries, question/decision text, specification content, hidden reasoning, principal names, or external links. Definitions and interpretation limits are documented in [`docs/product-analytics.md`](docs/product-analytics.md).
 
+Human project administrators can browse their project's immutable metadata events in the web **Audit** view or through `GET /v1/admin/projects/:projectId/audit`; organization administrators can switch to the organization administration stream or call `GET /v1/admin/organization/audit`. Both views support exact action, actor, subject, correlation, and inclusive timestamp filters with bounded offset pagination. Audited `POST .../audit/export` commands return a bounded JSON or CSV download. Audit results contain identifiers, controlled action/type metadata, timestamps, and correlation IDs—not question/specification bodies, credentials, prompts, answers, or private reasoning.
+
 ## Operational health and recovery
 
 The API and standalone MCP service expose `GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness. The API keeps `GET /health` as a compatibility liveness alias. Readiness returns `503` with a sanitized dependency result when PostgreSQL is unavailable; load balancers should route traffic using readiness, not the compatibility endpoint.

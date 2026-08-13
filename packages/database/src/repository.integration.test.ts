@@ -118,8 +118,22 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         subjectId: owner.id,
         createdAt: "2026-01-02T00:00:00.000Z",
       });
+      await firstStore.repository.saveOrganizationAuditEvent({
+        id: `oaud_export_${suffix}`,
+        correlationId: `cor_export_${suffix}`,
+        organizationId: project.organizationId,
+        actorId: owner.id,
+        actorType: "human",
+        action: "audit.exported",
+        subjectType: "audit_export",
+        subjectId: `aex_${suffix}`,
+        createdAt: "2026-01-03T00:00:00.000Z",
+      });
       await expect(firstStore.repository.listOrganizationAuditEvents(project.organizationId))
-        .resolves.toMatchObject([{ subjectId: owner.id, action: "organization_member.updated" }]);
+        .resolves.toEqual(expect.arrayContaining([
+          expect.objectContaining({ subjectId: owner.id, action: "organization_member.updated" }),
+          expect.objectContaining({ subjectId: `aex_${suffix}`, action: "audit.exported" }),
+        ]));
       const service = new BridgeService(firstStore.repository);
       const registration = await service.startRun(agent, project.id, {
         idempotencyKey: `run-${suffix}`,

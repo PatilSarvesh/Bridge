@@ -7,7 +7,7 @@
 | Last updated | 2026-08-11, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and shared high-confidence secret blocking complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and shared high-confidence secret blocking complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, and pre-persistence high-confidence credential detection are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, RLS, broader DLP, deployment, and live provider/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -600,6 +600,13 @@ Delivery operations (human project administrators only):
 
 - `GET /v1/admin/projects/:projectId/outbox?status=&type=&limit=`
 - `POST /v1/admin/outbox/:eventId/replay` with the last observed `expectedAttempts`
+
+Audit operations:
+
+- `GET /v1/admin/projects/:projectId/audit` (human project administrators; exact metadata filters and bounded offset pagination)
+- `POST /v1/admin/projects/:projectId/audit/export` (bounded JSON/CSV; export is audited)
+- `GET /v1/admin/organization/audit` (human organization administrators)
+- `POST /v1/admin/organization/audit/export` (bounded JSON/CSV; export is audited)
 
 Specifications:
 
@@ -1693,6 +1700,23 @@ Deliberate boundaries:
 - This is a high-confidence accidental-leak guardrail, not comprehensive entropy scanning, enterprise DLP, malware inspection, attachment scanning, or repository secret scanning. Broader policy remains BRG-101 follow-up work.
 - Existing accepted records are not retroactively scanned or rewritten. A future migration/backfill would require explicit policy for false positives, quarantine, retention, and audit evidence.
 
+### 20.41 Implemented permission-restricted audit browser and export
+
+Implemented and locally verified:
+
+1. Human project administrators can list the selected project's append-only audit stream; human organization administrators can independently list the organization administration stream. Both application paths authorize the requested scope before reading and deny agents, ordinary members, and cross-tenant principals.
+2. Shared contracts validate exact action, actor, subject type/ID, correlation ID, and inclusive creation-time filters. Results are newest-first with an offset capped at 10,000 and page size capped at 200.
+3. The web **Audit** area exposes available project/organization scopes, filters, loading/empty/error states, page controls, and JSON/CSV downloads. It uses canonical REST and does not require MCP.
+4. Export uses a write-scoped `POST` command, caps output at 5,000 records, and appends an `audit.exported` event in the same repository transaction. Forward-only migration `0019_luxuriant_wallop.sql` expands the organization audit action/subject constraints; Drizzle snapshot/journal metadata matches the migration.
+5. The unified read/export record contains only audit IDs, tenant/project identifiers, actor ID/type, controlled action/subject metadata, timestamp, and correlation ID. It never loads or returns question, response, decision, assumption, specification, notification, prompt, transcript, customer-content, private-reasoning, token, or credential bodies.
+6. Application/API/database regressions cover authorization, tenant isolation, filters, paging bounds, invalid date ranges, JSON/CSV content, content exclusion, export audit provenance, and migration constraints.
+
+Deliberate boundaries:
+
+- The browser covers events already produced by implemented commands; completing BRG-100 still requires broader assignment, policy, permission, and authentication event coverage plus production retention/export governance.
+- Offset pagination is deliberately bounded for the pilot. A keyset cursor and repository-level filtered queries should replace in-memory filtering before very large tenant audit volumes.
+- PostgreSQL rows remain protected by application authorization and tenant predicates; database RLS, tamper-evident chaining/external WORM retention, and SIEM streaming remain deployment/security follow-up work.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1727,6 +1751,9 @@ Deliberate boundaries:
 - Correlation propagation migration: `packages/database/drizzle/0014_first_jane_foster.sql`
 - Organization/identity/membership migration: `packages/database/drizzle/0015_spooky_bulldozer.sql`
 - Versioned member-administration migration: `packages/database/drizzle/0016_charming_siren.sql`
+- Service-identity migration: `packages/database/drizzle/0017_cooing_slipstream.sql`
+- Service-identity rotation/audit migration: `packages/database/drizzle/0018_brainy_blonde_phantom.sql`
+- Organization audit-export constraint migration: `packages/database/drizzle/0019_luxuriant_wallop.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1778,4 +1805,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and pre-persistence high-confidence secret blocking; endpoint-specific tool scopes, MCP-side token issuance, RLS, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, and pre-persistence high-confidence secret blocking; endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, RLS, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
