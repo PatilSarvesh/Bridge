@@ -57,11 +57,12 @@ This masks record existence while preserving `FORBIDDEN` for an authenticated pr
 - `packages/application/src/index.test.ts` covers matrix-level human/agent policies, same-organization and cross-organization ID guessing for all implemented aggregate types, search/inbox/notification/outbox/audit isolation, and stable absent-versus-inaccessible errors.
 - `apps/api/src/app.test.ts` covers REST scope enforcement, resource-specific ID masking, human-only approval, protected-review sequencing, and exactly one successful decision under concurrent protected acceptance requests.
 - `apps/mcp/src/bridge-server.test.ts` verifies the MCP tool list contains agent submission/context tools but no human approval or lifecycle commands.
-- `packages/database/src/repository.integration.test.ts` covers serializable aggregate transactions, row locking, tenant predicates, and composite tenant/project constraints when `BRIDGE_TEST_DATABASE_URL` points to an isolated PostgreSQL database.
+- `packages/database/src/row-security.test.ts` verifies the forward-only migration enables and forces every expected tenant policy even when CI has no live database.
+- `packages/database/src/repository.integration.test.ts` covers serializable aggregate transactions, row locking, tenant predicates, composite tenant/project constraints, forced RLS catalog state, missing-scope default denial, and cross-organization read/write filtering when `BRIDGE_TEST_DATABASE_URL` points to an isolated PostgreSQL database.
 
 ## Deliberate remaining boundaries
 
-- PostgreSQL row-level security and a separate maintenance role remain BRG-012 work. Application policy, tenant predicates, serializable transactions, and composite constraints do not replace RLS.
+- RLS now protects 18 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; production role provisioning and live deployment evidence remain BRG-012 work. Application policy and composite constraints remain required alongside RLS.
 - Reassignment and project-policy mutation do not yet exist. Their future APIs require explicit matrix rows, audit events, and adversarial tests before release.
 - Live identity-provider and isolated PostgreSQL concurrency/ID-guessing evidence is deployment validation, not implied by the deterministic in-memory and optional integration suites.
 - Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities remain; endpoint-specific non-human scopes are BRG-011/BRG-013 follow-up work.

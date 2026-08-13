@@ -18,6 +18,7 @@ export interface PostgresBridgeStore {
 
 export interface PostgresBridgeStoreOptions {
   readonly metrics?: BridgeMetrics;
+  readonly mode?: "application" | "maintenance";
 }
 
 export function createPostgresBridgeStore(
@@ -31,7 +32,13 @@ export function createPostgresBridgeStore(
   });
   const database = drizzle(client, { schema });
   return {
-    repository: new PostgresBridgeRepository(database, false, options.metrics),
+    repository: new PostgresBridgeRepository(
+      database,
+      false,
+      options.metrics,
+      undefined,
+      options.mode === "maintenance",
+    ),
     close: () => client.end(),
   };
 }

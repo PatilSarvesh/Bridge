@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, and PostgreSQL RLS are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, and forced RLS on the core tenant data plane are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, bootstrap-directory hardening, production database-role provisioning, and live isolation evidence are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -67,7 +67,7 @@ The reviewed migrations normalize projects, agent runs, continuation locators, a
 
 Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
-Row-level security, production database roles, external delivery adapters, and live identity-provider/deployment validation remain future work. OIDC plus application membership checks materially improve the boundary but are not by themselves a complete production tenant-security implementation.
+Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on 18 tenant/project tables. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions. Production role provisioning, bootstrap-directory hardening, external delivery adapters, and live identity-provider/deployment validation remain future work, so these controls do not establish full production readiness.
 
 ## 4. System context
 
@@ -291,7 +291,9 @@ Defense in depth:
 
 At the application boundary, inaccessible project and object identifiers are deliberately masked as the same resource-specific `404` returned for absent identifiers. Same-project role failures remain `403`, so clients can distinguish missing action authority without learning whether another tenant's record exists.
 
-The application sets the active tenant in the database transaction using a local transaction parameter. Database access without a tenant must fail closed except for narrowly defined administrative maintenance roles.
+The application sets `bridge.organization_id` through transaction-local `set_config` before accessing tenant rows. Policies read it with the missing-value form of `current_setting`; an absent scope therefore exposes no protected rows and rejects protected writes. Nested repository transactions cannot change their organization or elevate to maintenance access.
+
+The API and MCP services must use a non-superuser `NOBYPASSRLS` role. Cross-tenant worker, restore, or approved maintenance tasks use a different connection and an explicitly configured `BYPASSRLS` role; the application role cannot opt itself into that path. The complete protected-table list, bootstrap exceptions, role grants, and verification procedure are documented in [`database-security.md`](database-security.md).
 
 ## 9. Data architecture
 

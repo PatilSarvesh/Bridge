@@ -119,7 +119,7 @@ if (oidcEnabled) {
           version: 1,
         });
       }
-    });
+    }, { organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID });
   }
 }
 const app = await buildApp({

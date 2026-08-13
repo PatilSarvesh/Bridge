@@ -144,7 +144,10 @@ export async function createDemoRuntimeWithRepository(
   }
   await repository.saveOrganization(demoOrganization);
   await repository.saveOrganization(outsiderOrganization);
-  await repository.saveProject(demoProject);
+  await repository.transaction(
+    (scopedRepository) => scopedRepository.saveProject(demoProject),
+    { organizationId: demoProject.organizationId },
+  );
   const timestamp = "2026-01-01T00:00:00.000Z";
   for (const principal of Object.values(demoPrincipals)) {
     const identity: PrincipalIdentity = {
@@ -156,41 +159,43 @@ export async function createDemoRuntimeWithRepository(
       createdAt: timestamp,
     };
     await repository.savePrincipalIdentity(identity);
-    await repository.saveOrganizationMembership({
-      organizationId: principal.organizationId,
-      principalId: principal.id,
-      status: "active",
-      roles: principal.roles,
-      allProjects: principal.allProjects ?? false,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      version: 1,
-    });
-    if (principal.organizationId === demoProject.organizationId) {
-      await repository.saveProjectMembership({
+    await repository.transaction(async (scopedRepository) => {
+      await scopedRepository.saveOrganizationMembership({
         organizationId: principal.organizationId,
-        projectId: demoProject.id,
         principalId: principal.id,
         status: "active",
         roles: principal.roles,
+        allProjects: principal.allProjects ?? false,
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
       });
-    }
+      if (principal.organizationId === demoProject.organizationId) {
+        await scopedRepository.saveProjectMembership({
+          organizationId: principal.organizationId,
+          projectId: demoProject.id,
+          principalId: principal.id,
+          status: "active",
+          roles: principal.roles,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          version: 1,
+        });
+      }
+    }, { organizationId: principal.organizationId });
   }
   let sampleRunId: string | undefined;
   let sampleQuestionId: string | undefined;
   let sampleArtifactId: string | undefined;
   let sampleArtifactVersionId: string | undefined;
   if (options.seedQuestion || options.seedArtifact) {
-    const legacyQuestion = (await repository.listQuestions(demoProject.id)).find(
+    const legacyQuestion = (await service.listQuestions(demoPrincipals.agent, demoProject.id)).find(
       (question) =>
         question.title === "Which transfer failures should trigger an automatic retry?" &&
         question.runId !== undefined,
     );
     const legacyRun = legacyQuestion?.runId
-      ? await repository.getRun(legacyQuestion.runId)
+      ? await service.getRun(demoPrincipals.agent, legacyQuestion.runId)
       : undefined;
     if (legacyRun) {
       sampleRunId = legacyRun.id;

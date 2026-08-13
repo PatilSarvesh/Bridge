@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, and MCP protected-resource metadata are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, RLS, and provisioning work prevents a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, and forced RLS on the core tenant data plane are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, bootstrap-directory hardening, production role provisioning, and live validation prevent a production-security claim.
 
 ## 2. Planning conventions
 
@@ -243,7 +243,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — tenant/project keys, application authorization, transactional repository scoping, constraints, and cross-project tests are implemented; PostgreSQL RLS and a separate maintenance role remain
+- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 18 tenant/project tables, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; the three pre-tenant authentication directories, production database-role provisioning, and live deployment evidence remain
 - **Dependencies:** BRG-003, BRG-011
 - **PRD references:** AUTH-04, PRJ-03, MVP acceptance criterion 14
 
@@ -982,7 +982,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP, including org-admin inheritance, configured decision-owner approval, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, and concurrent REST acceptance; reassignment/project-policy commands, PostgreSQL RLS, endpoint-specific scopes, and live-provider/database evidence remain
+- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, and core forced RLS; reassignment/project-policy commands, bootstrap-directory hardening, endpoint-specific scopes, and live-provider/database evidence remain
 - **Dependencies:** BRG-012, BRG-040, BRG-043, BRG-081
 - **PRD references:** MVP acceptance criteria 11 and 14
 
@@ -996,7 +996,7 @@ Acceptance criteria:
 4. Protected approval requirements cannot be bypassed through REST, MCP, or concurrent requests.
 5. Search, inbox, notifications, object links, and audit views are tenant-safe.
 
-Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. PostgreSQL RLS remains BRG-012 defense-in-depth work and is not represented as complete by the application-level matrix.
+Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. BRG-012 now supplies core data-plane RLS defense in depth, while the documented authentication-bootstrap exclusions, production role provisioning, and live evidence remain explicitly incomplete.
 
 ### BRG-103 — Add backup, restore, and operational health procedures
 
@@ -1202,7 +1202,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 
 | Risk | Backlog response |
 |---|---|
-| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS, administration, and deployment validation explicitly |
+| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS bootstrap exceptions, database-role provisioning, administration, and deployment validation explicitly |
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |
