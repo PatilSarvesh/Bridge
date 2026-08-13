@@ -56,6 +56,7 @@ import {
   type Artifact,
   type ArtifactReview,
   type ArtifactVersion,
+  type BridgeErrorCode,
   type ContextItem,
   type ContextSnapshot,
   type Decision,
@@ -2000,7 +2001,13 @@ export class BridgeService {
       ) {
         throw new BridgeError("NOTIFICATION_NOT_FOUND", "Notification not found.", 404);
       }
-      await this.requireProject(principal, notification.projectId, repository);
+      await this.requireProjectForResource(
+        principal,
+        notification.projectId,
+        repository,
+        "NOTIFICATION_NOT_FOUND",
+        "Notification not found.",
+      );
       if (notification.readAt) return notification;
       const updated = { ...notification, readAt: this.now().toISOString() };
       await repository.saveNotification(updated);
@@ -2261,7 +2268,13 @@ export class BridgeService {
       if (!event || event.organizationId !== principal.organizationId) {
         throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Delivery event not found.", 404);
       }
-      await this.requireProject(principal, event.projectId, repository);
+      await this.requireProjectForResource(
+        principal,
+        event.projectId,
+        repository,
+        "OUTBOX_EVENT_NOT_FOUND",
+        "Delivery event not found.",
+      );
       this.assertProjectOperator(principal, "Replaying a delivery event", event.projectId);
       if (event.status !== "failed" && event.status !== "dead_letter") {
         throw new BridgeError(
@@ -3259,7 +3272,13 @@ export class BridgeService {
     if (!question) {
       throw new BridgeError("QUESTION_NOT_FOUND", "Question not found.", 404);
     }
-    await this.requireProject(principal, question.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      question.projectId,
+      repository,
+      "QUESTION_NOT_FOUND",
+      "Question not found.",
+    );
     return question;
   }
 
@@ -3761,7 +3780,13 @@ export class BridgeService {
   ): Promise<Artifact> {
     const artifact = await repository.getArtifact(artifactId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification not found.",
+    );
     return artifact;
   }
 
@@ -3783,7 +3808,13 @@ export class BridgeService {
   ): Promise<ArtifactReviewResult> {
     const artifact = await repository.getArtifactByVersionId(versionId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification version not found.",
+    );
     assertCanReviewArtifact(principal, artifact);
     this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
@@ -3859,8 +3890,14 @@ export class BridgeService {
   ): Promise<ArtifactPublication> {
     const artifact = await repository.getArtifactByVersionId(versionId);
     if (!artifact) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
-    await this.requireProject(principal, artifact.projectId, repository);
-    assertCanApproveArtifact(principal, artifact);
+    const project = await this.requireProjectForResource(
+      principal,
+      artifact.projectId,
+      repository,
+      "ARTIFACT_NOT_FOUND",
+      "Specification version not found.",
+    );
+    assertCanApproveArtifact(principal, artifact, project.decisionOwnerIds);
     this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
@@ -4098,7 +4135,13 @@ export class BridgeService {
   ): Promise<AgentRun> {
     const run = await repository.getRun(runId);
     if (!run) throw new BridgeError("RUN_NOT_FOUND", "Agent run not found.", 404);
-    await this.requireProject(principal, run.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      run.projectId,
+      repository,
+      "RUN_NOT_FOUND",
+      "Agent run not found.",
+    );
     return run;
   }
 
@@ -4109,7 +4152,13 @@ export class BridgeService {
   ): Promise<Assumption> {
     const assumption = await repository.getAssumption(assumptionId);
     if (!assumption) throw new BridgeError("ASSUMPTION_NOT_FOUND", "Assumption not found.", 404);
-    await this.requireProject(principal, assumption.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      assumption.projectId,
+      repository,
+      "ASSUMPTION_NOT_FOUND",
+      "Assumption not found.",
+    );
     return assumption;
   }
 
@@ -4120,7 +4169,13 @@ export class BridgeService {
   ): Promise<Decision> {
     const decision = await repository.getDecision(decisionId);
     if (!decision) throw new BridgeError("DECISION_NOT_FOUND", "Decision not found.", 404);
-    await this.requireProject(principal, decision.projectId, repository);
+    await this.requireProjectForResource(
+      principal,
+      decision.projectId,
+      repository,
+      "DECISION_NOT_FOUND",
+      "Decision not found.",
+    );
     return decision;
   }
 
@@ -4433,11 +4488,34 @@ export class BridgeService {
     projectId: string,
     repository: BridgeRepository = this.repository,
   ): Promise<Project> {
+    return this.requireProjectForResource(
+      principal,
+      projectId,
+      repository,
+      "PROJECT_NOT_FOUND",
+      "Project not found.",
+    );
+  }
+
+  private async requireProjectForResource(
+    principal: Principal,
+    projectId: string,
+    repository: BridgeRepository,
+    notFoundCode: BridgeErrorCode,
+    notFoundMessage: string,
+  ): Promise<Project> {
     const project = await repository.getProject(projectId);
     if (!project) {
-      throw new BridgeError("PROJECT_NOT_FOUND", "Project not found.", 404);
+      throw new BridgeError(notFoundCode, notFoundMessage, 404);
     }
-    assertProjectAccess(principal, project);
+    try {
+      assertProjectAccess(principal, project);
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === "FORBIDDEN") {
+        throw new BridgeError(notFoundCode, notFoundMessage, 404);
+      }
+      throw error;
+    }
     return project;
   }
 

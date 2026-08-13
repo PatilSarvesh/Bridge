@@ -268,9 +268,11 @@ Examples:
 - An agent can create a draft but cannot approve it.
 - A decision owner can accept an ordinary decision only when the question scope overlaps their configured authority.
 - A protected approval may require two distinct roles.
-- An organization administrator can manage policy but should not silently impersonate a decision owner; administrative override is explicit and audited.
+- An organization administrator inherits project-administrator authority only inside their organization. An administrative acceptance or approval remains an explicit application command recorded under the administrator's own identity; Bridge never rewrites the actor as a decision owner.
 
 Every application command receives an immutable `PrincipalContext` and a resolved `AuthorizationContext`.
+
+The executable mapping from PRD roles to implemented commands, denial behavior, and transport exposure is maintained in [`authorization-matrix.md`](authorization-matrix.md).
 
 ## 8. Tenant isolation
 
@@ -286,6 +288,8 @@ Defense in depth:
 6. Object-storage keys begin with an opaque organization and project prefix.
 7. Queue payloads contain record IDs, not sensitive record bodies.
 8. Automated cross-tenant tests run against every externally accessible query and command.
+
+At the application boundary, inaccessible project and object identifiers are deliberately masked as the same resource-specific `404` returned for absent identifiers. Same-project role failures remain `403`, so clients can distinguish missing action authority without learning whether another tenant's record exists.
 
 The application sets the active tenant in the database transaction using a local transaction parameter. Database access without a tenant must fail closed except for narrowly defined administrative maintenance roles.
 

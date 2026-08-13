@@ -155,6 +155,70 @@ describe("Bridge API vertical slice", () => {
       .not.toContain(demoPrincipals.outsider.id);
   });
 
+  it("returns resource-specific not-found responses for cross-tenant and unassigned ID guesses", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true, seedArtifact: true });
+    const unassigned: Principal = {
+      ...demoPrincipals.contributor,
+      id: "usr_unassigned_api",
+      projectIds: [],
+      allProjects: false,
+      projectRoles: {},
+      displayName: "Unassigned user",
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: { ...runtime.principals, [unassigned.id]: unassigned },
+    });
+    apps.push(app);
+    expect(runtime.sampleRunId).toBeDefined();
+    expect(runtime.sampleQuestionId).toBeDefined();
+    expect(runtime.sampleArtifactId).toBeDefined();
+
+    const resources = [
+      {
+        actual: `/v1/projects/${demoProject.id}`,
+        absent: "/v1/projects/prj_absent",
+        code: "PROJECT_NOT_FOUND",
+      },
+      {
+        actual: `/v1/runs/${runtime.sampleRunId}`,
+        absent: "/v1/runs/run_absent",
+        code: "RUN_NOT_FOUND",
+      },
+      {
+        actual: `/v1/questions/${runtime.sampleQuestionId}`,
+        absent: "/v1/questions/que_absent",
+        code: "QUESTION_NOT_FOUND",
+      },
+      {
+        actual: `/v1/artifacts/${runtime.sampleArtifactId}`,
+        absent: "/v1/artifacts/art_absent",
+        code: "ARTIFACT_NOT_FOUND",
+      },
+    ];
+
+    for (const principalId of [demoPrincipals.outsider.id, unassigned.id]) {
+      for (const resource of resources) {
+        const actual = await app.inject({
+          method: "GET",
+          url: resource.actual,
+          headers: { "x-bridge-principal-id": principalId },
+        });
+        const absent = await app.inject({
+          method: "GET",
+          url: resource.absent,
+          headers: { "x-bridge-principal-id": principalId },
+        });
+        expect(actual.statusCode).toBe(404);
+        expect(absent.statusCode).toBe(404);
+        expect(actual.json()).toMatchObject({ code: resource.code });
+        expect(absent.json()).toMatchObject({ code: resource.code });
+        expect(actual.body).not.toContain("Payments Platform");
+        expect(actual.body).not.toContain("transfer retry");
+      }
+    }
+  });
+
   it("lets a human organization admin provision and version-update project membership", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
@@ -264,14 +328,19 @@ describe("Bridge API vertical slice", () => {
       projectId: demoProject.id,
     })] });
 
-    for (const principalId of [demoPrincipals.contributor.id, demoPrincipals.outsider.id]) {
-      const denied = await app.inject({
-        method: "GET",
-        url: `/v1/admin/projects/${demoProject.id}/audit`,
-        headers: { "x-bridge-principal-id": principalId },
-      });
-      expect(denied.statusCode).toBe(403);
-    }
+    const contributorDenied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/audit`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(contributorDenied.statusCode).toBe(403);
+    const outsiderDenied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/audit`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(outsiderDenied.statusCode).toBe(404);
+    expect(outsiderDenied.json()).toMatchObject({ code: "PROJECT_NOT_FOUND" });
     const invalidRange = await app.inject({
       method: "GET",
       url: `/v1/admin/projects/${demoProject.id}/audit?createdFrom=2026-02-01T00%3A00%3A00.000Z&createdTo=2026-01-01T00%3A00%3A00.000Z`,
@@ -1576,6 +1645,57 @@ describe("Bridge API vertical slice", () => {
     ]);
   });
 
+  it("allows exactly one protected acceptance across concurrent REST requests", async () => {
+    const runtime = await createDemoRuntime();
+    const question = await runtime.service.createQuestion(demoPrincipals.agent, demoProject.id, {
+      idempotencyKey: "api-concurrent-protected-question",
+      title: "Which protected-data deletion policy should apply?",
+      type: "decision",
+      category: "privacy",
+      context: "The implementation needs one reviewed deletion policy.",
+      whyItMatters: "Concurrent requests must not produce multiple authoritative decisions.",
+      intendedOwnerIds: [demoPrincipals.qaLead.id],
+      intendedOwnerRoles: [],
+      risk: "protected",
+      reversible: false,
+      blocking: true,
+      options: [
+        { key: "governed", label: "Use governed deletion", tradeoffs: "Requires review evidence." },
+        { key: "unbounded", label: "Keep data indefinitely", tradeoffs: "Creates privacy exposure." },
+      ],
+      recommendationKey: "governed",
+      scope: { component: "patient-records" },
+    });
+    await runtime.service.reviewQuestion(demoPrincipals.securityReviewer, question.id, {
+      expectedVersion: question.version,
+      status: "approved",
+      rationale: "The governed deletion option contains the required human-reviewed control.",
+    });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const requests = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/v1/questions/${question.id}/accept`,
+        headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+        payload: { optionKey: "governed", rationale: "First concurrent human acceptance." },
+      }),
+      app.inject({
+        method: "POST",
+        url: `/v1/questions/${question.id}/accept`,
+        headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+        payload: { optionKey: "governed", rationale: "Second concurrent human acceptance." },
+      }),
+    ]);
+
+    expect(requests.map((response) => response.statusCode).sort()).toEqual([201, 409]);
+    expect((await runtime.service.listDecisions(demoPrincipals.qaLead, demoProject.id, {
+      includeHistory: true,
+      scope: {},
+    })).filter((decision) => decision.questionId === question.id)).toHaveLength(1);
+  });
+
   it("publishes an agent specification, accepts only human approval, and includes it in context", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
@@ -1672,7 +1792,8 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/artifacts/${publication.artifact.id}/diff?fromVersionId=${publication.version.id}&toVersionId=${replacement.version.id}`,
       headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
     });
-    expect(deniedDiff.statusCode).toBe(403);
+    expect(deniedDiff.statusCode).toBe(404);
+    expect(deniedDiff.json()).toMatchObject({ code: "ARTIFACT_NOT_FOUND" });
 
     const invalidDiff = await app.inject({
       method: "GET",

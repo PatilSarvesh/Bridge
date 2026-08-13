@@ -982,7 +982,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — agent self-approval denials, role/protected-review policy, project scoping, notification authority, and cross-project/application tests are implemented; the complete PRD matrix, database RLS, and live concurrent-ID-guessing suite remain
+- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP, including org-admin inheritance, configured decision-owner approval, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, and concurrent REST acceptance; reassignment/project-policy commands, PostgreSQL RLS, endpoint-specific scopes, and live-provider/database evidence remain
 - **Dependencies:** BRG-012, BRG-040, BRG-043, BRG-081
 - **PRD references:** MVP acceptance criteria 11 and 14
 
@@ -995,6 +995,8 @@ Acceptance criteria:
 3. Agent self-acceptance and artifact self-approval fail.
 4. Protected approval requirements cannot be bypassed through REST, MCP, or concurrent requests.
 5. Search, inbox, notifications, object links, and audit views are tenant-safe.
+
+Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. PostgreSQL RLS remains BRG-012 defense-in-depth work and is not represented as complete by the application-level matrix.
 
 ### BRG-103 — Add backup, restore, and operational health procedures
 

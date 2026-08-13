@@ -12,6 +12,32 @@ describe("Bridge MCP tools", () => {
     await Promise.all(cleanup.splice(0).map((close) => close()));
   });
 
+  it("does not expose human approval commands through the agent MCP surface", async () => {
+    const runtime = await createDemoRuntime();
+    const server = createBridgeMcpServer(runtime.service, demoPrincipals.architect);
+    const client = new Client({ name: "bridge-authorization-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    const toolNames = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(toolNames).not.toEqual(expect.arrayContaining([
+      "bridge_accept_answer",
+      "bridge_approve_artifact",
+      "bridge_review_question",
+      "bridge_supersede_decision",
+    ]));
+    expect(toolNames).toEqual(expect.arrayContaining([
+      "bridge_create_question",
+      "bridge_publish_artifact",
+      "bridge_get_context",
+    ]));
+  });
+
   it("carries an accepted human decision into a later agent context request", async () => {
     const runtime = await createDemoRuntime();
     const server = createBridgeMcpServer(runtime.service, demoPrincipals.agent, {

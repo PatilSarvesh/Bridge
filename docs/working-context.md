@@ -1717,6 +1717,22 @@ Deliberate boundaries:
 - Offset pagination is deliberately bounded for the pilot. A keyset cursor and repository-level filtered queries should replace in-memory filtering before very large tenant audit volumes.
 - PostgreSQL rows remain protected by application authorization and tenant predicates; database RLS, tamper-evident chaining/external WORM retention, and SIEM streaming remain deployment/security follow-up work.
 
+### 20.42 Verified the implemented authorization and tenant-isolation matrix
+
+Implemented and locally verified:
+
+1. `docs/authorization-matrix.md` maps every PRD permissions row to an implemented command or an explicit unavailable capability, and records transport behavior for REST, web, CLI, and optional MCP.
+2. Organization administrators now inherit project-administrator access and authority across projects in only their own organization. Configured project decision owners may approve an immutable specification even when they are not an artifact-specific reviewer. Both paths preserve the real human actor in approval/audit records.
+3. Non-human principals still cannot accept decisions, approve specifications, perform lifecycle actions, or satisfy a human role merely by receiving a human-looking owner/reviewer assignment. The MCP agent surface exposes none of those approval commands.
+4. Project, run, assumption, question, decision, artifact/version, notification, and outbox lookups return the same resource-specific `404` for an inaccessible real ID and an absent ID. Same-project role failures remain `403`.
+5. Application and REST regressions cover cross-organization and same-organization/unassigned ID guessing, collection/search/inbox/notification/outbox/audit isolation, ordinary and protected authority, and concurrent protected acceptance. Exactly one concurrent REST request can create the authoritative decision.
+
+Deliberate boundaries:
+
+- Reassignment and project-policy mutation are unavailable, so their future implementation still requires role, audit, and adversarial test slices.
+- PostgreSQL RLS/separate maintenance roles, endpoint-specific non-human scopes, and live provider/isolated-database evidence remain BRG-012/BRG-011/BRG-013 deployment and defense-in-depth work.
+- CLI and MCP are agent integration surfaces and intentionally do not implement human approval commands; humans approve through REST-backed UI/API workflows.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1724,6 +1740,7 @@ Deliberate boundaries:
 - CI workflow: `.github/workflows/ci.yml`
 - Founder/pilot decisions: `docs/pilot-decisions.md`
 - Technical architecture: `docs/technical-architecture.md`
+- Authorization evidence matrix: `docs/authorization-matrix.md`
 - Implementation backlog: `docs/mvp-backlog.md`
 - This living context: `docs/working-context.md`
 - Domain entities/policy: `packages/domain/src/index.ts`
