@@ -164,6 +164,17 @@ textarea { width: 100%; min-height: 90px; margin: 0 0 10px; padding: 10px; resiz
 .analytics-table th, .analytics-table td { padding: 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
 .analytics-table th:first-child { text-align: left; text-transform: capitalize; }
 .analytics-table thead th { color: var(--muted); font-size: .78rem; }
+.support-stack { display: grid; gap: 16px; }
+.support-panel { display: grid; gap: 14px; }
+.support-list { display: grid; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; }
+.support-row { display: grid; grid-template-columns: 5px minmax(0, 1fr) auto; gap: 12px; width: 100%; padding: 13px; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); color: var(--text); text-align: left; }
+.support-row:last-child { border-bottom: 0; }
+.support-row:hover { background: var(--action-soft); }
+.support-row small { display: block; margin-top: 5px; color: var(--muted); }
+.support-table th, .support-table td { text-align: left; vertical-align: top; }
+.support-table code { color: var(--muted); font-size: .76rem; }
+.support-note { margin: 0; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+.support-note code { color: var(--text); }
 .audit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .audit-filter-panel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .audit-filter-panel label { display: grid; gap: 6px; color: var(--muted); font-size: .78rem; }

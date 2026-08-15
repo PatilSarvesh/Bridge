@@ -41,7 +41,7 @@ import {
   type BridgeScope,
   type Principal,
 } from "@bridge/domain";
-import type { BridgeService } from "@bridge/application";
+import type { BridgeService, ProjectSupportView } from "@bridge/application";
 import {
   BridgeMetrics,
   correlationIdHeader,
@@ -287,6 +287,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const query = projectAnalyticsQuerySchema.parse(request.query);
     return options.service.getProjectAnalytics(principal, request.params.projectId, query);
   });
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/admin/projects/:projectId/support",
+    async (request): Promise<ProjectSupportView> => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.getProjectSupport(principal, request.params.projectId);
+    },
+  );
 
   app.get<{
     Params: { projectId: string };

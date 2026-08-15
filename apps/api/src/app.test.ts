@@ -741,6 +741,37 @@ describe("Bridge API vertical slice", () => {
     expect(invalidRange.statusCode).toBe(400);
   });
 
+  it("exposes project support signals only to project operators", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/support`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      projectId: demoProject.id,
+      routing: { unroutedQuestions: [] },
+      decisions: { overdueProtected: [] },
+      delivery: { pendingCount: 1, failedCount: 0, deadLetterEvents: [] },
+      adapters: {
+        items: [expect.objectContaining({ client: "codex", capabilities: ["cli"] })],
+        mcpDiagnostics: "not_reported",
+      },
+    });
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/support`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(response.body).not.toContain("Which transfer failures should trigger an automatic retry?");
+  });
+
   it("returns a personalized question inbox while keeping the shared question list available", async () => {
     const runtime = await createDemoRuntime({ seedQuestion: true });
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -1546,6 +1546,53 @@ describe("Bridge decision workflow", () => {
     );
   });
 
+  it("derives a privacy-safe project support view and restricts it to project operators", async () => {
+    const { repository, service } = await runtime();
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "support-unrouted-question-001",
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+    }));
+    const [unroutedQuestion] = await repository.listQuestions(project.id);
+    expect(unroutedQuestion).toBeDefined();
+    await repository.saveQuestion({ ...unroutedQuestion!, ownerIds: [], ownerRoles: [] });
+    const run = await service.startRun(agent, project.id, {
+      idempotencyKey: "support-mcp-run-001",
+      client: "codex",
+      capability: "mcp",
+      taskSummary: "Check the support dashboard integration path",
+      scope: { component: "support" },
+      externalLinks: [],
+    });
+    await service.reportRun(agent, run.run.id, {
+      expectedVersion: run.run.version,
+      status: "completed",
+      summary: "MCP support check completed.",
+      resultLinks: [],
+    });
+    const [pending] = await repository.listOutboxEvents(project.id);
+    expect(pending).toBeDefined();
+    await repository.claimOutboxEvents(pending!.availableAt, 1);
+    await repository.failOutboxEvent(pending!.id, "provider unavailable", pending!.availableAt, true);
+
+    const support = await service.getProjectSupport(owner, project.id);
+    expect(support.routing.unroutedQuestions).toEqual([
+      expect.objectContaining({ category: "architecture", blocking: true, ownerIds: [], ownerRoles: [] }),
+    ]);
+    expect(support.delivery.deadLetterEvents).toEqual([
+      expect.objectContaining({ id: pending!.id, hasError: true }),
+    ]);
+    expect(support.adapters.items).toEqual([
+      expect.objectContaining({ client: "codex", capabilities: ["mcp"] }),
+    ]);
+    expect(support.adapters.mcpDiagnostics).toBe("observed_from_runs");
+    expect(JSON.stringify(support)).not.toContain("provider unavailable");
+    await expect(service.getProjectSupport(contributor, project.id))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectSupport(agent, project.id))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("elevates security questions and prevents cross-tenant access", async () => {
     const { service } = await runtime();
     await expect(

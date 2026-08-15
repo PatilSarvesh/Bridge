@@ -7,8 +7,8 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, and fail-closed role/grant reconciliation are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, and a project-scoped pilot support view complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, and permission-restricted pilot support diagnostics are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -1782,6 +1782,20 @@ Deliberate boundaries:
 - The script requires a role-management-capable operator connection and does not create or rotate credentials. It must never receive the API `DATABASE_URL` or the maintenance URL.
 - Default privileges cannot target only the bootstrap table names, so deployments must re-apply the explicit runtime `SELECT` revocation after any broad grant reconciliation.
 
+### 20.46 Implemented project-scoped pilot support view
+
+Implemented and locally verified:
+
+1. Project and organization administrators can call `GET /v1/admin/projects/:projectId/support`; ordinary members and agent principals receive the existing project-operator denial.
+2. The response contains only bounded metadata for active unrouted questions, overdue active decisions whose source question is protected, dead-letter delivery jobs, pending/failed counts, and recorded agent client/capability observations.
+3. The web **Support** area provides loading, empty, error, denied, and project-scoped states, links unrouted questions and overdue decisions back to their canonical views, and does not expose delivery error text or governance content.
+4. Adapter capability is derived from recorded runs. Repository-specific `bridge doctor` connectivity/MCP initialization checks remain local and are explicitly labeled as not persisted rather than being presented as a live integration guarantee.
+
+Deliberate boundaries:
+
+- The view is an operational signal surface, not a replacement for the outbox replay controls, audit browser, or local repository diagnostics.
+- Persisting adapter/connector health reports and surfacing provider-backed disconnected integrations remain follow-up work.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1875,4 +1889,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation; endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, and a project-scoped pilot support view; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

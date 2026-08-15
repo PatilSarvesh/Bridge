@@ -47,7 +47,7 @@ Project, run, assumption, question, decision, artifact/version, notification, an
 - a real inaccessible project returns `PROJECT_NOT_FOUND`, matching an absent project ID;
 - a real inaccessible record returns its own stable not-found code, matching an absent ID of that resource type;
 - error bodies contain no record title, body, answer, rationale, principal name, or tenant metadata;
-- collection, search, inbox, notification, analytics, outbox, and audit queries verify project access before reading the scoped collection.
+- collection, search, inbox, notification, analytics, support, outbox, and audit queries verify project access before reading the scoped collection.
 
 This masks record existence while preserving `FORBIDDEN` for an authenticated principal who can access the project but lacks the action role, such as a contributor attempting acceptance or audit export.
 
