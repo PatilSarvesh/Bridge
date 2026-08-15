@@ -4,11 +4,11 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-13, Asia/Kolkata |
+| Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, and security-definer bootstrap-directory lookups complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, production database-role provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, and bounded security-definer bootstrap lookups are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until production role provisioning, endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, and fail-closed role/grant reconciliation are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -1730,7 +1730,7 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - Reassignment and project-policy mutation are unavailable, so their future implementation still requires role, audit, and adversarial test slices.
-- RLS, the maintenance-store boundary, and security-definer bootstrap-directory lookups are now implemented as recorded in sections 20.43-20.44; production role provisioning, endpoint-specific non-human scopes, and live provider/isolated-database evidence remain BRG-012/BRG-011/BRG-013 work.
+- RLS, the maintenance-store boundary, security-definer bootstrap-directory lookups, and repeatable role/grant reconciliation are now implemented as recorded in sections 20.43-20.45; endpoint-specific non-human scopes and live provider/isolated-database evidence remain BRG-011/BRG-013/BRG-012 work.
 - CLI and MCP are agent integration surfaces and intentionally do not implement human approval commands; humans approve through REST-backed UI/API workflows.
 
 ### 20.43 Implemented forced tenant RLS and a separate maintenance boundary
@@ -1765,8 +1765,22 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- Bootstrap tables remain writable by application workflows that create organizations, identities, and credentials. Credential revoke/rotate updates avoid `RETURNING` so the runtime role does not need table `SELECT`; production role provisioning must preserve the no-direct-`SELECT` contract.
+- Bootstrap tables remain writable by application workflows that create organizations, identities, and credentials. Credential revoke/rotate updates avoid `RETURNING` so the runtime role does not need table `SELECT`; role reconciliation must preserve the no-direct-`SELECT` contract.
 - Production role grants, default-privilege reconciliation, and managed PostgreSQL/RDS evidence remain deployment work. Operators must re-apply the explicit bootstrap-table `SELECT` revocation after grant reconciliation.
+
+### 20.45 Implemented repeatable PostgreSQL role and grant reconciliation
+
+Implemented and locally verified:
+
+1. `scripts/provision-postgres-roles.sql` is an operator-only, idempotent `psql` script. It creates missing migrator/runtime/maintenance roles without passwords, reconciles `NOSUPERUSER`, `NOBYPASSRLS`, and `BYPASSRLS`, and refuses duplicate role mappings.
+2. The script grants database/schema/table/sequence capabilities to runtime and maintenance, revokes runtime `SELECT` on the three bootstrap tables, grants the six migration-0021 lookup functions only to runtime, and configures default privileges for future migration-owned tables.
+3. Catalog assertions fail the script if the role attributes, bootstrap `SELECT` revocations, or lookup-function `EXECUTE` grants do not match the contract. Passwords and workload credentials remain outside the repository and deployment script.
+4. Static tests cover the script's no-password and grant boundaries. The existing isolated PostgreSQL integration test remains the live check for a temporary NOBYPASSRLS role; a deployment operator must run the reconciliation script against the target database after migrations.
+
+Deliberate boundaries:
+
+- The script requires a role-management-capable operator connection and does not create or rotate credentials. It must never receive the API `DATABASE_URL` or the maintenance URL.
+- Default privileges cannot target only the bootstrap table names, so deployments must re-apply the explicit runtime `SELECT` revocation after any broad grant reconciliation.
 
 ## 21. Important implementation files
 
@@ -1782,6 +1796,7 @@ Deliberate boundaries:
 - OIDC verifier and encrypted web session: `packages/auth/src/index.ts`
 - Authentication and organization operator guide: `docs/authentication.md`
 - PostgreSQL tenant-isolation and role guide: `docs/database-security.md`
+- PostgreSQL role reconciliation: `scripts/provision-postgres-roles.sql`
 - Shared schemas: `packages/contracts/src/index.ts`
 - Application service/repository interface: `packages/application/src/index.ts`
 - Persisted-content secret detector: `packages/application/src/content-security.ts`
@@ -1860,4 +1875,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, and security-definer bootstrap-directory lookups; production database-role provisioning, endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation; endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

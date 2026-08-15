@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, and security-definer bootstrap-directory lookups are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, production role provisioning, and live validation prevent a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and live validation prevent a production-security claim.
 
 ## 2. Planning conventions
 
@@ -243,7 +243,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 18 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; production database-role provisioning and live deployment evidence remain
+- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 18 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
 - **Dependencies:** BRG-003, BRG-011
 - **PRD references:** AUTH-04, PRJ-03, MVP acceptance criterion 14
 
@@ -996,7 +996,7 @@ Acceptance criteria:
 4. Protected approval requirements cannot be bypassed through REST, MCP, or concurrent requests.
 5. Search, inbox, notifications, object links, and audit views are tenant-safe.
 
-Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. BRG-012 now supplies core data-plane RLS defense in depth and bounded security-definer authentication-bootstrap lookups, while production role provisioning and live evidence remain explicitly incomplete.
+Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. BRG-012 now supplies core data-plane RLS defense in depth, bounded security-definer authentication-bootstrap lookups, and repeatable role/grant reconciliation, while live deployment evidence remains explicitly incomplete.
 
 ### BRG-103 — Add backup, restore, and operational health procedures
 
@@ -1202,7 +1202,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 
 | Risk | Backlog response |
 |---|---|
-| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS bootstrap exceptions, database-role provisioning, administration, and deployment validation explicitly |
+| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS bootstrap exceptions, role reconciliation, administration, and deployment validation explicitly |
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |
