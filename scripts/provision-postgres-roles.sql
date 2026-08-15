@@ -71,6 +71,23 @@ SELECT format(
 );
 \gexec
 
+-- Prevent the runtime role from switching into either operator role, even if a
+-- previous deployment accidentally granted one of these memberships.
+SELECT format(
+  'REVOKE %I FROM %I, %I',
+  :'bridge_migrator_role',
+  :'bridge_runtime_role',
+  :'bridge_maintenance_role'
+);
+\gexec
+SELECT format(
+  'REVOKE %I FROM %I, %I',
+  :'bridge_maintenance_role',
+  :'bridge_runtime_role',
+  :'bridge_migrator_role'
+);
+\gexec
+
 -- Grant only the database/schema entry points needed by the two service roles.
 SELECT format(
   'GRANT CONNECT ON DATABASE %I TO %I, %I',
@@ -209,6 +226,23 @@ FROM (VALUES
   ('bridge_get_service_credential(text)'),
   ('bridge_list_service_credentials(text)')
 ) AS lookup_functions(function_signature);
+\gexec
+
+SELECT CASE
+  WHEN NOT EXISTS (
+    SELECT 1
+    FROM pg_auth_members AS membership
+    JOIN pg_roles AS member_role ON member_role.oid = membership.member
+    JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
+    WHERE member_role.rolname = :'bridge_runtime_role'
+      AND granted_role.rolname IN (
+        :'bridge_migrator_role',
+        :'bridge_maintenance_role'
+      )
+  )
+  THEN 'SELECT true'
+  ELSE 'SELECT 1 / 0'
+END;
 \gexec
 
 \echo Bridge PostgreSQL roles and grants are reconciled and verified.

@@ -41,6 +41,8 @@ describe("PostgreSQL role provisioning contract", () => {
     expect(script).toContain("REVOKE SELECT ON TABLE public.%I FROM %I");
     expect(script).toContain("has_table_privilege(:'bridge_runtime_role'");
     expect(script).toContain("has_function_privilege(:'bridge_runtime_role'");
+    expect(script).toContain("REVOKE %I FROM %I, %I");
+    expect(script).toContain("pg_auth_members");
     expect(script).toContain("ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public");
 
     for (const table of bootstrapTables) {
