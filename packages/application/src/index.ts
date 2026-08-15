@@ -16,6 +16,7 @@ import type {
   DecisionListQuery,
   CreateQuestionInput,
   FindQuestionMatchesInput,
+  LinkRepositoryInput,
   PublishArtifactInput,
   ProposeAnswerInput,
   QuestionCommentInput,
@@ -78,6 +79,7 @@ import {
   type OutboxEvent,
   type PrincipalIdentity,
   type ProjectMembership,
+  type RepositoryRecord,
   type ServiceCredential,
   type ServiceTokenResolution,
 } from "@bridge/domain";
@@ -143,6 +145,9 @@ export interface BridgeRepository {
   getProject(projectId: string): Promise<Project | undefined>;
   listProjects(organizationId: string): Promise<readonly Project[]>;
   saveProject(project: Project): Promise<void>;
+  getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined>;
+  listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]>;
+  saveRepositoryRecord(repository: RepositoryRecord): Promise<void>;
   getRun(runId: string): Promise<AgentRun | undefined>;
   listRuns(projectId: string): Promise<readonly AgentRun[]>;
   saveRun(run: AgentRun): Promise<void>;
@@ -246,6 +251,11 @@ export interface RunRegistration {
 
 export interface ProjectRegistration {
   readonly project: Project;
+  readonly disposition: "created" | "idempotent_replay";
+}
+
+export interface RepositoryRegistration {
+  readonly repository: RepositoryRecord;
   readonly disposition: "created" | "idempotent_replay";
 }
 
@@ -795,6 +805,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly organizationMemberships = new Map<string, OrganizationMembership>();
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
+  private readonly repositoryRecords = new Map<string, RepositoryRecord>();
   private readonly runs = new Map<string, AgentRun>();
   private readonly adapterDiagnostics = new Map<string, AdapterDiagnostic>();
   private readonly assumptions = new Map<string, Assumption>();
@@ -843,6 +854,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       organizationMemberships: new Map(this.organizationMemberships),
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
+      repositoryRecords: new Map(this.repositoryRecords),
       runs: new Map(this.runs),
       adapterDiagnostics: new Map(this.adapterDiagnostics),
       assumptions: new Map(this.assumptions),
@@ -872,6 +884,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.organizationMemberships, snapshot.organizationMemberships);
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
+      this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.adapterDiagnostics, snapshot.adapterDiagnostics);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -1121,6 +1134,20 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveProject(project: Project): Promise<void> {
     this.projects.set(project.id, project);
+  }
+
+  async getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined> {
+    return this.repositoryRecords.get(repositoryId);
+  }
+
+  async listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]> {
+    return [...this.repositoryRecords.values()]
+      .filter((repository) => repository.projectId === projectId)
+      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  }
+
+  async saveRepositoryRecord(repository: RepositoryRecord): Promise<void> {
+    this.repositoryRecords.set(repository.id, repository);
   }
 
   async getRun(runId: string): Promise<AgentRun | undefined> {
@@ -1603,6 +1630,74 @@ export class BridgeService {
           return false;
         }
       });
+    });
+  }
+
+  async linkRepository(
+    principal: Principal,
+    projectId: string,
+    input: LinkRepositoryInput,
+  ): Promise<RepositoryRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Linking a repository", projectId);
+      this.assertSecretSafe("administration", input);
+      const provider = input.provider.trim().toLowerCase();
+      const owner = input.owner.trim();
+      const name = input.name.trim();
+      const canonicalUrl = input.canonicalUrl.trim();
+      const repositoryId = `repo_${createHash("sha256")
+        .update(`${principal.organizationId}:${provider}:${owner}:${name}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getRepositoryRecord(repositoryId);
+      if (existing) {
+        const sameRequest = existing.organizationId === principal.organizationId &&
+          existing.projectId === projectId &&
+          existing.provider === provider &&
+          existing.owner === owner &&
+          existing.name === name &&
+          existing.canonicalUrl === canonicalUrl;
+        if (!sameRequest) {
+          throw new BridgeError(
+            "CONFLICT",
+            "This repository is already linked with different project or metadata.",
+            409,
+          );
+        }
+        return { repository: existing, disposition: "idempotent_replay" };
+      }
+      const linked: RepositoryRecord = {
+        id: repositoryId,
+        organizationId: principal.organizationId,
+        projectId,
+        provider,
+        owner,
+        name,
+        canonicalUrl,
+        createdAt: this.now().toISOString(),
+      };
+      await repository.saveRepositoryRecord(linked);
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "repository.linked",
+        "repository",
+        linked.id,
+        linked.createdAt,
+      );
+      return { repository: linked, disposition: "created" };
+    });
+  }
+
+  async listProjectRepositories(
+    principal: Principal,
+    projectId: string,
+  ): Promise<readonly RepositoryRecord[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      return repository.listProjectRepositories(projectId);
     });
   }
 

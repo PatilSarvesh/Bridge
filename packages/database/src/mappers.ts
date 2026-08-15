@@ -16,6 +16,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  RepositoryRecord,
   Question,
   QuestionResponse,
   ServiceCredential,
@@ -31,6 +32,7 @@ import {
   contextSnapshots,
   decisions,
   projects,
+  projectRepositories,
   questionResponses,
   questions,
   notifications,
@@ -51,6 +53,7 @@ export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSel
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
+export type RepositoryRecordRow = typeof projectRepositories.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AdapterDiagnosticRow = typeof adapterDiagnostics.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -283,6 +286,16 @@ export function projectFromRow(row: ProjectRow): Project {
     name: row.name,
     decisionOwnerIds: row.decisionOwnerIds,
   };
+}
+
+export function repositoryRecordToRow(
+  repository: RepositoryRecord,
+): typeof projectRepositories.$inferInsert {
+  return { ...repository };
+}
+
+export function repositoryRecordFromRow(row: RepositoryRecordRow): RepositoryRecord {
+  return { ...row };
 }
 
 export function runToRow(run: AgentRun): typeof agentRuns.$inferInsert {

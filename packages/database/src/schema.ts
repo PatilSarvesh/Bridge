@@ -7,6 +7,7 @@ import type {
   QuestionComment,
   QuestionOption,
   QuestionReview,
+  RepositoryRecord,
 } from "@bridge/domain";
 import { sql } from "drizzle-orm";
 import {
@@ -217,6 +218,37 @@ export const projects = pgTable(
     decisionOwnerIds: jsonb("decision_owner_ids").$type<readonly string[]>().notNull(),
   },
   (table) => [tenantPolicy("bridge_projects_tenant", table.organizationId)],
+).enableRLS();
+
+export const projectRepositories = pgTable(
+  "bridge_project_repositories",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    name: text("name").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    unique("bridge_project_repositories_org_provider_owner_name_unique").on(
+      table.organizationId,
+      table.provider,
+      table.owner,
+      table.name,
+    ),
+    index("bridge_project_repositories_project_name_idx").on(table.projectId, table.name),
+    foreignKey({
+      name: "bridge_project_repositories_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_repositories_tenant", table.organizationId),
+  ],
 ).enableRLS();
 
 export const projectMemberships = pgTable(

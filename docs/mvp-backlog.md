@@ -283,7 +283,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, and version-checked member/project-access administration UI are implemented; repository records remain
+- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, version-checked member/project-access administration UI, and REST-canonical project repository records are implemented; repository management in the web/CLI surfaces remains
 - **Dependencies:** BRG-010, BRG-012
 - **PRD references:** PRJ-01, PRJ-03
 

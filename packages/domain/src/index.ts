@@ -162,6 +162,17 @@ export interface Project {
   readonly decisionOwnerIds: readonly string[];
 }
 
+export interface RepositoryRecord {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly provider: string;
+  readonly owner: string;
+  readonly name: string;
+  readonly canonicalUrl: string;
+  readonly createdAt: string;
+}
+
 export interface AgentRun {
   readonly id: string;
   readonly organizationId: string;
@@ -476,7 +487,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
+  readonly subjectType: "project" | "repository" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
   readonly createdAt: string;
 }

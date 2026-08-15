@@ -7,7 +7,7 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -1853,6 +1853,20 @@ Deliberate boundaries:
 - The telemetry remains process-local and optional with MCP; REST remains the canonical business boundary and CLI/repository snapshots remain viable when MCP is not approved.
 - Tool errors are diagnostic outcomes, not automatic approval, policy, or incident decisions. Hosted collection, alert delivery, durable worker export, provider pool saturation, and pilot calibration remain deployment work.
 
+### 20.51 Implemented REST-canonical project repository records
+
+Implemented and locally verified:
+
+1. `POST /v1/projects/:projectId/repositories` links provider, owner, repository name, and canonical HTTP(S) URL metadata to an authorized project; `GET` returns the records to any principal with project access.
+2. Repository identity is deterministic and unique within an organization/provider/owner/name scope. Repeating the same link returns an idempotent replay, while attempting to link the same identity to another project returns a conflict without leaking unrelated project data.
+3. The in-memory and PostgreSQL repositories share the same contract. Migration `0025_calm_vengeance.sql` adds a tenant-scoped, forced-RLS table with a composite project foreign key, uniqueness constraint, index, mapper, restore-verifier coverage, and migration regression checks.
+4. Linking is project-admin/human controlled and writes a project audit event. Repository metadata remains separate from source code and is never fetched or stored by Bridge.
+
+Deliberate boundaries:
+
+- REST is the canonical repository-association boundary; MCP remains optional and does not gain a direct database path.
+- Web/CLI repository-management presentation and provider-backed repository validation remain follow-up work. The canonical URL is caller-supplied metadata, not proof of provider connectivity.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1873,6 +1887,7 @@ Deliberate boundaries:
 - Persisted-content secret detector: `packages/application/src/content-security.ts`
 - Database schema: `packages/database/src/schema.ts`
 - PostgreSQL repository: `packages/database/src/repository.ts`
+- Project repository metadata schema/mappers: `packages/database/src/schema.ts`, `packages/database/src/mappers.ts`
 - Initial migration: `packages/database/drizzle/0000_nice_bulldozer.sql`
 - Agent-run migration: `packages/database/drizzle/0001_early_ricochet.sql`
 - Assumption migration: `packages/database/drizzle/0002_complex_moondragon.sql`
@@ -1898,6 +1913,7 @@ Deliberate boundaries:
 - Slack delivery-channel migration: `packages/database/drizzle/0022_blue_betty_ross.sql`
 - Slack semantic-dedupe migration: `packages/database/drizzle/0023_normal_synch.sql`
 - Persisted adapter-diagnostic migration: `packages/database/drizzle/0024_amazing_blindfold.sql`
+- Project repository metadata migration: `packages/database/drizzle/0025_calm_vengeance.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1950,4 +1966,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

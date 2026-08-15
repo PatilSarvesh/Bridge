@@ -23,6 +23,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  RepositoryRecord,
   Question,
   ServiceCredential,
   ServiceTokenResolution,
@@ -60,6 +61,8 @@ import {
   projectMembershipToRow,
   projectFromRow,
   projectToRow,
+  repositoryRecordFromRow,
+  repositoryRecordToRow,
   serviceCredentialToRow,
   questionFromRows,
   questionToRow,
@@ -79,6 +82,7 @@ import {
   decisions,
   idempotencyRecords,
   projects,
+  projectRepositories,
   questionResponses,
   questions,
   runContinuationLocators,
@@ -627,6 +631,43 @@ export class PostgresBridgeRepository implements BridgeRepository {
           organizationId: row.organizationId,
           name: row.name,
           decisionOwnerIds: row.decisionOwnerIds,
+        },
+      });
+  }
+
+  async getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectRepositories)
+      .where(eq(projectRepositories.id, repositoryId))
+      .limit(1);
+    return row ? repositoryRecordFromRow(row) : undefined;
+  }
+
+  async listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]> {
+    const rows = await this.database
+      .select()
+      .from(projectRepositories)
+      .where(eq(projectRepositories.projectId, projectId))
+      .orderBy(asc(projectRepositories.name), asc(projectRepositories.id));
+    return rows.map(repositoryRecordFromRow);
+  }
+
+  async saveRepositoryRecord(repository: RepositoryRecord): Promise<void> {
+    const row = repositoryRecordToRow(repository);
+    await this.database
+      .insert(projectRepositories)
+      .values(row)
+      .onConflictDoUpdate({
+        target: projectRepositories.id,
+        set: {
+          organizationId: row.organizationId,
+          projectId: row.projectId,
+          provider: row.provider,
+          owner: row.owner,
+          name: row.name,
+          canonicalUrl: row.canonicalUrl,
+          createdAt: row.createdAt,
         },
       });
   }

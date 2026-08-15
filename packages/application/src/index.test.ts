@@ -243,6 +243,45 @@ describe("Bridge decision workflow", () => {
     expect(await service.listProjects(outsider)).toEqual([]);
   });
 
+  it("links project repositories idempotently and keeps canonical identity unique", async () => {
+    const { repository, service } = await runtime();
+    const input = {
+      idempotencyKey: "repository-link-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    } as const;
+
+    await expect(service.linkRepository(agent, project.id, input)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const created = await service.linkRepository(owner, project.id, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      repository: {
+        id: expect.stringMatching(/^repo_/),
+        organizationId: project.organizationId,
+        projectId: project.id,
+        provider: "github",
+        owner: "bridge-org",
+        name: "bridge",
+        canonicalUrl: input.canonicalUrl,
+      },
+    });
+    await expect(service.linkRepository(owner, project.id, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.listProjectRepositories(agent, project.id)).resolves.toEqual([created.repository]);
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "repository.linked", subjectType: "repository", subjectId: created.repository.id }),
+    ]));
+
+    const otherProject = { ...project, id: "prj_two", name: "Project Two" };
+    await repository.saveProject(otherProject);
+    await expect(service.linkRepository(owner, otherProject.id, input)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.listProjectRepositories(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+  });
+
   it("creates, lists, audits, and version-updates organization members", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);

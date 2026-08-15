@@ -198,6 +198,22 @@ export const registerProjectInputSchema = z.object({
   decisionOwnerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
 });
 
+export const repositoryProviderSchema = z.string()
+  .trim()
+  .min(2)
+  .max(50)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+export const linkRepositoryInputSchema = z.object({
+  idempotencyKey: z.string().trim().min(8).max(200),
+  provider: repositoryProviderSchema,
+  owner: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("http://") || value.startsWith("https://"),
+    "canonicalUrl must use HTTP or HTTPS.",
+  ),
+});
+
 export const questionOptionInputSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/),
   label: z.string().trim().min(1).max(500),
@@ -569,6 +585,7 @@ export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInp
 export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
 export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
+export type LinkRepositoryInput = z.infer<typeof linkRepositoryInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;

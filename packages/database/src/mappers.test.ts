@@ -16,6 +16,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  RepositoryRecord,
   Question,
   ServiceCredential,
 } from "@bridge/domain";
@@ -35,6 +36,8 @@ import {
   contextSnapshotToRow,
   projectFromRow,
   projectToRow,
+  repositoryRecordFromRow,
+  repositoryRecordToRow,
   notificationFromRow,
   notificationToRow,
   organizationFromRow,
@@ -66,6 +69,7 @@ import {
   type DecisionRow,
   type ContextSnapshotRow,
   type ProjectRow,
+  type RepositoryRecordRow,
   type QuestionResponseRow,
   type QuestionRow,
   type NotificationRow,
@@ -412,6 +416,18 @@ describe("PostgreSQL domain mappings", () => {
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
+    const repositoryRecord: RepositoryRecord = {
+      id: "repo_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+      createdAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
+      .toEqual(repositoryRecord);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -589,6 +605,15 @@ describe("PostgreSQL domain mappings", () => {
     expect(adapterDiagnosticMigration).toContain("FORCE ROW LEVEL SECURITY");
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_mcp_status_check");
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_status_check");
+
+    const repositoryMigration = readFileSync(
+      new URL("../drizzle/0025_calm_vengeance.sql", import.meta.url),
+      "utf8",
+    );
+    expect(repositoryMigration).toContain('CREATE TABLE "bridge_project_repositories"');
+    expect(repositoryMigration).toContain("bridge_project_repositories_org_provider_owner_name_unique");
+    expect(repositoryMigration).toContain("bridge_project_repositories_organization_project_fk");
+    expect(repositoryMigration).toContain("FORCE ROW LEVEL SECURITY");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

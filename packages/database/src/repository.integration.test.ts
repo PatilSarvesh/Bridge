@@ -50,6 +50,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       const protectedTables = [
         "bridge_agent_runs",
         "bridge_adapter_diagnostics",
+        "bridge_project_repositories",
         "bridge_artifact_versions",
         "bridge_artifacts",
         "bridge_assumptions",

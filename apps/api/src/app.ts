@@ -24,6 +24,7 @@ import {
   projectAnalyticsQuerySchema,
   questionReviewInputSchema,
   questionInboxQuerySchema,
+  linkRepositoryInputSchema,
   recordAdapterDiagnosticInputSchema,
   recordAssumptionInputSchema,
   registerProjectInputSchema,
@@ -436,6 +437,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = await resolvePrincipal(request, options);
     return options.service.getProject(principal, request.params.projectId);
   });
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/repositories",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = linkRepositoryInputSchema.parse(request.body);
+      const registration = await options.service.linkRepository(principal, request.params.projectId, input);
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/projects/:projectId/repositories",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+    },
+  );
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/adapter-diagnostics",

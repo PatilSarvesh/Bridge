@@ -945,6 +945,56 @@ describe("Bridge API vertical slice", () => {
     });
     expect(projects.json<{ items: Array<{ id: string }> }>().items.map((project) => project.id))
       .toContain(registration.project.id);
+
+    const repositoryPayload = {
+      idempotencyKey: "api-repository-link-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    };
+    const deniedRepository = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: repositoryPayload,
+    });
+    expect(deniedRepository.statusCode).toBe(403);
+
+    const linkedRepository = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: repositoryPayload,
+    });
+    expect(linkedRepository.statusCode).toBe(201);
+    expect(linkedRepository.json()).toMatchObject({
+      disposition: "created",
+      repository: {
+        provider: "github",
+        owner: "bridge-org",
+        name: "bridge",
+      },
+    });
+
+    const repositoryReplay = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: repositoryPayload,
+    });
+    expect(repositoryReplay.statusCode).toBe(200);
+    expect(repositoryReplay.json<{ repository: { id: string } }>().repository.id)
+      .toBe(linkedRepository.json<{ repository: { id: string } }>().repository.id);
+
+    const visibleRepositories = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(visibleRepositories.statusCode).toBe(200);
+    expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items)
+      .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
   });
 
   it("supports the fresh Hospital project question-and-specification acceptance journey", async () => {
