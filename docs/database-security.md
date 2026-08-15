@@ -11,13 +11,19 @@ Bridge uses application authorization and PostgreSQL row-level security (RLS) to
 - RLS is enabled and forced on the protected tables, including for their owner. PostgreSQL superusers and roles carrying `BYPASSRLS` still bypass policies, so they must never be used by the API or MCP service.
 - Readiness reports failure when an application connection can bypass RLS, or when a configured maintenance connection cannot bypass RLS.
 
-The following bootstrap directory tables are deliberately outside RLS in this slice:
+The following bootstrap directory tables remain outside RLS because authentication must resolve a
+tenant before a tenant transaction can be established:
 
 - `bridge_organizations`
 - `bridge_principal_identities`
 - `bridge_service_credentials`
 
-OIDC and service-token resolution must find the organization before a tenant transaction can be established. These repositories expose bounded exact-key lookups; membership and project data are then loaded inside the resolved organization transaction. A future hardening slice may replace these lookups with security-definer functions or a separately permissioned identity directory. This exception means Bridge must not yet claim complete production tenant isolation.
+OIDC and service-token resolution use the bounded security-definer functions from migration
+`0021_bootstrap_directory_security.sql`. The functions use a fixed `search_path`, return only
+exact-key results, and are not executable by `PUBLIC`. Tenant-scoped identity and credential
+lookups additionally require the transaction-local organization setting; service-token and OIDC
+bootstrap lookups are the only intentionally pre-tenant operations. The application role must
+never receive direct `SELECT` on these three tables.
 
 ## Role separation
 
@@ -43,9 +49,25 @@ grant usage on schema public to bridge_runtime, bridge_maintenance;
 grant select, insert, update, delete on all tables in schema public
   to bridge_runtime, bridge_maintenance;
 
+revoke select on table
+  public.bridge_organizations,
+  public.bridge_principal_identities,
+  public.bridge_service_credentials
+from bridge_runtime;
+
+grant execute on function public.bridge_lookup_principal_identity_by_oidc(text, text) to bridge_runtime;
+grant execute on function public.bridge_lookup_organization_by_external_id(text) to bridge_runtime;
+grant execute on function public.bridge_lookup_service_token(text) to bridge_runtime;
+grant execute on function public.bridge_get_principal_identity(text) to bridge_runtime;
+grant execute on function public.bridge_get_service_credential(text) to bridge_runtime;
+grant execute on function public.bridge_list_service_credentials(text) to bridge_runtime;
+
 alter default privileges for role bridge_migrator in schema public
   grant select, insert, update, delete on tables to bridge_runtime, bridge_maintenance;
 ```
+
+Re-apply the explicit bootstrap-table `SELECT` revocation after any role/grant
+reconciliation job; default privileges cannot target only these three table names.
 
 Create passwords or workload credentials through the deployment secret system rather than source-controlled SQL. The migration role must own the Bridge schema objects so it can apply forward-only migrations. Do not grant `TRUNCATE`, DDL, role administration, or membership in the migration/maintenance roles to `bridge_runtime`.
 
@@ -75,13 +97,14 @@ The restore verifier scans all organizations and therefore requires an isolated 
 
 ## Verification
 
-Static tests verify that migration `0020_tenant_row_security.sql` enables and forces every expected policy and backfills idempotency ownership before making it non-null. The opt-in PostgreSQL integration test additionally verifies:
+Static tests verify that migration `0020_tenant_row_security.sql` enables and forces every expected policy and backfills idempotency ownership before making it non-null. They also verify that migration `0021_bootstrap_directory_security.sql` creates only the approved security-definer directory lookups and revokes ambient table/function access from `PUBLIC`. The opt-in PostgreSQL integration test additionally verifies:
 
 - every protected relation has both `relrowsecurity` and `relforcerowsecurity`;
 - an unscoped non-bypass role sees no protected project rows;
 - changing the transaction-local organization exposes only that organization's row;
 - a scoped insert or update cannot target another organization;
 - an application store cannot request maintenance scope.
+- the runtime role cannot directly read bootstrap directory tables but can execute the explicitly granted lookup functions.
 
 Run the live test only against an isolated database:
 

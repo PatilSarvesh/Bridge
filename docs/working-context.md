@@ -7,8 +7,8 @@
 | Last updated | 2026-08-13, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, and forced RLS on the core tenant data plane complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, production database-role provisioning, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, and transaction-scoped forced RLS are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until bootstrap-directory hardening, production role provisioning, endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, and security-definer bootstrap-directory lookups complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, production database-role provisioning, and live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, and bounded security-definer bootstrap lookups are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until production role provisioning, endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -1730,7 +1730,7 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - Reassignment and project-policy mutation are unavailable, so their future implementation still requires role, audit, and adversarial test slices.
-- RLS and the maintenance-store boundary are now implemented as recorded in section 20.43; bootstrap-directory hardening, production role provisioning, endpoint-specific non-human scopes, and live provider/isolated-database evidence remain BRG-012/BRG-011/BRG-013 work.
+- RLS, the maintenance-store boundary, and security-definer bootstrap-directory lookups are now implemented as recorded in sections 20.43-20.44; production role provisioning, endpoint-specific non-human scopes, and live provider/isolated-database evidence remain BRG-012/BRG-011/BRG-013 work.
 - CLI and MCP are agent integration surfaces and intentionally do not implement human approval commands; humans approve through REST-backed UI/API workflows.
 
 ### 20.43 Implemented forced tenant RLS and a separate maintenance boundary
@@ -1748,10 +1748,25 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- `bridge_organizations`, `bridge_principal_identities`, and `bridge_service_credentials` remain outside RLS because exact identity/token lookup occurs before Bridge can resolve an organization. Membership and project reads immediately continue inside the resolved tenant. Security-definer lookup functions or a separately permissioned identity directory remain a future hardening slice.
+- `bridge_organizations`, `bridge_principal_identities`, and `bridge_service_credentials` remain outside RLS because exact identity/token lookup occurs before Bridge can resolve an organization. Migration `0021_bootstrap_directory_security.sql` now revokes ambient table reads and exposes only bounded security-definer functions; tenant-scoped directory reads require the transaction-local organization setting. Membership and project reads continue inside the resolved tenant.
 - The live worker is still handler-injected. Its future database wiring must use a distinct maintenance secret and store mode; the API/MCP `DATABASE_URL` must never carry `BYPASSRLS`.
 - Static and opt-in integration coverage do not prove production role grants, RDS configuration, or every live ID-guessing path. BRG-012 and BRG-102 remain partial until dated isolated-database and deployment evidence exists.
 - PostgreSQL constraints can reveal conflicting-key existence even under RLS. Bridge retains opaque identifiers, composite tenant constraints, application authorization, and stable not-found masking alongside database policies.
+
+### 20.44 Implemented security-definer bootstrap directory lookups
+
+Implemented and locally verified:
+
+1. Forward-only migration `0021_bootstrap_directory_security.sql` adds six SQL-language, `SECURITY DEFINER` lookup functions for OIDC identities, organizations, service-token resolution, tenant-scoped identity reads, tenant-scoped credential reads, and credential listing.
+2. Every function pins `search_path` to `pg_catalog, public`, uses exact parameters, and is revoked from `PUBLIC`. Deployment grants `EXECUTE` only to the runtime role; the runtime role receives no direct `SELECT` on the three bootstrap tables.
+3. Tenant-scoped functions fail closed unless the requested organization matches the transaction-local `bridge.organization_id`. Pre-tenant functions return only the exact OIDC, external-organization, or token-hash match required to establish that scope.
+4. The PostgreSQL repository routes all bootstrap reads through these functions. Service-token resolution uses the joined credential/identity result, while organization-principal listing resolves identities through the scoped function instead of a cross-table directory join.
+5. Static migration tests assert the security-definer count, safe search path, explicit `PUBLIC` revocations, and tenant-scope predicates. The opt-in integration suite exercises the grants with a temporary NOBYPASSRLS role when the isolated test connection has role-management authority.
+
+Deliberate boundaries:
+
+- Bootstrap tables remain writable by application workflows that create organizations, identities, and credentials. Credential revoke/rotate updates avoid `RETURNING` so the runtime role does not need table `SELECT`; production role provisioning must preserve the no-direct-`SELECT` contract.
+- Production role grants, default-privilege reconciliation, and managed PostgreSQL/RDS evidence remain deployment work. Operators must re-apply the explicit bootstrap-table `SELECT` revocation after grant reconciliation.
 
 ## 21. Important implementation files
 
@@ -1793,6 +1808,7 @@ Deliberate boundaries:
 - Service-identity rotation/audit migration: `packages/database/drizzle/0018_brainy_blonde_phantom.sql`
 - Organization audit-export constraint migration: `packages/database/drizzle/0019_luxuriant_wallop.sql`
 - Tenant row-security migration: `packages/database/drizzle/0020_tenant_row_security.sql`
+- Bootstrap directory security migration: `packages/database/drizzle/0021_bootstrap_directory_security.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1844,4 +1860,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, and forced transaction-scoped RLS on the core tenant data plane; bootstrap-directory hardening, production database-role provisioning, endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, and security-definer bootstrap-directory lookups; production database-role provisioning, endpoint-specific tool scopes, broader audit-event coverage, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
