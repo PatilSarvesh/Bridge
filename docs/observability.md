@@ -61,7 +61,7 @@ The registry records:
 - email and Slack delivery/policy outcome and handler duration.
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
 
-API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle`, `createNotificationEmailHandler`, and `createNotificationSlackHandler`; its long-running scheduling/export host remains deployment-owned because the repository worker entry point is not yet a durable daemon.
+API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle`, `createNotificationEmailHandler`, and `createNotificationSlackHandler`; the repository now includes a bounded long-running Slack outbox daemon, while a worker metrics endpoint or collector remains deployment-owned.
 
 Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or translate its PromQL into the chosen dashboard system), load `config/observability/bridge-pilot-alerts.yml` into a Prometheus-compatible rule evaluator, and use [`service-objectives.md`](./service-objectives.md) for the initial objectives and threshold rationale.
 
@@ -70,7 +70,7 @@ Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or trans
 - OpenTelemetry spans/export and production collector wiring.
 - MCP tool-name/session metrics beyond the bounded `/mcp` HTTP operation.
 - Stable PostgreSQL pool-utilization telemetry supplied by the selected deployment/provider.
-- A long-running worker metrics endpoint or collector integration and production evaluation of the included alert rules.
+- A worker metrics endpoint or collector integration and production evaluation of the included alert rules.
 - Validation and tuning of the initial service objectives against representative pilot telemetry.
 - Deployment-owned log access control, retention, and audit evidence.
 

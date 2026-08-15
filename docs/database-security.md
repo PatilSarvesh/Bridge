@@ -72,14 +72,14 @@ createPostgresBridgeStore(process.env.DATABASE_URL!);
 Only a cross-tenant worker or approved maintenance process may opt into the maintenance boundary:
 
 ```ts
-createPostgresBridgeStore(process.env.BRIDGE_MAINTENANCE_DATABASE_URL!, {
+createPostgresBridgeStore(process.env.BRIDGE_WORKER_DATABASE_URL!, {
   mode: "maintenance",
 });
 ```
 
 The maintenance option enables only explicitly maintenance-gated repository operations. It does not set a bypass parameter; PostgreSQL itself must authenticate the connection as the separately provisioned `BYPASSRLS` role.
 
-The current worker package is handler-injected and is not yet wired to a live database process. That later deployment wiring must use `BRIDGE_MAINTENANCE_DATABASE_URL`, never the API URL.
+The worker package now provides a bounded Slack outbox daemon. It requires `BRIDGE_WORKER_DATABASE_URL`, opens the store with `mode: "maintenance"`, and never falls back to `DATABASE_URL`; the deployment must provision that value from the separate maintenance role's secret.
 
 ## Restore verification
 

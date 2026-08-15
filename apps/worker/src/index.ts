@@ -153,8 +153,46 @@ export async function runReviewReminderCycle(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const logger = createSafeLogger({ service: "bridge-worker" });
-  runReviewReminderCycle().catch((error: unknown) => {
-    logger.error("service.failed", { error });
-    process.exitCode = 1;
-  });
+  const controller = new AbortController();
+  const stop = (): void => {
+    logger.info("service.shutdown_requested", { status: "stopping" });
+    controller.abort();
+  };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+  void import("./runtime.js")
+    .then(async ({ createConfiguredWorker, loadWorkerConfiguration, runOutboxWorker }) => {
+      const configuration = loadWorkerConfiguration();
+      const runtime = createConfiguredWorker(configuration);
+      try {
+        await runtime.store.repository.checkHealth();
+        logger.info("service.started", {
+          channel: configuration.channel,
+          pollIntervalMs: configuration.pollIntervalMs,
+          batchSize: configuration.batchSize,
+          status: "ready",
+        });
+        await runOutboxWorker({
+          store: runtime.store.repository,
+          handler: runtime.handler,
+          pollIntervalMs: configuration.pollIntervalMs,
+          cycleOptions: {
+            batchSize: configuration.batchSize,
+            maxAttempts: configuration.maxAttempts,
+            baseBackoffMs: configuration.baseBackoffMs,
+          },
+          signal: controller.signal,
+        });
+      } finally {
+        await runtime.close();
+      }
+    })
+    .catch((error: unknown) => {
+      logger.error("service.failed", { error });
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      process.removeListener("SIGTERM", stop);
+      process.removeListener("SIGINT", stop);
+    });
 }

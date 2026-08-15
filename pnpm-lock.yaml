@@ -122,6 +122,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bridge/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@bridge/domain':
         specifier: workspace:*
         version: link:../../packages/domain

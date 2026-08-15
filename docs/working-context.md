@@ -7,7 +7,7 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, and a Slack Incoming Webhook notification handler complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, live Slack workspace/runtime validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -1808,8 +1808,23 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - This is notification-only; Slack cannot accept decisions, approve specifications, or mutate Bridge state.
-- The repository provides the provider-neutral sender/handler and configuration parser. Live Slack workspace installation, deployment secret provisioning, worker composition, and provider/network failure-window validation remain deployment work.
+- The repository provides the provider-neutral sender/handler and configuration parser. Live Slack workspace installation, deployment secret provisioning, and provider/network failure-window validation remain deployment work; worker composition is implemented in section 20.48.
 - The existing at-least-once outbox model applies. A provider acknowledgement lost before the receipt is committed can still require operator review; no unproven exactly-once claim is made.
+
+### 20.48 Implemented deployable Slack outbox worker runtime
+
+Implemented and locally verified:
+
+1. `@bridge/worker` now starts a bounded polling loop instead of only printing a readiness placeholder. It claims through the existing outbox contract, invokes the Slack notification handler, records normal retry/dead-letter outcomes through `runOutboxCycle`, and waits between cycles to avoid a hot loop.
+2. The process requires `BRIDGE_WORKER_DATABASE_URL`, deliberately separate from the API's `DATABASE_URL`, and opens the PostgreSQL store in `maintenance` mode. This preserves the database security boundary: API/MCP use `NOBYPASSRLS`, while only the explicitly provisioned worker connection can claim cross-tenant delivery work.
+3. `BRIDGE_WORKER_CHANNEL` currently accepts `slack`; `BRIDGE_WORKER_POLL_INTERVAL_MS`, `BRIDGE_WORKER_BATCH_SIZE`, `BRIDGE_WORKER_MAX_ATTEMPTS`, and `BRIDGE_WORKER_BASE_BACKOFF_MS` are validated and bounded. `SIGTERM` and `SIGINT` stop polling and close the database client cleanly.
+4. The worker passes the shared metrics registry and safe logger through the existing correlation-aware outbox/integration boundaries. It never runs migrations, stores webhook URLs, accepts decisions, or changes the human approval boundary.
+
+Deliberate boundaries:
+
+- The runtime currently composes Slack only. Email still requires a live sender/directory and a separate deployment composition; no unsupported email path is silently marked delivered.
+- A worker database connection must be provisioned with the documented maintenance role and an explicit target. No production or shared database command is part of the repository validation.
+- Slack workspace installation, deployment secret provisioning, provider/network failure-window testing, and a worker metrics exporter remain deployment evidence.
 
 ## 21. Important implementation files
 
@@ -1864,7 +1879,7 @@ Deliberate boundaries:
 - CLI PKCE, loopback callback, and OS credential stores: `apps/cli/src/auth.ts`
 - Web UI: `apps/web/app/page.tsx`
 - Web styles: `apps/web/app/globals.css`
-- Worker reminder/outbox cycle: `apps/worker/src/index.ts`
+- Worker outbox cycle/runtime: `apps/worker/src/index.ts`, `apps/worker/src/runtime.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
 - Slack pilot notification handler and Incoming Webhook sender: `apps/worker/src/slack.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
@@ -1907,4 +1922,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, and a Slack Incoming Webhook notification adapter; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

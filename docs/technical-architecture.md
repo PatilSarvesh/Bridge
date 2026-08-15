@@ -67,7 +67,7 @@ The reviewed migrations normalize projects, agent runs, continuation locators, a
 
 Project registration, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
-Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on 18 tenant/project tables. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions, but migration `0021_bootstrap_directory_security.sql` removes ambient runtime table reads and exposes only bounded security-definer lookups. The repeatable `scripts/provision-postgres-roles.sql` reconciles the runtime/migrator/maintenance role attributes and grants without handling passwords. External delivery adapters and live identity-provider/deployment validation remain future work, so these controls do not establish full production readiness.
+Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on 18 tenant/project tables. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions, but migration `0021_bootstrap_directory_security.sql` removes ambient runtime table reads and exposes only bounded security-definer lookups. The repeatable `scripts/provision-postgres-roles.sql` reconciles the runtime/migrator/maintenance role attributes and grants without handling passwords. The Slack delivery adapter and bounded worker runtime are repository-implemented; live email, identity-provider, workspace, and deployment validation remain future work, so these controls do not establish full production readiness.
 
 ## 4. System context
 
@@ -135,7 +135,7 @@ In the implemented standalone process, MCP and API use the same migrated Postgre
 
 Responsibilities:
 
-- Claim and process transactional outbox events with leases, bounded retries, and dead-letter state; the current `runOutboxCycle` accepts an injected delivery handler.
+- Claim and process transactional outbox events with leases, bounded retries, and dead-letter state; `runOutboxCycle` accepts an injected delivery handler and the worker runtime supplies bounded polling, graceful shutdown, and a maintenance-role PostgreSQL composition.
 - Deliver email and team-channel notifications.
 - Maintain full-text search documents and optional derived embeddings later.
 - Perform duplicate suggestions, conflict scans, expiry jobs, and impact analysis.
@@ -494,7 +494,7 @@ Current prototype behavior adds these conservative rules:
 - Expiry defaults to seven days and cannot exceed 30 days.
 - Exact normalized duplicates and direct textual negations of active same-category/exact-scope decisions return `CONFLICT` with the decision ID.
 - Human decision owners/project administrators resolve assumptions with an expected version and rationale.
-- Active due assumptions are durably expired during authoritative reads until the scheduled worker/outbox adapter exists.
+- Active due assumptions are durably expired during authoritative reads until the scheduled expiry job is connected to the worker runtime.
 
 ## 12. REST API
 
@@ -779,7 +779,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. Jitter, live provider implementations, time-series telemetry, and scheduled runtime wiring remain deployment work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. The deployable worker runtime uses `BRIDGE_WORKER_DATABASE_URL` with the maintenance role, validates bounded poll/batch/retry settings, and handles shutdown signals. Jitter, live email provider implementation, time-series telemetry, and deployment validation remain follow-up work.
 
 ## 17. Notification architecture
 
@@ -791,7 +791,7 @@ Notification generation is separate from delivery:
 4. The provider-neutral email handler resolves the recipient and immediate/digest/muted preference through an injected directory, renders bounded plain text, and calls an injected sender without persisting the address.
 5. The Slack Incoming Webhook handler resolves the project channel through deployment configuration, renders bounded status/risk/owner metadata with a Bridge link, and calls an injected sender without persisting the webhook URL.
 6. `outbox_deliveries` records the destination hash, optional semantic dedupe key, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
-7. A future scheduled runtime wires live directories and email/Slack senders; deferred digest receipts become inputs to a digest job rather than credentials or addresses stored in the outbox.
+7. The configured worker runtime wires the Slack sender and project-channel directory from deployment configuration; live email directories/senders and deferred digest receipts remain future scheduler inputs rather than credentials or addresses stored in the outbox.
 
 Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest deferral. The actual digest scheduler and administrative preference store are not yet connected.
 
