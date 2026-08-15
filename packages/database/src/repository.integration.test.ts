@@ -151,6 +151,130 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     }
   });
 
+  it("protects bootstrap directories behind bounded security-definer lookups", async () => {
+    if (!databaseUrl) return;
+    await migrateDatabase(databaseUrl);
+
+    const suffix = randomUUID().replaceAll("-", "");
+    const organizationId = `org_bootstrap_${suffix}`;
+    const principalId = `usr_bootstrap_${suffix}`;
+    const credentialId = `svc_bootstrap_${suffix}`;
+    const externalIdentityProviderId = `bootstrap-${suffix}`;
+    const tokenHash = `hash-${suffix}`;
+    const store = createPostgresBridgeStore(databaseUrl);
+    const client = postgres(databaseUrl, { max: 1, prepare: false, onnotice: () => undefined });
+    let testRole: string | undefined;
+    try {
+      await store.repository.saveOrganization({
+        id: organizationId,
+        externalIdentityProviderId,
+        slug: `bootstrap-${suffix}`,
+        name: "Bootstrap Directory Test",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await store.repository.savePrincipalIdentity({
+        id: principalId,
+        type: "agent",
+        displayName: "Bootstrap Agent",
+        oidcIssuer: "https://identity.example/",
+        oidcSubject: `bootstrap|${suffix}`,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await inTenant(store.repository, organizationId, (repository) => repository.saveOrganizationMembership({
+        organizationId,
+        principalId,
+        status: "active",
+        roles: ["agent"],
+        allProjects: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        version: 1,
+      }));
+      await store.repository.saveServiceCredential({
+        id: credentialId,
+        organizationId,
+        principalId,
+        name: "Bootstrap token",
+        tokenHash,
+        scopes: ["bridge:read"],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        version: 1,
+      });
+
+      expect((await store.repository.getOrganizationByExternalId(externalIdentityProviderId))?.id)
+        .toBe(organizationId);
+      expect((await store.repository.getPrincipalIdentityByOidc(
+        "https://identity.example/",
+        `bootstrap|${suffix}`,
+      ))?.id).toBe(principalId);
+      expect((await store.repository.getServiceCredentialByTokenHash(tokenHash))?.id)
+        .toBe(credentialId);
+      await inTenant(store.repository, organizationId, async (repository) => {
+        expect((await repository.getPrincipalIdentity(principalId))?.id).toBe(principalId);
+        expect((await repository.getServiceCredential(credentialId))?.id).toBe(credentialId);
+        expect((await repository.listServiceCredentials(organizationId)).map((credential) => credential.id))
+          .toEqual([credentialId]);
+      });
+
+      const [runtimeRole] = await client<{ bypassesRls: boolean; canCreateRole: boolean }[]>`
+        select (rolsuper or rolbypassrls) as "bypassesRls", rolcreaterole as "canCreateRole"
+        from pg_roles
+        where rolname = current_user
+      `;
+      if (runtimeRole?.bypassesRls || runtimeRole?.canCreateRole) {
+        testRole = `bridge_bootstrap_test_${suffix}`;
+        const testRoleName = testRole;
+        await client`create role ${client(testRoleName)} nologin nobypassrls`;
+        await client`grant usage on schema public to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_lookup_principal_identity_by_oidc(text, text) to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_lookup_organization_by_external_id(text) to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_lookup_service_token(text) to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_get_principal_identity(text) to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_get_service_credential(text) to ${client(testRoleName)}`;
+        await client`grant execute on function public.bridge_list_service_credentials(text) to ${client(testRoleName)}`;
+
+        for (const table of [
+          "bridge_organizations",
+          "bridge_principal_identities",
+          "bridge_service_credentials",
+        ]) {
+          await expect(client.begin(async (transaction) => {
+            await transaction`set local role ${transaction(testRoleName)}`;
+            await transaction.unsafe(`select id from public.${table} limit 1`);
+          })).rejects.toMatchObject({ code: "42501" });
+        }
+
+        await client.begin(async (transaction) => {
+          await transaction`set local role ${transaction(testRoleName)}`;
+          const organization = await transaction<{ id: string }[]>`
+            select id from public.bridge_lookup_organization_by_external_id(${externalIdentityProviderId})
+          `;
+          expect(organization).toEqual([{ id: organizationId }]);
+          const token = await transaction<{ id: string; principal_id: string }[]>`
+            select id, principal_id from public.bridge_lookup_service_token(${tokenHash})
+          `;
+          expect(token).toEqual([{ id: credentialId, principal_id: principalId }]);
+          await transaction`select set_config('bridge.organization_id', ${organizationId}, true)`;
+          const identity = await transaction<{ id: string }[]>`
+            select id from public.bridge_get_principal_identity(${principalId})
+          `;
+          expect(identity).toEqual([{ id: principalId }]);
+          const credentials = await transaction<{ id: string }[]>`
+            select id from public.bridge_list_service_credentials(${organizationId})
+          `;
+          expect(credentials).toEqual([{ id: credentialId }]);
+        });
+      }
+    } finally {
+      if (testRole) {
+        await client`drop owned by ${client(testRole)}`;
+        await client`drop role if exists ${client(testRole)}`;
+      }
+      await Promise.all([store.close(), client.end()]);
+    }
+  });
+
   it("persists run provenance, assumptions, decisions, and approved specifications across connections", async () => {
     if (!databaseUrl) return;
     await migrateDatabase(databaseUrl);

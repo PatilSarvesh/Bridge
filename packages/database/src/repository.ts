@@ -43,7 +43,6 @@ import {
   decisionToRow,
   notificationFromRow,
   notificationToRow,
-  organizationFromRow,
   organizationAuditEventFromRow,
   organizationAuditEventToRow,
   organizationMembershipFromRow,
@@ -53,13 +52,11 @@ import {
   outboxDeliveryToRow,
   outboxEventFromRow,
   outboxEventToRow,
-  principalIdentityFromRow,
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
   projectFromRow,
   projectToRow,
-  serviceCredentialFromRow,
   serviceCredentialToRow,
   questionFromRows,
   questionToRow,
@@ -95,6 +92,85 @@ import {
 type BridgeDatabase = PostgresJsDatabase<typeof schema>;
 type IdempotencyKind = (typeof schema.idempotencyKindEnum.enumValues)[number];
 
+interface PrincipalIdentityLookupRow {
+  readonly [key: string]: unknown;
+  readonly id: string;
+  readonly type: PrincipalIdentity["type"];
+  readonly display_name: string;
+  readonly oidc_issuer: string;
+  readonly oidc_subject: string;
+  readonly created_at: string;
+}
+
+interface OrganizationLookupRow {
+  readonly [key: string]: unknown;
+  readonly id: string;
+  readonly external_identity_provider_id: string;
+  readonly slug: string;
+  readonly name: string;
+  readonly created_at: string;
+}
+
+interface ServiceCredentialLookupRow {
+  readonly [key: string]: unknown;
+  readonly id: string;
+  readonly organization_id: string;
+  readonly principal_id: string;
+  readonly name: string;
+  readonly token_hash: string;
+  readonly scopes: readonly string[];
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly rotated_at: string | null;
+  readonly revoked_at: string | null;
+  readonly version: number;
+}
+
+interface ServiceTokenLookupRow extends ServiceCredentialLookupRow {
+  readonly principal_type: PrincipalIdentity["type"];
+  readonly principal_display_name: string;
+  readonly principal_oidc_issuer: string;
+  readonly principal_oidc_subject: string;
+  readonly principal_created_at: string;
+}
+
+function principalIdentityFromLookupRow(row: PrincipalIdentityLookupRow): PrincipalIdentity {
+  return {
+    id: row.id,
+    type: row.type,
+    displayName: row.display_name,
+    oidcIssuer: row.oidc_issuer,
+    oidcSubject: row.oidc_subject,
+    createdAt: row.created_at,
+  };
+}
+
+function organizationFromLookupRow(row: OrganizationLookupRow): Organization {
+  return {
+    id: row.id,
+    externalIdentityProviderId: row.external_identity_provider_id,
+    slug: row.slug,
+    name: row.name,
+    createdAt: row.created_at,
+  };
+}
+
+function serviceCredentialFromLookupRow(row: ServiceCredentialLookupRow): ServiceCredential {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    principalId: row.principal_id,
+    name: row.name,
+    tokenHash: row.token_hash,
+    scopes: row.scopes,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    ...(row.rotated_at === null ? {} : { rotatedAt: row.rotated_at }),
+    ...(row.revoked_at === null ? {} : { revokedAt: row.revoked_at }),
+    version: row.version,
+  };
+}
+
 function databaseErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
   const code = (error as { readonly code?: unknown }).code;
@@ -109,6 +185,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
     private readonly transactionContext?: RepositoryTransactionContext,
     private readonly allowMaintenance = false,
   ) {}
+
+  private async lookupServiceToken(tokenHash: string): Promise<ServiceTokenLookupRow | undefined> {
+    const rows = await this.database.execute<ServiceTokenLookupRow>(sql`
+      select * from public.bridge_lookup_service_token(${tokenHash})
+    `);
+    return rows[0];
+  }
 
   async checkHealth(): Promise<{ readonly backend: string }> {
     const rows = await this.database.execute<{ readonly bypassesRls: boolean }>(sql`
@@ -195,12 +278,10 @@ export class PostgresBridgeRepository implements BridgeRepository {
   async getOrganizationByExternalId(
     externalIdentityProviderId: string,
   ): Promise<Organization | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(organizations)
-      .where(eq(organizations.externalIdentityProviderId, externalIdentityProviderId))
-      .limit(1);
-    return row ? organizationFromRow(row) : undefined;
+    const rows = await this.database.execute<OrganizationLookupRow>(sql`
+      select * from public.bridge_lookup_organization_by_external_id(${externalIdentityProviderId})
+    `);
+    return rows[0] ? organizationFromLookupRow(rows[0]) : undefined;
   }
 
   async saveOrganization(organization: Organization): Promise<void> {
@@ -219,24 +300,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     issuer: string,
     subject: string,
   ): Promise<PrincipalIdentity | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(principalIdentities)
-      .where(and(
-        eq(principalIdentities.oidcIssuer, issuer),
-        eq(principalIdentities.oidcSubject, subject),
-      ))
-      .limit(1);
-    return row ? principalIdentityFromRow(row) : undefined;
+    const rows = await this.database.execute<PrincipalIdentityLookupRow>(sql`
+      select * from public.bridge_lookup_principal_identity_by_oidc(${issuer}, ${subject})
+    `);
+    return rows[0] ? principalIdentityFromLookupRow(rows[0]) : undefined;
   }
 
   async getPrincipalIdentity(principalId: string): Promise<PrincipalIdentity | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(principalIdentities)
-      .where(eq(principalIdentities.id, principalId))
-      .limit(1);
-    return row ? principalIdentityFromRow(row) : undefined;
+    const rows = await this.database.execute<PrincipalIdentityLookupRow>(sql`
+      select * from public.bridge_get_principal_identity(${principalId})
+    `);
+    return rows[0] ? principalIdentityFromLookupRow(rows[0]) : undefined;
   }
 
   async savePrincipalIdentity(identity: PrincipalIdentity): Promise<void> {
@@ -253,30 +327,22 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async getServiceCredential(serviceCredentialId: string): Promise<ServiceCredential | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(serviceCredentials)
-      .where(eq(serviceCredentials.id, serviceCredentialId))
-      .limit(1);
-    return row ? serviceCredentialFromRow(row) : undefined;
+    const rows = await this.database.execute<ServiceCredentialLookupRow>(sql`
+      select * from public.bridge_get_service_credential(${serviceCredentialId})
+    `);
+    return rows[0] ? serviceCredentialFromLookupRow(rows[0]) : undefined;
   }
 
   async getServiceCredentialByTokenHash(tokenHash: string): Promise<ServiceCredential | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(serviceCredentials)
-      .where(eq(serviceCredentials.tokenHash, tokenHash))
-      .limit(1);
-    return row ? serviceCredentialFromRow(row) : undefined;
+    const row = await this.lookupServiceToken(tokenHash);
+    return row ? serviceCredentialFromLookupRow(row) : undefined;
   }
 
   async listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]> {
-    const rows = await this.database
-      .select()
-      .from(serviceCredentials)
-      .where(eq(serviceCredentials.organizationId, organizationId))
-      .orderBy(asc(serviceCredentials.createdAt));
-    return rows.map(serviceCredentialFromRow);
+    const rows = await this.database.execute<ServiceCredentialLookupRow>(sql`
+      select * from public.bridge_list_service_credentials(${organizationId})
+    `);
+    return rows.map(serviceCredentialFromLookupRow);
   }
 
   async saveServiceCredential(credential: ServiceCredential): Promise<void> {
@@ -298,13 +364,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     expectedVersion?: number,
   ): Promise<boolean> {
     const row = serviceCredentialToRow(credential);
-    const conditions = [eq(serviceCredentials.id, credential.id)];
-    if (expectedVersion !== undefined) conditions.push(eq(serviceCredentials.version, expectedVersion));
-    const updated = await this.database.update(serviceCredentials).set({
-      revokedAt: row.revokedAt,
-      version: row.version,
-    }).where(and(...conditions)).returning({ id: serviceCredentials.id });
-    return updated.length === 1;
+    const expectedVersionCondition = expectedVersion === undefined
+      ? sql``
+      : sql`and version = ${expectedVersion}`;
+    const updated = await this.database.execute(sql`
+      update public.bridge_service_credentials
+      set revoked_at = ${row.revokedAt}, version = ${row.version}
+      where id = ${credential.id}
+        and organization_id = nullif(current_setting('bridge.organization_id', true), '')
+        ${expectedVersionCondition}
+    `);
+    return updated.count === 1;
   }
 
   async rotateServiceCredential(
@@ -312,14 +382,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     expectedVersion?: number,
   ): Promise<boolean> {
     const row = serviceCredentialToRow(credential);
-    const conditions = [eq(serviceCredentials.id, credential.id)];
-    if (expectedVersion !== undefined) conditions.push(eq(serviceCredentials.version, expectedVersion));
-    const updated = await this.database.update(serviceCredentials).set({
-      tokenHash: row.tokenHash,
-      rotatedAt: row.rotatedAt,
-      version: row.version,
-    }).where(and(...conditions)).returning({ id: serviceCredentials.id });
-    return updated.length === 1;
+    const expectedVersionCondition = expectedVersion === undefined
+      ? sql``
+      : sql`and version = ${expectedVersion}`;
+    const updated = await this.database.execute(sql`
+      update public.bridge_service_credentials
+      set token_hash = ${row.tokenHash}, rotated_at = ${row.rotatedAt}, version = ${row.version}
+      where id = ${credential.id}
+        and organization_id = nullif(current_setting('bridge.organization_id', true), '')
+        ${expectedVersionCondition}
+    `);
+    return updated.count === 1;
   }
 
   async getOrganizationMembership(
@@ -466,25 +539,26 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
-    const credential = await this.getServiceCredentialByTokenHash(tokenHash);
+    const lookup = await this.lookupServiceToken(tokenHash);
+    const credential = lookup ? serviceCredentialFromLookupRow(lookup) : undefined;
     const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
-    if (!credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    if (!lookup || !credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
     return this.transaction(async (repository) => {
-      const principalIdentity = await repository.getPrincipalIdentity(credential.principalId);
-      const organizationMembership = principalIdentity
-        ? await repository.getOrganizationMembership(credential.organizationId, principalIdentity.id)
-        : undefined;
-      if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
+      const organizationMembership = await repository.getOrganizationMembership(
+        credential.organizationId,
+        lookup.principal_id,
+      );
+      if (lookup.principal_type === "human" || !organizationMembership ||
         organizationMembership.status !== "active") return undefined;
       const memberships = (await repository.listProjectMemberships(
         credential.organizationId,
-        principalIdentity.id,
+        lookup.principal_id,
       )).filter((membership) => membership.status === "active");
       return {
         credential,
         principal: {
-          id: principalIdentity.id,
-          type: principalIdentity.type,
+          id: lookup.principal_id,
+          type: lookup.principal_type,
           organizationId: credential.organizationId,
           projectIds: memberships.map((membership) => membership.projectId),
           allProjects: organizationMembership.allProjects,
@@ -492,44 +566,36 @@ export class PostgresBridgeRepository implements BridgeRepository {
           projectRoles: Object.fromEntries(
             memberships.map((membership) => [membership.projectId, membership.roles]),
           ),
-          displayName: principalIdentity.displayName,
+          displayName: lookup.principal_display_name,
         },
       };
     }, { organizationId: credential.organizationId });
   }
 
   async listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]> {
-    const rows = await this.database
-      .select({
-        identity: principalIdentities,
-        membership: organizationMemberships,
-      })
-      .from(organizationMemberships)
-      .innerJoin(
-        principalIdentities,
-        eq(organizationMemberships.principalId, principalIdentities.id),
-      )
-      .where(and(
-        eq(organizationMemberships.organizationId, organizationId),
-        eq(organizationMemberships.status, "active"),
-      ));
-    const principals = await Promise.all(rows.map(async (row): Promise<Principal> => {
-      const memberships = (await this.listProjectMemberships(organizationId, row.identity.id))
+    const memberships = (await this.listOrganizationMemberships(organizationId))
+      .filter((membership) => membership.status === "active");
+    const principals = await Promise.all(memberships.map(async (membership): Promise<Principal | undefined> => {
+      const identity = await this.getPrincipalIdentity(membership.principalId);
+      if (!identity) return undefined;
+      const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id))
         .filter((membership) => membership.status === "active");
       return {
-        id: row.identity.id,
-        type: row.identity.type,
+        id: identity.id,
+        type: identity.type,
         organizationId,
-        projectIds: memberships.map((membership) => membership.projectId),
-        allProjects: row.membership.allProjects,
-        roles: row.membership.roles,
+        projectIds: projectMemberships.map((membership) => membership.projectId),
+        allProjects: membership.allProjects,
+        roles: membership.roles,
         projectRoles: Object.fromEntries(
-          memberships.map((membership) => [membership.projectId, membership.roles]),
+          projectMemberships.map((membership) => [membership.projectId, membership.roles]),
         ),
-        displayName: row.identity.displayName,
+        displayName: identity.displayName,
       };
     }));
-    return principals.sort((left, right) => left.displayName.localeCompare(right.displayName));
+    return principals
+      .filter((principal): principal is Principal => principal !== undefined)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName));
   }
 
   async getProject(projectId: string): Promise<Project | undefined> {
