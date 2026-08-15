@@ -1396,6 +1396,12 @@ describe("Bridge decision workflow", () => {
         payload: expect.objectContaining({
           notificationId: assigned[0]!.id,
           recipientId: owner.id,
+          questionContext: {
+            id: question.id,
+            status: "open",
+            risk: question.risk,
+            ownerIds: question.ownerIds,
+          },
         }),
       }),
     ]);

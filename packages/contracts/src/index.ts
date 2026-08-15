@@ -38,7 +38,7 @@ export const outboxEventStatusSchema = z.enum([
   "failed",
   "dead_letter",
 ]);
-export const deliveryChannelSchema = z.enum(["email"]);
+export const deliveryChannelSchema = z.enum(["email", "slack"]);
 export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
 export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest", "muted"]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);

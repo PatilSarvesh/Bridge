@@ -9,6 +9,7 @@ import {
 } from "@bridge/observability";
 
 export * from "./email.js";
+export * from "./slack.js";
 
 export interface ReviewableDecision {
   readonly id: string;

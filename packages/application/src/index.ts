@@ -68,6 +68,7 @@ import {
   type QuestionReview,
   type QuestionResponse,
   type Notification,
+  type NotificationQuestionContext,
   type Organization,
   type OrganizationAuditEvent,
   type OrganizationMembership,
@@ -631,6 +632,7 @@ interface NotificationDraft {
   readonly body: string;
   readonly targetType: Notification["targetType"];
   readonly targetId: string;
+  readonly questionContext?: NotificationQuestionContext;
 }
 
 export type QuestionSubmission = Question & {
@@ -3123,6 +3125,12 @@ export class BridgeService {
       body: `${principal.displayName} routed “${question.title}” to you.`,
       targetType: "question",
       targetId: question.id,
+      questionContext: {
+        id: question.id,
+        status: question.status,
+        risk: question.risk,
+        ownerIds: question.ownerIds,
+      },
     });
     return { ...question, submissionDisposition: "created" };
   }
@@ -3398,6 +3406,12 @@ export class BridgeService {
       body: `${principal.displayName} marked “${question.title}” ${review.status}.`,
       targetType: "review",
       targetId: review.id,
+      questionContext: {
+        id: question.id,
+        status: question.status,
+        risk: question.risk,
+        ownerIds: question.ownerIds,
+      },
     });
     return review;
   }
@@ -3466,6 +3480,12 @@ export class BridgeService {
         body: `${principal.displayName} added a clarification to “${question.title}”.`,
         targetType: "comment",
         targetId: comment.id,
+        questionContext: {
+          id: question.id,
+          status: "in_discussion",
+          risk: question.risk,
+          ownerIds: question.ownerIds,
+        },
       },
     );
     return comment;
@@ -3540,6 +3560,12 @@ export class BridgeService {
       body: `${principal.displayName} proposed an answer for “${question.title}”.`,
       targetType: "response",
       targetId: response.id,
+      questionContext: {
+        id: question.id,
+        status: "in_discussion",
+        risk: question.risk,
+        ownerIds: question.ownerIds,
+      },
     });
     return response;
   }
@@ -3628,6 +3654,12 @@ export class BridgeService {
         body: `${principal.displayName} accepted the decision for “${question.title}”.`,
         targetType: "decision",
         targetId: decision.id,
+        questionContext: {
+          id: question.id,
+          status: "accepted",
+          risk: question.risk,
+          ownerIds: question.ownerIds,
+        },
       },
     );
     return decision;
@@ -3807,6 +3839,14 @@ export class BridgeService {
         body: `The decision “${decision.answer}” was ${input.status}.`,
         targetType: "decision",
         targetId: decision.id,
+        ...(sourceQuestion ? {
+          questionContext: {
+            id: sourceQuestion.id,
+            status: sourceQuestion.status,
+            risk: sourceQuestion.risk,
+            ownerIds: sourceQuestion.ownerIds,
+          },
+        } : {}),
       },
     );
     return { decision: changed, impact };
@@ -4799,6 +4839,7 @@ export class BridgeService {
           notificationType: draft.type,
           targetType: draft.targetType,
           targetId: draft.targetId,
+          ...(draft.questionContext ? { questionContext: draft.questionContext } : {}),
         },
         status: "pending",
         attempts: 0,

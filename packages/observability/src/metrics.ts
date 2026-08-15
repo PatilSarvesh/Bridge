@@ -107,7 +107,7 @@ export interface OutboxCycleMetric {
 }
 
 export interface NotificationDeliveryMetric {
-  readonly channel: "email";
+  readonly channel: "email" | "slack";
   readonly outcome: BridgeNotificationOutcome;
   readonly durationMs: number;
 }

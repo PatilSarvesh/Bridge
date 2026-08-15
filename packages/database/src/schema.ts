@@ -687,6 +687,7 @@ export const outboxDeliveries = pgTable(
     projectId: text("project_id").notNull(),
     outboxEventId: text("outbox_event_id").notNull(),
     channel: text("channel").notNull(),
+    dedupeKey: text("dedupe_key"),
     destinationHash: text("destination_hash").notNull(),
     status: text("status").notNull(),
     attemptCount: integer("attempt_count").notNull(),
@@ -700,6 +701,12 @@ export const outboxDeliveries = pgTable(
     unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
     index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
     index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
+    index("bridge_outbox_deliveries_project_channel_dedupe_idx").on(
+      table.projectId,
+      table.channel,
+      table.dedupeKey,
+    ),
+    check("bridge_outbox_deliveries_channel_check", sql`${table.channel} IN ('email', 'slack')`),
     foreignKey({
       name: "bridge_outbox_deliveries_event_scope_fk",
       columns: [table.organizationId, table.projectId, table.outboxEventId],

@@ -1,4 +1,9 @@
-import type { Notification, OutboxDelivery, OutboxEvent } from "@bridge/domain";
+import type {
+  Notification,
+  NotificationQuestionContext,
+  OutboxDelivery,
+  OutboxEvent,
+} from "@bridge/domain";
 import { BridgeMetrics, currentCorrelationId } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
@@ -8,10 +13,17 @@ import {
   decisionsDueForReview,
   renderEssentialEmailTemplate,
   runOutboxCycle,
+  createNotificationSlackHandler,
+  createSlackChannelDirectory,
+  createSlackChannelDirectoryFromEnvironment,
+  createSlackWebhookSender,
+  renderSlackNotification,
   type EmailSendRequest,
   type EssentialEmailTemplateKind,
   type NotificationEmailStore,
   type OutboxStore,
+  type SlackNotificationStore,
+  type SlackSendRequest,
 } from "./index.js";
 
 class TestOutboxStore implements OutboxStore {
@@ -139,6 +151,33 @@ class TestNotificationEmailStore implements NotificationEmailStore {
     return [...this.deliveries.values()].find(
       (delivery) => delivery.outboxEventId === eventId && delivery.channel === channel,
     );
+  }
+
+  async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
+    this.deliveries.set(delivery.id, delivery);
+  }
+}
+
+class TestNotificationSlackStore implements SlackNotificationStore {
+  readonly notifications = new Map<string, Notification>();
+  readonly deliveries = new Map<string, OutboxDelivery>();
+
+  constructor(items: readonly Notification[]) {
+    for (const item of items) this.notifications.set(item.id, item);
+  }
+
+  async getNotification(notificationId: string): Promise<Notification | undefined> {
+    return this.notifications.get(notificationId);
+  }
+
+  async getOutboxDelivery(eventId: string, channel: "slack"): Promise<OutboxDelivery | undefined> {
+    return [...this.deliveries.values()].find(
+      (delivery) => delivery.outboxEventId === eventId && delivery.channel === channel,
+    );
+  }
+
+  async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
+    return [...this.deliveries.values()].filter((delivery) => delivery.projectId === projectId);
   }
 
   async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
@@ -386,5 +425,179 @@ describe("notification email delivery", () => {
     expect(delivery?.lastError).toContain("Bearer [redacted]");
     expect(delivery?.lastError).not.toContain("top-secret");
     expect(delivery?.lastError).not.toContain("hidden-value");
+  });
+});
+
+describe("Slack notification delivery", () => {
+  const questionContext: NotificationQuestionContext = {
+    id: "qst_worker",
+    status: "in_discussion",
+    risk: "protected",
+    ownerIds: ["usr_owner"],
+  };
+
+  it("renders question status, risk, owner, and a Bridge link without the notification body", async () => {
+    const item = notification("slack_render");
+    const rendered = await renderSlackNotification(
+      item,
+      questionContext,
+      "https://bridge.example.test/",
+      { resolveDisplayName: async () => "Architecture Owner" },
+    );
+
+    expect(rendered.text).toContain("status: in_discussion");
+    expect(rendered.text).toContain("risk: protected");
+    expect(rendered.text).toContain("owner: Architecture Owner");
+    expect(rendered.text).toContain("view=questions");
+    expect(rendered.blocks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fields: expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining("Status") }),
+          expect.objectContaining({ text: expect.stringContaining("Risk") }),
+          expect.objectContaining({ text: expect.stringContaining("Owner") }),
+        ]),
+      }),
+      expect.objectContaining({
+        elements: expect.arrayContaining([
+          expect.objectContaining({ text: expect.stringContaining("Final acceptance and approval remain in Bridge") }),
+        ]),
+      }),
+    ]));
+    expect(JSON.stringify(rendered)).not.toContain(item.body);
+  });
+
+  it("uses the configured Slack webhook once for duplicate event delivery", async () => {
+    const metrics = new BridgeMetrics();
+    const item = notification("slack_delivery");
+    const event = {
+      ...notificationEvent("evt_slack_delivery", item),
+      status: "processing" as const,
+      attempts: 1,
+      payload: {
+        ...notificationEvent("evt_slack_delivery", item).payload,
+        questionContext,
+      },
+    };
+    const store = new TestNotificationSlackStore([item]);
+    const requests: SlackSendRequest[] = [];
+    const handler = createNotificationSlackHandler({
+      store,
+      channels: createSlackChannelDirectory({
+        prj_worker: "https://hooks.slack.com/services/T000/B000/secret",
+      }),
+      sender: {
+        send: async (request) => {
+          requests.push(request);
+          return { providerMessageId: "slack-request-001" };
+        },
+      },
+      publicBaseUrl: "https://bridge.example.test/",
+      owners: { resolveDisplayName: async () => "Architecture Owner" },
+      now: () => new Date("2026-08-08T00:00:01.000Z"),
+      metrics,
+    });
+
+    await handler(event);
+    await handler(event);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      idempotencyKey: "evt_slack_delivery:slack",
+      correlationId: "cor_evt_slack_delivery",
+    });
+    const [delivery] = [...store.deliveries.values()];
+    expect(delivery).toMatchObject({
+      outboxEventId: event.id,
+      channel: "slack",
+      status: "delivered",
+      attemptCount: 1,
+      preference: "immediate",
+      providerMessageId: "slack-request-001",
+      destinationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(JSON.stringify(delivery)).not.toContain("hooks.slack.com");
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_notification_deliveries_total",
+        labels: { channel: "slack", outcome: "delivered" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_notification_deliveries_total",
+        labels: { channel: "slack", outcome: "skipped" },
+        value: 1,
+      }),
+    ]));
+  });
+
+  it("collapses separate recipient events into one project-channel message", async () => {
+    const first = notification("slack_owner_one");
+    const second = { ...first, id: "ntf_slack_owner_two", recipientId: "usr_second" };
+    const firstEvent = {
+      ...notificationEvent("evt_slack_owner_one", first),
+      status: "processing" as const,
+      attempts: 1,
+      payload: { ...notificationEvent("evt_slack_owner_one", first).payload, questionContext },
+    };
+    const secondEvent = {
+      ...notificationEvent("evt_slack_owner_two", second),
+      status: "processing" as const,
+      attempts: 1,
+      payload: { ...notificationEvent("evt_slack_owner_two", second).payload, questionContext },
+    };
+    const store = new TestNotificationSlackStore([first, second]);
+    const requests: SlackSendRequest[] = [];
+    const handler = createNotificationSlackHandler({
+      store,
+      channels: createSlackChannelDirectory({
+        prj_worker: "https://hooks.slack.com/services/T000/B000/secret",
+      }),
+      sender: {
+        send: async (request) => {
+          requests.push(request);
+          return { providerMessageId: `slack-request-${requests.length}` };
+        },
+      },
+      publicBaseUrl: "https://bridge.example.test/",
+    });
+
+    await handler(firstEvent);
+    await handler(secondEvent);
+
+    expect(requests).toHaveLength(1);
+    expect([...store.deliveries.values()].map((delivery) => delivery.status)).toEqual([
+      "delivered",
+      "suppressed",
+    ]);
+  });
+
+  it("supports environment-configured project mappings and validates Slack webhook sends", async () => {
+    const directory = createSlackChannelDirectoryFromEnvironment(JSON.stringify({
+      prj_worker: "https://hooks.slack.com/services/T000/B000/secret",
+    }));
+    await expect(directory.resolveChannel("prj_worker")).resolves.toEqual({
+      webhookUrl: "https://hooks.slack.com/services/T000/B000/secret",
+    });
+    expect(() => createSlackChannelDirectory({ prj_worker: "https://example.test/hook" })).toThrow(
+      "Slack Incoming Webhook URL",
+    );
+
+    let request: RequestInit | undefined;
+    const sender = createSlackWebhookSender(async (_url, init) => {
+      request = init;
+      return new Response("ok", { status: 200, headers: { "x-slack-req-id": "slack-request-002" } });
+    });
+    await expect(sender.send({
+      webhookUrl: "https://hooks.slack.com/services/T000/B000/secret",
+      text: "Bridge notification",
+      blocks: [],
+      idempotencyKey: "evt_slack_sender:slack",
+      correlationId: "cor_slack_sender",
+    })).resolves.toEqual({ providerMessageId: "slack-request-002" });
+    expect(request).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ "content-type": "application/json" }),
+    });
+    expect(JSON.parse(String(request?.body))).toMatchObject({ text: "Bridge notification", blocks: [] });
   });
 });

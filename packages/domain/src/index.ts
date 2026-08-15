@@ -269,6 +269,14 @@ export interface NotificationOutboxPayload {
   readonly notificationType: NotificationType;
   readonly targetType: Notification["targetType"];
   readonly targetId: string;
+  readonly questionContext?: NotificationQuestionContext;
+}
+
+export interface NotificationQuestionContext {
+  readonly id: string;
+  readonly status: QuestionStatus;
+  readonly risk: Risk;
+  readonly ownerIds: readonly string[];
 }
 
 export interface DecisionLifecycleOutboxPayload {
@@ -302,6 +310,7 @@ export interface OutboxDelivery {
   readonly projectId: string;
   readonly outboxEventId: string;
   readonly channel: DeliveryChannel;
+  readonly dedupeKey?: string;
   readonly destinationHash: string;
   readonly status: OutboxDeliveryStatus;
   readonly attemptCount: number;
