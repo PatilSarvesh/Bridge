@@ -46,5 +46,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Reconcile isolated PostgreSQL role contract
+        run: |
+          DATABASE_URL="$BRIDGE_TEST_DATABASE_URL" pnpm --filter @bridge/database db:migrate
+          psql "$BRIDGE_TEST_DATABASE_URL" \
+            -v bridge_migrator_role=bridge_migrator \
+            -v bridge_runtime_role=bridge_runtime \
+            -v bridge_maintenance_role=bridge_maintenance \
+            -f scripts/provision-postgres-roles.sql
+
       - name: Run typecheck, tests, and production builds
         run: pnpm check
