@@ -60,6 +60,45 @@ export const agentRunCapabilitySchema = z.enum([
   "hooks",
   "orchestrated",
 ]);
+export const adapterDiagnosticMcpStatusSchema = z.enum(["ready", "failed", "not_configured"]);
+export const adapterDiagnosticCheckNameSchema = z.enum([
+  "api",
+  "project-config",
+  "project-mapping",
+  "mcp",
+  "bridge-instructions",
+  "client-instructions",
+]);
+export const adapterDiagnosticCheckStatusSchema = z.enum(["pass", "fail"]);
+export const adapterDiagnosticCheckSchema = z.object({
+  name: adapterDiagnosticCheckNameSchema,
+  status: adapterDiagnosticCheckStatusSchema,
+});
+export const recordAdapterDiagnosticInputSchema = z.object({
+  client: agentRunClientSchema,
+  capabilities: z.array(agentRunCapabilitySchema).max(10),
+  mcpStatus: adapterDiagnosticMcpStatusSchema,
+  checks: z.array(adapterDiagnosticCheckSchema).min(1).max(20),
+}).superRefine((value, context) => {
+  const checkNames = new Set<string>();
+  for (const [index, check] of value.checks.entries()) {
+    if (checkNames.has(check.name)) {
+      context.addIssue({
+        code: "custom",
+        message: "Each diagnostic check can appear only once.",
+        path: ["checks", index, "name"],
+      });
+    }
+    checkNames.add(check.name);
+  }
+  if (new Set(value.capabilities).size !== value.capabilities.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Each adapter capability can appear only once.",
+      path: ["capabilities"],
+    });
+  }
+});
 export const agentRunStatusSchema = z.enum([
   "running",
   "waiting_for_human",
@@ -506,6 +545,10 @@ export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
 export type DeliveryChannel = z.infer<typeof deliveryChannelSchema>;
 export type OutboxDeliveryStatus = z.infer<typeof outboxDeliveryStatusSchema>;
 export type NotificationDeliveryPreference = z.infer<typeof notificationDeliveryPreferenceSchema>;
+export type AdapterDiagnosticMcpStatus = z.infer<typeof adapterDiagnosticMcpStatusSchema>;
+export type AdapterDiagnosticCheckName = z.infer<typeof adapterDiagnosticCheckNameSchema>;
+export type AdapterDiagnosticCheckStatus = z.infer<typeof adapterDiagnosticCheckStatusSchema>;
+export type AdapterDiagnosticCheck = z.infer<typeof adapterDiagnosticCheckSchema>;
 export type DecisionStatus = z.infer<typeof decisionStatusSchema>;
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
@@ -554,6 +597,7 @@ export type ReportAgentRunInput = z.infer<typeof reportAgentRunInputSchema>;
 export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;
 export type RecordAssumptionInput = z.infer<typeof recordAssumptionInputSchema>;
 export type ResolveAssumptionInput = z.infer<typeof resolveAssumptionInputSchema>;
+export type RecordAdapterDiagnosticInput = z.infer<typeof recordAdapterDiagnosticInputSchema>;
 
 export interface ArtifactDiffVersion {
   readonly id: string;

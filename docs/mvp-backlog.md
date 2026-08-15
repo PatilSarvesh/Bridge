@@ -243,7 +243,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 18 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
+- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 19 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
 - **Dependencies:** BRG-003, BRG-011
 - **PRD references:** AUTH-04, PRJ-03, MVP acceptance criterion 14
 
@@ -680,7 +680,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, API/project/instruction doctor checks, and opt-in MCP endpoint initialization probes are implemented; vendor-specific MCP configuration generation, authentication, hooks, and expanded integration diagnostics remain
+- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, API/project/instruction doctor checks, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; vendor-specific MCP configuration generation, authentication, hooks, and expanded integration diagnostics remain
 - **Dependencies:** BRG-001, BRG-052, BRG-061
 - **PRD references:** MCP and CLI design
 
@@ -1064,7 +1064,7 @@ Implementation note: project and controlled-client filtering, lifecycle attribut
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, dead-letter delivery jobs, and recorded agent capabilities; repository-level `bridge doctor` reports are still local and not persisted
+- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, dead-letter delivery jobs, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata; provider-backed disconnected integrations, time-series history, and richer diagnostics remain
 - **Dependencies:** BRG-032, BRG-090, BRG-104
 - **PRD references:** ADM-01, pilot plan
 
@@ -1073,7 +1073,7 @@ As a pilot administrator, I need to see configuration health, unresolved routing
 Acceptance criteria:
 
 1. View lists unroutable questions and overdue protected decisions.
-2. View lists dead-letter jobs and disconnected integrations without secrets.
+2. View lists dead-letter jobs and bounded adapter/diagnostic status without secrets; provider-backed disconnected integrations remain deployment work.
 3. View lists adapter capability levels and last successful MCP check.
 4. Actions respect project and organization administration boundaries.
 5. Support access never bypasses tenant authorization silently.

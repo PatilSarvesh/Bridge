@@ -62,7 +62,7 @@ This masks record existence while preserving `FORBIDDEN` for an authenticated pr
 
 ## Deliberate remaining boundaries
 
-- RLS now protects 18 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; repeatable production role/grant reconciliation is documented and live deployment evidence remains BRG-012 work. Application policy and composite constraints remain required alongside RLS.
+- RLS now protects 19 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; repeatable production role/grant reconciliation is documented and live deployment evidence remains BRG-012 work. Application policy and composite constraints remain required alongside RLS.
 - Reassignment and project-policy mutation do not yet exist. Their future APIs require explicit matrix rows, audit events, and adversarial tests before release.
 - Live identity-provider and isolated PostgreSQL concurrency/ID-guessing evidence is deployment validation, not implied by the deterministic in-memory and optional integration suites.
 - Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities remain; endpoint-specific non-human scopes are BRG-011/BRG-013 follow-up work.

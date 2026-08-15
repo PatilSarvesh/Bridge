@@ -19,6 +19,7 @@ interface MockState {
   run?: Record<string, unknown>;
   mcpAvailable?: boolean;
   mcpMalformed?: boolean;
+  diagnosticPersistenceAvailable?: boolean;
 }
 
 function mockBridge(state: MockState): CliRuntime["fetch"] {
@@ -111,6 +112,24 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       }, existing ? 200 : 201);
     }
     if (url.pathname === "/v1/projects") return json({ items: state.projects ?? [] });
+    if (/^\/v1\/projects\/[^/]+\/adapter-diagnostics$/.test(url.pathname) && init?.method === "POST") {
+      if (state.diagnosticPersistenceAvailable === false) {
+        return json({ code: "UNAVAILABLE", message: "Diagnostic persistence unavailable." }, 503);
+      }
+      return json({
+        organizationId: "org_acme",
+        projectId: url.pathname.split("/")[3],
+        client: JSON.parse(String(init.body)).client,
+        reportedById: "agt_cli",
+        reportedByType: "agent",
+        correlationId: "cli_diagnostic_001",
+        capabilities: JSON.parse(String(init.body)).capabilities,
+        mcpStatus: JSON.parse(String(init.body)).mcpStatus,
+        checks: JSON.parse(String(init.body)).checks,
+        status: "pass",
+        observedAt: "2026-08-15T00:00:00.000Z",
+      });
+    }
     if (/^\/v1\/projects\/[^/]+$/.test(url.pathname)) {
       const projectId = url.pathname.split("/").at(-1);
       return json(
@@ -309,6 +328,12 @@ describe("Bridge CLI fallback adapter", () => {
     expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions"');
     expect(stdout.at(-1)).toContain('"mcp": "not_configured"');
     expect(stdout.at(-1)).toContain('"name": "project-mapping"');
+    expect(stdout.at(-1)).toContain('"diagnosticPersisted": true');
+
+    state.diagnosticPersistenceAvailable = false;
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
+    expect(stdout.at(-1)).toContain('"name": "diagnostic-persistence"');
+    state.diagnosticPersistenceAvailable = true;
 
     expect(await runCli([
       "init",

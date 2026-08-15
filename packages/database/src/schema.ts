@@ -1,5 +1,6 @@
 import type { Scope } from "@bridge/contracts";
 import type {
+  AdapterDiagnostic,
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
@@ -280,6 +281,41 @@ export const agentRuns = pgTable(
     index("bridge_agent_runs_project_started_idx").on(table.projectId, table.startedAt),
     index("bridge_agent_runs_project_status_idx").on(table.projectId, table.status),
     tenantPolicy("bridge_agent_runs_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const adapterDiagnostics = pgTable(
+  "bridge_adapter_diagnostics",
+  {
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    client: agentRunClientEnum("client").notNull(),
+    reportedById: text("reported_by_id").notNull(),
+    reportedByType: principalTypeEnum("reported_by_type").notNull(),
+    correlationId: text("correlation_id").notNull(),
+    capabilities: jsonb("capabilities").$type<readonly string[]>().notNull(),
+    mcpStatus: text("mcp_status").notNull(),
+    checks: jsonb("checks").$type<AdapterDiagnostic["checks"]>().notNull(),
+    status: text("status").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId, table.client] }),
+    index("bridge_adapter_diagnostics_project_observed_idx").on(table.projectId, table.observedAt),
+    check(
+      "bridge_adapter_diagnostics_mcp_status_check",
+      sql`${table.mcpStatus} IN ('ready', 'failed', 'not_configured')`,
+    ),
+    check(
+      "bridge_adapter_diagnostics_status_check",
+      sql`${table.status} IN ('pass', 'fail')`,
+    ),
+    foreignKey({
+      name: "bridge_adapter_diagnostics_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_adapter_diagnostics_tenant", table.organizationId),
   ],
 ).enableRLS();
 

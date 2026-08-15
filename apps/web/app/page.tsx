@@ -352,9 +352,20 @@ interface ProjectSupport {
       readonly lastObservedAt?: string;
       readonly lastSuccessfulMcpRunAt?: string;
     }[];
-    readonly mcpDiagnostics: "observed_from_runs" | "not_reported";
+    readonly mcpDiagnostics: "observed_from_runs" | "observed_from_doctor" | "not_reported";
     readonly note: string;
   };
+  readonly diagnostics: readonly {
+    readonly client: string;
+    readonly status: "pass" | "fail";
+    readonly capabilities: readonly string[];
+    readonly mcpStatus: "ready" | "failed" | "not_configured";
+    readonly checks: readonly {
+      readonly name: string;
+      readonly status: "pass" | "fail";
+    }[];
+    readonly observedAt: string;
+  }[];
 }
 
 interface AuditRecord {
@@ -1765,7 +1776,7 @@ export default function Home() {
                   <section className="analytics-panel support-panel">
                     <div className="analytics-panel-heading">
                       <div><h2>Agent adapter observations</h2><p>{support.adapters.note}</p></div>
-                      <small>{support.adapters.mcpDiagnostics === "observed_from_runs" ? "MCP observed" : "MCP not reported"}</small>
+                      <small>{support.adapters.mcpDiagnostics === "observed_from_runs" ? "MCP observed from runs" : support.adapters.mcpDiagnostics === "observed_from_doctor" ? "Doctor reported" : "MCP not reported"}</small>
                     </div>
                     {support.adapters.items.length === 0 ? <div className="empty">No agent runs have reported adapter capability yet.</div> : (
                       <div className="analytics-table-wrap">
@@ -1783,7 +1794,30 @@ export default function Home() {
                         </table>
                       </div>
                     )}
-                    <p className="support-note">Repository-specific connectivity and MCP initialization checks remain local to <code>bridge doctor</code> and are not persisted in Bridge yet.</p>
+                    <p className="support-note">Run metadata is derived from agent runs; repository-specific checks are recorded separately by <code>bridge doctor</code>.</p>
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Repository diagnostics</h2><p>Latest bounded <code>bridge doctor</code> results are stored per adapter. Bridge keeps check names, statuses, capabilities, and timestamps—not URLs, errors, or repository content.</p></div>
+                      <small>{support.diagnostics.length} adapter{support.diagnostics.length === 1 ? "" : "s"}</small>
+                    </div>
+                    {support.diagnostics.length === 0 ? <div className="empty">No bridge doctor reports are recorded.</div> : (
+                      <div className="analytics-table-wrap">
+                        <table className="analytics-table support-table">
+                          <thead><tr><th>Client</th><th>Status</th><th>MCP</th><th>Checks</th><th>Observed</th></tr></thead>
+                          <tbody>{support.diagnostics.map((diagnostic) => (
+                            <tr key={diagnostic.client}>
+                              <td><strong>{diagnostic.client.replaceAll("_", " ")}</strong><small>{diagnostic.capabilities.join(", ") || "No capabilities"}</small></td>
+                              <td><span className={diagnostic.status === "pass" ? "status status-approved" : "status status-rejected"}>{diagnostic.status}</span></td>
+                              <td>{diagnostic.mcpStatus.replaceAll("_", " ")}</td>
+                              <td>{diagnostic.checks.map((check) => `${check.name}: ${check.status}`).join(" · ")}</td>
+                              <td>{new Date(diagnostic.observedAt).toLocaleString()}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
                   </section>
                 </div>
               ) : null}

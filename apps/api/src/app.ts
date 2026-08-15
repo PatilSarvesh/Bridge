@@ -24,6 +24,7 @@ import {
   projectAnalyticsQuerySchema,
   questionReviewInputSchema,
   questionInboxQuerySchema,
+  recordAdapterDiagnosticInputSchema,
   recordAssumptionInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
@@ -435,6 +436,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = await resolvePrincipal(request, options);
     return options.service.getProject(principal, request.params.projectId);
   });
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/adapter-diagnostics",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = recordAdapterDiagnosticInputSchema.parse(request.body);
+      return options.service.recordAdapterDiagnostic(principal, request.params.projectId, input);
+    },
+  );
 
   app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/context",

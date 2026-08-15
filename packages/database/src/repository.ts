@@ -6,6 +6,7 @@ import {
   runWithCorrelationContextIfAbsent,
 } from "@bridge/observability";
 import type {
+  AdapterDiagnostic,
   AgentRun,
   Assumption,
   Artifact,
@@ -31,6 +32,8 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import {
   artifactFromRows,
+  adapterDiagnosticFromRow,
+  adapterDiagnosticToRow,
   assumptionFromRow,
   assumptionToRow,
   artifactToRow,
@@ -68,6 +71,7 @@ import * as schema from "./schema.js";
 import {
   artifacts,
   agentRuns,
+  adapterDiagnostics,
   assumptions,
   artifactVersions,
   auditEvents,
@@ -660,6 +664,35 @@ export class PostgresBridgeRepository implements BridgeRepository {
           endedAt: row.endedAt,
           summary: row.summary,
           version: row.version,
+        },
+      });
+  }
+
+  async listAdapterDiagnostics(projectId: string): Promise<readonly AdapterDiagnostic[]> {
+    const rows = await this.database
+      .select()
+      .from(adapterDiagnostics)
+      .where(eq(adapterDiagnostics.projectId, projectId))
+      .orderBy(asc(adapterDiagnostics.client));
+    return rows.map(adapterDiagnosticFromRow);
+  }
+
+  async saveAdapterDiagnostic(diagnostic: AdapterDiagnostic): Promise<void> {
+    const row = adapterDiagnosticToRow(diagnostic);
+    await this.database
+      .insert(adapterDiagnostics)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [adapterDiagnostics.organizationId, adapterDiagnostics.projectId, adapterDiagnostics.client],
+        set: {
+          reportedById: row.reportedById,
+          reportedByType: row.reportedByType,
+          correlationId: row.correlationId,
+          capabilities: row.capabilities,
+          mcpStatus: row.mcpStatus,
+          checks: row.checks,
+          status: row.status,
+          observedAt: row.observedAt,
         },
       });
   }

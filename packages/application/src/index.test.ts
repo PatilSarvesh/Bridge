@@ -1576,6 +1576,16 @@ describe("Bridge decision workflow", () => {
       summary: "MCP support check completed.",
       resultLinks: [],
     });
+    await service.recordAdapterDiagnostic(agent, project.id, {
+      client: "codex",
+      capabilities: ["instructions", "cli", "mcp"],
+      mcpStatus: "ready",
+      checks: [
+        { name: "api", status: "pass" },
+        { name: "project-config", status: "pass" },
+        { name: "mcp", status: "pass" },
+      ],
+    });
     const [pending] = await repository.listOutboxEvents(project.id);
     expect(pending).toBeDefined();
     await repository.claimOutboxEvents(pending!.availableAt, 1);
@@ -1592,6 +1602,19 @@ describe("Bridge decision workflow", () => {
       expect.objectContaining({ client: "codex", capabilities: ["mcp"] }),
     ]);
     expect(support.adapters.mcpDiagnostics).toBe("observed_from_runs");
+    expect(support.diagnostics).toEqual([
+      expect.objectContaining({
+        client: "codex",
+        status: "pass",
+        capabilities: ["instructions", "cli", "mcp"],
+        mcpStatus: "ready",
+        checks: [
+          { name: "api", status: "pass" },
+          { name: "project-config", status: "pass" },
+          { name: "mcp", status: "pass" },
+        ],
+      }),
+    ]);
     expect(JSON.stringify(support)).not.toContain("provider unavailable");
     await expect(service.getProjectSupport(contributor, project.id))
       .rejects.toMatchObject({ code: "FORBIDDEN" });

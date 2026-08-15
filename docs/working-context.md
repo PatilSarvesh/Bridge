@@ -7,7 +7,7 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -1739,7 +1739,7 @@ Implemented and locally verified:
 
 1. The repository transaction contract accepts immutable organization or maintenance context. Every principal-bearing application operation now executes inside an organization-scoped transaction; a nested transaction cannot change its tenant or elevate itself to maintenance.
 2. PostgreSQL sets `bridge.organization_id` with transaction-local `set_config`. Policies use missing-safe `current_setting`, so absent scope exposes no protected rows and rejects writes.
-3. Forward-only migration `0020_tenant_row_security.sql` enables and forces RLS on 18 core tenant/project tables. Direct tables compare organization ownership; artifact versions, question responses, and run continuation locators verify ownership through their RLS-protected parent.
+3. Forward-only migration `0020_tenant_row_security.sql` enables and forces RLS on 18 core tenant/project tables, and migration `0024_amazing_blindfold.sql` adds the persisted adapter-diagnostic table with its own forced policy, bringing the current protected set to 19. Direct tables compare organization ownership; artifact versions, question responses, and run continuation locators verify ownership through their RLS-protected parent.
 4. Idempotency records now store non-null organization ownership and use `(organization_id, key)` as their primary key so equal client keys cannot collide across tenants. The migration backfills existing question, artifact-version, run, and assumption records, discards only orphaned cache rows whose referenced resource no longer exists, then enforces the constraint; schema, repository behavior, migration metadata, and regression coverage match.
 5. The default PostgreSQL store rejects maintenance operations. A separately opted-in `mode: "maintenance"` store is required for cross-tenant outbox claims/completion/failure, and PostgreSQL itself must authenticate that connection with `BYPASSRLS`.
 6. Repository readiness rejects an API/MCP role that is a superuser or has `BYPASSRLS`, and rejects a maintenance configuration whose role cannot bypass RLS. The restore verifier also refuses a connection that cannot inspect all tenants and disables policy filtering as an additional fail-loud check. This prevents an unsafe or incomplete check without exposing credentials in health output.
@@ -1789,12 +1789,12 @@ Implemented and locally verified:
 1. Project and organization administrators can call `GET /v1/admin/projects/:projectId/support`; ordinary members and agent principals receive the existing project-operator denial.
 2. The response contains only bounded metadata for active unrouted questions, overdue active decisions whose source question is protected, dead-letter delivery jobs, pending/failed counts, and recorded agent client/capability observations.
 3. The web **Support** area provides loading, empty, error, denied, and project-scoped states, links unrouted questions and overdue decisions back to their canonical views, and does not expose delivery error text or governance content.
-4. Adapter capability is derived from recorded runs. Repository-specific `bridge doctor` connectivity/MCP initialization checks remain local and are explicitly labeled as not persisted rather than being presented as a live integration guarantee.
+4. Adapter capability is derived from recorded runs. The latest bounded `bridge doctor` client/capability/MCP/check status is now submitted through REST and displayed separately; it is an operational observation, not a live provider integration guarantee.
 
 Deliberate boundaries:
 
 - The view is an operational signal surface, not a replacement for the outbox replay controls, audit browser, or local repository diagnostics.
-- Persisting adapter/connector health reports and surfacing provider-backed disconnected integrations remain follow-up work.
+- Provider-backed disconnected integrations, richer connector health details, and historical/time-series diagnostic reporting remain follow-up work.
 
 ### 20.47 Implemented Slack pilot team-channel adapter
 
@@ -1825,6 +1825,20 @@ Deliberate boundaries:
 - The runtime currently composes Slack only. Email still requires a live sender/directory and a separate deployment composition; no unsupported email path is silently marked delivered.
 - A worker database connection must be provisioned with the documented maintenance role and an explicit target. No production or shared database command is part of the repository validation.
 - Slack workspace installation, deployment secret provisioning, provider/network failure-window testing, and a worker metrics exporter remain deployment evidence.
+
+### 20.49 Implemented persisted bounded adapter diagnostics
+
+Implemented and locally verified:
+
+1. `POST /v1/projects/:projectId/adapter-diagnostics` accepts a bounded, REST-canonical report from an authorized project client. The application records the reporter envelope, correlation ID, client, capabilities, MCP state, check names/statuses, aggregate pass/fail state, and observation time inside the tenant transaction.
+2. PostgreSQL migration `0024_amazing_blindfold.sql` adds one latest-per-project/client diagnostic row with a project foreign key, explicit RLS policy and forced RLS, constrained status values, and a bounded observed-time index. The repository mapper, upsert, restore verifier, migration assertions, and isolated-database RLS checks include the new table.
+3. `bridge doctor` posts its bounded result after local checks. A persistence failure is itself a failed doctor check, while API/MCP/project/configuration details remain local to the CLI and are not copied into the durable report.
+4. Project support returns and renders the latest diagnostics without secrets, URLs, raw errors, prompts, repository content, or human approval state. Existing run-derived capability observations remain distinct, and MCP remains optional.
+
+Deliberate boundaries:
+
+- Diagnostics are operational observations, not governance records; they do not create approvals, decisions, audit events, provider connections, or automatic remediation.
+- Only the latest result per adapter is retained in this slice. Historical trends, provider-backed connector health, vendor-native configuration generation, and live deployment validation remain follow-up work.
 
 ## 21. Important implementation files
 
@@ -1870,6 +1884,7 @@ Deliberate boundaries:
 - Bootstrap directory security migration: `packages/database/drizzle/0021_bootstrap_directory_security.sql`
 - Slack delivery-channel migration: `packages/database/drizzle/0022_blue_betty_ross.sql`
 - Slack semantic-dedupe migration: `packages/database/drizzle/0023_normal_synch.sql`
+- Persisted adapter-diagnostic migration: `packages/database/drizzle/0024_amazing_blindfold.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1922,4 +1937,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

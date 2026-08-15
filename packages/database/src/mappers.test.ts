@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import type {
+  AdapterDiagnostic,
   AgentRun,
   Assumption,
   Artifact,
@@ -21,6 +22,8 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  adapterDiagnosticFromRow,
+  adapterDiagnosticToRow,
   artifactFromRows,
   assumptionFromRow,
   assumptionToRow,
@@ -56,6 +59,7 @@ import {
   runFromRow,
   runToRow,
   type AgentRunRow,
+  type AdapterDiagnosticRow,
   type AssumptionRow,
   type ArtifactRow,
   type ArtifactVersionRow,
@@ -312,6 +316,23 @@ const outboxDelivery: OutboxDelivery = {
   updatedAt: "2026-08-07T10:02:12.000Z",
 };
 
+const adapterDiagnostic: AdapterDiagnostic = {
+  organizationId: project.organizationId,
+  projectId: project.id,
+  client: "codex",
+  reportedById: "agt_mapping",
+  reportedByType: "agent",
+  correlationId: "cor_diagnostic_mapping",
+  capabilities: ["instructions", "cli"],
+  mcpStatus: "not_configured",
+  checks: [
+    { name: "api", status: "pass" },
+    { name: "project-config", status: "pass" },
+  ],
+  status: "pass",
+  observedAt: "2026-08-07T10:02:13.000Z",
+};
+
 describe("PostgreSQL domain mappings", () => {
   it("round-trips organizations, identities, and memberships", () => {
     const organization: Organization = {
@@ -392,6 +413,9 @@ describe("PostgreSQL domain mappings", () => {
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
+    expect(adapterDiagnosticFromRow(
+      adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
+    )).toEqual(adapterDiagnostic);
     expect(assumptionFromRow(assumptionToRow(assumption) as AssumptionRow)).toEqual(assumption);
     expect(decisionFromRow(decisionToRow(decision) as DecisionRow)).toEqual(decision);
     expect(contextSnapshotFromRow(contextSnapshotToRow(contextSnapshot) as ContextSnapshotRow))
@@ -554,6 +578,17 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(slackDedupeMigration).toContain('ADD COLUMN "dedupe_key" text');
     expect(slackDedupeMigration).toContain("bridge_outbox_deliveries_project_channel_dedupe_idx");
+
+    const adapterDiagnosticMigration = readFileSync(
+      new URL("../drizzle/0024_amazing_blindfold.sql", import.meta.url),
+      "utf8",
+    );
+    expect(adapterDiagnosticMigration).toContain('CREATE TABLE "bridge_adapter_diagnostics"');
+    expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_project_fk");
+    expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_tenant");
+    expect(adapterDiagnosticMigration).toContain("FORCE ROW LEVEL SECURITY");
+    expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_mcp_status_check");
+    expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_status_check");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

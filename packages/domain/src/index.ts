@@ -1,4 +1,7 @@
 import type {
+  AdapterDiagnosticCheckName,
+  AdapterDiagnosticCheckStatus,
+  AdapterDiagnosticMcpStatus,
   AgentRunCapability,
   AgentRunClient,
   AgentRunStatus,
@@ -182,6 +185,23 @@ export interface AgentRun {
   readonly summary?: string;
   readonly continuesRunId?: string;
   readonly version: number;
+}
+
+export interface AdapterDiagnostic {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly client: AgentRunClient;
+  readonly reportedById: string;
+  readonly reportedByType: PrincipalType;
+  readonly correlationId: string;
+  readonly capabilities: readonly AgentRunCapability[];
+  readonly mcpStatus: AdapterDiagnosticMcpStatus;
+  readonly checks: readonly {
+    readonly name: AdapterDiagnosticCheckName;
+    readonly status: AdapterDiagnosticCheckStatus;
+  }[];
+  readonly status: "pass" | "fail";
+  readonly observedAt: string;
 }
 
 export interface Assumption {

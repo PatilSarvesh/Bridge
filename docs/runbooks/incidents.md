@@ -12,6 +12,8 @@ This runbook covers the first-response paths required for the Bridge pilot. Pres
 
 `GET /health` remains a compatibility alias for liveness. It must not be used to decide whether a deployment is ready for traffic.
 
+For repository adapter issues, ask the affected maintainer to run `bridge doctor` from the configured repository and inspect the project **Support** view. Doctor persists only bounded client/capability/MCP/check status metadata through REST; use the local CLI output and approved private incident records for details, and never copy URLs, secrets, repository content, or raw error text into Bridge documentation.
+
 ## Queue backlog or dead letters
 
 Symptoms include growing ready work, expired processing leases, repeated failures, or dead-letter counts in `GET /v1/admin/projects/:projectId/outbox`.
