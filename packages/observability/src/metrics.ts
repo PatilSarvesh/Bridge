@@ -2,6 +2,7 @@ export type BridgeServiceName = "api" | "mcp";
 export type BridgeRequestOutcome = "success" | "client_error" | "server_error";
 export type BridgeDatabaseBackend = "memory" | "postgresql";
 export type BridgeOperationOutcome = "success" | "error";
+export type BridgeMcpSessionOutcome = "initialized" | "failed";
 export type BridgeNotificationOutcome =
   | "delivered"
   | "failed"
@@ -112,6 +113,16 @@ export interface NotificationDeliveryMetric {
   readonly durationMs: number;
 }
 
+export interface McpSessionMetric {
+  readonly outcome: BridgeMcpSessionOutcome;
+}
+
+export interface McpToolCallMetric {
+  readonly tool: string;
+  readonly outcome: BridgeOperationOutcome;
+  readonly durationMs: number;
+}
+
 export interface ContentSecretDetectionMetric {
   readonly contentType: BridgeSecretContentType;
   readonly secretType: BridgeDetectedSecretType;
@@ -192,6 +203,19 @@ const definitions = {
     name: "bridge_content_secret_detections_total",
     help: "Bridge content writes rejected after high-confidence secret detection.",
   },
+  mcpSessions: {
+    name: "bridge_mcp_sessions_total",
+    help: "MCP initialize requests completed by outcome.",
+  },
+  mcpToolCalls: {
+    name: "bridge_mcp_tool_calls_total",
+    help: "MCP tool calls completed by bounded tool name and outcome.",
+  },
+  mcpToolDuration: {
+    name: "bridge_mcp_tool_duration_seconds",
+    help: "MCP tool call duration in seconds.",
+    buckets: secondsBuckets,
+  },
 } as const;
 
 function finiteNonNegative(value: number): number {
@@ -263,6 +287,7 @@ export class BridgeMetrics {
   private readonly gauges = new Map<string, GaugeState>();
   private readonly histograms = new Map<string, HistogramState>();
   private readonly operationLabels = new Set<string>();
+  private readonly mcpToolLabels = new Set<string>();
 
   recordHttpRequest(metric: HttpRequestMetric): void {
     const operation = this.boundedOperation(metric.service, metric.operation);
@@ -345,6 +370,21 @@ export class BridgeMetrics {
     });
   }
 
+  recordMcpSession(metric: McpSessionMetric): void {
+    this.increment(definitions.mcpSessions, { outcome: metric.outcome });
+  }
+
+  recordMcpToolCall(metric: McpToolCallMetric): void {
+    const tool = this.boundedMcpTool(metric.tool);
+    const labels = { tool, outcome: metric.outcome };
+    this.increment(definitions.mcpToolCalls, labels);
+    this.observe(
+      definitions.mcpToolDuration,
+      { tool },
+      finiteNonNegative(metric.durationMs) / 1_000,
+    );
+  }
+
   snapshot(): BridgeMetricsSnapshot {
     return {
       counters: sortedBySeries(this.counters.values()).map((sample) => ({
@@ -420,6 +460,14 @@ export class BridgeMetrics {
     if (this.operationLabels.size >= maxOperationLabels) return "overflow";
     this.operationLabels.add(key);
     return operation;
+  }
+
+  private boundedMcpTool(value: string): string {
+    const tool = normalizeOperation(value);
+    if (this.mcpToolLabels.has(tool)) return tool;
+    if (this.mcpToolLabels.size >= maxOperationLabels) return "overflow";
+    this.mcpToolLabels.add(tool);
+    return tool;
   }
 
   private increment(definition: CounterDefinition, labels: MetricLabels, value = 1): void {

@@ -1,4 +1,5 @@
 import type { BridgeService } from "@bridge/application";
+import type { BridgeMetrics } from "@bridge/observability";
 import {
   continuationQuerySchema,
   contextQuerySchema,
@@ -28,6 +29,7 @@ function result(value: Record<string, unknown>) {
 
 export interface BridgeMcpServerOptions {
   readonly publicWebUrl?: string;
+  readonly metrics?: BridgeMetrics;
 }
 
 export function createBridgeMcpServer(
@@ -52,6 +54,38 @@ export function createBridgeMcpServer(
         "Start consequential work with bridge_start_run and retain its run ID and continuation locator outside committed repository files. Pass the run ID when retrieving context, recording assumptions, creating questions, and publishing specifications so provenance stays linked. Search approved decisions and use bridge_find_question_matches before asking. Record only low-risk reversible uncertainty as a visible, expiring assumption; create a structured question for anything more consequential. Exact matching unresolved questions or active accepted decisions are reused automatically; related matches are suggestions only. Never represent an assumption, agent recommendation, or generated specification as human approval, and never continue or report completion while protected or blocking work lacks an accepted human decision. Use bridge_get_continuation for a durable handoff, start a later run with continuesRunId and resumeContextKey, and report the final run status with bridge_report_run. Store concise metadata and outcomes only; never send raw conversations or hidden reasoning.",
     },
   );
+
+  if (options.metrics) {
+    const registerTool = server.registerTool.bind(server);
+    server.registerTool = ((name: string, config: unknown, callback: unknown) => {
+      const measuredCallback = async (args: unknown, extra: unknown) => {
+        const startedAt = performance.now();
+        try {
+          const response = await (callback as (args: unknown, extra: unknown) => Promise<unknown>)(args, extra);
+          options.metrics?.recordMcpToolCall({
+            tool: name,
+            outcome: response && typeof response === "object" && "isError" in response && response.isError === true
+              ? "error"
+              : "success",
+            durationMs: Math.max(0, performance.now() - startedAt),
+          });
+          return response;
+        } catch (error) {
+          options.metrics?.recordMcpToolCall({
+            tool: name,
+            outcome: "error",
+            durationMs: Math.max(0, performance.now() - startedAt),
+          });
+          throw error;
+        }
+      };
+      return (registerTool as unknown as (
+        toolName: string,
+        toolConfig: unknown,
+        toolCallback: unknown,
+      ) => unknown)(name, config, measuredCallback);
+    }) as typeof server.registerTool;
+  }
 
   server.registerTool(
     "bridge_start_run",

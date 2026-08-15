@@ -133,6 +133,31 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "MCP tool calls",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        {
+          "expr": "sum by (tool, outcome) (rate(bridge_mcp_tool_calls_total[5m]))",
+          "legendFormat": "{{tool}} {{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "MCP tool p95 latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(bridge_mcp_tool_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{tool}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -143,5 +168,5 @@
   "timezone": "browser",
   "title": "Bridge pilot operations",
   "uid": "bridge-pilot-operations",
-  "version": 1
+  "version": 2
 }

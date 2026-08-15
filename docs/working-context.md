@@ -7,7 +7,7 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -1540,7 +1540,7 @@ Implemented and locally verified:
 4. Context retrieval records success/error, end-to-end latency, result count, and pre-truncation candidate count without changing the public context contract.
 5. In-memory and PostgreSQL repository transactions record backend/outcome/duration at the outer transaction boundary. The current driver does not expose a stable pool-utilization metric, so provider/exporter saturation telemetry remains explicit deployment work.
 6. Outbox cycles record their completion timestamp, claimed count, oldest claimed age, and processed/retried/dead-lettered outcomes; notification email and Slack handling record delivered/failed/suppressed/deferred/skipped outcomes and duration.
-7. `config/observability/bridge-pilot-dashboard.json` provides request, latency, error, authorization, database, context, queue, and notification PromQL panels. `config/observability/bridge-pilot-alerts.yml` provides sustained API/MCP failure, database availability-risk, outbox backlog/dead-letter, and notification-failure rules.
+7. `config/observability/bridge-pilot-dashboard.json` provides request, latency, error, authorization, database, context, queue, notification, and bounded MCP tool-call PromQL panels. `config/observability/bridge-pilot-alerts.yml` provides sustained API/MCP failure, database availability-risk, outbox backlog/dead-letter, and notification-failure rules.
 8. `docs/service-objectives.md` defines the measurement boundary, initial non-contractual pilot objectives, error-budget interpretation, thresholds, response class, ownership, and calibration process.
 9. Observability, application, API, and worker regressions cover rendering/privacy, authorization denial, context/database wiring, queue outcomes/age, and email/Slack delivery/idempotent-skip metrics.
 
@@ -1548,7 +1548,7 @@ Deliberate boundaries:
 
 - Metrics are process-local and reset on restart. Multi-instance collection, storage, dashboard hosting, rule evaluation, paging routes, and monitoring-network access control belong to the deployment.
 - The worker exposes injection seams rather than a long-running metrics server because its scheduled durable runtime remains incomplete. Queue/provider panels become live only after that deployment host exports the shared registry.
-- MCP is represented by its bounded HTTP operation; per-tool/session metrics remain follow-up work. Database pool saturation requires provider/exporter telemetry.
+- MCP session initialize outcomes and bounded tool-call success/error/duration are exported without request arguments or identity/content labels. Database pool saturation requires provider/exporter telemetry.
 - The included objectives and thresholds are starting hypotheses. BRG-104 remains partial until representative pilot telemetry validates them and external alert delivery is exercised.
 
 ### 20.33 Implemented privacy-conscious product analytics
@@ -1840,6 +1840,19 @@ Deliberate boundaries:
 - Diagnostics are operational observations, not governance records; they do not create approvals, decisions, audit events, provider connections, or automatic remediation.
 - Only the latest result per adapter is retained in this slice. Historical trends, provider-backed connector health, vendor-native configuration generation, and live deployment validation remain follow-up work.
 
+### 20.50 Implemented bounded MCP session and tool telemetry
+
+Implemented and locally verified:
+
+1. `BridgeMetrics` records MCP initialize outcomes plus bounded tool-call success/error counts and duration histograms using controlled session outcomes and tool names.
+2. The standalone MCP runtime records initialize request outcomes and wraps all registered tool handlers, including thrown errors and policy denials, without recording request arguments, session IDs, tenant/project/principal IDs, prompts, or content.
+3. The pilot dashboard includes MCP tool-call rate and p95-duration panels, while the observability, architecture, backlog, and README documentation describes the new metrics and their limits.
+
+Deliberate boundaries:
+
+- The telemetry remains process-local and optional with MCP; REST remains the canonical business boundary and CLI/repository snapshots remain viable when MCP is not approved.
+- Tool errors are diagnostic outcomes, not automatic approval, policy, or incident decisions. Hosted collection, alert delivery, durable worker export, provider pool saturation, and pilot calibration remain deployment work.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1937,4 +1950,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
