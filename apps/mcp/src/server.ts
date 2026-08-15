@@ -71,6 +71,10 @@ const protectedResourceMetadataUrl = oidcEnabled
   ? `${publicMcpUrl.replace(/\/$/, "")}/.well-known/oauth-protected-resource/mcp`
   : undefined;
 
+function isMcpInitializeRequest(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "method" in value && value.method === "initialize";
+}
+
 app.use((request: Request, response: Response, next) => {
   const correlationId = resolveCorrelationId(request.header(correlationIdHeader));
   response.setHeader(correlationIdHeader, correlationId);
@@ -86,6 +90,9 @@ app.use((request: Request, response: Response, next) => {
         statusCode: response.statusCode,
         durationMs,
       });
+      if (request.path === "/mcp" && request.method === "POST" && isMcpInitializeRequest(request.body)) {
+        metrics.recordMcpSession({ outcome: response.statusCode >= 400 ? "failed" : "initialized" });
+      }
       logger.info("request.completed", {
         method: request.method,
         path: request.path,
@@ -146,7 +153,7 @@ app.post("/mcp", async (request: Request, response: Response) => {
     sendMcpAuthenticationError(response, error, protectedResourceMetadataUrl);
     return;
   }
-  const server = createBridgeMcpServer(runtime.service, principal, { publicWebUrl });
+  const server = createBridgeMcpServer(runtime.service, principal, { publicWebUrl, metrics });
   const transport = new StreamableHTTPServerTransport();
   response.on("close", () => {
     void transport.close();

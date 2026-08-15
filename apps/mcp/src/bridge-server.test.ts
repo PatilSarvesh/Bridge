@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
+import { BridgeMetrics } from "@bridge/observability";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createBridgeMcpServer } from "./bridge-server.js";
@@ -419,5 +420,51 @@ describe("Bridge MCP tools", () => {
     expect(noScopeResult.isError).toBe(true);
     expect((noScopeResult.content as Array<{ readonly text?: string }>)[0])
       .toMatchObject({ text: expect.stringContaining("bridge:read") });
+  });
+
+  it("records bounded tool success and error telemetry without request arguments", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    const readOnlyAgent = { ...demoPrincipals.agent, scopes: ["bridge:read"] } as const;
+    const server = createBridgeMcpServer(runtime.service, readOnlyAgent, { metrics });
+    const client = new Client({ name: "mcp-metrics-test-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    await client.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    await client.callTool({
+      name: "bridge_start_run",
+      arguments: {
+        projectId: demoProject.id,
+        idempotencyKey: "mcp-metrics-write-denial-001",
+        client: "codex",
+        capability: "mcp",
+        taskSummary: "This argument must never become a metric label",
+        scope: { component: "metrics" },
+        externalLinks: [],
+      },
+    });
+
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_mcp_tool_calls_total",
+        labels: { tool: "bridge_list_artifacts", outcome: "success" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_mcp_tool_calls_total",
+        labels: { tool: "bridge_start_run", outcome: "error" },
+        value: 1,
+      }),
+    ]));
+    expect(metrics.renderPrometheus()).not.toContain("This argument must never become a metric label");
   });
 });

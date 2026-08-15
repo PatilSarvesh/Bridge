@@ -60,6 +60,7 @@ The registry records:
 - most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
 - email and Slack delivery/policy outcome and handler duration.
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
+- MCP initialize outcomes and tool-call success/error/duration by bounded tool name, without request arguments, session identifiers, tenant, project, principal, record, or content labels.
 
 API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle`, `createNotificationEmailHandler`, and `createNotificationSlackHandler`; the repository now includes a bounded long-running Slack outbox daemon, while a worker metrics endpoint or collector remains deployment-owned.
 
@@ -68,7 +69,6 @@ Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or trans
 ## Remaining BRG-104 work
 
 - OpenTelemetry spans/export and production collector wiring.
-- MCP tool-name/session metrics beyond the bounded `/mcp` HTTP operation.
 - Stable PostgreSQL pool-utilization telemetry supplied by the selected deployment/provider.
 - A worker metrics endpoint or collector integration and production evaluation of the included alert rules.
 - Validation and tuning of the initial service objectives against representative pilot telemetry.

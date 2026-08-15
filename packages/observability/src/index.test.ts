@@ -83,7 +83,7 @@ describe("Bridge observability primitives", () => {
     });
   });
 
-  it("renders bounded request, context, database, outbox, and delivery metrics", () => {
+  it("renders bounded request, context, database, outbox, delivery, and MCP metrics", () => {
     const metrics = new BridgeMetrics();
     metrics.recordHttpRequest({
       service: "api",
@@ -111,6 +111,18 @@ describe("Bridge observability primitives", () => {
       contentType: "artifact",
       secretType: "private_key",
     });
+    metrics.recordMcpSession({ outcome: "initialized" });
+    metrics.recordMcpSession({ outcome: "failed" });
+    metrics.recordMcpToolCall({
+      tool: "bridge_get_context",
+      outcome: "success",
+      durationMs: 40,
+    });
+    metrics.recordMcpToolCall({
+      tool: "bridge_publish_artifact?secret=ignored",
+      outcome: "error",
+      durationMs: 80,
+    });
 
     const snapshot = metrics.snapshot();
     expect(snapshot.counters).toEqual(expect.arrayContaining([
@@ -129,6 +141,21 @@ describe("Bridge observability primitives", () => {
         labels: { content_type: "artifact", secret_type: "private_key" },
         value: 1,
       }),
+      expect.objectContaining({
+        name: "bridge_mcp_sessions_total",
+        labels: { outcome: "initialized" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_mcp_tool_calls_total",
+        labels: { tool: "bridge_get_context", outcome: "success" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_mcp_tool_calls_total",
+        labels: { tool: "bridge_publish_artifact", outcome: "error" },
+        value: 1,
+      }),
     ]));
     expect(snapshot.gauges).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "bridge_outbox_last_cycle_claimed", value: 3 }),
@@ -145,6 +172,8 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain('bridge_http_requests_total{operation="/v1/projects/:projectId/context",outcome="client_error",service="api"} 1');
     expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
     expect(rendered).toContain('bridge_content_secret_detections_total{content_type="artifact",secret_type="private_key"} 1');
+    expect(rendered).toContain('bridge_mcp_sessions_total{outcome="failed"} 1');
+    expect(rendered).toContain('bridge_mcp_tool_duration_seconds_bucket{le="+Inf",tool="bridge_get_context"} 1');
     expect(rendered).not.toContain("ignored=true");
     expect(rendered).not.toContain("organizationId");
     expect(rendered).not.toContain("projectId=prj_");
