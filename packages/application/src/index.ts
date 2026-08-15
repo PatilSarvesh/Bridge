@@ -37,6 +37,7 @@ import type {
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
+  RecordAdapterDiagnosticInput,
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
@@ -51,6 +52,7 @@ import {
   principalHasRole,
   reviewDateFor,
   type AgentRun,
+  type AdapterDiagnostic,
   type Assumption,
   type AuditEvent,
   type Artifact,
@@ -144,6 +146,8 @@ export interface BridgeRepository {
   getRun(runId: string): Promise<AgentRun | undefined>;
   listRuns(projectId: string): Promise<readonly AgentRun[]>;
   saveRun(run: AgentRun): Promise<void>;
+  listAdapterDiagnostics(projectId: string): Promise<readonly AdapterDiagnostic[]>;
+  saveAdapterDiagnostic(diagnostic: AdapterDiagnostic): Promise<void>;
   findIdempotentRun(key: string): Promise<AgentRun | undefined>;
   getIdempotentRunRequestHash(key: string): Promise<string | undefined>;
   saveIdempotentRun(key: string, runId: string, requestHash: string): Promise<void>;
@@ -370,9 +374,20 @@ export interface ProjectSupportView {
       readonly lastObservedAt?: string;
       readonly lastSuccessfulMcpRunAt?: string;
     }[];
-    readonly mcpDiagnostics: "observed_from_runs" | "not_reported";
+    readonly mcpDiagnostics: "observed_from_runs" | "observed_from_doctor" | "not_reported";
     readonly note: string;
   };
+  readonly diagnostics: readonly {
+    readonly client: AgentRun["client"];
+    readonly status: "pass" | "fail";
+    readonly capabilities: readonly AgentRun["capability"][];
+    readonly mcpStatus: "ready" | "failed" | "not_configured";
+    readonly checks: readonly {
+      readonly name: string;
+      readonly status: "pass" | "fail";
+    }[];
+    readonly observedAt: string;
+  }[];
 }
 
 export interface AuditRecord {
@@ -781,6 +796,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly runs = new Map<string, AgentRun>();
+  private readonly adapterDiagnostics = new Map<string, AdapterDiagnostic>();
   private readonly assumptions = new Map<string, Assumption>();
   private readonly questions = new Map<string, Question>();
   private readonly decisions = new Map<string, Decision>();
@@ -828,6 +844,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       runs: new Map(this.runs),
+      adapterDiagnostics: new Map(this.adapterDiagnostics),
       assumptions: new Map(this.assumptions),
       questions: new Map(this.questions),
       decisions: new Map(this.decisions),
@@ -856,6 +873,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.runs, snapshot.runs);
+      this.restoreMap(this.adapterDiagnostics, snapshot.adapterDiagnostics);
       this.restoreMap(this.assumptions, snapshot.assumptions);
       this.restoreMap(this.questions, snapshot.questions);
       this.restoreMap(this.decisions, snapshot.decisions);
@@ -1117,6 +1135,16 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveRun(run: AgentRun): Promise<void> {
     this.runs.set(run.id, run);
+  }
+
+  async listAdapterDiagnostics(projectId: string): Promise<readonly AdapterDiagnostic[]> {
+    return [...this.adapterDiagnostics.values()]
+      .filter((diagnostic) => diagnostic.projectId === projectId)
+      .sort((left, right) => left.client.localeCompare(right.client));
+  }
+
+  async saveAdapterDiagnostic(diagnostic: AdapterDiagnostic): Promise<void> {
+    this.adapterDiagnostics.set(`${diagnostic.projectId}:${diagnostic.client}`, diagnostic);
   }
 
   async findIdempotentRun(key: string): Promise<AgentRun | undefined> {
@@ -2274,15 +2302,41 @@ export class BridgeService {
     });
   }
 
+  async recordAdapterDiagnostic(
+    principal: Principal,
+    projectId: string,
+    input: RecordAdapterDiagnosticInput,
+  ): Promise<AdapterDiagnostic> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      const diagnostic: AdapterDiagnostic = {
+        organizationId: project.organizationId,
+        projectId,
+        client: input.client,
+        reportedById: principal.id,
+        reportedByType: principal.type,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
+        capabilities: input.capabilities,
+        mcpStatus: input.mcpStatus,
+        checks: input.checks,
+        status: input.checks.every((check) => check.status === "pass") ? "pass" : "fail",
+        observedAt: this.now().toISOString(),
+      };
+      await repository.saveAdapterDiagnostic(diagnostic);
+      return diagnostic;
+    });
+  }
+
   async getProjectSupport(principal: Principal, projectId: string): Promise<ProjectSupportView> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project support operations", projectId);
-      const [questions, decisions, runs, events] = await Promise.all([
+      const [questions, decisions, runs, events, adapterDiagnostics] = await Promise.all([
         repository.listQuestions(projectId),
         repository.listDecisions(projectId),
         repository.listRuns(projectId),
         repository.listOutboxEvents(projectId),
+        repository.listAdapterDiagnostics(projectId),
       ]);
       const questionById = new Map(questions.map((question) => [question.id, question]));
       const now = this.now().getTime();
@@ -2375,9 +2429,17 @@ export class BridgeService {
           items: adapters,
           mcpDiagnostics: adapters.some((adapter) => adapter.capabilities.includes("mcp"))
             ? "observed_from_runs"
-            : "not_reported",
-          note: "Adapter capability is derived from recorded runs. Repository-level `bridge doctor` checks are not persisted yet.",
+            : adapterDiagnostics.length > 0 ? "observed_from_doctor" : "not_reported",
+          note: "Capabilities are derived from recorded runs; the latest bounded `bridge doctor` report is shown separately.",
         },
+        diagnostics: adapterDiagnostics.map((diagnostic) => ({
+          client: diagnostic.client,
+          status: diagnostic.status,
+          capabilities: diagnostic.capabilities,
+          mcpStatus: diagnostic.mcpStatus,
+          checks: diagnostic.checks,
+          observedAt: diagnostic.observedAt,
+        })),
       };
     });
   }

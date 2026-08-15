@@ -1792,6 +1792,41 @@ async function runDoctor(
   const instructionReady = checks
     .filter((check) => check.name === "bridge-instructions" || check.name === "client-instructions")
     .every((check) => check.status === "pass");
+  let diagnosticPersisted = false;
+  try {
+    await bridgeFetch(
+      `/v1/projects/${encodeURIComponent(config.projectId)}/adapter-diagnostics`,
+      connection,
+      runtime,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          client: config.client,
+          capabilities: [
+            ...(instructionReady ? ["instructions"] : []),
+            "cli",
+            ...(mcpStatus === "ready" ? ["mcp"] : []),
+          ],
+          mcpStatus,
+          checks: checks.map(({ name, status }) => ({ name, status })),
+        }),
+      },
+    );
+    diagnosticPersisted = true;
+    checks.push({
+      name: "diagnostic-persistence",
+      status: "pass",
+      detail: "The bounded doctor result was recorded for the project support view.",
+    });
+  } catch (error) {
+    checks.push({
+      name: "diagnostic-persistence",
+      status: "fail",
+      detail: error instanceof CliError
+        ? error.message
+        : "The doctor result could not be recorded in Bridge.",
+    });
+  }
   const capabilityLevel = !instructionReady
     ? "unconfigured"
     : mcpStatus === "ready"
@@ -1808,6 +1843,7 @@ async function runDoctor(
     client: config.client,
     mcpUrl: configuredMcpUrl ?? null,
     capabilityLevel,
+    diagnosticPersisted,
     capabilities: {
       instructions: instructionReady,
       cli: true,

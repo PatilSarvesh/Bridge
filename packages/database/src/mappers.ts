@@ -1,4 +1,5 @@
 import type {
+  AdapterDiagnostic,
   AgentRun,
   Assumption,
   Artifact,
@@ -22,6 +23,7 @@ import type {
 
 import {
   agentRuns,
+  adapterDiagnostics,
   assumptions,
   artifacts,
   artifactVersions,
@@ -50,6 +52,7 @@ export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
+export type AdapterDiagnosticRow = typeof adapterDiagnostics.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
 export type QuestionRow = typeof questions.$inferSelect;
 export type QuestionResponseRow = typeof questionResponses.$inferSelect;
@@ -333,6 +336,40 @@ export function runFromRow(row: AgentRunRow): AgentRun {
     ...(row.summary === null ? {} : { summary: row.summary }),
     ...(row.continuesRunId === null ? {} : { continuesRunId: row.continuesRunId }),
     version: row.version,
+  };
+}
+
+export function adapterDiagnosticToRow(
+  diagnostic: AdapterDiagnostic,
+): typeof adapterDiagnostics.$inferInsert {
+  return {
+    organizationId: diagnostic.organizationId,
+    projectId: diagnostic.projectId,
+    client: diagnostic.client,
+    reportedById: diagnostic.reportedById,
+    reportedByType: diagnostic.reportedByType,
+    correlationId: diagnostic.correlationId,
+    capabilities: diagnostic.capabilities,
+    mcpStatus: diagnostic.mcpStatus,
+    checks: diagnostic.checks,
+    status: diagnostic.status,
+    observedAt: diagnostic.observedAt,
+  };
+}
+
+export function adapterDiagnosticFromRow(row: AdapterDiagnosticRow): AdapterDiagnostic {
+  return {
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    client: row.client,
+    reportedById: row.reportedById,
+    reportedByType: row.reportedByType,
+    correlationId: row.correlationId,
+    capabilities: row.capabilities as AdapterDiagnostic["capabilities"],
+    mcpStatus: row.mcpStatus as AdapterDiagnostic["mcpStatus"],
+    checks: row.checks,
+    status: row.status as AdapterDiagnostic["status"],
+    observedAt: row.observedAt,
   };
 }
 

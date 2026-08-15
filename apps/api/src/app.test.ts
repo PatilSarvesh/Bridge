@@ -746,6 +746,52 @@ describe("Bridge API vertical slice", () => {
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
 
+    const diagnostic = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/adapter-diagnostics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        client: "codex",
+        capabilities: ["instructions", "cli"],
+        mcpStatus: "not_configured",
+        checks: [
+          { name: "api", status: "pass" },
+          { name: "project-config", status: "pass" },
+        ],
+      },
+    });
+    expect(diagnostic.statusCode).toBe(200);
+    expect(diagnostic.json()).toMatchObject({
+      projectId: demoProject.id,
+      client: "codex",
+      status: "pass",
+      mcpStatus: "not_configured",
+    });
+    const malformedDiagnostic = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/adapter-diagnostics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        client: "codex",
+        capabilities: ["cli", "cli"],
+        mcpStatus: "not_configured",
+        checks: [{ name: "api", status: "pass" }],
+      },
+    });
+    expect(malformedDiagnostic.statusCode).toBe(400);
+    const crossTenant = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/adapter-diagnostics`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+      payload: {
+        client: "codex",
+        capabilities: ["cli"],
+        mcpStatus: "not_configured",
+        checks: [{ name: "api", status: "pass" }],
+      },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+
     const response = await app.inject({
       method: "GET",
       url: `/v1/admin/projects/${demoProject.id}/support`,
@@ -759,8 +805,9 @@ describe("Bridge API vertical slice", () => {
       delivery: { pendingCount: 1, failedCount: 0, deadLetterEvents: [] },
       adapters: {
         items: [expect.objectContaining({ client: "codex", capabilities: ["cli"] })],
-        mcpDiagnostics: "not_reported",
+        mcpDiagnostics: "observed_from_doctor",
       },
+      diagnostics: [expect.objectContaining({ client: "codex", mcpStatus: "not_configured" })],
     });
 
     const denied = await app.inject({
