@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@bridge/database": "workspace:*",
     "@bridge/domain": "workspace:*",
     "@bridge/observability": "workspace:*"
   },

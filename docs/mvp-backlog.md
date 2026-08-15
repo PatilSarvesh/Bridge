@@ -870,7 +870,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, and optimistic audited replay are implemented; external adapters, destination idempotency, jitter, telemetry export, and scheduled runtime wiring remain
+- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, and a bounded maintenance-role worker runtime are implemented; live email delivery, jitter, telemetry export, and deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -925,7 +925,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Slack Incoming Webhook installation/configuration, deployment-secret-backed project mapping, bounded question metadata/Bridge links, injected sender delivery, sanitized receipts, retry behavior, and duplicate-event suppression are implemented; live workspace installation, worker runtime wiring, and deployment validation remain
+- **Status:** Partial — Slack Incoming Webhook installation/configuration, deployment-secret-backed project mapping, bounded question metadata/Bridge links, injected sender delivery, sanitized receipts, retry behavior, duplicate-event suppression, and a bounded maintenance-role worker runtime are implemented; live workspace installation, secret provisioning, and deployment/failure-window validation remain
 - **Dependencies:** BRG-001, BRG-090
 - **PRD references:** NTF-02
 
