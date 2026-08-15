@@ -306,6 +306,57 @@ interface ProjectAnalytics {
   };
 }
 
+interface ProjectSupport {
+  readonly projectId: string;
+  readonly generatedAt: string;
+  readonly routing: {
+    readonly unroutedQuestions: readonly {
+      readonly id: string;
+      readonly title: string;
+      readonly category: string;
+      readonly risk: Question["risk"];
+      readonly blocking: boolean;
+      readonly status: string;
+      readonly ownerIds: readonly string[];
+      readonly ownerRoles: readonly string[];
+      readonly createdAt: string;
+    }[];
+  };
+  readonly decisions: {
+    readonly overdueProtected: readonly {
+      readonly id: string;
+      readonly questionId: string;
+      readonly category: string;
+      readonly ownerId: string;
+      readonly status: string;
+      readonly reviewAt: string;
+    }[];
+  };
+  readonly delivery: {
+    readonly pendingCount: number;
+    readonly failedCount: number;
+    readonly deadLetterEvents: readonly {
+      readonly id: string;
+      readonly type: string;
+      readonly attempts: number;
+      readonly createdAt: string;
+      readonly availableAt: string;
+      readonly hasError: boolean;
+    }[];
+  };
+  readonly adapters: {
+    readonly items: readonly {
+      readonly client: string;
+      readonly runCount: number;
+      readonly capabilities: readonly string[];
+      readonly lastObservedAt?: string;
+      readonly lastSuccessfulMcpRunAt?: string;
+    }[];
+    readonly mcpDiagnostics: "observed_from_runs" | "not_reported";
+    readonly note: string;
+  };
+}
+
 interface AuditRecord {
   readonly id: string;
   readonly scope: "organization" | "project";
@@ -341,7 +392,8 @@ type View =
   | "runs"
   | "organization"
   | "analytics"
-  | "audit";
+  | "audit"
+  | "support";
 
 async function bridgeFetch<T>(
   path: string,
@@ -455,6 +507,7 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
   const [analytics, setAnalytics] = useState<ProjectAnalytics>();
+  const [support, setSupport] = useState<ProjectSupport>();
   const [auditPage, setAuditPage] = useState<AuditPage>();
   const [auditScope, setAuditScope] = useState<"project" | "organization">("project");
   const [auditFilters, setAuditFilters] = useState<AuditFilters>({});
@@ -506,6 +559,7 @@ export default function Home() {
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
@@ -818,6 +872,33 @@ export default function Home() {
     }
   }, [activePrincipalId, analyticsFilters, selectedProjectId]);
 
+  const loadSupport = useCallback(async () => {
+    if (!selectedProjectId) {
+      setSupport(undefined);
+      setSupportLoading(false);
+      return;
+    }
+    if (!isProjectAdmin && !isOrganizationAdmin) {
+      setSupport(undefined);
+      setSupportLoading(false);
+      return;
+    }
+    setSupportLoading(true);
+    setError(undefined);
+    try {
+      setSupport(await bridgeFetch<ProjectSupport>(
+        `/v1/admin/projects/${selectedProjectId}/support`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setSupport(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to load pilot support signals.");
+    } finally {
+      setSupportLoading(false);
+    }
+  }, [activePrincipalId, isOrganizationAdmin, isProjectAdmin, selectedProjectId]);
+
   const auditParameters = useCallback((offset?: number): URLSearchParams => {
     const parameters = new URLSearchParams();
     for (const key of ["action", "actorId", "subjectType", "subjectId", "correlationId"] as const) {
@@ -996,7 +1077,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics", "audit"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -1042,6 +1123,10 @@ export default function Home() {
   }, [authenticationReady, loadAnalytics, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "support") void loadSupport();
+  }, [authenticationReady, loadSupport, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
   }, [authenticationReady, loadAudit, signedIn, view]);
 
@@ -1058,6 +1143,13 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "audit" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "support" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
       setError(undefined);
       setView("inbox");
     }
@@ -1135,6 +1227,7 @@ export default function Home() {
     organization: "Organization",
     analytics: "Analytics",
     audit: "Audit",
+    support: "Support",
   };
 
   useEffect(() => {
@@ -1530,6 +1623,13 @@ export default function Home() {
               onClick={() => setView("audit")}
             >Audit</button>
           ) : null}
+          {isOrganizationAdmin || isProjectAdmin ? (
+            <button
+              type="button"
+              aria-current={view === "support" ? "page" : undefined}
+              onClick={() => setView("support")}
+            >Support</button>
+          ) : null}
         </nav>
         <div className="identity">
           <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
@@ -1545,6 +1645,8 @@ export default function Home() {
           <strong>{viewTitle[view]}</strong>
           <span>{view === "organization"
             ? "Member access and roles"
+            : view === "support"
+              ? "Pilot health and operator signals"
             : view === "audit" && auditScope === "organization"
               ? "Organization metadata events"
               : selectedProject?.name ?? "Select a project"}</span>
@@ -1552,7 +1654,141 @@ export default function Home() {
         <div className="content">
           {error ? <div className="error" role="alert">{error}</div> : null}
 
-          {view === "organization" ? (
+          {view === "support" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Pilot support signals</h1>
+                  <p>Operator-only project health derived from routing, decision review, durable delivery, and recorded agent runs.</p>
+                </div>
+                <button className="secondary" type="button" disabled={supportLoading} onClick={() => void loadSupport()}>Refresh</button>
+              </div>
+              {supportLoading ? <div className="empty">Loading project support signals…</div> : null}
+              {!supportLoading && !support ? <div className="empty">Select a project to load support signals.</div> : null}
+              {!supportLoading && support ? (
+                <div className="support-stack">
+                  <div className="analytics-grid" aria-label="Support summary">
+                    <article className="analytics-card">
+                      <strong>{support.routing.unroutedQuestions.length}</strong>
+                      <span>unrouted active questions</span>
+                    </article>
+                    <article className="analytics-card">
+                      <strong>{support.decisions.overdueProtected.length}</strong>
+                      <span>overdue protected decisions</span>
+                    </article>
+                    <article className="analytics-card">
+                      <strong>{support.delivery.deadLetterEvents.length}</strong>
+                      <span>dead-letter jobs · {support.delivery.failedCount} failed total</span>
+                    </article>
+                    <article className="analytics-card">
+                      <strong>{support.adapters.items.length}</strong>
+                      <span>observed agent clients</span>
+                    </article>
+                  </div>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Unresolved routing</h2><p>Questions without a direct owner or role assignment remain visible for administrator action.</p></div>
+                      <small>{support.routing.unroutedQuestions.length} items</small>
+                    </div>
+                    {support.routing.unroutedQuestions.length === 0 ? <div className="empty">No active questions are currently unrouted.</div> : (
+                      <div className="support-list">
+                        {support.routing.unroutedQuestions.map((question) => (
+                          <button
+                            type="button"
+                            key={question.id}
+                            className="support-row"
+                            onClick={() => {
+                              setSelectedId(question.id);
+                              setView("questions");
+                            }}
+                          >
+                            <span className={`risk risk-${question.risk}`} aria-hidden="true" />
+                            <span><strong>{question.title}</strong><small>{question.category} · {question.status.replaceAll("_", " ")} · {question.blocking ? "blocking" : "non-blocking"}</small></span>
+                            <span className={`status status-${question.risk}`}>{question.risk}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Overdue protected decisions</h2><p>Protected decisions past their review date need an explicit human lifecycle decision.</p></div>
+                      <small>{support.decisions.overdueProtected.length} items</small>
+                    </div>
+                    {support.decisions.overdueProtected.length === 0 ? <div className="empty">No protected decisions are overdue.</div> : (
+                      <div className="support-list">
+                        {support.decisions.overdueProtected.map((decision) => (
+                          <button
+                            type="button"
+                            key={decision.id}
+                            className="support-row"
+                            onClick={() => {
+                              setSelectedDecisionId(decision.id);
+                              setDecisionFilters((current) => ({ ...current, includeHistory: true }));
+                              setView("decisions");
+                            }}
+                          >
+                            <span className="risk risk-protected" aria-hidden="true" />
+                            <span><strong>{decision.category} decision</strong><small>Owner {decision.ownerId} · review due {new Date(decision.reviewAt).toLocaleDateString()}</small></span>
+                            <span className="status status-rejected">overdue</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Delivery operations</h2><p>Dead letters contain only operational identifiers here; inspect and replay through the existing project-admin outbox controls.</p></div>
+                      <small>{support.delivery.pendingCount} pending or processing</small>
+                    </div>
+                    {support.delivery.deadLetterEvents.length === 0 ? <div className="empty">No dead-letter jobs are currently recorded.</div> : (
+                      <div className="analytics-table-wrap">
+                        <table className="analytics-table support-table">
+                          <thead><tr><th>Event</th><th>Type</th><th>Attempts</th><th>Created</th><th>Error</th></tr></thead>
+                          <tbody>{support.delivery.deadLetterEvents.map((event) => (
+                            <tr key={event.id}>
+                              <td><code>{event.id}</code></td>
+                              <td>{event.type}</td>
+                              <td>{event.attempts}</td>
+                              <td>{new Date(event.createdAt).toLocaleString()}</td>
+                              <td>{event.hasError ? "Recorded" : "None"}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Agent adapter observations</h2><p>{support.adapters.note}</p></div>
+                      <small>{support.adapters.mcpDiagnostics === "observed_from_runs" ? "MCP observed" : "MCP not reported"}</small>
+                    </div>
+                    {support.adapters.items.length === 0 ? <div className="empty">No agent runs have reported adapter capability yet.</div> : (
+                      <div className="analytics-table-wrap">
+                        <table className="analytics-table support-table">
+                          <thead><tr><th>Client</th><th>Capabilities</th><th>Runs</th><th>Last observed</th><th>Last completed MCP run</th></tr></thead>
+                          <tbody>{support.adapters.items.map((adapter) => (
+                            <tr key={adapter.client}>
+                              <td><strong>{adapter.client.replaceAll("_", " ")}</strong></td>
+                              <td>{adapter.capabilities.join(", ")}</td>
+                              <td>{adapter.runCount}</td>
+                              <td>{adapter.lastObservedAt ? new Date(adapter.lastObservedAt).toLocaleString() : "Not available"}</td>
+                              <td>{adapter.lastSuccessfulMcpRunAt ? new Date(adapter.lastSuccessfulMcpRunAt).toLocaleString() : "Not observed"}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
+                    <p className="support-note">Repository-specific connectivity and MCP initialization checks remain local to <code>bridge doctor</code> and are not persisted in Bridge yet.</p>
+                  </section>
+                </div>
+              ) : null}
+            </>
+          ) : view === "organization" ? (
             <>
               <div className="title-row">
                 <div>

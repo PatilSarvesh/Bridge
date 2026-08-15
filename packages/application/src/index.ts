@@ -323,6 +323,57 @@ export interface OutboxOperationsView {
   readonly metrics: OutboxOperationsMetrics;
 }
 
+export interface ProjectSupportView {
+  readonly projectId: string;
+  readonly generatedAt: string;
+  readonly routing: {
+    readonly unroutedQuestions: readonly {
+      readonly id: string;
+      readonly title: string;
+      readonly category: string;
+      readonly risk: Question["risk"];
+      readonly blocking: boolean;
+      readonly status: Question["status"];
+      readonly ownerIds: readonly string[];
+      readonly ownerRoles: readonly string[];
+      readonly createdAt: string;
+    }[];
+  };
+  readonly decisions: {
+    readonly overdueProtected: readonly {
+      readonly id: string;
+      readonly questionId: string;
+      readonly category: string;
+      readonly ownerId: string;
+      readonly status: Decision["status"];
+      readonly reviewAt: string;
+    }[];
+  };
+  readonly delivery: {
+    readonly pendingCount: number;
+    readonly failedCount: number;
+    readonly deadLetterEvents: readonly {
+      readonly id: string;
+      readonly type: OutboxEvent["type"];
+      readonly attempts: number;
+      readonly createdAt: string;
+      readonly availableAt: string;
+      readonly hasError: boolean;
+    }[];
+  };
+  readonly adapters: {
+    readonly items: readonly {
+      readonly client: AgentRun["client"];
+      readonly runCount: number;
+      readonly capabilities: readonly AgentRun["capability"][];
+      readonly lastObservedAt?: string;
+      readonly lastSuccessfulMcpRunAt?: string;
+    }[];
+    readonly mcpDiagnostics: "observed_from_runs" | "not_reported";
+    readonly note: string;
+  };
+}
+
 export interface AuditRecord {
   readonly id: string;
   readonly scope: "organization" | "project";
@@ -2218,6 +2269,114 @@ export class BridgeService {
         ],
       },
     };
+    });
+  }
+
+  async getProjectSupport(principal: Principal, projectId: string): Promise<ProjectSupportView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Reading project support operations", projectId);
+      const [questions, decisions, runs, events] = await Promise.all([
+        repository.listQuestions(projectId),
+        repository.listDecisions(projectId),
+        repository.listRuns(projectId),
+        repository.listOutboxEvents(projectId),
+      ]);
+      const questionById = new Map(questions.map((question) => [question.id, question]));
+      const now = this.now().getTime();
+      const unroutedQuestions = questions
+        .filter((question) =>
+          ["open", "in_discussion"].includes(question.status) &&
+          question.ownerIds.length === 0 &&
+          question.ownerRoles.length === 0,
+        )
+        .map((question) => ({
+          id: question.id,
+          title: question.title,
+          category: question.category,
+          risk: question.risk,
+          blocking: question.blocking,
+          status: question.status,
+          ownerIds: question.ownerIds,
+          ownerRoles: question.ownerRoles,
+          createdAt: question.createdAt,
+        }));
+      const overdueProtected = decisions
+        .filter((decision) => {
+          const question = questionById.get(decision.questionId);
+          return decision.status === "active" &&
+            question?.risk === "protected" &&
+            Date.parse(decision.reviewAt) <= now;
+        })
+        .map((decision) => ({
+          id: decision.id,
+          questionId: decision.questionId,
+          category: decision.category,
+          ownerId: decision.ownerId,
+          status: decision.status,
+          reviewAt: decision.reviewAt,
+        }));
+      const adapterMap = new Map<AgentRun["client"], AgentRun[]>();
+      for (const run of runs) {
+        const existing = adapterMap.get(run.client) ?? [];
+        existing.push(run);
+        adapterMap.set(run.client, existing);
+      }
+      const capabilityOrder: readonly AgentRun["capability"][] = [
+        "instructions",
+        "cli",
+        "mcp",
+        "hooks",
+        "orchestrated",
+      ];
+      const adapters = [...adapterMap.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([client, clientRuns]) => {
+          const capabilities = capabilityOrder.filter((capability) =>
+            clientRuns.some((run) => run.capability === capability),
+          );
+          const mcpRuns = clientRuns
+            .filter((run) => run.capability === "mcp" && run.status === "completed")
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          const lastObservedAt = clientRuns
+            .map((run) => run.updatedAt)
+            .sort((left, right) => right.localeCompare(left))[0];
+          return {
+            client,
+            runCount: clientRuns.length,
+            capabilities,
+            ...(lastObservedAt ? { lastObservedAt } : {}),
+            ...(mcpRuns[0]?.updatedAt ? { lastSuccessfulMcpRunAt: mcpRuns[0].updatedAt } : {}),
+          };
+        });
+      return {
+        projectId,
+        generatedAt: this.now().toISOString(),
+        routing: { unroutedQuestions },
+        decisions: { overdueProtected },
+        delivery: {
+          pendingCount: events.filter((event) => event.status === "pending" || event.status === "processing").length,
+          failedCount: events.filter((event) => event.status === "failed" || event.status === "dead_letter").length,
+          deadLetterEvents: events
+            .filter((event) => event.status === "dead_letter")
+            .slice(0, 50)
+            .map((event) => ({
+              id: event.id,
+              type: event.type,
+              attempts: event.attempts,
+              createdAt: event.createdAt,
+              availableAt: event.availableAt,
+              hasError: Boolean(event.lastError),
+            })),
+        },
+        adapters: {
+          items: adapters,
+          mcpDiagnostics: adapters.some((adapter) => adapter.capabilities.includes("mcp"))
+            ? "observed_from_runs"
+            : "not_reported",
+          note: "Adapter capability is derived from recorded runs. Repository-level `bridge doctor` checks are not persisted yet.",
+        },
+      };
     });
   }
 

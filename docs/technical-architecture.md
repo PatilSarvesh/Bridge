@@ -569,6 +569,7 @@ GET    /v1/projects/:projectId/audit-events
 GET    /v1/admin/projects/:projectId/outbox?status=&type=&limit=
 POST   /v1/admin/outbox/:eventId/replay
 GET    /v1/admin/projects/:projectId/analytics?client=&startedFrom=&startedTo=
+GET    /v1/admin/projects/:projectId/support
 GET    /v1/admin/projects/:projectId/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
 POST   /v1/admin/projects/:projectId/audit/export
 GET    /v1/admin/organization/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
@@ -959,6 +960,8 @@ Use structured logs with record IDs and correlation IDs. Redact tokens, secrets,
 `GET /v1/admin/projects/:projectId/analytics` computes privacy-conscious pilot outcomes from the existing repository boundary. The mandatory path scope plus optional controlled client and inclusive run-start timestamps define a run cohort. The application then aggregates linked context snapshots, questions, responses, decisions, assumptions, and artifact versions. The response contains only counts, rates, durations, controlled client enums, and a collection/exclusion notice; it never returns stored task or record content.
 
 The web **Analytics** view is the pilot product dashboard for the technically available PRD metrics. It shows context compliance, question creation/reuse/routing coverage, response and acceptance activity, later-run decision reuse, assumption resolution, specification approval, question-volume/context-size guardrails, and client breakdowns. This read-time approach adds no schema or duplicate analytics store and works with in-memory or PostgreSQL repositories without MCP.
+
+`GET /v1/admin/projects/:projectId/support` is the operator support read model. It reuses the application repository boundary to report active unrouted questions, overdue protected decisions, dead-letter/pending delivery counts, and recorded agent client/capability observations without returning governance bodies or delivery error text. The web **Support** view links these signals back to canonical question/decision views. Repository-specific `bridge doctor` checks remain local and are explicitly not treated as persisted integration health.
 
 Routing coverage is owner/role presence, not a claim that the assigned expert was correct. Decision retrieval proves that Bridge returned approved context, not that an agent followed it. Cohorts select runs by start time and report current outcomes rather than immutable historical as-of state. The full definitions, exclusions, and later materialization boundary are in `docs/product-analytics.md`.
 

@@ -1062,7 +1062,7 @@ Implementation note: project and controlled-client filtering, lifecycle attribut
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, dead-letter delivery jobs, and recorded agent capabilities; repository-level `bridge doctor` reports are still local and not persisted
 - **Dependencies:** BRG-032, BRG-090, BRG-104
 - **PRD references:** ADM-01, pilot plan
 
