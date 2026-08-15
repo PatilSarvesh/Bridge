@@ -16,7 +16,7 @@ web or CLI -> API/MCP -> application transaction -> audit/outbox -> worker -> in
 - The transport establishes an async context without adding transport parameters to domain commands.
 - Direct application use receives a new context at the repository transaction boundary.
 - Audit events and outbox events persist the same operation ID. Migration `0014_first_jane_foster.sql` safely backfills pre-existing rows before enforcing non-null and format constraints.
-- A worker restores the persisted context for each claimed event. The provider-neutral email request receives the correlation ID explicitly alongside its stable idempotency key.
+- A worker restores the persisted context for each claimed event. Provider-neutral email and Slack requests receive the correlation ID explicitly alongside their stable idempotency keys.
 - Replaying an event preserves its original delivery correlation ID; the separate replay audit record receives the operator request's new correlation ID.
 
 Correlation IDs are diagnostic metadata, not authentication, authorization, tenant scope, or proof that two actions have the same authority.
@@ -58,10 +58,10 @@ The registry records:
 - context success/error count, latency, result count, and candidate count;
 - in-memory/PostgreSQL transaction count, outcome, and duration;
 - most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
-- email delivery/policy outcome and handler duration.
+- email and Slack delivery/policy outcome and handler duration.
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
 
-API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle` and `createNotificationEmailHandler`; its long-running scheduling/export host remains deployment-owned because the repository worker entry point is not yet a durable daemon.
+API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle`, `createNotificationEmailHandler`, and `createNotificationSlackHandler`; its long-running scheduling/export host remains deployment-owned because the repository worker entry point is not yet a durable daemon.
 
 Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or translate its PromQL into the chosen dashboard system), load `config/observability/bridge-pilot-alerts.yml` into a Prometheus-compatible rule evaluator, and use [`service-objectives.md`](./service-objectives.md) for the initial objectives and threshold rationale.
 

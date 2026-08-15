@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_outbox_deliveries" ADD COLUMN "dedupe_key" text;--> statement-breakpoint
+CREATE INDEX "bridge_outbox_deliveries_project_channel_dedupe_idx" ON "bridge_outbox_deliveries" USING btree ("project_id","channel","dedupe_key");

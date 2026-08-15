@@ -748,7 +748,7 @@ Event envelope:
 
 Avoid placing complete artifact bodies, secrets, or raw tokens in events.
 
-The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, and target pointer; the full notification body remains in the canonical notification table. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; the additive lifecycle migration extends its type constraint.
+The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, target pointer, and—when the event is question-related—a bounded question context containing only question ID, status, risk, and owner IDs; the full notification body remains in the canonical notification table. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; the additive lifecycle migration extends its type constraint.
 
 ### 16.2 Initial event types
 
@@ -779,7 +779,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email handler passes a stable event/channel idempotency key to an injected provider and skips an already delivered receipt. Jitter, live provider implementations, time-series telemetry, and scheduled runtime wiring remain deployment work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. Jitter, live provider implementations, time-series telemetry, and scheduled runtime wiring remain deployment work.
 
 ## 17. Notification architecture
 
@@ -789,12 +789,13 @@ Notification generation is separate from delivery:
 2. In one repository transaction it creates the durable in-app notification and a `notification.created` outbox intent.
 3. The worker claims the intent, applies retry/dead-letter policy, and invokes an injected channel handler.
 4. The provider-neutral email handler resolves the recipient and immediate/digest/muted preference through an injected directory, renders bounded plain text, and calls an injected sender without persisting the address.
-5. `outbox_deliveries` records the destination hash, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
-6. A future scheduled runtime wires a live directory and SES sender; deferred digest receipts become inputs to a digest job rather than credentials or addresses stored in the outbox.
+5. The Slack Incoming Webhook handler resolves the project channel through deployment configuration, renders bounded status/risk/owner metadata with a Bridge link, and calls an injected sender without persisting the webhook URL.
+6. `outbox_deliveries` records the destination hash, optional semantic dedupe key, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
+7. A future scheduled runtime wires live directories and email/Slack senders; deferred digest receipts become inputs to a digest job rather than credentials or addresses stored in the outbox.
 
 Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest deferral. The actual digest scheduler and administrative preference store are not yet connected.
 
-Team-channel messages should link to Bridge for final acceptance. Accepting a consequential decision directly from chat should be deferred until identity, replay, and confirmation semantics are proven.
+Team-channel messages link to Bridge for final acceptance. The Slack pilot adapter uses Slack's supported Incoming Webhooks installation model and treats the webhook URL as deployment secret material. Accepting a consequential decision directly from chat is intentionally unsupported; Slack delivery is idempotent for repeated processed events through the durable outbox receipt, while provider/network failure windows remain subject to the existing at-least-once delivery model.
 
 ## 18. Agent run and continuation design
 
@@ -927,7 +928,7 @@ Propagate one correlation ID across:
 agent/client -> MCP/API -> application command -> database/outbox -> worker -> integration
 ```
 
-The current vendor-neutral implementation validates or generates `x-bridge-correlation-id` at web/CLI/API/MCP boundaries, establishes async request context, creates a context at the repository transaction boundary for direct application use, persists the ID on audit/outbox rows, restores it per worker event, and supplies it explicitly to the email integration seam. Correlation is diagnostic metadata and never replaces principal or tenant authorization.
+The current vendor-neutral implementation validates or generates `x-bridge-correlation-id` at web/CLI/API/MCP boundaries, establishes async request context, creates a context at the repository transaction boundary for direct application use, persists the ID on audit/outbox rows, restores it per worker event, and supplies it explicitly to the email and Slack integration seams. Correlation is diagnostic metadata and never replaces principal or tenant authorization.
 
 ### 22.2 Metrics
 
@@ -943,9 +944,9 @@ Initial technical metrics:
 - Idempotency hits and conflicts.
 - Cross-tenant test and policy-denial counts.
 
-`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; in-memory test/runtime paths use the same transaction instrumentation. Outbox and email handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are route templates, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
+`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; in-memory test/runtime paths use the same transaction instrumentation. Outbox, email, and Slack handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are route templates, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
 
-The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email handling outcomes/duration. Database pool utilization, MCP tool-name/session counts, idempotency/conflict counters, and a durable worker exporter remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
+The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email/Slack handling outcomes/duration. Database pool utilization, MCP tool-name/session counts, idempotency/conflict counters, and a durable worker exporter remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
 
 Provider-neutral operational assets are `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`, and `docs/service-objectives.md`. They are initial definitions requiring a real metrics backend, rule evaluator, notification route, and pilot calibration; repository presence is not evidence that production monitoring is active.
 

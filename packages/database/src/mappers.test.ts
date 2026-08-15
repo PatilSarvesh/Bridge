@@ -302,6 +302,7 @@ const outboxDelivery: OutboxDelivery = {
   projectId: project.id,
   outboxEventId: outboxEvent.id,
   channel: "email",
+  dedupeKey: "sdl_mapping",
   destinationHash: "a".repeat(64),
   status: "delivered",
   attemptCount: 1,
@@ -538,6 +539,21 @@ describe("PostgreSQL domain mappings", () => {
       .toBeLessThan(emailDeliveryMigration.indexOf("bridge_outbox_deliveries_event_scope_fk"));
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_result_check");
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_destination_hash_check");
+
+    const slackDeliveryMigration = readFileSync(
+      new URL("../drizzle/0022_blue_betty_ross.sql", import.meta.url),
+      "utf8",
+    );
+    expect(slackDeliveryMigration).toContain("bridge_outbox_deliveries_channel_check");
+    expect(slackDeliveryMigration).toContain("DROP CONSTRAINT IF EXISTS");
+    expect(slackDeliveryMigration).toContain("'email', 'slack'");
+
+    const slackDedupeMigration = readFileSync(
+      new URL("../drizzle/0023_normal_synch.sql", import.meta.url),
+      "utf8",
+    );
+    expect(slackDedupeMigration).toContain('ADD COLUMN "dedupe_key" text');
+    expect(slackDedupeMigration).toContain("bridge_outbox_deliveries_project_channel_dedupe_idx");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

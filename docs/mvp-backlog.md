@@ -925,7 +925,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Ready
+- **Status:** Partial — Slack Incoming Webhook installation/configuration, deployment-secret-backed project mapping, bounded question metadata/Bridge links, injected sender delivery, sanitized receipts, retry behavior, and duplicate-event suppression are implemented; live workspace installation, worker runtime wiring, and deployment validation remain
 - **Dependencies:** BRG-001, BRG-090
 - **PRD references:** NTF-02
 
@@ -938,6 +938,8 @@ Acceptance criteria:
 3. Messages include question status, owner, risk, and Bridge link.
 4. Final protected acceptance remains in Bridge for the MVP.
 5. Duplicate event delivery does not duplicate visible notifications.
+
+Implementation note: Slack is intentionally notification-only. Incoming Webhooks are a Slack-supported app installation mechanism for the pilot, project mapping is supplied through deployment configuration, and the handler does not provide chat-side approval or acceptance. Production workspace installation and composition with the deployment worker remain operational work rather than repository-local claims.
 
 ## 18. E10 — Security, audit, and reliability
 

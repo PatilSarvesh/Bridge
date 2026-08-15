@@ -1111,6 +1111,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .onConflictDoUpdate({
         target: [outboxDeliveries.outboxEventId, outboxDeliveries.channel],
         set: {
+          dedupeKey: row.dedupeKey,
           destinationHash: row.destinationHash,
           status: row.status,
           attemptCount: row.attemptCount,

@@ -102,7 +102,7 @@ export function renderEssentialEmailTemplate(input: EssentialEmailTemplateInput)
   };
 }
 
-export function sanitizeDeliveryError(error: unknown): string {
+export function sanitizeDeliveryError(error: unknown, fallback = "Notification delivery failed."): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
@@ -111,7 +111,7 @@ export function sanitizeDeliveryError(error: unknown): string {
     .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
     .replace(/[\r\n\u0000-\u001f\u007f]+/g, " ")
     .trim()
-    .slice(0, 1_000) || "Email delivery failed.";
+    .slice(0, 1_000) || fallback;
 }
 
 function templateKind(notification: Notification): EssentialEmailTemplateKind {

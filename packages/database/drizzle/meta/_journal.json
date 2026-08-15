@@ -155,6 +155,20 @@
       "when": 1786790400000,
       "tag": "0021_bootstrap_directory_security",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786799311754,
+      "tag": "0022_blue_betty_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786799680875,
+      "tag": "0023_normal_synch",
+      "breakpoints": true
     }
   ]
 }

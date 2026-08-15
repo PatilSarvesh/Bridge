@@ -7,8 +7,8 @@
 | Last updated | 2026-08-15, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, and a project-scoped pilot support view complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, and live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, and permission-restricted pilot support diagnostics are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, and a Slack Incoming Webhook notification handler complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, persisted adapter diagnostics, live Slack workspace/runtime validation, and other live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -930,14 +930,14 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 ### 17.4 Not yet implemented
 
 - Database row-level security.
-- Live email/team provider implementations, scheduled worker deployment, digest batching, jitter, and time-series delivery telemetry/alerts.
+- Live email/team provider installations, scheduled worker deployment, digest batching, jitter, and time-series delivery telemetry/alerts.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
 - Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
 - Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
-- A live recipient directory/preferences store, SES sender, digest scheduler, and team channel; the provider-neutral email contracts and preference outcomes are implemented.
+- A live recipient directory/preferences store, SES sender, digest scheduler, and production Slack workspace/runtime; provider-neutral email/Slack contracts and preference outcomes are implemented.
 - GitHub integration.
-- Live Slack/SES integrations.
+- Live Slack/SES workspace/provider validation and deployment wiring.
 - PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
 - Configurable specification reviewer/team routing or multi-reviewer quorum; append-only comments and request-changes are implemented.
@@ -993,7 +993,7 @@ Environment facts remain:
 
 1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
 2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
-3. Wire the provider-neutral email handler to an approved SES sender and recipient directory after live PostgreSQL validation; add digest scheduling, a team-channel adapter, jitter, and telemetry export around the implemented receipts/operator controls.
+3. Wire the provider-neutral email and Slack handlers to approved production senders/directories after live PostgreSQL validation; add digest scheduling, jitter, and telemetry export around the implemented receipts/operator controls.
 4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
 
 ### 20.2 Implemented agent-run and continuation slice
@@ -1518,7 +1518,7 @@ Implemented and locally verified:
 1. Web and CLI callers generate a bounded `x-bridge-correlation-id`; API and MCP validate or replace inbound values and return the effective value on every response.
 2. Async request context crosses the transport/application boundary without adding correlation parameters to domain commands. Direct application calls receive a generated context at the repository transaction boundary.
 3. Audit and outbox events persist the operation correlation ID. Forward-only migration `0014_first_jane_foster.sql` backfills deterministic legacy IDs before setting non-null constraints, adds format checks, and indexes both durable lookup paths.
-4. The worker restores each claimed event's persisted context before handling it. The email sender request receives that ID explicitly with the existing stable event/channel idempotency key.
+4. The worker restores each claimed event's persisted context before handling it. Email and Slack sender requests receive that ID explicitly with their existing stable event/channel idempotency keys.
 5. Replayed delivery work keeps its original causal correlation ID while the operator replay audit uses the new request correlation ID.
 6. `@bridge/observability` provides context helpers and a JSON logger with bounded event/service names, an operational-field allowlist, recursive sensitive-key removal, unknown free-form redaction, and exception-message suppression.
 7. Standalone API/MCP runtimes use safe logging instead of framework-default request/error logs; worker cycle logs are injectable and correlated.
@@ -1539,10 +1539,10 @@ Implemented and locally verified:
 3. Metrics never add tenant, project, principal, record, prompt, answer, specification, or other content labels. API operations use framework route templates and both HTTP surfaces collapse unmatched paths to `unmatched`.
 4. Context retrieval records success/error, end-to-end latency, result count, and pre-truncation candidate count without changing the public context contract.
 5. In-memory and PostgreSQL repository transactions record backend/outcome/duration at the outer transaction boundary. The current driver does not expose a stable pool-utilization metric, so provider/exporter saturation telemetry remains explicit deployment work.
-6. Outbox cycles record their completion timestamp, claimed count, oldest claimed age, and processed/retried/dead-lettered outcomes; notification email handling records delivered/failed/suppressed/deferred/skipped outcomes and duration.
+6. Outbox cycles record their completion timestamp, claimed count, oldest claimed age, and processed/retried/dead-lettered outcomes; notification email and Slack handling record delivered/failed/suppressed/deferred/skipped outcomes and duration.
 7. `config/observability/bridge-pilot-dashboard.json` provides request, latency, error, authorization, database, context, queue, and notification PromQL panels. `config/observability/bridge-pilot-alerts.yml` provides sustained API/MCP failure, database availability-risk, outbox backlog/dead-letter, and notification-failure rules.
 8. `docs/service-objectives.md` defines the measurement boundary, initial non-contractual pilot objectives, error-budget interpretation, thresholds, response class, ownership, and calibration process.
-9. Observability, application, API, and worker regressions cover rendering/privacy, authorization denial, context/database wiring, queue outcomes/age, and email delivery/idempotent-skip metrics.
+9. Observability, application, API, and worker regressions cover rendering/privacy, authorization denial, context/database wiring, queue outcomes/age, and email/Slack delivery/idempotent-skip metrics.
 
 Deliberate boundaries:
 
@@ -1796,6 +1796,21 @@ Deliberate boundaries:
 - The view is an operational signal surface, not a replacement for the outbox replay controls, audit browser, or local repository diagnostics.
 - Persisting adapter/connector health reports and surfacing provider-backed disconnected integrations remain follow-up work.
 
+### 20.47 Implemented Slack pilot team-channel adapter
+
+Implemented and locally verified:
+
+1. The worker exposes a Slack Incoming Webhook sender and notification handler behind the existing injected outbox boundary. Webhook URLs are accepted only for `https://hooks.slack.com/services/...` and are expected to come from deployment secret storage.
+2. `BRIDGE_SLACK_PROJECT_CHANNELS` provides a configurable JSON mapping from project ID to Slack webhook URL. The mapping is resolved per project and missing mappings are recorded as suppressed Slack delivery receipts rather than retried indefinitely.
+3. Question-related notification outbox payloads carry bounded status, risk, and owner IDs. The Slack message resolves owner labels when a directory is supplied, includes a Bridge link, and states that final acceptance/approval remains in Bridge. It does not send the notification body or raw agent content.
+4. Slack receipts store only an organization/project-scoped destination hash, semantic dedupe key, preference outcome, attempt count, sanitized error, and provider request ID. Repeated delivery of an already delivered event is skipped using the existing event/channel receipt key; separate recipient events for the same question notification are collapsed by the semantic key.
+
+Deliberate boundaries:
+
+- This is notification-only; Slack cannot accept decisions, approve specifications, or mutate Bridge state.
+- The repository provides the provider-neutral sender/handler and configuration parser. Live Slack workspace installation, deployment secret provisioning, worker composition, and provider/network failure-window validation remain deployment work.
+- The existing at-least-once outbox model applies. A provider acknowledgement lost before the receipt is committed can still require operator review; no unproven exactly-once claim is made.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1838,6 +1853,8 @@ Deliberate boundaries:
 - Organization audit-export constraint migration: `packages/database/drizzle/0019_luxuriant_wallop.sql`
 - Tenant row-security migration: `packages/database/drizzle/0020_tenant_row_security.sql`
 - Bootstrap directory security migration: `packages/database/drizzle/0021_bootstrap_directory_security.sql`
+- Slack delivery-channel migration: `packages/database/drizzle/0022_blue_betty_ross.sql`
+- Slack semantic-dedupe migration: `packages/database/drizzle/0023_normal_synch.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1849,6 +1866,7 @@ Deliberate boundaries:
 - Web styles: `apps/web/app/globals.css`
 - Worker reminder/outbox cycle: `apps/worker/src/index.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
+- Slack pilot notification handler and Incoming Webhook sender: `apps/worker/src/slack.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
 - Observability behavior and boundaries: `docs/observability.md`
@@ -1889,4 +1907,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, and a project-scoped pilot support view; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view, and a Slack Incoming Webhook notification adapter; endpoint-specific tool scopes, broader audit-event coverage, persisted adapter diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
