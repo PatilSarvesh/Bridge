@@ -2348,7 +2348,9 @@ export default function Home() {
                 <div><h1>Accepted project decisions</h1><p>Only human-accepted answers appear here as authoritative context.</p></div>
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
               </div>
-              <div className="filter-bar" aria-label="Decision filters">
+              <details className="filter-disclosure">
+                <summary>Filter decisions <span>{hasDecisionFilters ? "Filters active" : "Optional"}</span></summary>
+                <div className="filter-bar" aria-label="Decision filters">
                 <label htmlFor="decision-search">Search</label>
                 <input
                   id="decision-search"
@@ -2449,7 +2451,8 @@ export default function Home() {
                     }}
                   >Clear</button>
                 ) : null}
-              </div>
+                </div>
+              </details>
               {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
               {!referenceDataLoading && decisions.length === 0 ? (
                 <div className="empty">
@@ -2709,7 +2712,9 @@ export default function Home() {
               </div>
 
               {view === "inbox" ? (
-                <div className="filter-bar" aria-label="Inbox filters">
+                <details className="filter-disclosure">
+                  <summary>Filter inbox <span>{hasInboxFilters ? "Filters active" : "Optional"}</span></summary>
+                  <div className="filter-bar" aria-label="Inbox filters">
                   <label htmlFor="inbox-status">State</label>
                   <select
                     id="inbox-status"
@@ -2753,7 +2758,8 @@ export default function Home() {
                   {hasInboxFilters ? (
                     <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
                   ) : null}
-                </div>
+                  </div>
+                </details>
               ) : null}
 
               {questionsLoading ? <div className="empty">Loading Bridge questions…</div> : null}
@@ -2825,8 +2831,8 @@ export default function Home() {
                         </div>
                       </section>
 
-                      <section>
-                        <h3>Team discussion <span className="section-count">{selectedQuestion.responses.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Team discussion <span className="section-count">{selectedQuestion.responses.length}</span></summary>
                         {selectedQuestion.responses.length === 0 ? (
                           <p className="muted-copy">No responses yet. Share your perspective so the decision owner can compare the trade-offs.</p>
                         ) : (
@@ -2884,10 +2890,10 @@ export default function Home() {
                             </button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Clarifications <span className="section-count">{selectedQuestion.comments.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Clarifications <span className="section-count">{selectedQuestion.comments.length}</span></summary>
                         {selectedQuestion.comments.length === 0 ? (
                           <p className="muted-copy">No clarification thread yet. Ask a focused follow-up so the team can resolve missing context without reopening the agent session.</p>
                         ) : (
@@ -2939,11 +2945,11 @@ export default function Home() {
                             </button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
                       {selectedQuestion.risk === "protected" ? (
-                        <section>
-                          <h3>Security review <span className="section-count">{selectedQuestion.reviews.length}</span></h3>
+                        <details className="detail-disclosure">
+                          <summary>Security review <span className="section-count">{selectedQuestion.reviews.length}</span></summary>
                           {selectedQuestion.reviews.length === 0 ? (
                             <p className="muted-copy">No security review has been recorded. A separate security reviewer must approve or reject this protected question before the owner can accept it.</p>
                           ) : (
@@ -2988,7 +2994,7 @@ export default function Home() {
                               </button>
                             </div>
                           ) : null}
-                        </section>
+                        </details>
                       ) : null}
 
                       {selectedQuestion.status === "accepted" ? (
@@ -3062,8 +3068,8 @@ export default function Home() {
                         <pre className="spec-body">{selectedArtifactVersion.body}</pre>
                       </section>
 
-                      <section>
-                        <h3>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></summary>
                         {selectedArtifactVersion.reviews.length === 0 ? (
                           <p className="muted-copy">No reviewer feedback has been recorded for this version.</p>
                         ) : (
@@ -3106,10 +3112,10 @@ export default function Home() {
                             >{submitting ? "Recording feedback…" : artifactReviewStatus === "changes_requested" ? "Request changes" : "Post review comment"}</button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Compare immutable versions</h3>
+                      <details className="detail-disclosure">
+                        <summary>Compare immutable versions</summary>
                         {selectedArtifact.versions.length < 2 ? (
                           <p className="muted-copy">Publish another version to compare specification changes.</p>
                         ) : (
@@ -3198,10 +3204,10 @@ export default function Home() {
                             ) : null}
                           </>
                         )}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Version history</h3>
+                      <details className="detail-disclosure">
+                        <summary>Version history</summary>
                         <div className="version-list">
                           {[...selectedArtifact.versions].reverse().map((version) => (
                             <div key={version.id}>
@@ -3211,7 +3217,7 @@ export default function Home() {
                             </div>
                           ))}
                         </div>
-                      </section>
+                      </details>
 
                       {selectedArtifactVersion.status === "approved" ? (
                         <div className="accepted">
