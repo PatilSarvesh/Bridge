@@ -11,6 +11,15 @@ interface Project {
   readonly decisionOwnerIds: readonly string[];
 }
 
+interface RepositoryRecord {
+  readonly id: string;
+  readonly provider: string;
+  readonly owner: string;
+  readonly name: string;
+  readonly canonicalUrl: string;
+  readonly createdAt: string;
+}
+
 interface Principal {
   readonly id: string;
   readonly displayName: string;
@@ -401,6 +410,7 @@ type View =
   | "decisions"
   | "assumptions"
   | "runs"
+  | "repositories"
   | "organization"
   | "analytics"
   | "audit"
@@ -517,6 +527,11 @@ export default function Home() {
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
+  const [repositories, setRepositories] = useState<readonly RepositoryRecord[]>([]);
+  const [repositoryProvider, setRepositoryProvider] = useState("");
+  const [repositoryOwner, setRepositoryOwner] = useState("");
+  const [repositoryName, setRepositoryName] = useState("");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics>();
   const [support, setSupport] = useState<ProjectSupport>();
   const [auditPage, setAuditPage] = useState<AuditPage>();
@@ -571,6 +586,7 @@ export default function Home() {
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
@@ -691,6 +707,60 @@ export default function Home() {
       setProjectsLoading(false);
     }
   }, [activePrincipalId]);
+
+  const loadRepositories = useCallback(async () => {
+    if (!selectedProjectId) {
+      setRepositories([]);
+      setRepositoriesLoading(false);
+      return;
+    }
+    setRepositoriesLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly RepositoryRecord[] }>(
+        `/v1/projects/${selectedProjectId}/repositories`,
+        undefined,
+        activePrincipalId,
+      );
+      setRepositories(response.items);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project repositories.");
+    } finally {
+      setRepositoriesLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const linkRepository = async () => {
+    if (!selectedProjectId || !repositoryProvider.trim() || !repositoryOwner.trim() ||
+      !repositoryName.trim() || !repositoryUrl.trim()) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(
+        `/v1/projects/${selectedProjectId}/repositories`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: `web-repository-${crypto.randomUUID().replaceAll("-", "")}`,
+            provider: repositoryProvider,
+            owner: repositoryOwner,
+            name: repositoryName,
+            canonicalUrl: repositoryUrl,
+          }),
+        },
+        activePrincipalId,
+      );
+      setRepositoryProvider("");
+      setRepositoryOwner("");
+      setRepositoryName("");
+      setRepositoryUrl("");
+      await loadRepositories();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to link project repository.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const loadQuestions = useCallback(async () => {
     if (!selectedProjectId) {
@@ -1088,7 +1158,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -1138,6 +1208,10 @@ export default function Home() {
   }, [authenticationReady, loadSupport, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "repositories") void loadRepositories();
+  }, [authenticationReady, loadRepositories, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
   }, [authenticationReady, loadAudit, signedIn, view]);
 
@@ -1161,6 +1235,13 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "support" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "repositories" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
       setError(undefined);
       setView("inbox");
     }
@@ -1235,6 +1316,7 @@ export default function Home() {
     decisions: "Decisions",
     assumptions: "Assumptions",
     runs: "Agent Runs",
+    repositories: "Repositories",
     organization: "Organization",
     analytics: "Analytics",
     audit: "Audit",
@@ -1615,6 +1697,13 @@ export default function Home() {
             aria-current={view === "runs" ? "page" : undefined}
             onClick={() => setView("runs")}
           >Agent Runs</button>
+          {isOrganizationAdmin || isProjectAdmin ? (
+            <button
+              type="button"
+              aria-current={view === "repositories" ? "page" : undefined}
+              onClick={() => setView("repositories")}
+            >Repositories</button>
+          ) : null}
           {isOrganizationAdmin ? (
             <button
               type="button"
@@ -1821,6 +1910,60 @@ export default function Home() {
                   </section>
                 </div>
               ) : null}
+            </>
+          ) : view === "repositories" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project repositories</h1>
+                  <p>Manage repository metadata for this project. Bridge stores the canonical link and does not fetch repository source.</p>
+                </div>
+                <button className="secondary" type="button" disabled={repositoriesLoading} onClick={() => void loadRepositories()}>Refresh</button>
+              </div>
+              <form
+                className="organization-panel member-create-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void linkRepository();
+                }}
+              >
+                <div className="organization-panel-heading">
+                  <div><h2>Link a repository</h2><p>Repository linking is restricted to project or organization administrators.</p></div>
+                </div>
+                <div className="member-form-grid">
+                  <label>Provider<input value={repositoryProvider} onChange={(event) => setRepositoryProvider(event.target.value)} placeholder="github" required /></label>
+                  <label>Owner<input value={repositoryOwner} onChange={(event) => setRepositoryOwner(event.target.value)} placeholder="bridge-org" required /></label>
+                  <label>Repository name<input value={repositoryName} onChange={(event) => setRepositoryName(event.target.value)} placeholder="bridge" required /></label>
+                  <label>Canonical URL<input type="url" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/bridge-org/bridge" required /></label>
+                </div>
+                <div className="member-form-actions">
+                  <small>Provider connectivity and source synchronization remain outside this metadata-only workflow.</small>
+                  <button className="primary" type="submit" disabled={submitting || !selectedProjectId}>Link repository</button>
+                </div>
+              </form>
+              <section className="organization-panel">
+                <div className="organization-panel-heading">
+                  <div><h2>Linked repositories</h2><p>Repository identity is unique within the organization and provider scope.</p></div>
+                  <small>{repositories.length} linked</small>
+                </div>
+                {repositoriesLoading ? <div className="empty">Loading project repositories…</div> : null}
+                {!repositoriesLoading && repositories.length === 0 ? <div className="empty">No repositories are linked to this project.</div> : null}
+                {!repositoriesLoading && repositories.length > 0 ? (
+                  <div className="analytics-table-wrap">
+                    <table className="analytics-table">
+                      <thead><tr><th>Provider</th><th>Repository</th><th>Canonical URL</th><th>Linked</th></tr></thead>
+                      <tbody>{repositories.map((repository) => (
+                        <tr key={repository.id}>
+                          <td><strong>{repository.provider}</strong></td>
+                          <td>{repository.owner}/{repository.name}</td>
+                          <td><a href={repository.canonicalUrl} target="_blank" rel="noreferrer">{repository.canonicalUrl}</a></td>
+                          <td>{new Date(repository.createdAt).toLocaleString()}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </section>
             </>
           ) : view === "organization" ? (
             <>

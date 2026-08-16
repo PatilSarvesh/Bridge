@@ -14,6 +14,7 @@ interface MockState {
   projects?: Array<Record<string, unknown>>;
   serviceIdentities?: Array<Record<string, unknown>>;
   serviceRequestBodies?: Array<Record<string, unknown>>;
+  repositories?: Array<Record<string, unknown>>;
   serviceToken?: string;
   rejectSecretWrites?: boolean;
   run?: Record<string, unknown>;
@@ -112,6 +113,31 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       }, existing ? 200 : 201);
     }
     if (url.pathname === "/v1/projects") return json({ items: state.projects ?? [] });
+    if (/^\/v1\/projects\/[^/]+\/repositories$/.test(url.pathname)) {
+      const projectId = url.pathname.split("/")[3];
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        const existing = state.repositories?.find((repository) =>
+          repository.projectId === projectId &&
+          repository.provider === body.provider &&
+          repository.owner === body.owner &&
+          repository.name === body.name,
+        );
+        const repository = existing ?? {
+          id: "repo_cli_1",
+          organizationId: "org_acme",
+          projectId,
+          provider: body.provider,
+          owner: body.owner,
+          name: body.name,
+          canonicalUrl: body.canonicalUrl,
+          createdAt: "2026-08-16T00:00:00.000Z",
+        };
+        if (!existing) state.repositories = [...(state.repositories ?? []), repository];
+        return json({ repository, disposition: existing ? "idempotent_replay" : "created" }, existing ? 200 : 201);
+      }
+      return json({ items: state.repositories?.filter((repository) => repository.projectId === projectId) ?? [] });
+    }
     if (/^\/v1\/projects\/[^/]+\/adapter-diagnostics$/.test(url.pathname) && init?.method === "POST") {
       if (state.diagnosticPersistenceAvailable === false) {
         return json({ code: "UNAVAILABLE", message: "Diagnostic persistence unavailable." }, 503);
@@ -768,6 +794,43 @@ describe("Bridge CLI fallback adapter", () => {
       code: "INVALID_OUTPUT_MODE",
       exitCode: cliExitCodes.usage,
     });
+  });
+
+  it("links and lists project repositories through the CLI", async () => {
+    const stdout: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [], repositories: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd: "/tmp/bridge-cli",
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+      environment: {},
+    };
+
+    expect(await runCli([
+      "repository",
+      "link",
+      "prj_payments",
+      "--provider",
+      "GitHub",
+      "--owner",
+      "bridge-org",
+      "--name",
+      "bridge",
+      "--url",
+      "https://github.com/bridge-org/bridge",
+    ], runtime)).toBe(0);
+    expect(state.repositories).toEqual([expect.objectContaining({
+      projectId: "prj_payments",
+      provider: "github",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    })]);
+    expect(JSON.parse(stdout.at(-1) ?? "{}")).toMatchObject({ disposition: "created" });
+
+    expect(await runCli(["repository", "list", "prj_payments"], runtime)).toBe(0);
+    expect(JSON.parse(stdout.at(-1) ?? "{}").items).toEqual([
+      expect.objectContaining({ name: "bridge", owner: "bridge-org" }),
+    ]);
   });
 
   it("surfaces a secret rejection without printing the submitted credential", async () => {

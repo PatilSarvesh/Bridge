@@ -283,7 +283,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, version-checked member/project-access administration UI, and REST-canonical project repository records are implemented; repository management in the web/CLI surfaces remains
+- **Status:** Implemented for the controlled MVP slice — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, version-checked member/project-access administration UI, REST-canonical repository records, and administrator web/CLI list/link surfaces are implemented; provider-backed repository validation and source synchronization remain deferred
 - **Dependencies:** BRG-010, BRG-012
 - **PRD references:** PRJ-01, PRJ-03
 

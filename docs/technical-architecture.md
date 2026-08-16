@@ -522,6 +522,8 @@ GET    /v1/principals
 GET    /v1/organizations/:organizationId/projects
 POST   /v1/projects
 GET    /v1/projects/:projectId
+POST   /v1/projects/:projectId/repositories
+GET    /v1/projects/:projectId/repositories
 GET    /v1/projects/:projectId/context
 
 POST   /v1/projects/:projectId/questions
@@ -586,6 +588,8 @@ Administrative endpoints are separated under `/v1/admin`. Outbox operations and 
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, timestamp, and correlation metadata.
 
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
+
+Project repository metadata is managed through the canonical REST endpoints, the administrator-only web **Repositories** view, or the equivalent CLI `repository list` and `repository link` commands. These surfaces exchange only provider, owner, repository name, canonical URL, project scope, and timestamps. They do not fetch source or infer provider connectivity from a caller-supplied URL; provider-backed validation and synchronization remain integration work.
 
 ## 13. MCP architecture
 

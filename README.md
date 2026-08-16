@@ -43,7 +43,18 @@ Migrations are explicit; API startup does not modify the schema. With `DATABASE_
 
 The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance/lifecycle transitions, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, bounded adapter diagnostics, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used for runs, assumptions, decisions, and approvals take row locks inside tenant-scoped transactions. PostgreSQL RLS fails closed when that transaction scope is absent. API/MCP connections must use a non-superuser `NOBYPASSRLS` role; cross-tenant queue and restore work requires a separate maintenance connection. See [`docs/database-security.md`](docs/database-security.md) for role provisioning, protected tables, bootstrap exceptions, and live verification. The worker uses that explicit maintenance connection for cross-tenant outbox claims; its notification handlers remain independently injectable.
 
-Project administrators can link and list repository metadata through the REST boundary at `POST /v1/projects/:projectId/repositories` and `GET /v1/projects/:projectId/repositories`. Records contain only provider, owner, repository name, canonical URL, project scope, and timestamps; Bridge does not fetch or retain repository source. Repository identity is unique within an organization/provider/owner/name scope, and tenant/project access checks apply to both commands and reads.
+Project administrators can link and list repository metadata through the REST boundary at `POST /v1/projects/:projectId/repositories` and `GET /v1/projects/:projectId/repositories`, the web **Repositories** view, or the MCP-independent CLI:
+
+```bash
+bridge repository link prj_payments \
+  --provider github \
+  --owner bridge-org \
+  --name bridge \
+  --url https://github.com/bridge-org/bridge
+bridge repository list prj_payments
+```
+
+Records contain only provider, owner, repository name, canonical URL, project scope, and timestamps; Bridge does not fetch or retain repository source. Repository identity is unique within an organization/provider/owner/name scope, and tenant/project access checks apply to both commands and reads. Linking remains restricted to project or organization administrators; listing is available to authorized project members.
 
 Fixed project administrators can inspect delivery state and point-in-time queue metrics through `GET /v1/admin/projects/:projectId/outbox`. Failed or dead-letter events can be safely requeued through `POST /v1/admin/outbox/:eventId/replay` with the last observed `expectedAttempts` value. Replay retains the event ID for handler idempotency, resets its retry budget, and creates an audit event; it cannot replay pending, processing, or processed work.
 

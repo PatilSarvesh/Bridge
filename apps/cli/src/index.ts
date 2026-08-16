@@ -158,6 +158,8 @@ Usage:
   bridge service identity revoke <credential-id> --version <number> [--api-url <url>]
   bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
   bridge install [--client <client>] [--dry-run]
+  bridge repository list [project-id]
+  bridge repository link [project-id] --provider <provider> --owner <owner> --name <name> --url <http(s)-url> [--idempotency-key <key>]
   bridge doctor
   bridge conformance [project-id] --task <description> [--run-id <id>]
   bridge run start [project-id] --task <description> [--client <name>] [--capability <level>] [--continues <run-id> --resume-key <key>]
@@ -1512,6 +1514,69 @@ async function initializeRepository(args: readonly string[], runtime: CliRuntime
   });
 }
 
+function parseRepositoryProvider(value: string): string {
+  const provider = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(provider) || provider.length > 50) {
+    throw new CliError(
+      "INVALID_REPOSITORY_PROVIDER",
+      "--provider must contain only lowercase letters, numbers, dots, underscores, or hyphens.",
+      cliExitCodes.usage,
+    );
+  }
+  return provider;
+}
+
+async function runRepositoryCommand(
+  args: readonly string[],
+  config: ProjectConfig | undefined,
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const action = args[1];
+  const projectId = requireProjectId(firstPositional(args, 2), config);
+  if (action === "list") {
+    output(
+      runtime,
+      await bridgeFetch(`/v1/projects/${encodeURIComponent(projectId)}/repositories`, connection, runtime),
+    );
+    return;
+  }
+  if (action === "link") {
+    const provider = parseRepositoryProvider(
+      requiredOptionValue(args, "--provider", "repository link requires --provider."),
+    );
+    const owner = requiredOptionValue(args, "--owner", "repository link requires --owner.");
+    const name = requiredOptionValue(args, "--name", "repository link requires --name.");
+    const canonicalUrl = optionalHttpUrl(
+      requiredOptionValue(args, "--url", "repository link requires --url."),
+      "--url",
+    )!;
+    const idempotencyKey = optionValue(args, "--idempotency-key") ??
+      `repository-${createHash("sha256")
+        .update(`${projectId}:${provider}:${owner}:${name}:${canonicalUrl}`)
+        .digest("hex")
+        .slice(0, 32)}`;
+    output(
+      runtime,
+      await bridgeFetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/repositories`,
+        connection,
+        runtime,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey, provider, owner, name, canonicalUrl }),
+        },
+      ),
+    );
+    return;
+  }
+  throw new CliError(
+    "UNKNOWN_REPOSITORY_COMMAND",
+    "Use `bridge repository list` or `bridge repository link`.",
+    cliExitCodes.usage,
+  );
+}
+
 async function installAdapter(args: readonly string[], runtime: CliRuntime): Promise<void> {
   const config = await loadProjectConfig(runtime.cwd);
   if (!config) {
@@ -2099,6 +2164,11 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
       );
     }
     await runServiceIdentityCommand(args, connection, runtime);
+    return;
+  }
+
+  if (command === "repository") {
+    await runRepositoryCommand(args, config, connection, runtime);
     return;
   }
 
