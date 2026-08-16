@@ -7,7 +7,7 @@
 | Last updated | 2026-08-16, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -708,7 +708,7 @@ It also safely creates or updates the selected client's native repository instru
 
 Unrelated existing content is preserved. `bridge init --name` uses the fixed local project-admin principal to register the project; this is a prototype seam, not organization onboarding or authentication. The CLI can be packaged locally with `pnpm cli:pack`, producing `dist/bridge-cli-0.1.0.tgz`.
 
-The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; `BRIDGE_MCP_URL` can override it for diagnostics. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
+The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; for Codex and Claude Code it also plans a project-scoped vendor MCP configuration with no credentials. `BRIDGE_MCP_URL` can override the endpoint for diagnostics only. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
 `bridge install --client <client>` activates or switches the native adapter for an existing `.bridge/project.yaml` without registering another project. It safely preserves unrelated content, updates only the managed Bridge block, and supports `--dry-run` for a no-mutation preview.
 
 `bridge sync` creates approved repository context:
@@ -1284,7 +1284,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- This slice does not generate vendor-specific MCP config files, negotiate authentication, persist MCP sessions, install hooks, or claim that MCP is approved by an organization.
+- This slice does not negotiate authentication, persist MCP sessions, install hooks, or generate vendor configuration for Cursor/Copilot; Codex and Claude project configuration generation is covered by the later adapter slice.
 - MCP remains an opt-in adapter; repositories without `mcp_url` continue to operate through generated instructions, CLI commands, repository snapshots, and the web UI.
 
 ### 20.18 Implemented adapter-only installation slice
@@ -1883,6 +1883,21 @@ Deliberate boundaries:
 
 - REST validates project identity and caller access, not provider connectivity or source synchronization. Repository records remain metadata-only and continue to use the separate REST repository-management commands.
 - Interactive initialization is a human setup workflow. Agents and CI can continue using explicit project IDs or a pre-approved `--name` registration flow without MCP.
+
+### 20.53 Implemented project-scoped Codex and Claude MCP configuration
+
+Implemented and locally verified:
+
+1. When `mcp_url` is configured, `bridge init` and `bridge install` generate Codex's project-scoped `.codex/config.toml` or Claude Code's project-scoped `.mcp.json` alongside the existing Bridge instruction adapter.
+2. Codex uses a managed `[mcp_servers.bridge]` block with the approved HTTP endpoint. Claude Code uses an `mcpServers.bridge` entry with explicit HTTP transport; no token, OAuth secret, bearer header, or other credential is written.
+3. Existing unrelated TOML/JSON settings and MCP servers are preserved. Bridge-owned markers permit safe regeneration; an unrelated existing `bridge` server or malformed config fails closed instead of being overwritten.
+4. Dry-run plans include vendor MCP config changes, and switching clients leaves the previous client's config file untouched so unrelated client state is not deleted.
+5. CLI regression coverage verifies Codex generation, Claude JSON merging, client switching, and preservation of unrelated settings.
+
+Deliberate boundaries:
+
+- MCP remains optional. Cursor and Copilot continue to receive instruction-only adapters in this slice; vendor-specific configuration for them, hooks, vendor discovery, and authentication remain pending.
+- Generated project config only points the client at the approved endpoint. The user or approved client performs any OAuth login through its own supported flow; Bridge never stores client credentials in the repository.
 
 ## 21. Important implementation files
 

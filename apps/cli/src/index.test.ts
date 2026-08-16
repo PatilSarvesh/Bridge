@@ -590,6 +590,11 @@ describe("Bridge CLI fallback adapter", () => {
     ], runtime)).toBe(0);
     expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
       .toContain('mcp_url: "http://mcp.test/mcp"');
+    const codexMcpConfig = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
+    expect(codexMcpConfig).toContain("# bridge:mcp:start");
+    expect(codexMcpConfig).toContain("Bridge-managed MCP configuration version: 1");
+    expect(codexMcpConfig).toContain('[mcp_servers.bridge]');
+    expect(codexMcpConfig).toContain('url = "http://mcp.test/mcp"');
     expect(await runCli(["doctor"], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions+mcp"');
     expect(stdout.at(-1)).toContain('"mcp": "ready"');
@@ -602,6 +607,66 @@ describe("Bridge CLI fallback adapter", () => {
     state.mcpMalformed = true;
     expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
     expect(stdout.at(-1)).toContain('"mcp": "failed"');
+  });
+
+  it("generates and safely merges the Claude project MCP configuration", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-claude-mcp-config-"));
+    const stdout: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+      environment: {},
+    };
+    await writeFile(join(cwd, ".mcp.json"), `${JSON.stringify({
+      customSetting: true,
+      mcpServers: {
+        other: { type: "http", url: "https://example.test/mcp" },
+      },
+    }, null, 2)}\n`, "utf8");
+
+    expect(await runCli([
+      "init",
+      "prj_payments",
+      "--client",
+      "claude_code",
+      "--api-url",
+      "http://bridge.test",
+      "--mcp-url",
+      "https://bridge.test/mcp",
+    ], runtime)).toBe(0);
+    const firstConfig = JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8")) as {
+      customSetting: boolean;
+      mcpServers: Record<string, Record<string, unknown>>;
+      "x-bridge": Record<string, unknown>;
+    };
+    expect(firstConfig.customSetting).toBe(true);
+    expect(firstConfig.mcpServers.other?.url).toBe("https://example.test/mcp");
+    expect(firstConfig.mcpServers.bridge).toMatchObject({
+      type: "http",
+      url: "https://bridge.test/mcp",
+      "x-bridge": { managedBy: "bridge-cli", version: 1 },
+    });
+    expect(firstConfig["x-bridge"]).toEqual({ managedBy: "bridge-cli", version: 1 });
+    expect(stdout.at(-1)).toContain('".mcp.json"');
+
+    expect(await runCli(["install", "--client", "codex"], runtime)).toBe(0);
+    expect(await readFile(join(cwd, ".codex", "config.toml"), "utf8"))
+      .toContain('[mcp_servers.bridge]');
+    const preservedClaudeConfig = JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    expect(preservedClaudeConfig.mcpServers.other?.url).toBe("https://example.test/mcp");
+    expect(preservedClaudeConfig.mcpServers.bridge?.url).toBe("https://bridge.test/mcp");
+
+    await writeFile(join(cwd, ".mcp.json"), `${JSON.stringify({
+      mcpServers: { bridge: { type: "http", url: "https://unrelated.test/mcp" } },
+    }, null, 2)}\n`, "utf8");
+    expect(await runCli(["install", "--client", "claude_code"], runtime)).toBe(cliExitCodes.conflict);
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
+      .toContain('client: "codex"');
   });
 
   it("starts, reads, continues, and reports an agent run without MCP", async () => {
