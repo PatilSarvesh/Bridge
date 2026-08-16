@@ -4,7 +4,7 @@
 |---|---|
 | Status | Approved MVP baseline; implementation validation required |
 | Version | 0.1 |
-| Last updated | 2026-08-08 |
+| Last updated | 2026-08-16 |
 | Related documents | [Bridge PRD](./bridge-prd.md), [Pilot Decisions](./pilot-decisions.md) |
 | Architecture stage | MVP and controlled pilot |
 
@@ -148,6 +148,7 @@ Responsibilities:
 
 - Repository-to-project initialization.
 - Fixed-principal fresh-project registration for the local prototype.
+- Interactive authorized-project selection, repository metadata detection, and API-validated project mapping during bridge init.
 - Client-native instruction generation with managed-block safe merging.
 - Adapter-only activation/switching through `bridge install` without project registration.
 - Safe `init --dry-run` previews for project registration and adapter files.
@@ -171,7 +172,7 @@ Responsibilities:
 
 Adapters do not own canonical policy. They project policy from `.bridge/` and the server.
 
-The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --dry-run` previews create/update/unchanged actions without API or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. Packaged entrypoint detection resolves pnpm symlinks to the real module path, and the generated workflow documents `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated dependency policy blocks `pnpm exec`. `bridge conformance` verifies observable run/context/question/specification provenance and the human boundary. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
+The implemented bootstrap supports Codex `AGENTS.md`, Claude Code `CLAUDE.md`, Cursor `.cursor/rules/bridge.mdc`, and Copilot `.github/copilot-instructions.md`. The marked Bridge block is safely replaced on regeneration while unrelated file content is retained. `bridge init --interactive` lists only projects returned by the canonical authorized REST project list and asks the operator to choose one; selected and explicit project IDs are read back through REST before any repository file is written. Existing Bridge-owned changes are shown as a file plan and require interactive confirmation, while `--force` remains an explicit noninteractive override. `bridge init --dry-run` previews create/update/unchanged actions without API mutation or filesystem mutation, and `bridge doctor` verifies the API, project mapping, generated instructions, selected adapter marker, and—only when configured—an MCP JSON-RPC `initialize` response. Packaged entrypoint detection resolves pnpm symlinks to the real module path, and the generated workflow documents `./node_modules/.bin/bridge` as a no-reinstall fallback when unrelated dependency policy blocks `pnpm exec`. `bridge conformance` verifies observable run/context/question/specification provenance and the human boundary. This instruction-driven layer is best-effort: it cannot universally intercept a vendor-native clarification prompt when the client exposes no hook.
 
 ## 6. Repository structure
 

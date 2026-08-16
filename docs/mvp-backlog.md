@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-08 |
+| Last updated | 2026-08-16 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -662,7 +662,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — fixed-principal registration by name/ID, Bridge-owned file protection, and non-mutating dry-run previews are implemented; interactive selection, human-confirmed diff application, and API-side mapping validation in init remain
+- **Status:** Implemented for the local REST-canonical prototype — repository metadata detection, authorized-project selection, Bridge-owned file protection, interactive diff confirmation, non-mutating dry-run previews, and API-side project mapping validation are covered; provider-backed repository validation remains outside this story
 - **Dependencies:** BRG-002
 - **PRD references:** PRJ-01, repository configuration
 
@@ -670,11 +670,11 @@ As a repository maintainer, I need `bridge init` to connect the repository to a 
 
 Acceptance criteria:
 
-1. Command detects repository metadata and asks the user to select an authorized project.
+1. Command detects repository metadata and asks the user to select an authorized project. **Implemented through bridge init --interactive; explicit project IDs remain supported for automation.**
 2. Command writes a versioned `.bridge/project.yaml` without unrelated changes.
-3. Existing conflicting configuration produces a diff and confirmation requirement.
+3. Existing conflicting configuration produces a diff and confirmation requirement. **Implemented for interactive runs; --force remains an explicit noninteractive override and --yes supports separately approved automation.**
 4. `--dry-run` prints proposed changes without mutating the API or repository. **Implemented with create/update/unchanged actions.**
-5. Command validates the mapping against the API.
+5. Command validates the mapping against the API. **Implemented through the authorized REST project read before any repository file is written.**
 
 ### BRG-062 — Install and diagnose the first agent adapter
 

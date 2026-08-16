@@ -7,7 +7,7 @@
 | Last updated | 2026-08-16, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -1260,7 +1260,7 @@ Deliberate boundaries:
 
 Implemented:
 
-1. `bridge init --dry-run` previews project registration, Bridge-owned files, and the selected native instruction adapter without making an API request or writing files.
+1. `bridge init --dry-run` previews project registration, Bridge-owned files, and the selected native instruction adapter without mutating API or repository state; when a project ID is known, it may perform a read-only REST mapping validation.
 2. Dry-run plans report `create`, `update`, or `unchanged` actions and use a safe placeholder when a new project ID would be assigned by registration.
 3. `bridge doctor` verifies API health, the configured project mapping, `.bridge/agent-instructions.md`, and the client-specific managed instruction block.
 4. Doctor output reports structured checks, stable failure exit codes, and capability levels: instructions and CLI are available; MCP and hooks are not implicitly claimed unless explicitly configured.
@@ -1268,7 +1268,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- Interactive project selection, human-confirmed diff application, hooks, vendor-native configuration generation, and universal vendor-native interception remain future adapter work.
+- Provider-backed repository validation/synchronization, hooks, vendor-native configuration generation, and universal vendor-native interception remain future adapter work. The init mapping check confirms authorized project identity through REST; it does not claim that a provider URL is reachable.
 - Doctor validates the fixed-principal prototype boundary; it is not an authentication or organization-membership check.
 
 ### 20.17 Implemented optional MCP endpoint discovery slice
@@ -1868,6 +1868,21 @@ Deliberate boundaries:
 
 - REST is the canonical repository-association boundary; MCP remains optional and does not gain a direct database path.
 - Provider-backed repository validation and synchronization remain follow-up work. The canonical URL is caller-supplied metadata, not proof of provider connectivity.
+
+### 20.52 Completed interactive repository initialization
+
+Implemented and locally verified:
+
+1. `bridge init --interactive` lists only projects returned by the canonical authorized REST project list, displays stable project names/IDs, and accepts a numbered selection, project ID, or project name.
+2. `bridge init` detects a repository name from the local `origin` remote when available, with an explicit `--repository` override and directory-name fallback.
+3. Explicitly selected and newly registered project IDs are read back through `GET /v1/projects/:projectId` before any `.bridge/` or native adapter file is written; a failed mapping leaves the repository unchanged.
+4. Existing Bridge-owned changes are planned as create/update/unchanged actions. Interactive runs show the changed paths and require an affirmative confirmation; `--force` preserves the existing explicit noninteractive override and `--yes` supports separately approved automation.
+5. CLI regression coverage proves authorized selection, mapping-failure no-write behavior, and confirmation refusal/approval. No schema, migration, MCP, or direct database path was added.
+
+Deliberate boundaries:
+
+- REST validates project identity and caller access, not provider connectivity or source synchronization. Repository records remain metadata-only and continue to use the separate REST repository-management commands.
+- Interactive initialization is a human setup workflow. Agents and CI can continue using explicit project IDs or a pre-approved `--name` registration flow without MCP.
 
 ## 21. Important implementation files
 

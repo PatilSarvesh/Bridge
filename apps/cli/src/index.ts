@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -42,6 +43,8 @@ export interface CliRuntime {
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
   readonly readStdin: () => Promise<string>;
+  readonly isInteractive: boolean;
+  readonly prompt: (message: string) => Promise<string>;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly now: () => Date;
   readonly credentialStore: CredentialStore;
@@ -103,6 +106,15 @@ function defaultRuntime(): CliRuntime {
       }
       return Buffer.concat(chunks).toString("utf8");
     },
+    isInteractive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    prompt: async (message) => {
+      const readline = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await readline.question(message);
+      } finally {
+        readline.close();
+      }
+    },
     sleep: (milliseconds) => new Promise((complete) => setTimeout(complete, milliseconds)),
     now: () => new Date(),
     credentialStore: createSystemCredentialStore(),
@@ -156,7 +168,7 @@ Usage:
   bridge service identity create --name <name> --type <agent|ci|integration> --scope <scope>[,<scope>...] [--role <role>] [--project <project-id[=role,...]>] [--all-projects] [--expires-at <ISO datetime>] [--api-url <url>]
   bridge service identity rotate <credential-id> --version <number> [--api-url <url>]
   bridge service identity revoke <credential-id> --version <number> [--api-url <url>]
-  bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--force] [--dry-run]
+  bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--interactive] [--force] [--yes] [--dry-run]
   bridge install [--client <client>] [--dry-run]
   bridge repository list [project-id]
   bridge repository link [project-id] --provider <provider> --owner <owner> --name <name> --url <http(s)-url> [--idempotency-key <key>]
@@ -188,6 +200,8 @@ Output:
 
 Configuration:
   bridge init --name <name> registers a project and activates repository instructions for the selected client.
+  bridge init --interactive lists projects visible to the current principal and asks which one to use.
+  When existing Bridge-owned files would change, an interactive run shows the planned changes and asks for confirmation; use --yes only for an explicitly approved noninteractive update.
   bridge install activates or switches a client adapter for an existing .bridge/project.yaml without registering a project.
   A project ID can then be omitted from repository-scoped commands.
 
@@ -283,6 +297,162 @@ function optionalHttpUrl(value: string | undefined, optionName: string): string 
     throw new CliError("INVALID_URL", `${optionName} must use http or https.`, cliExitCodes.usage);
   }
   return value.replace(/\/$/, "");
+}
+
+interface ProjectSelection {
+  readonly id: string;
+  readonly name: string;
+}
+
+async function detectRepositoryName(cwd: string): Promise<string> {
+  const fallback = basename(cwd);
+  try {
+    const gitConfig = await readFile(resolve(cwd, ".git", "config"), "utf8");
+    const origin = /\[remote\s+"origin"\]([\s\S]*?)(?=\n\[|$)/i.exec(gitConfig)?.[1];
+    const remoteUrl = origin ? /^\s*url\s*=\s*(\S+)\s*$/im.exec(origin)?.[1] : undefined;
+    if (!remoteUrl) return fallback;
+    const remotePath = remoteUrl
+      .replace(/^[^:]+:\/?/, "")
+      .replace(/^https?:\/\/[^/]+\//i, "")
+      .replace(/\.git\/?$/, "")
+      .replace(/\/$/, "");
+    const repositoryName = remotePath.split("/").at(-1)?.trim();
+    return repositoryName || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function initializationPrincipal(args: readonly string[], runtime: CliRuntime): string {
+  return optionValue(args, "--principal-id") ?? runtime.environment.BRIDGE_INIT_PRINCIPAL_ID ?? "usr_architect";
+}
+
+function projectSelectionItems(value: unknown): ProjectSelection[] {
+  const items = asRecord(value)?.items;
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => {
+      const record = asRecord(item);
+      const id = typeof record?.id === "string" ? record.id.trim() : "";
+      const name = typeof record?.name === "string" ? record.name.trim() : "";
+      return id && name ? { id, name } : undefined;
+    })
+    .filter((item): item is ProjectSelection => item !== undefined)
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
+
+async function selectAuthorizedProject(
+  repository: string,
+  apiUrl: string,
+  args: readonly string[],
+  runtime: CliRuntime,
+): Promise<ProjectSelection> {
+  const projects = projectSelectionItems(await bridgeFetch(
+    "/v1/projects",
+    { apiUrl, principalId: initializationPrincipal(args, runtime) },
+    runtime,
+    { method: "GET" },
+  ));
+  if (projects.length === 0) {
+    throw new CliError(
+      "NO_AUTHORIZED_PROJECTS",
+      "Bridge returned no projects that this principal can access. Ask a project administrator to grant access or use --name to register a project.",
+      cliExitCodes.forbidden,
+      { repository },
+    );
+  }
+  runtime.stderr(`Authorized Bridge projects for ${repository}:\n${projects
+    .map((project, index) => `  ${index + 1}. ${project.name} (${project.id})`)
+    .join("\n")}\n`);
+  const answer = (await runtime.prompt("Select a project number (or q to cancel): ")).trim();
+  if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
+    throw new CliError("PROJECT_SELECTION_CANCELLED", "Project selection was cancelled.", cliExitCodes.usage);
+  }
+  const numericSelection = Number.parseInt(answer, 10);
+  const selected = Number.isInteger(numericSelection) && numericSelection > 0
+    ? projects[numericSelection - 1]
+    : projects.find((project) => project.id === answer || project.name.toLowerCase() === answer.toLowerCase());
+  if (!selected) {
+    throw new CliError(
+      "INVALID_PROJECT_SELECTION",
+      "Choose one of the listed project numbers, or enter a project ID or name.",
+      cliExitCodes.usage,
+      { availableProjectIds: projects.map((project) => project.id) },
+    );
+  }
+  return selected;
+}
+
+async function validateProjectMapping(
+  projectId: string,
+  apiUrl: string,
+  args: readonly string[],
+  runtime: CliRuntime,
+): Promise<string> {
+  const project = asRecord(await bridgeFetch(
+    `/v1/projects/${encodeURIComponent(projectId)}`,
+    { apiUrl, principalId: initializationPrincipal(args, runtime) },
+    runtime,
+    { method: "GET" },
+  ));
+  if (!project || project.id !== projectId || typeof project.name !== "string" || !project.name.trim()) {
+    throw new CliError(
+      "INVALID_PROJECT_RESPONSE",
+      "Bridge returned an invalid project while validating the repository mapping.",
+      cliExitCodes.connection,
+      { projectId },
+    );
+  }
+  return project.name;
+}
+
+type InitializationChange = {
+  readonly path: string;
+  readonly action: "create" | "update" | "unchanged";
+};
+
+async function planInitializationFiles(
+  runtime: CliRuntime,
+  paths: Readonly<Record<"project" | "instructions" | "example" | "assumptionExample", string>>,
+  adapterPath: string,
+  config: ProjectConfig,
+): Promise<InitializationChange[]> {
+  const changes: InitializationChange[] = [];
+  const relativePath = (path: string) => path.slice(runtime.cwd.length + 1);
+  const planFile = async (path: string, content: string): Promise<void> => {
+    const current = await exists(path) ? await readFile(path, "utf8") : undefined;
+    changes.push({
+      path: relativePath(path),
+      action: current === undefined ? "create" : current === content ? "unchanged" : "update",
+    });
+  };
+  await planFile(paths.project, serializeProjectConfig(config));
+  await planFile(paths.instructions, generatedInstructions());
+  await planFile(paths.example, exampleQuestion());
+  await planFile(paths.assumptionExample, exampleAssumption());
+  const currentAdapter = await exists(adapterPath) ? await readFile(adapterPath, "utf8") : "";
+  await planFile(adapterPath, mergeClientInstructionContent(currentAdapter, bridgeInstructionBlock()));
+  return changes;
+}
+
+async function confirmInitializationChanges(
+  runtime: CliRuntime,
+  changes: readonly InitializationChange[],
+): Promise<void> {
+  const changed = changes.filter((change) => change.action !== "unchanged");
+  if (changed.length === 0) return;
+  runtime.stderr(`Bridge will change these files:\n${changed
+    .map((change) => `  ${change.action}: ${change.path}`)
+    .join("\n")}\n`);
+  const answer = (await runtime.prompt("Apply these Bridge-owned changes? [y/N] ")).trim().toLowerCase();
+  if (answer !== "y" && answer !== "yes") {
+    throw new CliError(
+      "CONFIRMATION_REQUIRED",
+      "Repository changes were not applied. Re-run and confirm the displayed Bridge-owned changes.",
+      cliExitCodes.conflict,
+      { changes: changed },
+    );
+  }
 }
 
 function parseAgentClient(value: string | undefined, optionName = "--client"): AgentClient {
@@ -1358,56 +1528,70 @@ async function initializeRepository(args: readonly string[], runtime: CliRuntime
     assumptionExample: resolve(bridgeDirectory, "assumption.example.json"),
   };
   const force = args.includes("--force");
+  const yes = args.includes("--yes");
   const dryRun = args.includes("--dry-run");
-  const existingConfig = (force || dryRun) && await exists(paths.project)
+  const interactive = args.includes("--interactive") || runtime.isInteractive;
+  const existingConfig = await exists(paths.project)
     ? await loadProjectConfig(runtime.cwd)
     : undefined;
-  if (!projectId && existingConfig && (dryRun || !projectName)) {
+  if (!projectId && existingConfig && (dryRun || (!projectName && (force || interactive)))) {
     projectId = existingConfig.projectId;
   }
-  if (!projectId && !projectName) {
-    throw new CliError(
-      "PROJECT_REQUIRED",
-      "bridge init requires an existing project ID, --name, or an existing .bridge/project.yaml with --force/--dry-run.",
-      cliExitCodes.usage,
-    );
-  }
-  const repository = requestedRepository ?? existingConfig?.repository ?? basename(runtime.cwd);
+  const repository = requestedRepository ?? existingConfig?.repository ?? await detectRepositoryName(runtime.cwd);
   const client = parseAgentClient(requestedClient ?? existingConfig?.client);
   const requestedMcpUrl = optionValue(args, "--mcp-url");
   const mcpUrl = optionalHttpUrl(
     requestedMcpUrl ?? existingConfig?.mcpUrl,
     requestedMcpUrl ? "--mcp-url" : ".bridge/project.yaml mcp_url",
   );
-  if (!force && !dryRun) {
-    const existing = (await Promise.all(Object.values(paths).map(async (path) => ({ path, exists: await exists(path) }))))
-      .filter((entry) => entry.exists)
-      .map((entry) => entry.path);
-    if (existing.length > 0) {
-      throw new CliError(
-        "CONFIG_EXISTS",
-        "Bridge configuration already exists. Use --force to regenerate only Bridge-owned files.",
-        cliExitCodes.conflict,
-        { paths: existing },
-      );
-    }
-  }
   const apiUrl = (
     optionValue(args, "--api-url") ??
     runtime.environment.BRIDGE_API_URL ??
     existingConfig?.apiUrl ??
     "http://127.0.0.1:4000"
   ).replace(/\/$/, "");
+  if (!projectId && !projectName && interactive) {
+    projectId = (await selectAuthorizedProject(repository, apiUrl, args, runtime)).id;
+  }
+  if (!projectId && !projectName) {
+    throw new CliError(
+      "PROJECT_REQUIRED",
+      "bridge init requires an existing project ID, --name, or an interactive project selection.",
+      cliExitCodes.usage,
+    );
+  }
+  const existing = (await Promise.all(Object.values(paths).map(async (path) => ({ path, exists: await exists(path) }))))
+    .filter((entry) => entry.exists)
+    .map((entry) => entry.path);
+  const plannedProjectId = projectId ?? "<registered-project-id>";
+  const plannedConfig: ProjectConfig = {
+    version: 1,
+    projectId: plannedProjectId,
+    apiUrl,
+    repository,
+    client,
+    ...(mcpUrl ? { mcpUrl } : {}),
+  };
+  const adapterPath = clientInstructionPath(runtime.cwd, client);
+  const plannedChanges = await planInitializationFiles(runtime, paths, adapterPath, plannedConfig);
+  if (existing.length > 0 && !dryRun) {
+    if (!force && !yes && !interactive) {
+      throw new CliError(
+        "CONFIG_EXISTS",
+        "Bridge configuration already exists. Use --force for an explicit update, or run interactively to review and confirm the file diff.",
+        cliExitCodes.conflict,
+        { paths: existing, changes: plannedChanges.filter((change) => change.action !== "unchanged") },
+      );
+    }
+    if (interactive && !yes) await confirmInitializationChanges(runtime, plannedChanges);
+  }
   let registrationDisposition: string | undefined;
   if (!projectId && projectName && !dryRun) {
     const registration = await bridgeFetch(
       "/v1/projects",
       {
         apiUrl,
-        principalId:
-          optionValue(args, "--principal-id") ??
-          runtime.environment.BRIDGE_INIT_PRINCIPAL_ID ??
-          "usr_architect",
+        principalId: initializationPrincipal(args, runtime),
       },
       runtime,
       {
@@ -1439,45 +1623,22 @@ async function initializeRepository(args: readonly string[], runtime: CliRuntime
   if (!projectId && !projectName) {
     throw new CliError("PROJECT_REQUIRED", "Bridge project registration failed.", cliExitCodes.configuration);
   }
+  let validatedProjectName: string | undefined;
+  if (projectId) {
+    validatedProjectName = await validateProjectMapping(projectId, apiUrl, args, runtime);
+  }
   if (dryRun) {
-    const plannedProjectId = projectId ?? "<registered-project-id>";
-    const config: ProjectConfig = {
-      version: 1,
-      projectId: plannedProjectId,
-      apiUrl,
-      repository,
-      client,
-      ...(mcpUrl ? { mcpUrl } : {}),
-    };
-    const adapterPath = clientInstructionPath(runtime.cwd, client);
-    const changes: Array<{
-      readonly path: string;
-      readonly action: "create" | "update" | "unchanged";
-    }> = [];
-    const relativePath = (path: string) => path.slice(runtime.cwd.length + 1);
-    const planFile = async (path: string, content: string): Promise<void> => {
-      const current = await exists(path) ? await readFile(path, "utf8") : undefined;
-      changes.push({
-        path: relativePath(path),
-        action: current === undefined ? "create" : current === content ? "unchanged" : "update",
-      });
-    };
-    await planFile(paths.project, serializeProjectConfig(config));
-    await planFile(paths.instructions, generatedInstructions());
-    await planFile(paths.example, exampleQuestion());
-    await planFile(paths.assumptionExample, exampleAssumption());
-    const currentAdapter = await exists(adapterPath) ? await readFile(adapterPath, "utf8") : "";
-    await planFile(adapterPath, mergeClientInstructionContent(currentAdapter, bridgeInstructionBlock()));
     output(runtime, {
       ok: true,
       dryRun: true,
       projectId: projectId ?? null,
-      projectName: projectName ?? null,
+      projectName: validatedProjectName ?? projectName ?? null,
       repository,
       client,
       mcpUrl: mcpUrl ?? null,
       registrationDisposition: projectId ? "existing_project" : "would_register",
-      changes,
+      mappingValidated: Boolean(projectId),
+      changes: plannedChanges,
       note: "Dry run completed; no API state or repository files were changed.",
     });
     return;
@@ -1498,17 +1659,18 @@ async function initializeRepository(args: readonly string[], runtime: CliRuntime
   await writeFile(paths.instructions, generatedInstructions(), "utf8");
   await writeFile(paths.example, exampleQuestion(), "utf8");
   await writeFile(paths.assumptionExample, exampleAssumption(), "utf8");
-  const adapterPath = clientInstructionPath(runtime.cwd, client);
   const adapterDisposition = await mergeClientInstructions(adapterPath);
   output(runtime, {
     ok: true,
     projectId,
-    projectName: projectName ?? null,
+    projectName: validatedProjectName ?? projectName ?? null,
     repository: config.repository,
     client,
     mcpUrl: config.mcpUrl ?? null,
     registrationDisposition: registrationDisposition ?? "existing_project",
     adapterDisposition,
+    mappingValidated: true,
+    changes: plannedChanges,
     files: [...Object.values(paths), adapterPath].map((path) => path.slice(runtime.cwd.length + 1)),
     next: `Open ${client} in this repository and give it a normal build request. The generated repository instructions activate Bridge automatically.`,
   });
