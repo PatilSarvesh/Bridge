@@ -1309,7 +1309,7 @@ export default function Home() {
     [runs, selectedRunId],
   );
   const viewTitle: Record<View, string> = {
-    inbox: "My Inbox",
+    inbox: "Inbox",
     questions: "Questions",
     specifications: "Specifications",
     notifications: "Notifications",
@@ -1662,74 +1662,83 @@ export default function Home() {
           </div>
         ) : null}
         <nav aria-label="Bridge navigation">
-          <button
-            type="button"
-            aria-current={view === "inbox" ? "page" : undefined}
-            onClick={() => setView("inbox")}
-          >Inbox <span>{pendingQuestions}</span></button>
-          <button
-            type="button"
-            aria-current={view === "notifications" ? "page" : undefined}
-            onClick={() => setView("notifications")}
-          >Notifications <span>{pendingNotifications}</span></button>
-          <button
-            type="button"
-            aria-current={view === "questions" ? "page" : undefined}
-            onClick={() => setView("questions")}
-          >Questions</button>
-          <button
-            type="button"
-            aria-current={view === "decisions" ? "page" : undefined}
-            onClick={() => setView("decisions")}
-          >Decisions</button>
-          <button
-            type="button"
-            aria-current={view === "specifications" ? "page" : undefined}
-            onClick={() => setView("specifications")}
-          >Specifications <span>{pendingSpecifications}</span></button>
-          <button
-            type="button"
-            aria-current={view === "assumptions" ? "page" : undefined}
-            onClick={() => setView("assumptions")}
-          >Assumptions</button>
-          <button
-            type="button"
-            aria-current={view === "runs" ? "page" : undefined}
-            onClick={() => setView("runs")}
-          >Agent Runs</button>
-          {isOrganizationAdmin || isProjectAdmin ? (
+          <div className="nav-group">
+            <span className="nav-label">Work</span>
             <button
               type="button"
-              aria-current={view === "repositories" ? "page" : undefined}
-              onClick={() => setView("repositories")}
-            >Repositories</button>
-          ) : null}
-          {isOrganizationAdmin ? (
+              aria-current={view === "inbox" ? "page" : undefined}
+              onClick={() => setView("inbox")}
+            >Inbox <span>{pendingQuestions}</span></button>
             <button
               type="button"
-              aria-current={view === "organization" ? "page" : undefined}
-              onClick={() => setView("organization")}
-            >Organization</button>
-          ) : null}
-          <button
-            type="button"
-            aria-current={view === "analytics" ? "page" : undefined}
-            onClick={() => setView("analytics")}
-          >Analytics</button>
-          {isOrganizationAdmin || isProjectAdmin ? (
+              aria-current={view === "questions" ? "page" : undefined}
+              onClick={() => setView("questions")}
+            >Questions</button>
             <button
               type="button"
-              aria-current={view === "audit" ? "page" : undefined}
-              onClick={() => setView("audit")}
-            >Audit</button>
-          ) : null}
-          {isOrganizationAdmin || isProjectAdmin ? (
+              aria-current={view === "notifications" ? "page" : undefined}
+              onClick={() => setView("notifications")}
+            >Notifications <span>{pendingNotifications}</span></button>
+          </div>
+          <div className="nav-group">
+            <span className="nav-label">Knowledge</span>
             <button
               type="button"
-              aria-current={view === "support" ? "page" : undefined}
-              onClick={() => setView("support")}
-            >Support</button>
-          ) : null}
+              aria-current={view === "decisions" ? "page" : undefined}
+              onClick={() => setView("decisions")}
+            >Decisions</button>
+            <button
+              type="button"
+              aria-current={view === "specifications" ? "page" : undefined}
+              onClick={() => setView("specifications")}
+            >Specifications <span>{pendingSpecifications}</span></button>
+            <button
+              type="button"
+              aria-current={view === "assumptions" ? "page" : undefined}
+              onClick={() => setView("assumptions")}
+            >Assumptions</button>
+            <button
+              type="button"
+              aria-current={view === "runs" ? "page" : undefined}
+              onClick={() => setView("runs")}
+            >Agent runs</button>
+          </div>
+          <div className="nav-group nav-group-admin">
+            <span className="nav-label">Admin</span>
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "repositories" ? "page" : undefined}
+                onClick={() => setView("repositories")}
+              >Repositories</button>
+            ) : null}
+            {isOrganizationAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "organization" ? "page" : undefined}
+                onClick={() => setView("organization")}
+              >Organization</button>
+            ) : null}
+            <button
+              type="button"
+              aria-current={view === "analytics" ? "page" : undefined}
+              onClick={() => setView("analytics")}
+            >Analytics</button>
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "audit" ? "page" : undefined}
+                onClick={() => setView("audit")}
+              >Audit</button>
+            ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "support" ? "page" : undefined}
+                onClick={() => setView("support")}
+              >Support</button>
+            ) : null}
+          </div>
         </nav>
         <div className="identity">
           <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
@@ -2687,9 +2696,9 @@ export default function Home() {
             <>
               <div className="title-row">
                 <div>
-                  <h1>{view === "inbox" ? "Decisions needing your authority" : "All project questions"}</h1>
-                  <p>{view === "inbox"
-                    ? "Agent recommendations remain advisory until a human owner accepts an answer."
+                    <h1>{view === "inbox" ? "Needs your attention" : "All project questions"}</h1>
+                    <p>{view === "inbox"
+                    ? "Review the decisions and specifications waiting for a human response."
                     : "Shared questions remain visible to the whole project team; use My Inbox for questions routed to you."}</p>
                 </div>
                 <button

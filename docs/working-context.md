@@ -39,7 +39,7 @@ Current explicit founder directives:
 4. MCP must be optional because some organizations do not approve MCP.
 5. Provide CLI and repository-file workflows for organizations where agents cannot use MCP or initiate network requests.
 6. Only humans may accept decisions or approve specification versions.
-7. UI feedback exists but is deferred; the founder will revisit it later.
+7. The founder requested a UI refresh on 2026-08-16 after finding the first pilot dashboard too clustered and dated. The active direction is a minimal workbench: a lighter shell, grouped Work / Knowledge / Admin navigation, calmer spacing, and clearer separation between action queues and record detail. This is a visual information-architecture change only; existing approval boundaries and workflows remain unchanged.
 8. Maintain this file as durable context for future sessions.
 9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
 
