@@ -36,7 +36,7 @@ export default function DesignPreviewPage() {
 
       <aside className={styles.context}>
         <div className={styles.contextTop}>
-          <span className={styles.overline}>Bridge / concept 01</span>
+          <span className={styles.overline}>Bridge / concept</span>
           <span className={styles.previewPill}>Preview</span>
         </div>
         <div className={styles.workspaceName}>
