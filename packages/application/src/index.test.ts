@@ -258,6 +258,247 @@ class FailingAuditRepository extends InMemoryBridgeRepository {
 }
 
 describe("Bridge decision workflow", () => {
+  it("routes owner and reviewer lanes by explicit, scoped, category, project, and admin fallback hierarchy", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    await service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      roles: [{ name: "QA Lead", description: "Owns quality decisions." }],
+      teams: [{ key: "quality", name: "Quality", memberIds: [qaLead.id] }],
+      rules: [
+        {
+          key: "transfer-quality",
+          name: "Transfer quality",
+          priority: 10,
+          category: "quality",
+          component: "transfers",
+          owners: { principalIds: [], roles: [], teamKeys: ["quality"] },
+          reviewers: { principalIds: [], roles: ["architecture-reviewer"], teamKeys: [] },
+        },
+        {
+          key: "quality-category",
+          name: "Quality category",
+          priority: 20,
+          category: "quality",
+          owners: { principalIds: [], roles: ["qa-lead"], teamKeys: [] },
+          reviewers: { principalIds: [], roles: [], teamKeys: [] },
+        },
+        {
+          key: "project-default",
+          name: "Project default",
+          priority: 30,
+          owners: { principalIds: [owner.id], roles: [], teamKeys: [] },
+          reviewers: { principalIds: [], roles: [], teamKeys: [] },
+        },
+      ],
+    });
+
+    const explicit = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "route-explicit-owner",
+      category: "quality",
+      risk: "medium",
+      blocking: false,
+    }));
+    expect(explicit.routing).toMatchObject({
+      ownerSource: "explicit_owner",
+      reviewerSource: "scoped_ownership",
+      reviewerRuleKey: "transfer-quality",
+      ownershipVersion: 1,
+    });
+    expect(explicit.reviewerRoles).toEqual(["architecture-reviewer"]);
+    expect(explicit.assignmentHistory).toHaveLength(1);
+
+    const scoped = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "route-scoped-owner",
+      title: "Who should own transfer quality readiness?",
+      category: "quality",
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+      risk: "medium",
+      blocking: false,
+    }));
+    expect(scoped).toMatchObject({
+      ownerIds: [qaLead.id],
+      reviewerRoles: ["architecture-reviewer"],
+      routing: {
+        ownerSource: "scoped_ownership",
+        reviewerSource: "scoped_ownership",
+        ownerRuleKey: "transfer-quality",
+        reviewerRuleKey: "transfer-quality",
+      },
+    });
+    expect((await service.listQuestionInbox(architectureReviewer, project.id, {
+      role: "architecture-reviewer",
+    })).map((question) => question.id)).toEqual(expect.arrayContaining([explicit.id, scoped.id]));
+
+    const category = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "route-category-owner",
+      title: "Who should own documentation quality readiness?",
+      category: "quality",
+      scope: { component: "documentation" },
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+      risk: "medium",
+      blocking: false,
+    }));
+    expect(category).toMatchObject({
+      ownerRoles: ["qa-lead"],
+      routing: { ownerSource: "category_role", ownerRuleKey: "quality-category" },
+    });
+
+    const projectRouted = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "route-project-default",
+      title: "Who should own operational readiness?",
+      category: "operations",
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+      risk: "medium",
+      blocking: false,
+    }));
+    expect(projectRouted).toMatchObject({
+      ownerIds: [owner.id],
+      routing: { ownerSource: "project_default", ownerRuleKey: "project-default" },
+    });
+
+    const noOwnerProject: Project = {
+      id: "prj_unrouted",
+      organizationId: project.organizationId,
+      name: "Unrouted project",
+      decisionOwnerIds: [],
+    };
+    await repository.saveProject(noOwnerProject);
+    const projectAgent = { ...agent, projectIds: [...agent.projectIds, noOwnerProject.id] };
+    const unrouted = await service.createQuestion(projectAgent, noOwnerProject.id, questionInput({
+      idempotencyKey: "route-admin-fallback",
+      title: "Who should own this unresolved operational decision?",
+      category: "operations",
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+      risk: "medium",
+      blocking: false,
+    }));
+    expect(unrouted).toMatchObject({
+      ownerIds: [],
+      ownerRoles: [],
+      routing: { ownerSource: "admin_fallback", reviewerSource: "none" },
+    });
+    const support = await service.getProjectSupport(owner, noOwnerProject.id);
+    expect(support.routing.unroutedQuestions.map((question) => question.id)).toContain(unrouted.id);
+  });
+
+  it("reassigns unresolved questions with versioned history, audit, notifications, and an outbox event", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "reassign-question",
+      intendedOwnerIds: [qaLead.id],
+      risk: "medium",
+      blocking: false,
+    }));
+    await expect(service.reassignQuestion(agent, question.id, {
+      expectedVersion: question.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [],
+      reviewerRoles: [],
+      reason: "An agent must never control the accountable human assignment lane.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.reassignQuestion(contributor, question.id, {
+      expectedVersion: question.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [qaLead.id],
+      reviewerRoles: [],
+      reason: "The contributor must not be able to change accountable ownership.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const reassigned = await service.reassignQuestion(owner, question.id, {
+      expectedVersion: question.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [qaLead.id],
+      reviewerRoles: ["architecture-reviewer"],
+      reason: "Architecture owns the decision while quality provides an independent review.",
+    });
+    expect(reassigned).toMatchObject({
+      ownerIds: [owner.id],
+      reviewerIds: [qaLead.id],
+      reviewerRoles: ["architecture-reviewer"],
+      routing: { ownerSource: "reassignment", reviewerSource: "reassignment", ownershipVersion: 0 },
+      version: question.version + 1,
+    });
+    expect(reassigned.assignmentHistory).toHaveLength(2);
+    expect(reassigned.assignmentHistory[1]).toMatchObject({
+      kind: "reassigned",
+      changedById: owner.id,
+      reason: "Architecture owns the decision while quality provides an independent review.",
+      questionVersion: question.version + 1,
+    });
+    await expect(service.reassignQuestion(owner, question.id, {
+      expectedVersion: question.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [],
+      reviewerRoles: [],
+      reason: "This stale command must lose the optimistic concurrency race.",
+    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: question.version + 1 } });
+    await expect(service.reassignQuestion(owner, question.id, {
+      expectedVersion: reassigned.version,
+      ownerIds: [agent.id],
+      ownerRoles: [],
+      reviewerIds: [],
+      reviewerRoles: [],
+      reason: "A non-human principal cannot become a human question owner.",
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { principalId: agent.id } });
+
+    const qaInbox = await service.listQuestionInbox(qaLead, project.id, {});
+    expect(qaInbox.find((item) => item.id === question.id)?.inboxReasons).toContain("direct_reviewer");
+    expect((await repository.listAuditEvents(project.id)).some((event) =>
+      event.action === "question.reassigned" && event.subjectId === question.id)).toBe(true);
+    expect((await repository.listOutboxEvents(project.id)).some((event) =>
+      event.type === "question.reassigned" && "assignmentId" in event.payload)).toBe(true);
+    expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id)).some((notification) =>
+      notification.targetId === question.id && notification.title === "Question assignment changed")).toBe(true);
+  });
+
+  it("rolls back a reassignment when its audit record cannot be written", async () => {
+    const repository = new FailingAuditRepository();
+    await repository.saveProject(project);
+    await seedOwnershipMembers(repository);
+    const service = new BridgeService(repository, {
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => String(++next);
+      })(),
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "rollback-reassignment",
+      intendedOwnerIds: [qaLead.id],
+      risk: "medium",
+      blocking: false,
+    }));
+
+    repository.failAction = "question.reassigned";
+    await expect(service.reassignQuestion(owner, question.id, {
+      expectedVersion: question.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [qaLead.id],
+      reviewerRoles: [],
+      reason: "The injected audit failure must roll the full assignment transaction back.",
+    })).rejects.toThrow("Injected failure for question.reassigned");
+
+    expect(await repository.getQuestion(question.id)).toMatchObject({
+      ownerIds: [qaLead.id],
+      reviewerIds: [],
+      version: question.version,
+      assignmentHistory: [{ kind: "initial", questionVersion: question.version }],
+    });
+    expect((await repository.listOutboxEvents(project.id)).some((event) =>
+      event.type === "question.reassigned")).toBe(false);
+  });
+
   it("manages versioned project policy and applies only risk-elevating scoped rules", async () => {
     const { repository, service } = await runtime();
     await expect(service.getProjectPolicyConfiguration(contributor, project.id))

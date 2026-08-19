@@ -341,6 +341,41 @@ export interface QuestionComment {
   readonly createdAt: string;
 }
 
+export type QuestionRouteSource =
+  | "explicit_owner"
+  | "scoped_ownership"
+  | "category_role"
+  | "project_default"
+  | "admin_fallback"
+  | "policy"
+  | "none"
+  | "reassignment"
+  | "legacy_assignment";
+
+export interface QuestionRoutingExplanation {
+  readonly ownerSource: QuestionRouteSource;
+  readonly reviewerSource: QuestionRouteSource;
+  readonly ownerRuleKey?: string;
+  readonly reviewerRuleKey?: string;
+  readonly ownershipVersion: number;
+  readonly policyVersion: number;
+}
+
+export interface QuestionAssignmentHistoryEntry {
+  readonly id: string;
+  readonly kind: "initial" | "reassigned";
+  readonly changedById: string;
+  readonly changedByType: PrincipalType;
+  readonly ownerIds: readonly string[];
+  readonly ownerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
+  readonly route: QuestionRoutingExplanation;
+  readonly reason?: string;
+  readonly createdAt: string;
+  readonly questionVersion: number;
+}
+
 export interface Notification {
   readonly id: string;
   readonly organizationId: string;
@@ -378,7 +413,14 @@ export interface DecisionLifecycleOutboxPayload {
   readonly replacementDecisionId?: string;
 }
 
-export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxPayload;
+export interface QuestionReassignedOutboxPayload {
+  readonly questionId: string;
+  readonly changedById: string;
+  readonly assignmentId: string;
+  readonly questionVersion: number;
+}
+
+export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxPayload | QuestionReassignedOutboxPayload;
 
 export interface OutboxEvent {
   readonly id: string;
@@ -432,7 +474,11 @@ export interface Question {
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
   readonly requiredOwnerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly routing: QuestionRoutingExplanation;
+  readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly options: readonly QuestionOption[];
   readonly recommendationKey?: string;
   readonly fallback?: string | null;
@@ -449,7 +495,13 @@ export interface Question {
   readonly version: number;
 }
 
-export type QuestionInboxReason = "direct_owner" | "role_owner" | "project_admin" | "protected_review";
+export type QuestionInboxReason =
+  | "direct_owner"
+  | "role_owner"
+  | "direct_reviewer"
+  | "role_reviewer"
+  | "project_admin"
+  | "protected_review";
 
 export interface QuestionInboxItem extends Question {
   readonly inboxReasons: readonly QuestionInboxReason[];
@@ -664,6 +716,10 @@ export function questionInboxReasons(
   const reasons: QuestionInboxReason[] = [];
   if (question.ownerIds.includes(principal.id)) reasons.push("direct_owner");
   if (question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId))) reasons.push("role_owner");
+  if ((question.reviewerIds ?? []).includes(principal.id)) reasons.push("direct_reviewer");
+  if ((question.reviewerRoles ?? []).some((role) => principalHasRole(principal, role, question.projectId))) {
+    reasons.push("role_reviewer");
+  }
   if (principalHasRole(principal, "project-admin", question.projectId)) reasons.push("project_admin");
   if (question.risk === "protected" && requiredQuestionReviewerRoles(question).some((role) =>
     principalHasRole(principal, role, question.projectId))) {

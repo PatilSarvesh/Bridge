@@ -149,6 +149,29 @@ interface QuestionComment {
   readonly createdAt: string;
 }
 
+interface QuestionRoutingExplanation {
+  readonly ownerSource: string;
+  readonly reviewerSource: string;
+  readonly ownerRuleKey?: string;
+  readonly reviewerRuleKey?: string;
+  readonly ownershipVersion: number;
+  readonly policyVersion: number;
+}
+
+interface QuestionAssignmentHistoryEntry {
+  readonly id: string;
+  readonly kind: "initial" | "reassigned";
+  readonly changedById: string;
+  readonly ownerIds: readonly string[];
+  readonly ownerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
+  readonly route: QuestionRoutingExplanation;
+  readonly reason?: string;
+  readonly createdAt: string;
+  readonly questionVersion: number;
+}
+
 interface Question {
   readonly id: string;
   readonly title: string;
@@ -165,7 +188,11 @@ interface Question {
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
   readonly requiredOwnerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly routing: QuestionRoutingExplanation;
+  readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly status: string;
   readonly decisionId?: string;
   readonly responses: readonly QuestionResponse[];
@@ -1709,6 +1736,36 @@ export default function Home() {
       await Promise.all([loadQuestions(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to record security review.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reassignQuestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedQuestion) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const reason = String(form.get("assignmentReason") ?? "").trim();
+    if (reason.length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/assignments`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          ownerIds: roleList(String(form.get("assignmentOwnerIds") ?? "")),
+          ownerRoles: roleList(String(form.get("assignmentOwnerRoles") ?? "")),
+          reviewerIds: roleList(String(form.get("assignmentReviewerIds") ?? "")),
+          reviewerRoles: roleList(String(form.get("assignmentReviewerRoles") ?? "")),
+          reason,
+        }),
+      }, activePrincipalId);
+      formElement.reset();
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to reassign the question.");
     } finally {
       setSubmitting(false);
     }
@@ -3292,6 +3349,7 @@ export default function Home() {
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
                         {selectedQuestion.requiredOwnerRoles.length > 0 ? <div className="owner-routing"><strong>Required owner roles:</strong> {selectedQuestion.requiredOwnerRoles.join(", ")}</div> : null}
+                        {selectedQuestion.reviewerIds.length + selectedQuestion.reviewerRoles.length > 0 ? <div className="owner-routing"><strong>Review lane:</strong> {[...selectedQuestion.reviewerIds, ...selectedQuestion.reviewerRoles].join(", ")}</div> : null}
                         <div className="owner-routing"><strong>Policy:</strong> {selectedQuestion.policyRuleKey} · version {selectedQuestion.policyVersion} · {selectedQuestion.policyAction.replaceAll("_", " ")}</div>
                         {selectedQuestion.requiredReviewerRoles.length > 0 ? <div className="owner-routing"><strong>Required reviewer roles:</strong> {selectedQuestion.requiredReviewerRoles.join(", ")}</div> : null}
                         {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
@@ -3301,6 +3359,32 @@ export default function Home() {
                           </div>
                         ) : null}
                       </section>
+
+                      <details className="detail-disclosure">
+                        <summary>Assignment routing <span className="section-count">{selectedQuestion.assignmentHistory.length}</span></summary>
+                        <div className="owner-routing"><strong>Current route:</strong> owner via {selectedQuestion.routing.ownerSource.replaceAll("_", " ")}{selectedQuestion.routing.ownerRuleKey ? ` (${selectedQuestion.routing.ownerRuleKey})` : ""} · reviewer via {selectedQuestion.routing.reviewerSource.replaceAll("_", " ")}{selectedQuestion.routing.reviewerRuleKey ? ` (${selectedQuestion.routing.reviewerRuleKey})` : ""} · ownership v{selectedQuestion.routing.ownershipVersion} · policy v{selectedQuestion.routing.policyVersion}</div>
+                        <div className="response-list">
+                          {selectedQuestion.assignmentHistory.map((assignment) => (
+                            <article className="response-card" key={assignment.id}>
+                              <div className="response-heading"><strong>{assignment.kind === "initial" ? "Initial route" : "Reassigned"}</strong><small>{new Date(assignment.createdAt).toLocaleString()}</small></div>
+                              <small>By {assignment.changedById} · question v{assignment.questionVersion}</small>
+                              <div className="response-rationale"><strong>Owners:</strong> {[...assignment.ownerIds, ...assignment.ownerRoles].join(", ") || "Administrator fallback"}</div>
+                              <div className="response-rationale"><strong>Reviewers:</strong> {[...assignment.reviewerIds, ...assignment.reviewerRoles].join(", ") || "None"}</div>
+                              {assignment.reason ? <div className="response-rationale"><strong>Reason:</strong> {assignment.reason}</div> : null}
+                            </article>
+                          ))}
+                        </div>
+                        {(isOrganizationAdmin || isProjectAdmin) && ["open", "in_discussion"].includes(selectedQuestion.status) ? (
+                          <form className="member-form-grid" onSubmit={(event) => void reassignQuestion(event)}>
+                            <label>Owner member IDs<input name="assignmentOwnerIds" defaultValue={selectedQuestion.ownerIds.join(", ")} placeholder="usr_architect" /></label>
+                            <label>Owner roles<input name="assignmentOwnerRoles" defaultValue={selectedQuestion.ownerRoles.join(", ")} placeholder="qa-lead" /></label>
+                            <label>Reviewer member IDs<input name="assignmentReviewerIds" defaultValue={selectedQuestion.reviewerIds.join(", ")} placeholder="usr_qa_lead" /></label>
+                            <label>Reviewer roles<input name="assignmentReviewerRoles" defaultValue={selectedQuestion.reviewerRoles.join(", ")} placeholder="architecture-reviewer" /></label>
+                            <label>Reason<textarea name="assignmentReason" minLength={10} required placeholder="Explain why accountable ownership or review changed." /></label>
+                            <div className="member-form-actions"><small>Active humans: {principals.map((principal) => principal.id).join(", ") || "none"}. Required policy roles are retained automatically.</small><button className="secondary" type="submit" disabled={submitting}>Reassign</button></div>
+                          </form>
+                        ) : null}
+                      </details>
 
                       <section>
                         <h3>Options</h3>

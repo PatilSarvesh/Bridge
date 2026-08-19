@@ -35,6 +35,7 @@ import type {
   ProjectAnalyticsQuery,
   ProjectMembershipConfiguration,
   QuestionReviewInput,
+  ReassignQuestionInput,
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
@@ -70,9 +71,12 @@ import {
   type Principal,
   type Project,
   type Question,
+  type QuestionAssignmentHistoryEntry,
   type QuestionComment,
   type QuestionInboxItem,
   type QuestionReview,
+  type QuestionRouteSource,
+  type QuestionRoutingExplanation,
   type QuestionResponse,
   type Notification,
   type NotificationQuestionContext,
@@ -701,6 +705,14 @@ interface PolicyEvaluation {
   readonly policyRuleKey: string;
   readonly requiredOwnerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+}
+
+interface RoutingResolution {
+  readonly ownerIds: readonly string[];
+  readonly ownerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
+  readonly explanation: QuestionRoutingExplanation;
 }
 
 export type QuestionSubmission = Question & {
@@ -3482,18 +3494,7 @@ export class BridgeService {
     }
 
     const timestamp = this.now().toISOString();
-    const ownerRoles = this.normalizedRoles([
-      ...input.intendedOwnerRoles,
-      ...policy.requiredOwnerRoles,
-    ]);
-    const ownerIds = input.intendedOwnerIds.length > 0
-      ? [...input.intendedOwnerIds]
-      : ownerRoles.length > 0
-        ? []
-        : [...project.decisionOwnerIds];
-    if (ownerIds.length === 0 && ownerRoles.length === 0) {
-      throw new BridgeError("POLICY_BLOCKED", "No decision owner or assigned role can be resolved for this question.", 422);
-    }
+    const routing = await this.resolveQuestionRouting(repository, project, input, policy);
     const sourceRun = input.runId
       ? await this.requireLinkableRun(principal, input.runId, repository)
       : undefined;
@@ -3504,7 +3505,7 @@ export class BridgeService {
       projectId,
       input,
       policy,
-      ownerRoles,
+      routing,
       effectiveBlocking,
     );
     if (reusable) {
@@ -3528,8 +3529,22 @@ export class BridgeService {
       };
     }
 
+    const questionId = `qst_${this.id()}`;
+    const initialAssignment: QuestionAssignmentHistoryEntry = {
+      id: `qas_${this.id()}`,
+      kind: "initial",
+      changedById: principal.id,
+      changedByType: principal.type,
+      ownerIds: routing.ownerIds,
+      ownerRoles: routing.ownerRoles,
+      reviewerIds: routing.reviewerIds,
+      reviewerRoles: routing.reviewerRoles,
+      route: routing.explanation,
+      createdAt: timestamp,
+      questionVersion: 1,
+    };
     const question: Question = {
-      id: `qst_${this.id()}`,
+      id: questionId,
       organizationId: principal.organizationId,
       projectId,
       ...(input.runId ? { runId: input.runId } : {}),
@@ -3544,10 +3559,14 @@ export class BridgeService {
       policyRuleKey: policy.policyRuleKey,
       reversible: input.reversible,
       blocking: effectiveBlocking,
-      ownerIds: [...ownerIds],
-      ownerRoles,
+      ownerIds: routing.ownerIds,
+      ownerRoles: routing.ownerRoles,
       requiredOwnerRoles: policy.requiredOwnerRoles,
+      reviewerIds: routing.reviewerIds,
+      reviewerRoles: routing.reviewerRoles,
       requiredReviewerRoles: policy.requiredReviewerRoles,
+      routing: routing.explanation,
+      assignmentHistory: [initialAssignment],
       options: input.options.map((option) => ({ ...option })),
       ...(input.recommendationKey ? { recommendationKey: input.recommendationKey } : {}),
       ...(input.fallback !== undefined ? { fallback: input.fallback } : {}),
@@ -3577,7 +3596,7 @@ export class BridgeService {
       timestamp,
       question.policyVersion,
     );
-    await this.notify(repository, principal, projectId, question.ownerIds, {
+    await this.notify(repository, principal, projectId, [...question.ownerIds, ...question.reviewerIds], {
       type: "question_assigned",
       title: "Question needs your review",
       body: `${principal.displayName} routed “${question.title}” to you.`,
@@ -3678,7 +3697,7 @@ export class BridgeService {
     projectId: string,
     input: CreateQuestionInput,
     policy: PolicyEvaluation,
-    ownerRoles: readonly string[],
+    routing: RoutingResolution,
     effectiveBlocking: boolean,
   ): Promise<Question | undefined> {
     const questions = await repository.listQuestions(projectId);
@@ -3693,8 +3712,13 @@ export class BridgeService {
       question.policyAction === policy.action &&
       question.reversible === input.reversible &&
       question.blocking === effectiveBlocking &&
+      JSON.stringify([...question.ownerIds].sort()) === JSON.stringify([...routing.ownerIds].sort()) &&
       JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...ownerRoles].sort()) &&
+        JSON.stringify([...routing.ownerRoles].sort()) &&
+      JSON.stringify([...(question.reviewerIds ?? [])].sort()) ===
+        JSON.stringify([...routing.reviewerIds].sort()) &&
+      JSON.stringify([...(question.reviewerRoles ?? [])].map(normalizeRoleName).filter(Boolean).sort()) ===
+        JSON.stringify([...routing.reviewerRoles].sort()) &&
       JSON.stringify([...question.requiredOwnerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
         JSON.stringify([...policy.requiredOwnerRoles].sort()) &&
       JSON.stringify([...question.requiredReviewerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
@@ -3784,7 +3808,8 @@ export class BridgeService {
         (!filters.status || question.status === filters.status) &&
         (!filters.risk || question.risk === filters.risk) &&
         (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
-        (!normalizedRole || question.ownerRoles.some((role) => normalizeRoleName(role) === normalizedRole)),
+        (!normalizedRole || [...question.ownerRoles, ...(question.reviewerRoles ?? [])]
+          .some((role) => normalizeRoleName(role) === normalizedRole)),
       )
       .map((question) => ({
         ...question,
@@ -3807,6 +3832,139 @@ export class BridgeService {
   async getQuestion(principal: Principal, questionId: string): Promise<Question> {
     return this.tenantTransaction(principal, (repository) =>
       this.requireQuestion(principal, questionId, repository));
+  }
+
+  async reassignQuestion(
+    principal: Principal,
+    questionId: string,
+    input: ReassignQuestionInput,
+  ): Promise<Question> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const question = await this.requireQuestion(principal, questionId, repository);
+      const project = await this.requireProject(principal, question.projectId, repository);
+      this.assertProjectOperator(principal, "Reassigning a question", project.id);
+      this.assertSecretSafe("question", input);
+      if (question.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: question.version,
+        });
+      }
+      if (!["open", "in_discussion"].includes(question.status)) {
+        throw new BridgeError("CONFLICT", "Only an unresolved question can be reassigned.", 409);
+      }
+      const activeHumans = new Map(
+        (await repository.listOrganizationPrincipals(principal.organizationId))
+          .filter((candidate) => {
+            if (candidate.type !== "human") return false;
+            try {
+              assertProjectAccess(candidate, project);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .map((candidate) => [candidate.id, candidate]),
+      );
+      for (const principalId of [...input.ownerIds, ...input.reviewerIds]) {
+        if (!activeHumans.has(principalId)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Question assignments can target only active human members with project access.",
+            400,
+            { principalId },
+          );
+        }
+      }
+      const normalizedOwnerRoles = this.normalizedRoles(input.ownerRoles);
+      const normalizedReviewerRoles = this.normalizedRoles(input.reviewerRoles);
+      if (normalizedOwnerRoles.length !== input.ownerRoles.length ||
+        normalizedReviewerRoles.length !== input.reviewerRoles.length) {
+        throw new BridgeError("VALIDATION_FAILED", "Assignment roles must be unique after normalization.", 400);
+      }
+      const ownerRoles = this.normalizedRoles([...normalizedOwnerRoles, ...(question.requiredOwnerRoles ?? [])]);
+      const reviewerRoles = this.normalizedRoles([
+        ...normalizedReviewerRoles,
+        ...(question.requiredReviewerRoles ?? []),
+      ]);
+      const timestamp = this.now().toISOString();
+      const ownershipVersion = (await repository.getProjectOwnershipConfiguration(project.id))?.version ?? 0;
+      const route: QuestionRoutingExplanation = {
+        ownerSource: "reassignment",
+        reviewerSource: "reassignment",
+        ownershipVersion,
+        policyVersion: question.policyVersion,
+      };
+      const assignment: QuestionAssignmentHistoryEntry = {
+        id: `qas_${this.id()}`,
+        kind: "reassigned",
+        changedById: principal.id,
+        changedByType: principal.type,
+        ownerIds: [...input.ownerIds],
+        ownerRoles,
+        reviewerIds: [...input.reviewerIds],
+        reviewerRoles,
+        route,
+        reason: input.reason,
+        createdAt: timestamp,
+        questionVersion: question.version + 1,
+      };
+      const updated: Question = {
+        ...question,
+        ownerIds: assignment.ownerIds,
+        ownerRoles: assignment.ownerRoles,
+        reviewerIds: assignment.reviewerIds,
+        reviewerRoles: assignment.reviewerRoles,
+        routing: route,
+        assignmentHistory: [...(question.assignmentHistory ?? []), assignment],
+        version: question.version + 1,
+      };
+      await repository.saveQuestion(updated);
+      await this.audit(
+        repository,
+        principal,
+        question.projectId,
+        "question.reassigned",
+        "question",
+        question.id,
+        timestamp,
+        question.policyVersion,
+      );
+      await repository.saveOutboxEvent({
+        id: `evt_${this.id()}`,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
+        organizationId: question.organizationId,
+        projectId: question.projectId,
+        type: "question.reassigned",
+        payload: {
+          questionId: question.id,
+          changedById: principal.id,
+          assignmentId: assignment.id,
+          questionVersion: updated.version,
+        },
+        status: "pending",
+        attempts: 0,
+        availableAt: timestamp,
+        createdAt: timestamp,
+      });
+      await this.notify(repository, principal, question.projectId, [
+        ...updated.ownerIds,
+        ...updated.reviewerIds,
+      ], {
+        type: "question_assigned",
+        title: "Question assignment changed",
+        body: `${principal.displayName} reassigned “${question.title}”.`,
+        targetType: "question",
+        targetId: question.id,
+        questionContext: {
+          id: question.id,
+          status: question.status,
+          risk: question.risk,
+          ownerIds: updated.ownerIds,
+        },
+      });
+      return updated;
+    });
   }
 
   async reviewQuestion(
@@ -5454,6 +5612,116 @@ export class BridgeService {
       policyRuleKey,
       requiredOwnerRoles,
       requiredReviewerRoles,
+    };
+  }
+
+  private ownershipRuleMatches(
+    rule: ProjectOwnershipRule,
+    category: string,
+    scope: Scope,
+  ): boolean {
+    return (!rule.category || this.normalizedPolicyCategory(rule.category) === this.normalizedPolicyCategory(category)) &&
+      (!rule.repository || this.normalizedOwnershipSelector(rule.repository) ===
+        this.normalizedOwnershipSelector(scope.repository)) &&
+      (!rule.component || this.normalizedOwnershipSelector(rule.component) ===
+        this.normalizedOwnershipSelector(scope.component));
+  }
+
+  private ownershipRouteSource(rule: ProjectOwnershipRule): QuestionRouteSource {
+    if (rule.repository || rule.component) return "scoped_ownership";
+    if (rule.category) return "category_role";
+    return "project_default";
+  }
+
+  private expandOwnershipTargets(
+    targets: ProjectOwnershipRule["owners"],
+    configuration: ProjectOwnershipConfiguration,
+  ): { readonly principalIds: readonly string[]; readonly roles: readonly string[] } {
+    const teamMembers = new Map(configuration.teams.map((team) => [team.key, team.memberIds]));
+    return {
+      principalIds: [...new Set([
+        ...targets.principalIds,
+        ...targets.teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? []),
+      ])],
+      roles: this.normalizedRoles(targets.roles),
+    };
+  }
+
+  private async resolveQuestionRouting(
+    repository: BridgeRepository,
+    project: Project,
+    input: CreateQuestionInput,
+    policy: PolicyEvaluation,
+  ): Promise<RoutingResolution> {
+    const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: [],
+      teams: [],
+      rules: [],
+      version: 0,
+    };
+    const rules = [...ownership.rules]
+      .filter((rule) => this.ownershipRuleMatches(rule, input.category, input.scope))
+      .sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
+    const findRule = (
+      lane: "owners" | "reviewers",
+      source: "scoped_ownership" | "category_role" | "project_default",
+    ) => rules.find((rule) =>
+      this.ownershipRouteSource(rule) === source && this.ownershipTargetCount(rule[lane]) > 0);
+
+    let ownerIds: readonly string[] = [...new Set(input.intendedOwnerIds)];
+    let ownerRoles: readonly string[] = this.normalizedRoles(input.intendedOwnerRoles);
+    let ownerSource: QuestionRouteSource = "admin_fallback";
+    let ownerRuleKey: string | undefined;
+    if (ownerIds.length > 0 || ownerRoles.length > 0) {
+      ownerSource = "explicit_owner";
+    } else {
+      const ownerRule = findRule("owners", "scoped_ownership") ??
+        findRule("owners", "category_role") ??
+        findRule("owners", "project_default");
+      if (ownerRule) {
+        const expanded = this.expandOwnershipTargets(ownerRule.owners, ownership);
+        ownerIds = expanded.principalIds;
+        ownerRoles = expanded.roles;
+        ownerSource = this.ownershipRouteSource(ownerRule);
+        ownerRuleKey = ownerRule.key;
+      } else if (policy.requiredOwnerRoles.length > 0) {
+        ownerSource = "category_role";
+      } else if (project.decisionOwnerIds.length > 0) {
+        ownerIds = [...project.decisionOwnerIds];
+        ownerSource = "project_default";
+      }
+    }
+    ownerRoles = this.normalizedRoles([...ownerRoles, ...policy.requiredOwnerRoles]);
+
+    const reviewerRule = findRule("reviewers", "scoped_ownership") ??
+      findRule("reviewers", "category_role") ??
+      findRule("reviewers", "project_default");
+    const expandedReviewers = reviewerRule
+      ? this.expandOwnershipTargets(reviewerRule.reviewers, ownership)
+      : { principalIds: [], roles: [] };
+    const reviewerIds = expandedReviewers.principalIds;
+    const reviewerRoles = this.normalizedRoles([
+      ...expandedReviewers.roles,
+      ...policy.requiredReviewerRoles,
+    ]);
+    const reviewerSource: QuestionRouteSource = reviewerRule
+      ? this.ownershipRouteSource(reviewerRule)
+      : policy.requiredReviewerRoles.length > 0 ? "policy" : "none";
+    return {
+      ownerIds,
+      ownerRoles,
+      reviewerIds,
+      reviewerRoles,
+      explanation: {
+        ownerSource,
+        reviewerSource,
+        ...(ownerRuleKey ? { ownerRuleKey } : {}),
+        ...(reviewerRule ? { reviewerRuleKey: reviewerRule.key } : {}),
+        ownershipVersion: ownership.version,
+        policyVersion: policy.policyVersion,
+      },
     };
   }
 

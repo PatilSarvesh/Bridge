@@ -31,7 +31,11 @@ export const notificationTypeSchema = z.enum([
   "artifact_review_feedback",
   "artifact_approved",
 ]);
-export const outboxEventTypeSchema = z.enum(["notification.created", "decision.lifecycle_changed"]);
+export const outboxEventTypeSchema = z.enum([
+  "notification.created",
+  "decision.lifecycle_changed",
+  "question.reassigned",
+]);
 export const outboxEventStatusSchema = z.enum([
   "pending",
   "processing",
@@ -468,6 +472,28 @@ export const questionReviewInputSchema = z.object({
   rationale: z.string().trim().min(10).max(5_000),
 });
 
+export const reassignQuestionInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  ownerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  ownerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  reviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  reviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  reason: z.string().trim().min(10).max(2_000),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["ownerIds", value.ownerIds],
+    ["reviewerIds", value.reviewerIds],
+  ] as const) {
+    const seen = new Set<string>();
+    for (const [index, id] of values.entries()) {
+      if (seen.has(id)) {
+        context.addIssue({ code: "custom", message: "Assignment principal IDs must be unique.", path: [field, index] });
+      }
+      seen.add(id);
+    }
+  }
+});
+
 export const questionCommentInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
   body: z.string().trim().min(2).max(5_000),
@@ -743,6 +769,7 @@ export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
 export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycleInputSchema>;
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
+export type ReassignQuestionInput = z.infer<typeof reassignQuestionInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;

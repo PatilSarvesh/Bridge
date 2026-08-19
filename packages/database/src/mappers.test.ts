@@ -117,7 +117,35 @@ const question: Question = {
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
   requiredOwnerRoles: [],
+  reviewerIds: ["usr_reviewer"],
+  reviewerRoles: ["architecture-reviewer"],
   requiredReviewerRoles: [],
+  routing: {
+    ownerSource: "explicit_owner",
+    reviewerSource: "scoped_ownership",
+    reviewerRuleKey: "architecture-review",
+    ownershipVersion: 1,
+    policyVersion: 0,
+  },
+  assignmentHistory: [{
+    id: "qas_mapping",
+    kind: "initial",
+    changedById: "agt_codex",
+    changedByType: "agent",
+    ownerIds: ["usr_owner"],
+    ownerRoles: ["architect"],
+    reviewerIds: ["usr_reviewer"],
+    reviewerRoles: ["architecture-reviewer"],
+    route: {
+      ownerSource: "explicit_owner",
+      reviewerSource: "scoped_ownership",
+      reviewerRuleKey: "architecture-review",
+      ownershipVersion: 1,
+      policyVersion: 0,
+    },
+    createdAt: "2026-08-07T10:00:00.000Z",
+    questionVersion: 1,
+  }],
   options: [
     { key: "postgres", label: "PostgreSQL", tradeoffs: "Operational dependency with strong transactions." },
     { key: "memory", label: "Memory", tradeoffs: "Simple but state is lost on restart." },
@@ -699,6 +727,18 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(requiredOwnerMigration).toContain('ADD COLUMN "required_owner_roles"');
     expect(requiredOwnerMigration).toContain("bridge_questions_required_owner_roles_shape_check");
+    const routingMigration = readFileSync(
+      new URL("../drizzle/0029_unknown_madame_hydra.sql", import.meta.url),
+      "utf8",
+    );
+    expect(routingMigration).toContain('ADD COLUMN "reviewer_ids"');
+    expect(routingMigration).toContain('ADD COLUMN "routing"');
+    expect(routingMigration).toContain('ADD COLUMN "assignment_history"');
+    expect(routingMigration).toContain("bridge_questions_assignment_history_shape_check");
+    expect(routingMigration).toContain("'question.reassigned'");
+    expect(routingMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
+      routingMigration.indexOf('ALTER COLUMN "routing" SET NOT NULL'),
+    );
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

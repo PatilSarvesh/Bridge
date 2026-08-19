@@ -23,6 +23,7 @@ import {
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
   questionReviewInputSchema,
+  reassignQuestionInputSchema,
   questionInboxQuerySchema,
   linkRepositoryInputSchema,
   recordAdapterDiagnosticInputSchema,
@@ -712,6 +713,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const input = questionReviewInputSchema.parse(request.body);
       const review = await options.service.reviewQuestion(principal, request.params.questionId, input);
       return reply.status(201).send(review);
+    },
+  );
+
+  app.post<{ Params: { questionId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/assignments",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = reassignQuestionInputSchema.parse(request.body);
+      return options.service.reassignQuestion(principal, request.params.questionId, input);
     },
   );
 

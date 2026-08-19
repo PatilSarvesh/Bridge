@@ -7,8 +7,10 @@ import type {
   ProjectOwnershipConfiguration,
   ProjectPolicyConfiguration,
   QuestionComment,
+  QuestionAssignmentHistoryEntry,
   QuestionOption,
   QuestionReview,
+  QuestionRoutingExplanation,
   RepositoryRecord,
 } from "@bridge/domain";
 import { sql } from "drizzle-orm";
@@ -446,7 +448,11 @@ export const questions = pgTable(
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
     requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
+    reviewerIds: jsonb("reviewer_ids").$type<readonly string[]>().default([]).notNull(),
+    reviewerRoles: jsonb("reviewer_roles").$type<readonly string[]>().default([]).notNull(),
     requiredReviewerRoles: jsonb("required_reviewer_roles").$type<readonly string[]>().default([]).notNull(),
+    routing: jsonb("routing").$type<QuestionRoutingExplanation>().notNull(),
+    assignmentHistory: jsonb("assignment_history").$type<readonly QuestionAssignmentHistoryEntry[]>().notNull(),
     options: jsonb("options").$type<readonly QuestionOption[]>().notNull(),
     reviews: jsonb("reviews").$type<readonly QuestionReview[]>().default([]).notNull(),
     comments: jsonb("comments").$type<readonly QuestionComment[]>().default([]).notNull(),

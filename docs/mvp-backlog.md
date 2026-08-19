@@ -359,7 +359,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — explicit owner IDs, project defaults, normalized role assignment, and role-based acceptance are implemented; configurable routing rules, reassignment, and route audit explanations remain
+- **Status:** Implemented for the controlled MVP slice — question creation resolves explicit owners, scoped ownership, category rules, project defaults, and an administrator-visible fallback; owner/reviewer lanes and rule/version explanations are persisted separately, while administrator-only unresolved-question reassignment preserves append-only history and emits audit, notification, and outbox events
 - **Dependencies:** BRG-021, BRG-022, BRG-030
 - **PRD references:** QST-03, QST-06
 
@@ -984,7 +984,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, project ownership/policy administration, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, forced RLS, and bootstrap-directory function boundaries; reassignment, endpoint-specific scopes, and live-provider/database evidence remain
+- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, administrator-only versioned reassignment, project ownership/policy administration, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, forced RLS, and bootstrap-directory function boundaries; endpoint-specific scopes and live-provider/database evidence remain
 - **Dependencies:** BRG-012, BRG-040, BRG-043, BRG-081
 - **PRD references:** MVP acceptance criteria 11 and 14
 
@@ -998,7 +998,7 @@ Acceptance criteria:
 4. Protected approval requirements cannot be bypassed through REST, MCP, or concurrent requests.
 5. Search, inbox, notifications, object links, and audit views are tenant-safe.
 
-Implementation note: `docs/authorization-matrix.md` is the evidence map. Project ownership and policy mutation now have explicit administrator-only rows; reassignment remains explicitly unavailable rather than silently granted. BRG-012 supplies core data-plane RLS defense in depth, bounded security-definer authentication-bootstrap lookups, and repeatable role/grant reconciliation, while live deployment evidence remains explicitly incomplete.
+Implementation note: `docs/authorization-matrix.md` is the evidence map. Project ownership, policy mutation, and unresolved-question reassignment have explicit administrator-only rows and adversarial coverage. BRG-012 supplies core data-plane RLS defense in depth, bounded security-definer authentication-bootstrap lookups, and repeatable role/grant reconciliation, while live deployment evidence remains explicitly incomplete.
 
 ### BRG-103 — Add backup, restore, and operational health procedures
 
