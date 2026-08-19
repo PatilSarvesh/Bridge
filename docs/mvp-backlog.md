@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-16 |
+| Last updated | 2026-08-19 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -243,7 +243,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 19 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
+- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 21 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
 - **Dependencies:** BRG-003, BRG-011
 - **PRD references:** AUTH-04, PRJ-03, MVP acceptance criterion 14
 
@@ -301,7 +301,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — normalized roles, explicit owners, scoped defaults, separate protected reviewers, and audited administrator-managed organization/project membership roles are implemented; reusable teams, ownership rules, and versioned role definitions remain
+- **Status:** Implemented for the controlled MVP slice — project administrators can atomically manage versioned role definitions, reusable human teams, and ordered project/repository/component/category owner and reviewer rules; equal-priority overlapping responsibility lanes are rejected and every change is audited
 - **Dependencies:** BRG-020
 - **PRD references:** PRJ-02, QST-03, QST-05
 

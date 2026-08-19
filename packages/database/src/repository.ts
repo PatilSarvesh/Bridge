@@ -23,6 +23,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
   RepositoryRecord,
   Question,
   ServiceCredential,
@@ -59,6 +60,8 @@ import {
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
+  projectOwnershipConfigurationFromRow,
+  projectOwnershipConfigurationToRow,
   projectFromRow,
   projectToRow,
   repositoryRecordFromRow,
@@ -94,6 +97,7 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  projectOwnershipConfigurations,
   serviceCredentials,
 } from "./schema.js";
 
@@ -670,6 +674,49 @@ export class PostgresBridgeRepository implements BridgeRepository {
           createdAt: row.createdAt,
         },
       });
+  }
+
+  async getProjectOwnershipConfiguration(
+    projectId: string,
+  ): Promise<ProjectOwnershipConfiguration | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectOwnershipConfigurations)
+      .where(eq(projectOwnershipConfigurations.projectId, projectId))
+      .limit(1);
+    return row ? projectOwnershipConfigurationFromRow(row) : undefined;
+  }
+
+  async saveProjectOwnershipConfiguration(
+    configuration: ProjectOwnershipConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const row = projectOwnershipConfigurationToRow(configuration);
+    if (expectedVersion === 0) {
+      const inserted = await this.database
+        .insert(projectOwnershipConfigurations)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ projectId: projectOwnershipConfigurations.projectId });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(projectOwnershipConfigurations)
+      .set({
+        roles: row.roles,
+        teams: row.teams,
+        rules: row.rules,
+        version: row.version,
+        updatedById: row.updatedById,
+        updatedAt: row.updatedAt,
+      })
+      .where(and(
+        eq(projectOwnershipConfigurations.organizationId, configuration.organizationId),
+        eq(projectOwnershipConfigurations.projectId, configuration.projectId),
+        eq(projectOwnershipConfigurations.version, expectedVersion),
+      ))
+      .returning({ projectId: projectOwnershipConfigurations.projectId });
+    return updated.length === 1;
   }
 
   async getRun(runId: string): Promise<AgentRun | undefined> {

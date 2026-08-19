@@ -29,6 +29,8 @@ The dependency-free local vertical slice still uses fixed development principals
 
 Human organization administrators can use the web **Organization** area to provision an exact OIDC subject, disable or reactivate access, assign organization roles, and configure per-project membership roles. Changes use optimistic membership versions, preserve at least one active organization administrator, and create organization-level audit records.
 
+Human project administrators can use the web **Ownership** area or the canonical REST boundary at `GET /v1/admin/projects/:projectId/ownership` and `POST /v1/admin/projects/:projectId/ownership` to manage custom role definitions, reusable human teams, and ordered owner/reviewer rules. The complete configuration is versioned and audited as one project-scoped aggregate; equal-priority overlapping rules are rejected, and agents cannot be team members or satisfy human ownership targets. Automatic question routing consumes this configuration in a later backlog slice.
+
 For contributors and coding agents, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/working-context.md`](docs/working-context.md). Root [`AGENTS.md`](AGENTS.md) is also referenced by [`CLAUDE.md`](CLAUDE.md) so Claude-based contributors receive the same architecture and scope constraints. Every push and pull request runs typecheck, tests, production builds, and the isolated PostgreSQL check through GitHub Actions.
 
 By default the API uses a seeded in-memory repository. To preserve agent-run metadata, assumptions, questions, accepted decisions, specifications, context snapshots, continuation locators, audit events, in-app notifications, and their transactional delivery intents across API restarts, provide a PostgreSQL database:

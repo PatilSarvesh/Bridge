@@ -27,6 +27,7 @@ import {
   linkRepositoryInputSchema,
   recordAdapterDiagnosticInputSchema,
   recordAssumptionInputSchema,
+  replaceProjectOwnershipInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
   resolveAssumptionInputSchema,
@@ -455,6 +456,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/admin/projects/:projectId/ownership",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.getProjectOwnershipConfiguration(principal, request.params.projectId);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/ownership",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = replaceProjectOwnershipInputSchema.parse(request.body);
+      return options.service.replaceProjectOwnershipConfiguration(
+        principal,
+        request.params.projectId,
+        input,
+      );
     },
   );
 

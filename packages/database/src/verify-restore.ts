@@ -13,6 +13,7 @@ export const restoreRequiredTables = [
   "bridge_agent_runs",
   "bridge_adapter_diagnostics",
   "bridge_project_repositories",
+  "bridge_project_ownership_configurations",
   "bridge_run_continuation_locators",
   "bridge_questions",
   "bridge_question_responses",
@@ -138,6 +139,7 @@ export async function verifyRestoredDatabase(
       union all select 'bridge_agent_runs', count(*)::integer from bridge_agent_runs
       union all select 'bridge_adapter_diagnostics', count(*)::integer from bridge_adapter_diagnostics
       union all select 'bridge_project_repositories', count(*)::integer from bridge_project_repositories
+      union all select 'bridge_project_ownership_configurations', count(*)::integer from bridge_project_ownership_configurations
       union all select 'bridge_questions', count(*)::integer from bridge_questions
       union all select 'bridge_decisions', count(*)::integer from bridge_decisions
       union all select 'bridge_assumptions', count(*)::integer from bridge_assumptions
@@ -166,6 +168,7 @@ export async function verifyRestoredDatabase(
           (select count(*) from bridge_agent_runs record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_adapter_diagnostics record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_project_repositories record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
+          (select count(*) from bridge_project_ownership_configurations record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_questions record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_decisions record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +
           (select count(*) from bridge_assumptions record join bridge_projects project on project.id = record.project_id where record.organization_id <> project.organization_id) +

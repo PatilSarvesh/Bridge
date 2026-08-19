@@ -18,10 +18,10 @@ tenant before a tenant transaction can be established:
 - `bridge_principal_identities`
 - `bridge_service_credentials`
 
-The current protected tenant/project set also includes `bridge_adapter_diagnostics`, added by
-forward-only migration `0024_amazing_blindfold.sql`. It stores only the latest bounded adapter
-diagnostic per project/client and uses the same forced RLS policy boundary as the other tenant
-relations.
+The current 21-table protected tenant/project set also includes `bridge_adapter_diagnostics`,
+`bridge_project_repositories`, and `bridge_project_ownership_configurations`, added by forward-only
+migrations `0024_amazing_blindfold.sql` through `0026_thin_sheva_callister.sql`. These relations use
+the same forced RLS policy boundary as the original tenant relations.
 
 OIDC and service-token resolution use the bounded security-definer functions from migration
 `0021_bootstrap_directory_security.sql`. The functions use a fixed `search_path`, return only
@@ -92,7 +92,7 @@ The restore verifier scans all organizations and therefore requires an isolated 
 
 ## Verification
 
-Static tests verify that migration `0020_tenant_row_security.sql` enables and forces every original expected policy, migration `0024_amazing_blindfold.sql` adds and forces the adapter-diagnostic policy, and the idempotency backfill occurs before making ownership non-null. They also verify that migration `0021_bootstrap_directory_security.sql` creates only the approved security-definer directory lookups and revokes ambient table/function access from `PUBLIC`, and that `scripts/provision-postgres-roles.sql` preserves the role, grant, and no-password contract. The opt-in PostgreSQL integration test additionally verifies:
+Static tests verify that migration `0020_tenant_row_security.sql` enables and forces every original expected policy, migrations `0024_amazing_blindfold.sql` through `0026_thin_sheva_callister.sql` add and force the adapter-diagnostic, repository, and ownership-configuration policies, and the idempotency backfill occurs before making ownership non-null. They also verify that migration `0021_bootstrap_directory_security.sql` creates only the approved security-definer directory lookups and revokes ambient table/function access from `PUBLIC`, and that `scripts/provision-postgres-roles.sql` preserves the role, grant, and no-password contract. The opt-in PostgreSQL integration test additionally verifies:
 
 - every protected relation has both `relrowsecurity` and `relforcerowsecurity`;
 - an unscoped non-bypass role sees no protected project rows;

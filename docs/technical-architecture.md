@@ -4,7 +4,7 @@
 |---|---|
 | Status | Approved MVP baseline; implementation validation required |
 | Version | 0.1 |
-| Last updated | 2026-08-16 |
+| Last updated | 2026-08-19 |
 | Related documents | [Bridge PRD](./bridge-prd.md), [Pilot Decisions](./pilot-decisions.md) |
 | Architecture stage | MVP and controlled pilot |
 
@@ -67,7 +67,7 @@ The reviewed migrations normalize projects, agent runs, continuation locators, a
 
 Project registration, repository linking, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal, threaded comment creation, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
-Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on the initial 18 tenant/project tables; migration `0024_amazing_blindfold.sql` applies the same forced policy boundary to the persisted adapter-diagnostic table, and migration `0025_calm_vengeance.sql` applies it to project repository metadata. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions, but migration `0021_bootstrap_directory_security.sql` removes ambient runtime table reads and exposes only bounded security-definer lookups. The repeatable `scripts/provision-postgres-roles.sql` reconciles the runtime/migrator/maintenance role attributes and grants without handling passwords. The Slack delivery adapter and bounded worker runtime are repository-implemented; live email, identity-provider, workspace, and deployment validation remain future work, so these controls do not establish full production readiness.
+Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on the initial 18 tenant/project tables; migration `0024_amazing_blindfold.sql` applies the same forced policy boundary to the persisted adapter-diagnostic table, migration `0025_calm_vengeance.sql` applies it to project repository metadata, and migration `0026_thin_sheva_callister.sql` applies it to project ownership configuration. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions, but migration `0021_bootstrap_directory_security.sql` removes ambient runtime table reads and exposes only bounded security-definer lookups. The repeatable `scripts/provision-postgres-roles.sql` reconciles the runtime/migrator/maintenance role attributes and grants without handling passwords. The Slack delivery adapter and bounded worker runtime are repository-implemented; live email, identity-provider, workspace, and deployment validation remain future work, so these controls do not establish full production readiness.
 
 ## 4. System context
 
@@ -332,6 +332,8 @@ service_identities
 
 The current implementation uses versioned organization and project membership rows, a separate `bridge_service_credentials` table that stores only token hashes and expiry/revocation metadata, plus an organization-level audit stream for member and service-identity changes. Organization administrators may manage membership and service credentials but do not gain decision-owner or specification-approver authority merely from that role.
 
+Project role definitions, reusable teams, and owner/reviewer rules are persisted atomically in `bridge_project_ownership_configurations`. The aggregate has one optimistic version per project, records its last human administrator, and rejects ambiguous equal-priority rules separately for owner and reviewer responsibility. Rules may narrow from the implicit project scope by repository, component, and category. Team membership and direct principal targets accept only active humans with project access; organization/project role assignments remain in the membership model.
+
 #### Work and knowledge
 
 ```text
@@ -526,6 +528,8 @@ GET    /v1/projects/:projectId
 POST   /v1/projects/:projectId/repositories
 GET    /v1/projects/:projectId/repositories
 GET    /v1/projects/:projectId/context
+GET    /v1/admin/projects/:projectId/ownership
+POST   /v1/admin/projects/:projectId/ownership
 
 POST   /v1/projects/:projectId/questions
 POST   /v1/projects/:projectId/questions/matches
@@ -591,6 +595,8 @@ Project audit browsing/export requires a human project administrator after tenan
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions also expose a separate security-review command before a non-security owner may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
 Project repository metadata is managed through the canonical REST endpoints, the administrator-only web **Repositories** view, or the equivalent CLI `repository list` and `repository link` commands. These surfaces exchange only provider, owner, repository name, canonical URL, project scope, and timestamps. They do not fetch source or infer provider connectivity from a caller-supplied URL; provider-backed validation and synchronization remain integration work.
+
+Project ownership configuration is managed through canonical administrator REST endpoints and the web **Ownership** view. The application validates active human team membership and direct targets, normalizes role/team/rule keys, detects equal-priority overlap per responsibility lane, performs an optimistic aggregate-version write, and appends the project audit event in one transaction. MCP exposes no separate ownership mutation path. BRG-031 applies the stored rules to question routing; until then, existing explicit question ownership remains authoritative.
 
 ## 13. MCP architecture
 

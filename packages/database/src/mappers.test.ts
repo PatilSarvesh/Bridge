@@ -16,6 +16,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
   RepositoryRecord,
   Question,
   ServiceCredential,
@@ -54,6 +55,8 @@ import {
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
+  projectOwnershipConfigurationFromRow,
+  projectOwnershipConfigurationToRow,
   serviceCredentialFromRow,
   serviceCredentialToRow,
   questionFromRows,
@@ -80,6 +83,7 @@ import {
   type OrganizationRow,
   type PrincipalIdentityRow,
   type ProjectMembershipRow,
+  type ProjectOwnershipConfigurationRow,
   type ServiceCredentialRow,
 } from "./mappers.js";
 
@@ -428,6 +432,26 @@ describe("PostgreSQL domain mappings", () => {
     };
     expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
       .toEqual(repositoryRecord);
+    const ownershipConfiguration: ProjectOwnershipConfiguration = {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: [{ name: "qa-lead", description: "Owns project quality decisions." }],
+      teams: [{ key: "quality", name: "Quality", memberIds: ["usr_qa"] }],
+      rules: [{
+        key: "quality",
+        name: "Quality ownership",
+        priority: 10,
+        category: "quality",
+        owners: { principalIds: [], roles: ["qa-lead"], teamKeys: ["quality"] },
+        reviewers: { principalIds: ["usr_owner"], roles: [], teamKeys: [] },
+      }],
+      version: 1,
+      updatedById: "usr_owner",
+      updatedAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(projectOwnershipConfigurationFromRow(
+      projectOwnershipConfigurationToRow(ownershipConfiguration) as ProjectOwnershipConfigurationRow,
+    )).toEqual(ownershipConfiguration);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -614,6 +638,17 @@ describe("PostgreSQL domain mappings", () => {
     expect(repositoryMigration).toContain("bridge_project_repositories_org_provider_owner_name_unique");
     expect(repositoryMigration).toContain("bridge_project_repositories_organization_project_fk");
     expect(repositoryMigration).toContain("FORCE ROW LEVEL SECURITY");
+
+    const ownershipMigration = readFileSync(
+      new URL("../drizzle/0026_thin_sheva_callister.sql", import.meta.url),
+      "utf8",
+    );
+    expect(ownershipMigration).toContain('CREATE TABLE "bridge_project_ownership_configurations"');
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_project_fk");
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_tenant");
+    expect(ownershipMigration).toContain("FORCE ROW LEVEL SECURITY");
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_roles_shape_check");
+    expect(ownershipMigration).toContain("'ownership_configuration'");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

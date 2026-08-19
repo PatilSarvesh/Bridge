@@ -16,6 +16,7 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
   RepositoryRecord,
   Question,
   QuestionResponse,
@@ -43,6 +44,7 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  projectOwnershipConfigurations,
   serviceCredentials,
 } from "./schema.js";
 
@@ -51,6 +53,7 @@ export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
 export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
+export type ProjectOwnershipConfigurationRow = typeof projectOwnershipConfigurations.$inferSelect;
 export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type RepositoryRecordRow = typeof projectRepositories.$inferSelect;
@@ -112,6 +115,39 @@ export function projectMembershipToRow(
 
 export function projectMembershipFromRow(row: ProjectMembershipRow): ProjectMembership {
   return { ...row };
+}
+
+export function projectOwnershipConfigurationToRow(
+  configuration: ProjectOwnershipConfiguration,
+): typeof projectOwnershipConfigurations.$inferInsert {
+  if (!configuration.updatedById || !configuration.updatedAt) {
+    throw new Error("Persisted project ownership configuration requires update provenance.");
+  }
+  return {
+    organizationId: configuration.organizationId,
+    projectId: configuration.projectId,
+    roles: configuration.roles,
+    teams: configuration.teams,
+    rules: configuration.rules,
+    version: configuration.version,
+    updatedById: configuration.updatedById,
+    updatedAt: configuration.updatedAt,
+  };
+}
+
+export function projectOwnershipConfigurationFromRow(
+  row: ProjectOwnershipConfigurationRow,
+): ProjectOwnershipConfiguration {
+  return {
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    roles: row.roles,
+    teams: row.teams,
+    rules: row.rules,
+    version: row.version,
+    updatedById: row.updatedById,
+    updatedAt: row.updatedAt,
+  };
 }
 
 export function serviceCredentialToRow(

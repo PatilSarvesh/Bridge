@@ -173,6 +173,45 @@ export interface RepositoryRecord {
   readonly createdAt: string;
 }
 
+export interface ProjectRoleDefinition {
+  readonly name: string;
+  readonly description: string;
+}
+
+export interface ProjectTeam {
+  readonly key: string;
+  readonly name: string;
+  readonly memberIds: readonly string[];
+}
+
+export interface OwnershipRuleTarget {
+  readonly principalIds: readonly string[];
+  readonly roles: readonly string[];
+  readonly teamKeys: readonly string[];
+}
+
+export interface ProjectOwnershipRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly repository?: string;
+  readonly component?: string;
+  readonly owners: OwnershipRuleTarget;
+  readonly reviewers: OwnershipRuleTarget;
+}
+
+export interface ProjectOwnershipConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly roles: readonly ProjectRoleDefinition[];
+  readonly teams: readonly ProjectTeam[];
+  readonly rules: readonly ProjectOwnershipRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
+}
+
 export interface AgentRun {
   readonly id: string;
   readonly organizationId: string;
@@ -487,7 +526,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
+  readonly subjectType: "project" | "repository" | "ownership_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
   readonly createdAt: string;
 }

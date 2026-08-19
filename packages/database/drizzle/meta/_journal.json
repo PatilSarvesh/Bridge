@@ -183,6 +183,13 @@
       "when": 1786810001183,
       "tag": "0025_calm_vengeance",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787147901295,
+      "tag": "0026_thin_sheva_callister",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import type {
   CreateQuestionInput,
   PublishArtifactInput,
   RecordAssumptionInput,
+  ReplaceProjectOwnershipInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
@@ -197,6 +198,41 @@ async function seedOrganizationAdministrator(repository: InMemoryBridgeRepositor
   });
 }
 
+async function seedOwnershipMembers(repository: InMemoryBridgeRepository): Promise<void> {
+  await seedOrganizationAdministrator(repository);
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  for (const principal of [owner, qaLead]) {
+    await repository.savePrincipalIdentity({
+      id: principal.id,
+      type: "human",
+      displayName: principal.displayName,
+      oidcIssuer: "https://identity.example/",
+      oidcSubject: `auth0|${principal.id}`,
+      createdAt: timestamp,
+    });
+    await repository.saveOrganizationMembership({
+      organizationId: project.organizationId,
+      principalId: principal.id,
+      status: "active",
+      roles: principal.roles,
+      allProjects: principal.allProjects ?? false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
+    });
+    await repository.saveProjectMembership({
+      organizationId: project.organizationId,
+      projectId: project.id,
+      principalId: principal.id,
+      status: "active",
+      roles: principal.roles,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
+    });
+  }
+}
+
 class FailingAuditRepository extends InMemoryBridgeRepository {
   failAction: string | undefined;
 
@@ -207,6 +243,98 @@ class FailingAuditRepository extends InMemoryBridgeRepository {
 }
 
 describe("Bridge decision workflow", () => {
+  it("manages versioned project roles, teams, and unambiguous ownership rules", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    await expect(service.getProjectOwnershipConfiguration(contributor, project.id))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectOwnershipConfiguration(outsider, project.id))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.getProjectOwnershipConfiguration(owner, project.id))
+      .resolves.toMatchObject({ projectId: project.id, version: 0, roles: [], teams: [], rules: [] });
+
+    const input: ReplaceProjectOwnershipInput = {
+      expectedVersion: 0,
+      roles: [
+        { name: "QA Lead", description: "Owns product quality and release-readiness decisions." },
+        { name: "Architecture Reviewer", description: "Reviews architecture-sensitive decisions." },
+      ],
+      teams: [{ key: "quality", name: "Quality", memberIds: [qaLead.id] }],
+      rules: [
+        {
+          key: "transfer-quality",
+          name: "Transfer quality ownership",
+          priority: 10,
+          category: "quality",
+          component: "transfers",
+          owners: { principalIds: [], roles: ["QA Lead"], teamKeys: ["quality"] },
+          reviewers: { principalIds: [owner.id], roles: ["Architecture Reviewer"], teamKeys: [] },
+        },
+      ],
+    };
+    const created = await service.replaceProjectOwnershipConfiguration(owner, project.id, input);
+    expect(created).toMatchObject({
+      projectId: project.id,
+      version: 1,
+      updatedById: owner.id,
+      roles: [
+        { name: "architecture-reviewer" },
+        { name: "qa-lead" },
+      ],
+      teams: [{ key: "quality", memberIds: [qaLead.id] }],
+      rules: [{ key: "transfer-quality", priority: 10 }],
+    });
+    expect((await repository.listAuditEvents(project.id)).some((event) =>
+      event.action === "project.ownership_configured" && event.subjectType === "ownership_configuration"))
+      .toBe(true);
+
+    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, input))
+      .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      ...input,
+      expectedVersion: 1,
+      rules: [
+        input.rules[0]!,
+        {
+          ...input.rules[0]!,
+          key: "project-quality-fallback",
+          name: "Project quality fallback",
+          component: undefined,
+        },
+      ],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { responsibility: "owner" } });
+    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      ...input,
+      expectedVersion: 1,
+      teams: [{ key: "quality", name: "Quality", memberIds: [agent.id] }],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { memberId: agent.id } });
+
+    const updated = await service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      ...input,
+      expectedVersion: 1,
+      roles: [...input.roles, { name: "Product Owner", description: "Owns product behavior decisions." }],
+    });
+    expect(updated.version).toBe(2);
+  });
+
+  it("rolls back project ownership configuration when its audit write fails", async () => {
+    const repository = new FailingAuditRepository();
+    await repository.saveProject(project);
+    await seedOwnershipMembers(repository);
+    repository.failAction = "project.ownership_configured";
+    const service = new BridgeService(repository, {
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      id: () => "ownership-audit",
+    });
+    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      roles: [{ name: "QA Lead", description: "Owns product quality decisions." }],
+      teams: [],
+      rules: [],
+    })).rejects.toThrow("Injected failure");
+    await expect(repository.getProjectOwnershipConfiguration(project.id)).resolves.toBeUndefined();
+  });
+
   it("registers a fresh project idempotently for fixed local principals", async () => {
     const { service } = await runtime();
     await expect(

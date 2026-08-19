@@ -4,6 +4,7 @@ import type {
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
+  ProjectOwnershipConfiguration,
   QuestionComment,
   QuestionOption,
   QuestionReview,
@@ -278,6 +279,34 @@ export const projectMemberships = pgTable(
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
     tenantPolicy("bridge_project_memberships_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const projectOwnershipConfigurations = pgTable(
+  "bridge_project_ownership_configurations",
+  {
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    roles: jsonb("roles").$type<ProjectOwnershipConfiguration["roles"]>().notNull(),
+    teams: jsonb("teams").$type<ProjectOwnershipConfiguration["teams"]>().notNull(),
+    rules: jsonb("rules").$type<ProjectOwnershipConfiguration["rules"]>().notNull(),
+    version: integer("version").notNull(),
+    updatedById: text("updated_by_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId] }),
+    index("bridge_project_ownership_configurations_project_updated_idx").on(
+      table.projectId,
+      table.updatedAt,
+    ),
+    check("bridge_project_ownership_configurations_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_project_ownership_configurations_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_ownership_configurations_tenant", table.organizationId),
   ],
 ).enableRLS();
 

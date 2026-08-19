@@ -997,6 +997,63 @@ describe("Bridge API vertical slice", () => {
       .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
   });
 
+  it("exposes versioned project ownership configuration only to administrators", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const url = `/v1/admin/projects/${demoProject.id}/ownership`;
+    const denied = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const initial = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({ projectId: demoProject.id, version: 0 });
+
+    const configured = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 0,
+        roles: [{ name: "QA Lead", description: "Owns quality and release-readiness decisions." }],
+        teams: [{ key: "quality", name: "Quality", memberIds: [demoPrincipals.qaLead.id] }],
+        rules: [{
+          key: "quality-ownership",
+          name: "Quality ownership",
+          priority: 10,
+          category: "quality",
+          owners: { principalIds: [], roles: ["QA Lead"], teamKeys: ["quality"] },
+          reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
+        }],
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toMatchObject({
+      projectId: demoProject.id,
+      version: 1,
+      roles: [{ name: "qa-lead" }],
+      teams: [{ key: "quality", memberIds: [demoPrincipals.qaLead.id] }],
+      rules: [{ key: "quality-ownership" }],
+    });
+
+    const stale = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedVersion: 0, roles: [], teams: [], rules: [] },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+  });
+
   it("supports the fresh Hospital project question-and-specification acceptance journey", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

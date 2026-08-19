@@ -125,6 +125,87 @@ export const scopeSchema = z.object({
 
 export const ownerRoleSchema = z.string().trim().min(2).max(80);
 
+export const projectRoleDefinitionSchema = z.object({
+  name: ownerRoleSchema,
+  description: z.string().trim().min(2).max(500),
+});
+
+export const projectTeamInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  memberIds: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+});
+
+export const ownershipRuleTargetSchema = z.object({
+  principalIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  roles: z.array(ownerRoleSchema).max(20).default([]),
+  teamKeys: z.array(z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/)).max(20).default([]),
+});
+
+export const ownershipRuleInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  priority: z.number().int().min(1).max(1_000),
+  category: z.string().trim().min(2).max(100).optional(),
+  repository: z.string().trim().min(1).max(200).optional(),
+  component: z.string().trim().min(1).max(200).optional(),
+  owners: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+  reviewers: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+}).superRefine((value, context) => {
+  const targetCount = (target: z.infer<typeof ownershipRuleTargetSchema>) =>
+    target.principalIds.length + target.roles.length + target.teamKeys.length;
+  if (targetCount(value.owners) + targetCount(value.reviewers) === 0) {
+    context.addIssue({
+      code: "custom",
+      message: "An ownership rule must configure at least one owner or reviewer target.",
+      path: ["owners"],
+    });
+  }
+});
+
+export const replaceProjectOwnershipInputSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  roles: z.array(projectRoleDefinitionSchema).max(50).default([]),
+  teams: z.array(projectTeamInputSchema).max(50).default([]),
+  rules: z.array(ownershipRuleInputSchema).max(100).default([]),
+}).superRefine((value, context) => {
+  const addUniqueIssues = (
+    values: readonly string[],
+    path: "roles" | "teams" | "rules",
+    label: string,
+  ) => {
+    const seen = new Set<string>();
+    for (const [index, current] of values.entries()) {
+      const normalized = current.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+      if (seen.has(normalized)) {
+        context.addIssue({
+          code: "custom",
+          message: `${label} values must be unique.`,
+          path: [path, index],
+        });
+      }
+      seen.add(normalized);
+    }
+  };
+  addUniqueIssues(value.roles.map((role) => role.name), "roles", "Role name");
+  addUniqueIssues(value.teams.map((team) => team.key), "teams", "Team key");
+  addUniqueIssues(value.rules.map((rule) => rule.key), "rules", "Rule key");
+
+  for (const [teamIndex, team] of value.teams.entries()) {
+    const seen = new Set<string>();
+    for (const [memberIndex, memberId] of team.memberIds.entries()) {
+      if (seen.has(memberId)) {
+        context.addIssue({
+          code: "custom",
+          message: "A team member can appear only once.",
+          path: ["teams", teamIndex, "memberIds", memberIndex],
+        });
+      }
+      seen.add(memberId);
+    }
+  }
+});
+
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
 export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
 export const serviceCapabilityScopeSchema = z.enum(["bridge:read", "bridge:write", "bridge:admin"]);
@@ -579,6 +660,11 @@ export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 export type ServiceIdentityType = z.infer<typeof serviceIdentityTypeSchema>;
 export type ServiceCapabilityScope = z.infer<typeof serviceCapabilityScopeSchema>;
 export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
+export type ProjectRoleDefinitionInput = z.infer<typeof projectRoleDefinitionSchema>;
+export type ProjectTeamInput = z.infer<typeof projectTeamInputSchema>;
+export type OwnershipRuleTargetInput = z.infer<typeof ownershipRuleTargetSchema>;
+export type OwnershipRuleInput = z.infer<typeof ownershipRuleInputSchema>;
+export type ReplaceProjectOwnershipInput = z.infer<typeof replaceProjectOwnershipInputSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;

@@ -26,6 +26,7 @@ This document records the implemented server-side authorization contract for BRG
 | Publish artifact draft | Allow | Allow | Allow | Allow | Allow | Allow | `publishArtifact`; publishing never creates approval |
 | Approve artifact | Deny | Deny | Policy-based | Allow | Allow | Allow | `approveArtifactVersion`; immutable version, human authority, and configured reviewer/owner/admin policy |
 | Supersede decision | Deny | Deny | Deny unless also owner | Allow | Allow | Allow | `changeDecisionLifecycle`; human owner/configured project owner/admin plus optimistic version |
+| Configure project ownership | Deny | Deny | Deny | Deny | Allow | Allow | `replaceProjectOwnershipConfiguration`; human project-admin policy, active-human team/target validation, optimistic aggregate version, and project audit event |
 | Change project policy | Deny | Deny | Deny | Deny | Unavailable | Unavailable | Project-policy mutation is not implemented; it must add an explicit admin-only command and audit event |
 | Manage organization | Deny | Deny | Deny | Deny | Deny | Allow | Organization member and service-identity commands require `organization-admin` |
 
@@ -62,7 +63,7 @@ This masks record existence while preserving `FORBIDDEN` for an authenticated pr
 
 ## Deliberate remaining boundaries
 
-- RLS now protects 19 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; repeatable production role/grant reconciliation is documented and live deployment evidence remains BRG-012 work. Application policy and composite constraints remain required alongside RLS.
+- RLS now protects 21 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; repeatable production role/grant reconciliation is documented and live deployment evidence remains BRG-012 work. Application policy and composite constraints remain required alongside RLS.
 - Reassignment and project-policy mutation do not yet exist. Their future APIs require explicit matrix rows, audit events, and adversarial tests before release.
 - Live identity-provider and isolated PostgreSQL concurrency/ID-guessing evidence is deployment validation, not implied by the deterministic in-memory and optional integration suites.
 - Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities remain; endpoint-specific non-human scopes are BRG-011/BRG-013 follow-up work.

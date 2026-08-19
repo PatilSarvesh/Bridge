@@ -39,6 +39,7 @@ import type {
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
+  ReplaceProjectOwnershipInput,
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
@@ -79,6 +80,10 @@ import {
   type OutboxEvent,
   type PrincipalIdentity,
   type ProjectMembership,
+  type ProjectOwnershipConfiguration,
+  type ProjectOwnershipRule,
+  type ProjectRoleDefinition,
+  type ProjectTeam,
   type RepositoryRecord,
   type ServiceCredential,
   type ServiceTokenResolution,
@@ -148,6 +153,11 @@ export interface BridgeRepository {
   getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined>;
   listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]>;
   saveRepositoryRecord(repository: RepositoryRecord): Promise<void>;
+  getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined>;
+  saveProjectOwnershipConfiguration(
+    configuration: ProjectOwnershipConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean>;
   getRun(runId: string): Promise<AgentRun | undefined>;
   listRuns(projectId: string): Promise<readonly AgentRun[]>;
   saveRun(run: AgentRun): Promise<void>;
@@ -806,6 +816,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
+  private readonly projectOwnershipConfigurations = new Map<string, ProjectOwnershipConfiguration>();
   private readonly runs = new Map<string, AgentRun>();
   private readonly adapterDiagnostics = new Map<string, AdapterDiagnostic>();
   private readonly assumptions = new Map<string, Assumption>();
@@ -855,6 +866,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
+      projectOwnershipConfigurations: new Map(this.projectOwnershipConfigurations),
       runs: new Map(this.runs),
       adapterDiagnostics: new Map(this.adapterDiagnostics),
       assumptions: new Map(this.assumptions),
@@ -885,6 +897,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
+      this.restoreMap(this.projectOwnershipConfigurations, snapshot.projectOwnershipConfigurations);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.adapterDiagnostics, snapshot.adapterDiagnostics);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -1148,6 +1161,22 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveRepositoryRecord(repository: RepositoryRecord): Promise<void> {
     this.repositoryRecords.set(repository.id, repository);
+  }
+
+  async getProjectOwnershipConfiguration(
+    projectId: string,
+  ): Promise<ProjectOwnershipConfiguration | undefined> {
+    return this.projectOwnershipConfigurations.get(projectId);
+  }
+
+  async saveProjectOwnershipConfiguration(
+    configuration: ProjectOwnershipConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const current = this.projectOwnershipConfigurations.get(configuration.projectId);
+    if ((current?.version ?? 0) !== expectedVersion) return false;
+    this.projectOwnershipConfigurations.set(configuration.projectId, configuration);
+    return true;
   }
 
   async getRun(runId: string): Promise<AgentRun | undefined> {
@@ -1698,6 +1727,84 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       return repository.listProjectRepositories(projectId);
+    });
+  }
+
+  async getProjectOwnershipConfiguration(
+    principal: Principal,
+    projectId: string,
+  ): Promise<ProjectOwnershipConfiguration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Reading project ownership configuration", projectId);
+      return await repository.getProjectOwnershipConfiguration(projectId) ?? {
+        organizationId: project.organizationId,
+        projectId: project.id,
+        roles: [],
+        teams: [],
+        rules: [],
+        version: 0,
+      };
+    });
+  }
+
+  async replaceProjectOwnershipConfiguration(
+    principal: Principal,
+    projectId: string,
+    input: ReplaceProjectOwnershipInput,
+  ): Promise<ProjectOwnershipConfiguration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Configuring project ownership", projectId);
+      this.assertSecretSafe("administration", input);
+      const current = await repository.getProjectOwnershipConfiguration(projectId);
+      const currentVersion = current?.version ?? 0;
+      if (input.expectedVersion !== currentVersion) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The project ownership configuration changed after it was read.",
+          409,
+          { expectedVersion: input.expectedVersion, currentVersion },
+        );
+      }
+
+      const activeHumans = new Map(
+        (await repository.listOrganizationPrincipals(principal.organizationId))
+          .filter((candidate) => {
+            if (candidate.type !== "human") return false;
+            try {
+              assertProjectAccess(candidate, project);
+              return true;
+            } catch {
+              return false;
+            }
+          })
+          .map((candidate) => [candidate.id, candidate]),
+      );
+      const configuration = this.normalizeProjectOwnershipConfiguration(
+        principal,
+        project,
+        input,
+        activeHumans,
+        currentVersion + 1,
+      );
+      if (!await repository.saveProjectOwnershipConfiguration(configuration, currentVersion)) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The project ownership configuration changed while it was being saved.",
+          409,
+        );
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "project.ownership_configured",
+        "ownership_configuration",
+        projectId,
+        configuration.updatedAt!,
+      );
+      return configuration;
     });
   }
 
@@ -4763,6 +4870,163 @@ export class BridgeService {
       body,
       itemCount: records.length,
     };
+  }
+
+  private normalizeProjectOwnershipConfiguration(
+    principal: Principal,
+    project: Project,
+    input: ReplaceProjectOwnershipInput,
+    activeHumans: ReadonlyMap<string, Principal>,
+    version: number,
+  ): ProjectOwnershipConfiguration {
+    const roles: ProjectRoleDefinition[] = [];
+    const roleNames = new Set<string>();
+    for (const role of input.roles) {
+      const name = normalizeRoleName(role.name);
+      if (!name || roleNames.has(name)) {
+        throw new BridgeError("VALIDATION_FAILED", "Project role names must be unique after normalization.", 400);
+      }
+      roleNames.add(name);
+      roles.push({ name, description: role.description.trim() });
+    }
+
+    const teams: ProjectTeam[] = [];
+    const teamKeys = new Set<string>();
+    for (const team of input.teams) {
+      const key = normalizeRoleName(team.key);
+      if (!key || teamKeys.has(key)) {
+        throw new BridgeError("VALIDATION_FAILED", "Project team keys must be unique after normalization.", 400);
+      }
+      const memberIds = [...new Set(team.memberIds)];
+      if (memberIds.length !== team.memberIds.length) {
+        throw new BridgeError("VALIDATION_FAILED", "A project team member can appear only once.", 400);
+      }
+      for (const memberId of memberIds) {
+        if (!activeHumans.has(memberId)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Project teams can contain only active human members with access to this project.",
+            400,
+            { memberId },
+          );
+        }
+      }
+      teamKeys.add(key);
+      teams.push({ key, name: team.name.trim(), memberIds });
+    }
+
+    const rules: ProjectOwnershipRule[] = [];
+    const ruleKeys = new Set<string>();
+    for (const inputRule of input.rules) {
+      const key = normalizeRoleName(inputRule.key);
+      if (!key || ruleKeys.has(key)) {
+        throw new BridgeError("VALIDATION_FAILED", "Ownership rule keys must be unique after normalization.", 400);
+      }
+      ruleKeys.add(key);
+      const owners = this.normalizeOwnershipTargets(inputRule.owners, activeHumans, teamKeys);
+      const reviewers = this.normalizeOwnershipTargets(inputRule.reviewers, activeHumans, teamKeys);
+      if (this.ownershipTargetCount(owners) + this.ownershipTargetCount(reviewers) === 0) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "An ownership rule must configure at least one owner or reviewer target.",
+          400,
+        );
+      }
+      rules.push({
+        key,
+        name: inputRule.name.trim(),
+        priority: inputRule.priority,
+        ...(inputRule.category ? { category: inputRule.category.trim() } : {}),
+        ...(inputRule.repository ? { repository: inputRule.repository.trim() } : {}),
+        ...(inputRule.component ? { component: inputRule.component.trim() } : {}),
+        owners,
+        reviewers,
+      });
+    }
+    this.assertOwnershipRulesUnambiguous(rules);
+
+    const updatedAt = this.now().toISOString();
+    return {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: roles.sort((left, right) => left.name.localeCompare(right.name)),
+      teams: teams.sort((left, right) => left.name.localeCompare(right.name)),
+      rules: rules.sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key)),
+      version,
+      updatedById: principal.id,
+      updatedAt,
+    };
+  }
+
+  private normalizeOwnershipTargets(
+    input: ReplaceProjectOwnershipInput["rules"][number]["owners"],
+    activeHumans: ReadonlyMap<string, Principal>,
+    teamKeys: ReadonlySet<string>,
+  ): ProjectOwnershipRule["owners"] {
+    const principalIds = [...new Set(input.principalIds)];
+    if (principalIds.length !== input.principalIds.length) {
+      throw new BridgeError("VALIDATION_FAILED", "An ownership target principal can appear only once.", 400);
+    }
+    for (const principalId of principalIds) {
+      if (!activeHumans.has(principalId)) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Ownership targets can include only active human members with access to this project.",
+          400,
+          { principalId },
+        );
+      }
+    }
+    const roles = this.normalizedRoles(input.roles);
+    const normalizedTeamKeys = [...new Set(input.teamKeys.map(normalizeRoleName).filter(Boolean))];
+    if (normalizedTeamKeys.length !== input.teamKeys.length) {
+      throw new BridgeError("VALIDATION_FAILED", "An ownership target team can appear only once.", 400);
+    }
+    for (const teamKey of normalizedTeamKeys) {
+      if (!teamKeys.has(teamKey)) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Ownership rules must reference a configured project team.",
+          400,
+          { teamKey },
+        );
+      }
+    }
+    return { principalIds, roles, teamKeys: normalizedTeamKeys };
+  }
+
+  private ownershipTargetCount(target: ProjectOwnershipRule["owners"]): number {
+    return target.principalIds.length + target.roles.length + target.teamKeys.length;
+  }
+
+  private normalizedOwnershipSelector(value: string | undefined): string | undefined {
+    return value?.normalize("NFKC").trim().toLocaleLowerCase("en") || undefined;
+  }
+
+  private ownershipRulesOverlap(left: ProjectOwnershipRule, right: ProjectOwnershipRule): boolean {
+    return (["category", "repository", "component"] as const).every((field) => {
+      const leftValue = this.normalizedOwnershipSelector(left[field]);
+      const rightValue = this.normalizedOwnershipSelector(right[field]);
+      return !leftValue || !rightValue || leftValue === rightValue;
+    });
+  }
+
+  private assertOwnershipRulesUnambiguous(rules: readonly ProjectOwnershipRule[]): void {
+    for (const [index, left] of rules.entries()) {
+      for (const right of rules.slice(index + 1)) {
+        if (left.priority !== right.priority || !this.ownershipRulesOverlap(left, right)) continue;
+        const ownerConflict = this.ownershipTargetCount(left.owners) > 0 && this.ownershipTargetCount(right.owners) > 0;
+        const reviewerConflict = this.ownershipTargetCount(left.reviewers) > 0 && this.ownershipTargetCount(right.reviewers) > 0;
+        if (ownerConflict || reviewerConflict) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Equal-priority ownership rules cannot overlap for the same responsibility.",
+            400,
+            { ruleKeys: [left.key, right.key], responsibility: ownerConflict ? "owner" : "reviewer" },
+          );
+        }
+      }
+    }
   }
 
   private normalizedRoles(roles: readonly string[]): readonly string[] {

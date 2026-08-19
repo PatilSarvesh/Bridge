@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
@@ -18,6 +18,45 @@ interface RepositoryRecord {
   readonly name: string;
   readonly canonicalUrl: string;
   readonly createdAt: string;
+}
+
+interface ProjectRoleDefinition {
+  readonly name: string;
+  readonly description: string;
+}
+
+interface ProjectTeam {
+  readonly key: string;
+  readonly name: string;
+  readonly memberIds: readonly string[];
+}
+
+interface OwnershipRuleTarget {
+  readonly principalIds: readonly string[];
+  readonly roles: readonly string[];
+  readonly teamKeys: readonly string[];
+}
+
+interface ProjectOwnershipRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly repository?: string;
+  readonly component?: string;
+  readonly owners: OwnershipRuleTarget;
+  readonly reviewers: OwnershipRuleTarget;
+}
+
+interface ProjectOwnershipConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly roles: readonly ProjectRoleDefinition[];
+  readonly teams: readonly ProjectTeam[];
+  readonly rules: readonly ProjectOwnershipRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
 }
 
 interface Principal {
@@ -411,6 +450,7 @@ type View =
   | "assumptions"
   | "runs"
   | "repositories"
+  | "ownership"
   | "organization"
   | "analytics"
   | "audit"
@@ -528,6 +568,8 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
   const [repositories, setRepositories] = useState<readonly RepositoryRecord[]>([]);
+  const [ownershipConfiguration, setOwnershipConfiguration] = useState<ProjectOwnershipConfiguration>();
+  const [ownershipDraft, setOwnershipDraft] = useState<ProjectOwnershipConfiguration>();
   const [repositoryProvider, setRepositoryProvider] = useState("");
   const [repositoryOwner, setRepositoryOwner] = useState("");
   const [repositoryName, setRepositoryName] = useState("");
@@ -587,6 +629,7 @@ export default function Home() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
   const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+  const [ownershipLoading, setOwnershipLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
@@ -760,6 +803,119 @@ export default function Home() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const loadOwnership = useCallback(async () => {
+    if (!selectedProjectId) {
+      setOwnershipConfiguration(undefined);
+      setOwnershipDraft(undefined);
+      setOwnershipLoading(false);
+      return;
+    }
+    setOwnershipLoading(true);
+    setError(undefined);
+    try {
+      const configuration = await bridgeFetch<ProjectOwnershipConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/ownership`,
+        undefined,
+        activePrincipalId,
+      );
+      setOwnershipConfiguration(configuration);
+      setOwnershipDraft(configuration);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project ownership configuration.");
+    } finally {
+      setOwnershipLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const saveOwnership = async () => {
+    if (!selectedProjectId || !ownershipConfiguration || !ownershipDraft) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<ProjectOwnershipConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/ownership`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: ownershipConfiguration.version,
+            roles: ownershipDraft.roles,
+            teams: ownershipDraft.teams,
+            rules: ownershipDraft.rules,
+          }),
+        },
+        activePrincipalId,
+      );
+      setOwnershipConfiguration(saved);
+      setOwnershipDraft(saved);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save project ownership configuration.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addOwnershipRole = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("roleName") ?? "").trim();
+    const description = String(form.get("roleDescription") ?? "").trim();
+    if (!name || !description) return;
+    setOwnershipDraft({ ...ownershipDraft, roles: [...ownershipDraft.roles, { name, description }] });
+    event.currentTarget.reset();
+  };
+
+  const addOwnershipTeam = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("teamKey") ?? ""));
+    const name = String(form.get("teamName") ?? "").trim();
+    const memberIds = roleList(String(form.get("teamMembers") ?? ""));
+    if (!key || !name || memberIds.length === 0) return;
+    setOwnershipDraft({ ...ownershipDraft, teams: [...ownershipDraft.teams, { key, name, memberIds }] });
+    event.currentTarget.reset();
+  };
+
+  const addOwnershipRule = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("ruleKey") ?? ""));
+    const name = String(form.get("ruleName") ?? "").trim();
+    const priority = Number(form.get("rulePriority"));
+    const category = String(form.get("ruleCategory") ?? "").trim();
+    const repository = String(form.get("ruleRepository") ?? "").trim();
+    const component = String(form.get("ruleComponent") ?? "").trim();
+    const owners: OwnershipRuleTarget = {
+      principalIds: roleList(String(form.get("ownerPrincipalIds") ?? "")),
+      roles: roleList(String(form.get("ownerRoles") ?? "")),
+      teamKeys: roleList(String(form.get("ownerTeamKeys") ?? "")).map(normalizedRole),
+    };
+    const reviewers: OwnershipRuleTarget = {
+      principalIds: roleList(String(form.get("reviewerPrincipalIds") ?? "")),
+      roles: roleList(String(form.get("reviewerRoles") ?? "")),
+      teamKeys: roleList(String(form.get("reviewerTeamKeys") ?? "")).map(normalizedRole),
+    };
+    const targetCount = [...owners.principalIds, ...owners.roles, ...owners.teamKeys,
+      ...reviewers.principalIds, ...reviewers.roles, ...reviewers.teamKeys].length;
+    if (!key || !name || !Number.isInteger(priority) || targetCount === 0) return;
+    setOwnershipDraft({
+      ...ownershipDraft,
+      rules: [...ownershipDraft.rules, {
+        key,
+        name,
+        priority,
+        ...(category ? { category } : {}),
+        ...(repository ? { repository } : {}),
+        ...(component ? { component } : {}),
+        owners,
+        reviewers,
+      }],
+    });
+    event.currentTarget.reset();
   };
 
   const loadQuestions = useCallback(async () => {
@@ -1158,7 +1314,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "ownership", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -1212,6 +1368,10 @@ export default function Home() {
   }, [authenticationReady, loadRepositories, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "ownership") void loadOwnership();
+  }, [authenticationReady, loadOwnership, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
   }, [authenticationReady, loadAudit, signedIn, view]);
 
@@ -1242,6 +1402,13 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "repositories" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "ownership" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
       setError(undefined);
       setView("inbox");
     }
@@ -1317,6 +1484,7 @@ export default function Home() {
     assumptions: "Assumptions",
     runs: "Agent Runs",
     repositories: "Repositories",
+    ownership: "Ownership",
     organization: "Organization",
     analytics: "Analytics",
     audit: "Audit",
@@ -1712,6 +1880,13 @@ export default function Home() {
                 onClick={() => setView("repositories")}
               >Repositories</button>
             ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "ownership" ? "page" : undefined}
+                onClick={() => setView("ownership")}
+              >Ownership</button>
+            ) : null}
             {isOrganizationAdmin ? (
               <button
                 type="button"
@@ -1973,6 +2148,105 @@ export default function Home() {
                   </div>
                 ) : null}
               </section>
+            </>
+          ) : view === "ownership" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project ownership</h1>
+                  <p>Define project roles, human teams, and explainable owner/reviewer rules. Changes are saved as one versioned configuration.</p>
+                </div>
+                <div className="member-form-actions">
+                  <button className="secondary" type="button" disabled={ownershipLoading} onClick={() => void loadOwnership()}>Refresh</button>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={submitting || !ownershipConfiguration || !ownershipDraft || JSON.stringify(ownershipConfiguration) === JSON.stringify(ownershipDraft)}
+                    onClick={() => void saveOwnership()}
+                  >Save configuration</button>
+                </div>
+              </div>
+              {ownershipLoading ? <div className="empty">Loading project ownership…</div> : null}
+              {!ownershipLoading && ownershipDraft ? (
+                <div className="organization-stack">
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Role definitions</h2><p>Role names are normalized when saved. Member assignment remains in Organization access.</p></div>
+                      <small>{ownershipDraft.roles.length} roles</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipRole}>
+                      <label>Role name<input name="roleName" placeholder="QA Lead" required minLength={2} /></label>
+                      <label>Description<input name="roleDescription" placeholder="Owns quality and release-readiness decisions" required minLength={2} /></label>
+                      <div className="member-form-actions"><span /><button className="secondary" type="submit">Add role</button></div>
+                    </form>
+                    {ownershipDraft.roles.length === 0 ? <div className="empty">No custom project roles are defined.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Role</th><th>Description</th><th /></tr></thead><tbody>
+                        {ownershipDraft.roles.map((role) => <tr key={role.name}><td><strong>{role.name}</strong></td><td>{role.description}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, roles: ownershipDraft.roles.filter((candidate) => candidate !== role) })}>Remove</button></td></tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Human teams</h2><p>Teams contain active human members with access to this project; agents cannot satisfy human ownership.</p></div>
+                      <small>{ownershipDraft.teams.length} teams</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipTeam}>
+                      <label>Team key<input name="teamKey" placeholder="quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Team name<input name="teamName" placeholder="Quality" required /></label>
+                      <label>Member IDs<input name="teamMembers" placeholder="usr_qa_lead, usr_architect" required /></label>
+                      <div className="member-form-actions"><small>Available humans: {principals.map((principal) => principal.id).join(", ") || "none"}</small><button className="secondary" type="submit">Add team</button></div>
+                    </form>
+                    {ownershipDraft.teams.length === 0 ? <div className="empty">No project teams are configured.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Team</th><th>Members</th><th /></tr></thead><tbody>
+                        {ownershipDraft.teams.map((team) => <tr key={team.key}><td><strong>{team.name}</strong><small>{team.key}</small></td><td>{team.memberIds.join(", ")}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, teams: ownershipDraft.teams.filter((candidate) => candidate !== team) })}>Remove</button></td></tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Ownership rules</h2><p>An empty match applies project-wide. Equal-priority overlapping owner or reviewer rules are rejected.</p></div>
+                      <small>{ownershipDraft.rules.length} rules</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipRule}>
+                      <label>Rule key<input name="ruleKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Rule name<input name="ruleName" placeholder="Transfer quality ownership" required /></label>
+                      <label>Priority<input name="rulePriority" type="number" min={1} max={1000} defaultValue={100} required /></label>
+                      <label>Category<input name="ruleCategory" placeholder="quality" /></label>
+                      <label>Repository<input name="ruleRepository" placeholder="payments-api" /></label>
+                      <label>Component<input name="ruleComponent" placeholder="transfers" /></label>
+                      <label>Owner member IDs<input name="ownerPrincipalIds" placeholder="usr_architect" /></label>
+                      <label>Owner roles<input name="ownerRoles" placeholder="qa-lead" /></label>
+                      <label>Owner team keys<input name="ownerTeamKeys" placeholder="quality" /></label>
+                      <label>Reviewer member IDs<input name="reviewerPrincipalIds" placeholder="usr_security_reviewer" /></label>
+                      <label>Reviewer roles<input name="reviewerRoles" placeholder="architecture-reviewer" /></label>
+                      <label>Reviewer team keys<input name="reviewerTeamKeys" placeholder="architecture" /></label>
+                      <div className="member-form-actions"><small>Use comma-separated values. Configure at least one owner or reviewer target.</small><button className="secondary" type="submit">Add rule</button></div>
+                    </form>
+                    {ownershipDraft.rules.length === 0 ? <div className="empty">No ownership rules are configured; project defaults remain unchanged.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Owners</th><th>Reviewers</th><th /></tr></thead><tbody>
+                        {ownershipDraft.rules.map((rule) => <tr key={rule.key}>
+                          <td><strong>{rule.name}</strong><small>Priority {rule.priority} · {rule.key}</small></td>
+                          <td>{[rule.category && `category ${rule.category}`, rule.repository && `repository ${rule.repository}`, rule.component && `component ${rule.component}`].filter(Boolean).join(" · ") || "Project-wide"}</td>
+                          <td>{[...rule.owners.principalIds, ...rule.owners.roles, ...rule.owners.teamKeys.map((key) => `team:${key}`)].join(", ") || "None"}</td>
+                          <td>{[...rule.reviewers.principalIds, ...rule.reviewers.roles, ...rule.reviewers.teamKeys.map((key) => `team:${key}`)].join(", ") || "None"}</td>
+                          <td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, rules: ownershipDraft.rules.filter((candidate) => candidate !== rule) })}>Remove</button></td>
+                        </tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+                  <div className="member-form-actions">
+                    <small>Version {ownershipConfiguration?.version ?? 0}{ownershipConfiguration?.updatedAt ? ` · last saved ${new Date(ownershipConfiguration.updatedAt).toLocaleString()}` : " · not saved yet"}</small>
+                    <button
+                      className="primary"
+                      type="button"
+                      disabled={submitting || !ownershipConfiguration || JSON.stringify(ownershipConfiguration) === JSON.stringify(ownershipDraft)}
+                      onClick={() => void saveOwnership()}
+                    >Save configuration</button>
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : view === "organization" ? (
             <>
