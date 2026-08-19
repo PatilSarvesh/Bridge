@@ -24,6 +24,7 @@ import type {
   Project,
   ProjectMembership,
   ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
   RepositoryRecord,
   Question,
   ServiceCredential,
@@ -62,6 +63,8 @@ import {
   projectMembershipToRow,
   projectOwnershipConfigurationFromRow,
   projectOwnershipConfigurationToRow,
+  projectPolicyConfigurationFromRow,
+  projectPolicyConfigurationToRow,
   projectFromRow,
   projectToRow,
   repositoryRecordFromRow,
@@ -98,6 +101,7 @@ import {
   principalIdentities,
   projectMemberships,
   projectOwnershipConfigurations,
+  projectPolicyConfigurations,
   serviceCredentials,
 } from "./schema.js";
 
@@ -716,6 +720,47 @@ export class PostgresBridgeRepository implements BridgeRepository {
         eq(projectOwnershipConfigurations.version, expectedVersion),
       ))
       .returning({ projectId: projectOwnershipConfigurations.projectId });
+    return updated.length === 1;
+  }
+
+  async getProjectPolicyConfiguration(
+    projectId: string,
+  ): Promise<ProjectPolicyConfiguration | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectPolicyConfigurations)
+      .where(eq(projectPolicyConfigurations.projectId, projectId))
+      .limit(1);
+    return row ? projectPolicyConfigurationFromRow(row) : undefined;
+  }
+
+  async saveProjectPolicyConfiguration(
+    configuration: ProjectPolicyConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const row = projectPolicyConfigurationToRow(configuration);
+    if (expectedVersion === 0) {
+      const inserted = await this.database
+        .insert(projectPolicyConfigurations)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ projectId: projectPolicyConfigurations.projectId });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(projectPolicyConfigurations)
+      .set({
+        rules: row.rules,
+        version: row.version,
+        updatedById: row.updatedById,
+        updatedAt: row.updatedAt,
+      })
+      .where(and(
+        eq(projectPolicyConfigurations.organizationId, configuration.organizationId),
+        eq(projectPolicyConfigurations.projectId, configuration.projectId),
+        eq(projectPolicyConfigurations.version, expectedVersion),
+      ))
+      .returning({ projectId: projectPolicyConfigurations.projectId });
     return updated.length === 1;
   }
 

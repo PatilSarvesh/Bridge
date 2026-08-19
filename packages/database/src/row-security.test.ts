@@ -99,3 +99,16 @@ describe("project ownership row security migration", () => {
     expect(migration).toContain("bridge_project_ownership_configurations_project_fk");
   });
 });
+
+describe("project policy row security migration", () => {
+  it("forces tenant isolation for project policy configuration", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_project_policy_configurations" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_project_policy_configurations" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain('CREATE POLICY "bridge_project_policy_configurations_tenant" ON "bridge_project_policy_configurations"');
+    expect(migration).toContain("bridge_project_policy_configurations_project_fk");
+  });
+});

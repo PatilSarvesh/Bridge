@@ -1054,6 +1054,79 @@ describe("Bridge API vertical slice", () => {
     expect(stale.json()).toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
   });
 
+  it("exposes versioned project policy with immutable protected defaults", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const url = `/v1/admin/projects/${demoProject.id}/policy`;
+    expect((await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    })).statusCode).toBe(403);
+
+    const initial = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({ projectId: demoProject.id, version: 0, rules: [] });
+    expect(initial.json<{ defaultRules: { key: string }[] }>().defaultRules.map((rule) => rule.key))
+      .toContain("bridge-authentication");
+
+    const configured = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 0,
+        rules: [{
+          key: "quality-transfer",
+          name: "Block transfer quality questions",
+          priority: 10,
+          category: "quality",
+          scope: { component: "transfers" },
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: ["QA Lead"],
+          requiredReviewerRoles: [],
+        }],
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toMatchObject({
+      version: 1,
+      rules: [{
+        key: "quality-transfer",
+        requiredOwnerRoles: ["qa-lead"],
+        requiredReviewerRoles: [],
+      }],
+    });
+
+    const weakened = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 1,
+        rules: [{
+          key: "weaken-authentication",
+          name: "Weaken authentication",
+          priority: 10,
+          category: "authentication",
+          scope: {},
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: [],
+          requiredReviewerRoles: [],
+        }],
+      },
+    });
+    expect(weakened.statusCode).toBe(403);
+    expect(weakened.json()).toMatchObject({ code: "POLICY_BLOCKED" });
+  });
+
   it("supports the fresh Hospital project question-and-specification acceptance journey", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -17,6 +17,7 @@ import type {
   Project,
   ProjectMembership,
   ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
   RepositoryRecord,
   Question,
   ServiceCredential,
@@ -57,6 +58,8 @@ import {
   projectMembershipToRow,
   projectOwnershipConfigurationFromRow,
   projectOwnershipConfigurationToRow,
+  projectPolicyConfigurationFromRow,
+  projectPolicyConfigurationToRow,
   serviceCredentialFromRow,
   serviceCredentialToRow,
   questionFromRows,
@@ -84,6 +87,7 @@ import {
   type PrincipalIdentityRow,
   type ProjectMembershipRow,
   type ProjectOwnershipConfigurationRow,
+  type ProjectPolicyConfigurationRow,
   type ServiceCredentialRow,
 } from "./mappers.js";
 
@@ -105,10 +109,15 @@ const question: Question = {
   context: "The component needs durable decisions across agent and API restarts.",
   whyItMatters: "Losing accepted decisions would make later agent sessions repeat questions.",
   risk: "high",
+  policyAction: "block",
+  policyVersion: 0,
+  policyRuleKey: "bridge-question-blocking",
   reversible: false,
   blocking: true,
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
+  requiredOwnerRoles: [],
+  requiredReviewerRoles: [],
   options: [
     { key: "postgres", label: "PostgreSQL", tradeoffs: "Operational dependency with strong transactions." },
     { key: "memory", label: "Memory", tradeoffs: "Simple but state is lost on restart." },
@@ -452,6 +461,27 @@ describe("PostgreSQL domain mappings", () => {
     expect(projectOwnershipConfigurationFromRow(
       projectOwnershipConfigurationToRow(ownershipConfiguration) as ProjectOwnershipConfigurationRow,
     )).toEqual(ownershipConfiguration);
+    const policyConfiguration: ProjectPolicyConfiguration = {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      rules: [{
+        key: "quality-transfer",
+        name: "Transfer quality",
+        priority: 10,
+        category: "quality",
+        scope: { component: "transfers" },
+        action: "block",
+        minimumRisk: "high",
+        requiredOwnerRoles: ["qa-lead"],
+        requiredReviewerRoles: [],
+      }],
+      version: 1,
+      updatedById: "usr_owner",
+      updatedAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(projectPolicyConfigurationFromRow(
+      projectPolicyConfigurationToRow(policyConfiguration) as ProjectPolicyConfigurationRow,
+    )).toEqual(policyConfiguration);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -649,6 +679,26 @@ describe("PostgreSQL domain mappings", () => {
     expect(ownershipMigration).toContain("FORCE ROW LEVEL SECURITY");
     expect(ownershipMigration).toContain("bridge_project_ownership_configurations_roles_shape_check");
     expect(ownershipMigration).toContain("'ownership_configuration'");
+
+    const policyMigration = readFileSync(
+      new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url),
+      "utf8",
+    );
+    expect(policyMigration).toContain('CREATE TABLE "bridge_project_policy_configurations"');
+    expect(policyMigration).toContain("bridge_project_policy_configurations_project_fk");
+    expect(policyMigration).toContain("bridge_project_policy_configurations_tenant");
+    expect(policyMigration).toContain("FORCE ROW LEVEL SECURITY");
+    expect(policyMigration).toContain("bridge_questions_policy_action_check");
+    expect(policyMigration).toContain("'policy_configuration'");
+    expect(policyMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
+      policyMigration.indexOf('ALTER COLUMN "policy_action" SET NOT NULL'),
+    );
+    const requiredOwnerMigration = readFileSync(
+      new URL("../drizzle/0028_cold_tombstone.sql", import.meta.url),
+      "utf8",
+    );
+    expect(requiredOwnerMigration).toContain('ADD COLUMN "required_owner_roles"');
+    expect(requiredOwnerMigration).toContain("bridge_questions_required_owner_roles_shape_check");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

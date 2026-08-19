@@ -10,6 +10,7 @@ export const questionTypeSchema = z.enum([
   "blocker",
 ]);
 export const riskSchema = z.enum(["low", "medium", "high", "protected"]);
+export const policyActionSchema = z.enum(["assume_and_log", "ask_async", "block", "protected_approval"]);
 export const questionStatusSchema = z.enum([
   "open",
   "in_discussion",
@@ -202,6 +203,64 @@ export const replaceProjectOwnershipInputSchema = z.object({
         });
       }
       seen.add(memberId);
+    }
+  }
+});
+
+export const projectPolicyRuleInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  priority: z.number().int().min(1).max(1_000),
+  category: z.string().trim().min(2).max(100).optional(),
+  scope: scopeSchema.default({}),
+  action: policyActionSchema,
+  minimumRisk: riskSchema,
+  requiredOwnerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  requiredReviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+}).superRefine((value, context) => {
+  if (value.action === "assume_and_log" && value.minimumRisk !== "low") {
+    context.addIssue({
+      code: "custom",
+      message: "Assume-and-log rules must keep the minimum risk low.",
+      path: ["minimumRisk"],
+    });
+  }
+  if (value.action === "protected_approval" && value.minimumRisk !== "protected") {
+    context.addIssue({
+      code: "custom",
+      message: "Protected-approval rules must set protected minimum risk.",
+      path: ["minimumRisk"],
+    });
+  }
+});
+
+export const replaceProjectPolicyInputSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  rules: z.array(projectPolicyRuleInputSchema).max(100).default([]),
+}).superRefine((value, context) => {
+  const seenKeys = new Set<string>();
+  for (const [index, rule] of value.rules.entries()) {
+    const normalized = rule.key.normalize("NFKC").toLocaleLowerCase("en");
+    if (seenKeys.has(normalized)) {
+      context.addIssue({ code: "custom", message: "Policy rule keys must be unique.", path: ["rules", index, "key"] });
+    }
+    seenKeys.add(normalized);
+    for (const [field, roles] of [
+      ["requiredOwnerRoles", rule.requiredOwnerRoles],
+      ["requiredReviewerRoles", rule.requiredReviewerRoles],
+    ] as const) {
+      const seenRoles = new Set<string>();
+      for (const [roleIndex, role] of roles.entries()) {
+        const normalizedRole = role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+        if (seenRoles.has(normalizedRole)) {
+          context.addIssue({
+            code: "custom",
+            message: "Required policy roles must be unique.",
+            path: ["rules", index, field, roleIndex],
+          });
+        }
+        seenRoles.add(normalizedRole);
+      }
     }
   }
 });
@@ -634,6 +693,7 @@ export const resolveAssumptionInputSchema = z
 export type PrincipalType = z.infer<typeof principalTypeSchema>;
 export type QuestionType = z.infer<typeof questionTypeSchema>;
 export type Risk = z.infer<typeof riskSchema>;
+export type PolicyAction = z.infer<typeof policyActionSchema>;
 export type QuestionStatus = z.infer<typeof questionStatusSchema>;
 export type QuestionReviewStatus = z.infer<typeof questionReviewStatusSchema>;
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
@@ -665,6 +725,8 @@ export type ProjectTeamInput = z.infer<typeof projectTeamInputSchema>;
 export type OwnershipRuleTargetInput = z.infer<typeof ownershipRuleTargetSchema>;
 export type OwnershipRuleInput = z.infer<typeof ownershipRuleInputSchema>;
 export type ReplaceProjectOwnershipInput = z.infer<typeof replaceProjectOwnershipInputSchema>;
+export type ProjectPolicyRuleInput = z.infer<typeof projectPolicyRuleInputSchema>;
+export type ReplaceProjectPolicyInput = z.infer<typeof replaceProjectPolicyInputSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;

@@ -5,6 +5,7 @@ import type {
   PublishArtifactInput,
   RecordAssumptionInput,
   ReplaceProjectOwnershipInput,
+  ReplaceProjectPolicyInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
@@ -35,7 +36,7 @@ const owner: Principal = {
   organizationId: "org_one",
   projectIds: [project.id],
   allProjects: true,
-  roles: ["project-admin", "security-reviewer"],
+  roles: ["project-admin", "security-reviewer", "data-privacy-owner"],
   displayName: "Owner",
 };
 
@@ -58,7 +59,7 @@ const qaLead: Principal = {
   organizationId: "org_one",
   projectIds: [project.id],
   allProjects: true,
-  roles: ["qa-lead", "qa"],
+  roles: ["qa-lead", "qa", "data-privacy-owner"],
   displayName: "QA Lead",
 };
 
@@ -70,6 +71,20 @@ const securityReviewer: Principal = {
   allProjects: true,
   roles: ["security-reviewer"],
   displayName: "Security Reviewer",
+};
+
+const architectureReviewer: Principal = {
+  ...securityReviewer,
+  id: "usr_architecture_reviewer",
+  roles: ["architecture-reviewer"],
+  displayName: "Architecture Reviewer",
+};
+
+const componentOwner: Principal = {
+  ...owner,
+  id: "usr_component_owner",
+  roles: ["component-owner"],
+  displayName: "Component Owner",
 };
 
 const contributor: Principal = {
@@ -243,6 +258,164 @@ class FailingAuditRepository extends InMemoryBridgeRepository {
 }
 
 describe("Bridge decision workflow", () => {
+  it("manages versioned project policy and applies only risk-elevating scoped rules", async () => {
+    const { repository, service } = await runtime();
+    await expect(service.getProjectPolicyConfiguration(contributor, project.id))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectPolicyConfiguration(outsider, project.id))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    const initial = await service.getProjectPolicyConfiguration(owner, project.id);
+    expect(initial).toMatchObject({ projectId: project.id, version: 0, rules: [] });
+    expect(initial.defaultRules).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "bridge-authentication", action: "protected_approval" }),
+    ]));
+
+    const input: ReplaceProjectPolicyInput = {
+      expectedVersion: 0,
+      rules: [
+        {
+          key: "quality-transfer",
+          name: "Block transfer quality questions",
+          priority: 10,
+          category: "quality",
+          scope: { component: "transfers" },
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: ["QA Lead"],
+          requiredReviewerRoles: [],
+        },
+        {
+          key: "quality-low",
+          name: "Low-risk quality default",
+          priority: 20,
+          category: "quality",
+          scope: { component: "documentation" },
+          action: "assume_and_log",
+          minimumRisk: "low",
+          requiredOwnerRoles: [],
+          requiredReviewerRoles: [],
+        },
+        {
+          key: "release-protected",
+          name: "Protect release decisions",
+          priority: 30,
+          category: "release",
+          scope: { environment: "production" },
+          action: "protected_approval",
+          minimumRisk: "protected",
+          requiredOwnerRoles: ["component-owner"],
+          requiredReviewerRoles: ["architecture-reviewer"],
+        },
+      ],
+    };
+    const configured = await service.replaceProjectPolicyConfiguration(owner, project.id, input);
+    expect(configured).toMatchObject({
+      version: 1,
+      updatedById: owner.id,
+      rules: expect.arrayContaining([expect.objectContaining({
+        key: "quality-transfer",
+        minimumRisk: "high",
+        requiredOwnerRoles: ["qa-lead"],
+        requiredReviewerRoles: [],
+      })]),
+    });
+
+    const governed = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "policy-quality-question",
+      category: "quality",
+      risk: "low",
+      reversible: true,
+      blocking: false,
+    }));
+    expect(governed).toMatchObject({
+      risk: "high",
+      blocking: true,
+      policyAction: "block",
+      policyVersion: 1,
+      policyRuleKey: "quality-transfer",
+      requiredReviewerRoles: [],
+    });
+    expect(governed.ownerRoles).toContain("qa-lead");
+    const notLowered = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "policy-no-lower-question",
+      category: "quality",
+      scope: { component: "documentation" },
+      risk: "high",
+      blocking: false,
+    }));
+    expect(notLowered).toMatchObject({
+      risk: "high",
+      blocking: true,
+      policyAction: "block",
+      policyRuleKey: "bridge-question-blocking",
+      policyVersion: 1,
+    });
+    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "policy-protected-release",
+      category: "release",
+      scope: { environment: "production" },
+      risk: "low",
+      blocking: false,
+    }));
+    expect(protectedQuestion).toMatchObject({
+      risk: "protected",
+      blocking: true,
+      policyAction: "protected_approval",
+      requiredReviewerRoles: ["architecture-reviewer"],
+    });
+    await expect(service.reviewQuestion(securityReviewer, protectedQuestion.id, {
+      expectedVersion: protectedQuestion.version,
+      status: "approved",
+      rationale: "Security authority alone does not satisfy the configured architecture role.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const review = await service.reviewQuestion(architectureReviewer, protectedQuestion.id, {
+      expectedVersion: protectedQuestion.version,
+      status: "approved",
+      rationale: "The production release architecture remains reversible and operationally bounded.",
+    });
+    expect(review).toMatchObject({ reviewerId: architectureReviewer.id, reviewerRole: "architecture-reviewer" });
+    await expect(service.acceptAnswer(owner, protectedQuestion.id, {
+      optionKey: "transient",
+      rationale: "A direct assignment does not replace the policy-required component-owner role.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const protectedDecision = await service.acceptAnswer(componentOwner, protectedQuestion.id, {
+      optionKey: "transient",
+      rationale: "The component owner accepts after the architecture reviewer approved the protected release.",
+    });
+    expect(protectedDecision.ownerId).toBe(componentOwner.id);
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "question.created" && event.subjectId === governed.id))
+      .toMatchObject({ policyVersion: 1 });
+
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, input))
+      .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
+      expectedVersion: 1,
+      rules: [{
+        key: "weaken-authentication",
+        name: "Weaken authentication policy",
+        priority: 10,
+        category: "authentication",
+        scope: {},
+        action: "block",
+        minimumRisk: "high",
+        requiredOwnerRoles: [],
+        requiredReviewerRoles: [],
+      }],
+    })).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
+      expectedVersion: 1,
+      rules: [
+        input.rules[0]!,
+        { ...input.rules[0]!, key: "quality-project", name: "Project quality", scope: {} },
+      ],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { ruleKeys: expect.any(Array) } });
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
+      expectedVersion: 1,
+      rules: [{ ...input.rules[0]!, requiredReviewerRoles: ["architecture-reviewer"] }],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
   it("manages versioned project roles, teams, and unambiguous ownership rules", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
@@ -333,6 +506,21 @@ describe("Bridge decision workflow", () => {
       rules: [],
     })).rejects.toThrow("Injected failure");
     await expect(repository.getProjectOwnershipConfiguration(project.id)).resolves.toBeUndefined();
+  });
+
+  it("rolls back project policy configuration when its audit write fails", async () => {
+    const repository = new FailingAuditRepository();
+    await repository.saveProject(project);
+    repository.failAction = "project.policy_configured";
+    const service = new BridgeService(repository, {
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      id: () => "policy-audit",
+    });
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      rules: [],
+    })).rejects.toThrow("Injected failure");
+    await expect(repository.getProjectPolicyConfiguration(project.id)).resolves.toBeUndefined();
   });
 
   it("registers a fresh project idempotently for fixed local principals", async () => {
@@ -1984,7 +2172,7 @@ describe("Bridge decision workflow", () => {
       canAccept: true,
     });
     expect(qaInbox.find((question) => question.id === protectedQuestion.id)).toMatchObject({
-      inboxReasons: ["direct_owner"],
+      inboxReasons: ["direct_owner", "role_owner"],
       canAccept: false,
     });
 

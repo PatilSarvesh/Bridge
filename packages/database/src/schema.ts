@@ -1,10 +1,11 @@
-import type { Scope } from "@bridge/contracts";
+import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
   ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
   QuestionComment,
   QuestionOption,
   QuestionReview,
@@ -310,6 +311,29 @@ export const projectOwnershipConfigurations = pgTable(
   ],
 ).enableRLS();
 
+export const projectPolicyConfigurations = pgTable(
+  "bridge_project_policy_configurations",
+  {
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    rules: jsonb("rules").$type<ProjectPolicyConfiguration["rules"]>().notNull(),
+    version: integer("version").notNull(),
+    updatedById: text("updated_by_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId] }),
+    index("bridge_project_policy_configurations_project_updated_idx").on(table.projectId, table.updatedAt),
+    check("bridge_project_policy_configurations_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_project_policy_configurations_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_policy_configurations_tenant", table.organizationId),
+  ],
+).enableRLS();
+
 export const agentRuns = pgTable(
   "bridge_agent_runs",
   {
@@ -414,10 +438,15 @@ export const questions = pgTable(
     context: text("context").notNull(),
     whyItMatters: text("why_it_matters").notNull(),
     risk: riskEnum("risk").notNull(),
+    policyAction: text("policy_action").$type<PolicyAction>().notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    policyRuleKey: text("policy_rule_key").notNull(),
     reversible: boolean("reversible").notNull(),
     blocking: boolean("blocking").notNull(),
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
+    requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
+    requiredReviewerRoles: jsonb("required_reviewer_roles").$type<readonly string[]>().default([]).notNull(),
     options: jsonb("options").$type<readonly QuestionOption[]>().notNull(),
     reviews: jsonb("reviews").$type<readonly QuestionReview[]>().default([]).notNull(),
     comments: jsonb("comments").$type<readonly QuestionComment[]>().default([]).notNull(),
@@ -660,6 +689,7 @@ export const auditEvents = pgTable(
     action: text("action").notNull(),
     subjectType: text("subject_type").notNull(),
     subjectId: text("subject_id").notNull(),
+    policyVersion: integer("policy_version"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [

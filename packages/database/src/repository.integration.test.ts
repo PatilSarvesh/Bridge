@@ -52,6 +52,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         "bridge_adapter_diagnostics",
         "bridge_project_repositories",
         "bridge_project_ownership_configurations",
+        "bridge_project_policy_configurations",
         "bridge_artifact_versions",
         "bridge_artifacts",
         "bridge_assumptions",

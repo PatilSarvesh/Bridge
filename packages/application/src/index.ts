@@ -40,6 +40,9 @@ import type {
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
   ReplaceProjectOwnershipInput,
+  ReplaceProjectPolicyInput,
+  PolicyAction,
+  Risk,
 } from "@bridge/contracts";
 import {
   assertCanApproveArtifact,
@@ -82,6 +85,8 @@ import {
   type ProjectMembership,
   type ProjectOwnershipConfiguration,
   type ProjectOwnershipRule,
+  type ProjectPolicyConfiguration,
+  type ProjectPolicyRule,
   type ProjectRoleDefinition,
   type ProjectTeam,
   type RepositoryRecord,
@@ -156,6 +161,11 @@ export interface BridgeRepository {
   getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined>;
   saveProjectOwnershipConfiguration(
     configuration: ProjectOwnershipConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean>;
+  getProjectPolicyConfiguration(projectId: string): Promise<ProjectPolicyConfiguration | undefined>;
+  saveProjectPolicyConfiguration(
+    configuration: ProjectPolicyConfiguration,
     expectedVersion: number,
   ): Promise<boolean>;
   getRun(runId: string): Promise<AgentRun | undefined>;
@@ -421,6 +431,7 @@ export interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly policyVersion?: number;
   readonly createdAt: string;
 }
 
@@ -430,6 +441,10 @@ export interface AuditPage {
   readonly limit: number;
   readonly totalMatching: number;
   readonly nextOffset?: number;
+}
+
+export interface ProjectPolicyView extends ProjectPolicyConfiguration {
+  readonly defaultRules: readonly ProjectPolicyRule[];
 }
 
 export interface AuditExport {
@@ -670,6 +685,24 @@ interface NotificationDraft {
   readonly questionContext?: NotificationQuestionContext;
 }
 
+interface PolicyEvaluationInput {
+  readonly operation: "assumption" | "question";
+  readonly category: string;
+  readonly scope: Scope;
+  readonly declaredRisk: Risk;
+  readonly reversible: boolean;
+  readonly blocking: boolean;
+}
+
+interface PolicyEvaluation {
+  readonly action: PolicyAction;
+  readonly risk: Risk;
+  readonly policyVersion: number;
+  readonly policyRuleKey: string;
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
+}
+
 export type QuestionSubmission = Question & {
   readonly submissionDisposition: QuestionSubmissionDisposition;
 };
@@ -679,6 +712,52 @@ type RawArtifactDiffLine = Pick<ArtifactDiffLine, "kind" | "text">;
 const MAX_EXACT_DIFF_CELLS = 1_000_000;
 const MAX_EXACT_DIFF_DIMENSION = 5_000;
 const MAX_RENDERED_DIFF_LINES = 2_000;
+
+const policyRule = (
+  key: string,
+  category: string,
+  requiredOwnerRoles: readonly string[],
+  requiredReviewerRoles: readonly string[],
+): ProjectPolicyRule => ({
+  key,
+  name: `Bridge protected default: ${category}`,
+  priority: 1,
+  category,
+  scope: {},
+  action: "protected_approval",
+  minimumRisk: "protected",
+  requiredOwnerRoles,
+  requiredReviewerRoles,
+});
+
+const DEFAULT_PROTECTED_POLICY_RULES: readonly ProjectPolicyRule[] = [
+  policyRule("bridge-authentication", "authentication", ["component-owner"], ["security-reviewer"]),
+  policyRule("bridge-authorization", "authorization", ["component-owner"], ["security-reviewer"]),
+  policyRule("bridge-access-control", "access-control", ["component-owner"], ["security-reviewer"]),
+  policyRule("bridge-secret-handling", "secrets", [], ["security-reviewer"]),
+  policyRule("bridge-credential-handling", "credentials", [], ["security-reviewer"]),
+  policyRule("bridge-key-handling", "keys", [], ["security-reviewer"]),
+  policyRule("bridge-security", "security", [], ["security-reviewer"]),
+  policyRule("bridge-pii", "pii", ["data-privacy-owner"], ["security-reviewer"]),
+  policyRule("bridge-privacy", "privacy", ["data-privacy-owner"], ["security-reviewer"]),
+  policyRule("bridge-regulated-data", "regulated-data", ["data-privacy-owner"], ["security-reviewer"]),
+  policyRule("bridge-production-deletion", "production-deletion", ["component-owner"], ["operations-sre-reviewer"]),
+  policyRule("bridge-destructive-migration", "destructive-migration", ["component-owner"], ["operations-sre-reviewer"]),
+  policyRule("bridge-irreversible-schema", "irreversible-schema-migration", ["component-owner"], ["database-architecture-reviewer"]),
+  policyRule("bridge-breaking-api", "breaking-api", ["product-owner"], ["architecture-owner"]),
+  policyRule("bridge-security-exception", "security-exception", ["security-owner"], []),
+  policyRule("bridge-legal", "legal", ["legal-compliance-owner"], []),
+  policyRule("bridge-regulatory", "regulatory", ["legal-compliance-owner"], []),
+  policyRule("bridge-recurring-spend", "recurring-infrastructure-spend", ["project-owner"], ["finance-operations-approver"]),
+];
+
+const RISK_RANK: Readonly<Record<Risk, number>> = { low: 0, medium: 1, high: 2, protected: 3 };
+const ACTION_RANK: Readonly<Record<PolicyAction, number>> = {
+  assume_and_log: 0,
+  ask_async: 1,
+  block: 2,
+  protected_approval: 3,
+};
 
 function splitMarkdownLines(body: string): readonly string[] {
   return body.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
@@ -817,6 +896,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
   private readonly projectOwnershipConfigurations = new Map<string, ProjectOwnershipConfiguration>();
+  private readonly projectPolicyConfigurations = new Map<string, ProjectPolicyConfiguration>();
   private readonly runs = new Map<string, AgentRun>();
   private readonly adapterDiagnostics = new Map<string, AdapterDiagnostic>();
   private readonly assumptions = new Map<string, Assumption>();
@@ -867,6 +947,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
       projectOwnershipConfigurations: new Map(this.projectOwnershipConfigurations),
+      projectPolicyConfigurations: new Map(this.projectPolicyConfigurations),
       runs: new Map(this.runs),
       adapterDiagnostics: new Map(this.adapterDiagnostics),
       assumptions: new Map(this.assumptions),
@@ -898,6 +979,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
       this.restoreMap(this.projectOwnershipConfigurations, snapshot.projectOwnershipConfigurations);
+      this.restoreMap(this.projectPolicyConfigurations, snapshot.projectPolicyConfigurations);
       this.restoreMap(this.runs, snapshot.runs);
       this.restoreMap(this.adapterDiagnostics, snapshot.adapterDiagnostics);
       this.restoreMap(this.assumptions, snapshot.assumptions);
@@ -1176,6 +1258,22 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     const current = this.projectOwnershipConfigurations.get(configuration.projectId);
     if ((current?.version ?? 0) !== expectedVersion) return false;
     this.projectOwnershipConfigurations.set(configuration.projectId, configuration);
+    return true;
+  }
+
+  async getProjectPolicyConfiguration(
+    projectId: string,
+  ): Promise<ProjectPolicyConfiguration | undefined> {
+    return this.projectPolicyConfigurations.get(projectId);
+  }
+
+  async saveProjectPolicyConfiguration(
+    configuration: ProjectPolicyConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const current = this.projectPolicyConfigurations.get(configuration.projectId);
+    if ((current?.version ?? 0) !== expectedVersion) return false;
+    this.projectPolicyConfigurations.set(configuration.projectId, configuration);
     return true;
   }
 
@@ -1805,6 +1903,72 @@ export class BridgeService {
         configuration.updatedAt!,
       );
       return configuration;
+    });
+  }
+
+  async getProjectPolicyConfiguration(
+    principal: Principal,
+    projectId: string,
+  ): Promise<ProjectPolicyView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Reading project policy configuration", projectId);
+      const configuration = await repository.getProjectPolicyConfiguration(projectId) ?? {
+        organizationId: project.organizationId,
+        projectId: project.id,
+        rules: [],
+        version: 0,
+      };
+      return { ...configuration, defaultRules: DEFAULT_PROTECTED_POLICY_RULES };
+    });
+  }
+
+  async replaceProjectPolicyConfiguration(
+    principal: Principal,
+    projectId: string,
+    input: ReplaceProjectPolicyInput,
+  ): Promise<ProjectPolicyView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Configuring project policy", projectId);
+      this.assertSecretSafe("administration", input);
+      const current = await repository.getProjectPolicyConfiguration(projectId);
+      const currentVersion = current?.version ?? 0;
+      if (input.expectedVersion !== currentVersion) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The project policy configuration changed after it was read.",
+          409,
+          { expectedVersion: input.expectedVersion, currentVersion },
+        );
+      }
+      const timestamp = this.now().toISOString();
+      const configuration: ProjectPolicyConfiguration = {
+        organizationId: project.organizationId,
+        projectId: project.id,
+        rules: this.normalizeProjectPolicyRules(input.rules),
+        version: currentVersion + 1,
+        updatedById: principal.id,
+        updatedAt: timestamp,
+      };
+      if (!await repository.saveProjectPolicyConfiguration(configuration, currentVersion)) {
+        throw new BridgeError(
+          "CONFLICT",
+          "The project policy configuration changed while it was being saved.",
+          409,
+        );
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "project.policy_configured",
+        "policy_configuration",
+        projectId,
+        timestamp,
+        configuration.version,
+      );
+      return { ...configuration, defaultRules: DEFAULT_PROTECTED_POLICY_RULES };
     });
   }
 
@@ -3029,27 +3193,6 @@ export class BridgeService {
   ): Promise<Assumption> {
     await this.requireProject(principal, projectId, repository);
     this.assertSecretSafe("assumption", input);
-    const protectedCategories = new Set([
-      "security",
-      "privacy",
-      "authentication",
-      "legal",
-      "production-deletion",
-    ]);
-    if (protectedCategories.has(input.category.toLowerCase())) {
-      throw new BridgeError(
-        "POLICY_BLOCKED",
-        "Protected uncertainty requires an explicit human decision and cannot be recorded as an assumption.",
-        403,
-      );
-    }
-    if (input.risk !== "low" || !input.reversible) {
-      throw new BridgeError(
-        "POLICY_BLOCKED",
-        "Only low-risk, reversible uncertainty can be recorded as an assumption.",
-        403,
-      );
-    }
     if (principal.type !== "human" && !input.runId) {
       throw new BridgeError(
         "VALIDATION_FAILED",
@@ -3067,6 +3210,23 @@ export class BridgeService {
         throw new BridgeError("CONFLICT", "The idempotency key was reused with a different request.", 409);
       }
       return existing;
+    }
+
+    const policy = await this.evaluateProjectPolicy(repository, projectId, {
+      operation: "assumption",
+      category: input.category,
+      scope: input.scope,
+      declaredRisk: input.risk,
+      reversible: input.reversible,
+      blocking: false,
+    });
+    if (policy.action !== "assume_and_log" || policy.risk !== "low") {
+      throw new BridgeError(
+        "POLICY_BLOCKED",
+        "Project policy allows assumption logging only for low-risk, reversible uncertainty.",
+        403,
+        { policyAction: policy.action, policyRuleKey: policy.policyRuleKey, policyVersion: policy.policyVersion },
+      );
     }
 
     const timestampDate = this.now();
@@ -3145,7 +3305,16 @@ export class BridgeService {
         version: sourceRun.version + 1,
       });
     }
-    await this.audit(repository, principal, projectId, "assumption.recorded", "assumption", assumption.id, timestamp);
+    await this.audit(
+      repository,
+      principal,
+      projectId,
+      "assumption.recorded",
+      "assumption",
+      assumption.id,
+      timestamp,
+      policy.policyVersion,
+    );
     return assumption;
   }
 
@@ -3285,16 +3454,6 @@ export class BridgeService {
   ): Promise<QuestionSubmission> {
     const project = await this.requireProject(principal, projectId, repository);
     this.assertSecretSafe("question", input);
-    const protectedCategories = new Set(["security", "privacy", "authentication", "legal", "production-deletion"]);
-    const effectiveRisk = protectedCategories.has(input.category) ? "protected" : input.risk;
-    if (effectiveRisk === "protected" && input.fallback) {
-      throw new BridgeError(
-        "POLICY_BLOCKED",
-        "Protected questions cannot define an automatic fallback.",
-        403,
-      );
-    }
-
     const idempotencyKey = `${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
     const requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const existing = await repository.findIdempotentQuestion(idempotencyKey);
@@ -3306,8 +3465,27 @@ export class BridgeService {
       return { ...existing, submissionDisposition: "idempotent_replay" };
     }
 
+    const policy = await this.evaluateProjectPolicy(repository, projectId, {
+      operation: "question",
+      category: input.category,
+      scope: input.scope,
+      declaredRisk: input.risk,
+      reversible: input.reversible,
+      blocking: input.blocking,
+    });
+    if (policy.action === "protected_approval" && input.fallback) {
+      throw new BridgeError(
+        "POLICY_BLOCKED",
+        "Protected questions cannot define an automatic fallback.",
+        403,
+      );
+    }
+
     const timestamp = this.now().toISOString();
-    const ownerRoles = [...new Set(input.intendedOwnerRoles.map(normalizeRoleName).filter(Boolean))];
+    const ownerRoles = this.normalizedRoles([
+      ...input.intendedOwnerRoles,
+      ...policy.requiredOwnerRoles,
+    ]);
     const ownerIds = input.intendedOwnerIds.length > 0
       ? [...input.intendedOwnerIds]
       : ownerRoles.length > 0
@@ -3320,12 +3498,13 @@ export class BridgeService {
       ? await this.requireLinkableRun(principal, input.runId, repository)
       : undefined;
 
-    const effectiveBlocking = input.blocking || effectiveRisk === "protected";
+    const effectiveBlocking = input.blocking || ["block", "protected_approval"].includes(policy.action);
     const reusable = await this.findReusableQuestion(
       repository,
       projectId,
       input,
-      effectiveRisk,
+      policy,
+      ownerRoles,
       effectiveBlocking,
     );
     if (reusable) {
@@ -3341,6 +3520,7 @@ export class BridgeService {
         "question",
         reusable.id,
         timestamp,
+        policy.policyVersion,
       );
       return {
         ...reusable,
@@ -3358,11 +3538,16 @@ export class BridgeService {
       category: input.category,
       context: input.context,
       whyItMatters: input.whyItMatters,
-      risk: effectiveRisk,
+      risk: policy.risk,
+      policyAction: policy.action,
+      policyVersion: policy.policyVersion,
+      policyRuleKey: policy.policyRuleKey,
       reversible: input.reversible,
       blocking: effectiveBlocking,
       ownerIds: [...ownerIds],
       ownerRoles,
+      requiredOwnerRoles: policy.requiredOwnerRoles,
+      requiredReviewerRoles: policy.requiredReviewerRoles,
       options: input.options.map((option) => ({ ...option })),
       ...(input.recommendationKey ? { recommendationKey: input.recommendationKey } : {}),
       ...(input.fallback !== undefined ? { fallback: input.fallback } : {}),
@@ -3382,7 +3567,16 @@ export class BridgeService {
     if (sourceRun) {
       await this.linkQuestionToRun(repository, principal, sourceRun, question, timestamp);
     }
-    await this.audit(repository, principal, projectId, "question.created", "question", question.id, timestamp);
+    await this.audit(
+      repository,
+      principal,
+      projectId,
+      "question.created",
+      "question",
+      question.id,
+      timestamp,
+      question.policyVersion,
+    );
     await this.notify(repository, principal, projectId, question.ownerIds, {
       type: "question_assigned",
       title: "Question needs your review",
@@ -3483,11 +3677,11 @@ export class BridgeService {
     repository: BridgeRepository,
     projectId: string,
     input: CreateQuestionInput,
-    effectiveRisk: Question["risk"],
+    policy: PolicyEvaluation,
+    ownerRoles: readonly string[],
     effectiveBlocking: boolean,
   ): Promise<Question | undefined> {
     const questions = await repository.listQuestions(projectId);
-    const requestedRoles = [...new Set(input.intendedOwnerRoles.map(normalizeRoleName).filter(Boolean))].sort();
     const candidates = questions.filter((question) =>
       ["open", "in_discussion", "accepted"].includes(question.status) &&
       question.type === input.type &&
@@ -3495,11 +3689,16 @@ export class BridgeService {
       this.normalizeQuestionText(question.title) === this.normalizeQuestionText(input.title) &&
       this.normalizeQuestionText(question.context) === this.normalizeQuestionText(input.context) &&
       this.scopesEqual(question.scope, input.scope) &&
-      question.risk === effectiveRisk &&
+      question.risk === policy.risk &&
+      question.policyAction === policy.action &&
       question.reversible === input.reversible &&
       question.blocking === effectiveBlocking &&
       JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify(requestedRoles)
+        JSON.stringify([...ownerRoles].sort()) &&
+      JSON.stringify([...question.requiredOwnerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
+        JSON.stringify([...policy.requiredOwnerRoles].sort()) &&
+      JSON.stringify([...question.requiredReviewerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
+        JSON.stringify([...policy.requiredReviewerRoles].sort())
     );
     for (const question of candidates.sort((left, right) =>
       Number(right.status === "accepted") - Number(left.status === "accepted") ||
@@ -3541,6 +3740,7 @@ export class BridgeService {
         "run",
         run.id,
         timestamp,
+        question.policyVersion,
       );
     }
   }
@@ -3628,10 +3828,40 @@ export class BridgeService {
     assertHuman(principal, "Reviewing a question");
     const question = await this.requireQuestion(principal, questionId, repository);
     if (question.risk !== "protected") {
-      throw new BridgeError("POLICY_BLOCKED", "Separate security review is required only for protected questions.", 422);
+      throw new BridgeError("POLICY_BLOCKED", "Separate policy review is required only for protected questions.", 422);
     }
-    if (!principalHasRole(principal, "security-reviewer", question.projectId)) {
-      throw new BridgeError("FORBIDDEN", "Only a configured security reviewer can review a protected question.", 403);
+    const requiredReviewerRoles = question.requiredReviewerRoles.length > 0
+      ? question.requiredReviewerRoles
+      : !question.policyRuleKey || question.policyRuleKey === "bridge-legacy-protected"
+        ? ["security-reviewer"]
+        : [];
+    if (requiredReviewerRoles.length === 0) {
+      throw new BridgeError(
+        "POLICY_BLOCKED",
+        "This protected policy requires owner authority but no separate reviewer role.",
+        422,
+      );
+    }
+    const principalReviewerRoles = requiredReviewerRoles.filter((role) =>
+      principalHasRole(principal, role, question.projectId));
+    if (principalReviewerRoles.length === 0) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Only a human with a policy-required reviewer role can review this protected question.",
+        403,
+        { requiredReviewerRoles },
+      );
+    }
+    const reviewerRole = principalReviewerRoles.find((role) =>
+      !question.reviews.some((review) =>
+        review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role)));
+    if (!reviewerRole) {
+      throw new BridgeError(
+        "CONFLICT",
+        "This reviewer has already reviewed the question for every matching required role.",
+        409,
+        { requiredReviewerRoles },
+      );
     }
     this.assertSecretSafe("question", input);
     if (question.version !== input.expectedVersion) {
@@ -3643,17 +3873,13 @@ export class BridgeService {
     if (!["open", "in_discussion"].includes(question.status)) {
       throw new BridgeError("CONFLICT", "Only an unresolved question can receive a security review.", 409);
     }
-    if (question.reviews.some((review) => review.reviewerId === principal.id)) {
-      throw new BridgeError("CONFLICT", "This reviewer has already reviewed the question.", 409);
-    }
-
     const timestamp = this.now().toISOString();
     const review: QuestionReview = {
       id: `qrv_${this.id()}`,
       questionId,
       reviewerId: principal.id,
       reviewerType: principal.type,
-      reviewerRole: "security-reviewer",
+      reviewerRole: normalizeRoleName(reviewerRole),
       status: input.status,
       rationale: input.rationale,
       createdAt: timestamp,
@@ -3663,10 +3889,19 @@ export class BridgeService {
       reviews: [...question.reviews, review],
       version: question.version + 1,
     });
-    await this.audit(repository, principal, question.projectId, "question.reviewed", "question", question.id, timestamp);
+    await this.audit(
+      repository,
+      principal,
+      question.projectId,
+      "question.reviewed",
+      "question",
+      question.id,
+      timestamp,
+      question.policyVersion,
+    );
     await this.notify(repository, principal, question.projectId, [...question.ownerIds, question.createdById], {
       type: "question_review",
-      title: "Protected question review recorded",
+      title: "Protected policy review recorded",
       body: `${principal.displayName} marked “${question.title}” ${review.status}.`,
       targetType: "review",
       targetId: review.id,
@@ -3728,7 +3963,10 @@ export class BridgeService {
       comments: [...question.comments, comment],
       version: question.version + 1,
     });
-    await this.audit(repository, principal, question.projectId, "question.comment_added", "question", question.id, timestamp);
+    await this.audit(
+      repository, principal, question.projectId, "question.comment_added", "question", question.id, timestamp,
+      question.policyVersion,
+    );
     await this.notify(
       repository,
       principal,
@@ -3817,7 +4055,10 @@ export class BridgeService {
       responses: [...question.responses, response],
       version: question.version + 1,
     });
-    await this.audit(repository, principal, question.projectId, "response.proposed", "response", response.id, timestamp);
+    await this.audit(
+      repository, principal, question.projectId, "response.proposed", "response", response.id, timestamp,
+      question.policyVersion,
+    );
     await this.notify(repository, principal, question.projectId, question.ownerIds, {
       type: "question_response",
       title: "New proposed answer",
@@ -3902,7 +4143,10 @@ export class BridgeService {
       decisionId: decision.id,
       version: question.version + 1,
     });
-    await this.audit(repository, principal, question.projectId, "decision.accepted", "decision", decision.id, timestamp);
+    await this.audit(
+      repository, principal, question.projectId, "decision.accepted", "decision", decision.id, timestamp,
+      question.policyVersion,
+    );
     await this.notify(
       repository,
       principal,
@@ -4062,6 +4306,7 @@ export class BridgeService {
       "decision",
       decision.id,
       timestamp,
+      sourceQuestion?.policyVersion,
     );
     await repository.saveOutboxEvent({
       id: `evt_${this.id()}`,
@@ -4857,7 +5102,7 @@ export class BridgeService {
     }
     const fields: readonly (keyof AuditRecord)[] = [
       "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
-      "action", "subjectType", "subjectId", "createdAt",
+      "action", "subjectType", "subjectId", "policyVersion", "createdAt",
     ];
     const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const body = [
@@ -5003,6 +5248,12 @@ export class BridgeService {
     return value?.normalize("NFKC").trim().toLocaleLowerCase("en") || undefined;
   }
 
+  private normalizedPolicyCategory(value: string | undefined): string | undefined {
+    return value?.normalize("NFKC").trim().toLocaleLowerCase("en")
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "") || undefined;
+  }
+
   private ownershipRulesOverlap(left: ProjectOwnershipRule, right: ProjectOwnershipRule): boolean {
     return (["category", "repository", "component"] as const).every((field) => {
       const leftValue = this.normalizedOwnershipSelector(left[field]);
@@ -5027,6 +5278,183 @@ export class BridgeService {
         }
       }
     }
+  }
+
+  private normalizeProjectPolicyRules(
+    inputRules: ReplaceProjectPolicyInput["rules"],
+  ): readonly ProjectPolicyRule[] {
+    const rules: ProjectPolicyRule[] = [];
+    const keys = new Set<string>();
+    for (const inputRule of inputRules) {
+      const key = normalizeRoleName(inputRule.key);
+      if (!key || keys.has(key)) {
+        throw new BridgeError("VALIDATION_FAILED", "Project policy rule keys must be unique after normalization.", 400);
+      }
+      keys.add(key);
+      const requiredOwnerRoles = this.normalizedRoles(inputRule.requiredOwnerRoles);
+      const requiredReviewerRoles = this.normalizedRoles(inputRule.requiredReviewerRoles);
+      if (requiredOwnerRoles.length !== inputRule.requiredOwnerRoles.length ||
+        requiredReviewerRoles.length !== inputRule.requiredReviewerRoles.length) {
+        throw new BridgeError("VALIDATION_FAILED", "Required policy roles must be unique after normalization.", 400);
+      }
+      if (inputRule.action === "assume_and_log" &&
+        (inputRule.minimumRisk !== "low" || requiredOwnerRoles.length > 0 || requiredReviewerRoles.length > 0)) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Assume-and-log policy cannot require elevated risk, owners, or reviewers.",
+          400,
+        );
+      }
+      if ((inputRule.action === "protected_approval") !== (inputRule.minimumRisk === "protected")) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Protected risk and protected-approval action must be configured together.",
+          400,
+        );
+      }
+      if (inputRule.action !== "protected_approval" && requiredReviewerRoles.length > 0) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Required reviewer roles are supported only by protected-approval policy.",
+          400,
+        );
+      }
+      if (inputRule.action === "protected_approval" &&
+        requiredOwnerRoles.length + requiredReviewerRoles.length === 0) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Protected policy must require at least one human owner or reviewer role.",
+          400,
+        );
+      }
+      const category = this.normalizedPolicyCategory(inputRule.category);
+      const defaultRule = category
+        ? DEFAULT_PROTECTED_POLICY_RULES.find((rule) => rule.category === category)
+        : undefined;
+      if (defaultRule) {
+        const missingDefaultRole = defaultRule.requiredOwnerRoles.some((role) => !requiredOwnerRoles.includes(role)) ||
+          defaultRule.requiredReviewerRoles.some((role) => !requiredReviewerRoles.includes(role));
+        if (inputRule.action !== "protected_approval" || inputRule.minimumRisk !== "protected" || missingDefaultRole) {
+          throw new BridgeError(
+            "POLICY_BLOCKED",
+            "Pilot protected-category defaults may be strengthened but not weakened.",
+            403,
+            { category, defaultRuleKey: defaultRule.key },
+          );
+        }
+      }
+      rules.push({
+        key,
+        name: inputRule.name.trim(),
+        priority: inputRule.priority,
+        ...(category ? { category } : {}),
+        scope: Object.fromEntries(
+          Object.entries(inputRule.scope)
+            .map(([field, value]) => [field, this.normalizedOwnershipSelector(value)])
+            .filter((entry): entry is [string, string] => Boolean(entry[1])),
+        ) as Scope,
+        action: inputRule.action,
+        minimumRisk: inputRule.minimumRisk,
+        requiredOwnerRoles,
+        requiredReviewerRoles,
+      });
+    }
+    for (const [index, left] of rules.entries()) {
+      for (const right of rules.slice(index + 1)) {
+        if (left.priority === right.priority && this.policyRulesOverlap(left, right)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Equal-priority project policy rules cannot overlap.",
+            400,
+            { ruleKeys: [left.key, right.key] },
+          );
+        }
+      }
+    }
+    return rules.sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
+  }
+
+  private policyRulesOverlap(left: ProjectPolicyRule, right: ProjectPolicyRule): boolean {
+    if (left.category && right.category && left.category !== right.category) return false;
+    return (["repository", "component", "branch", "environment", "workItem"] as const).every((field) => {
+      const leftValue = this.normalizedOwnershipSelector(left.scope[field]);
+      const rightValue = this.normalizedOwnershipSelector(right.scope[field]);
+      return !leftValue || !rightValue || leftValue === rightValue;
+    });
+  }
+
+  private policyRuleMatches(rule: ProjectPolicyRule, category: string, scope: Scope): boolean {
+    const normalizedCategory = this.normalizedPolicyCategory(category);
+    if (rule.category && rule.category !== normalizedCategory) return false;
+    return (["repository", "component", "branch", "environment", "workItem"] as const).every((field) => {
+      const expected = this.normalizedOwnershipSelector(rule.scope[field]);
+      return !expected || expected === this.normalizedOwnershipSelector(scope[field]);
+    });
+  }
+
+  private higherRisk(left: Risk, right: Risk): Risk {
+    return RISK_RANK[left] >= RISK_RANK[right] ? left : right;
+  }
+
+  private strongerAction(left: PolicyAction, right: PolicyAction): PolicyAction {
+    return ACTION_RANK[left] >= ACTION_RANK[right] ? left : right;
+  }
+
+  private async evaluateProjectPolicy(
+    repository: BridgeRepository,
+    projectId: string,
+    input: PolicyEvaluationInput,
+  ): Promise<PolicyEvaluation> {
+    const configuration = await repository.getProjectPolicyConfiguration(projectId);
+    const configuredRule = configuration?.rules.find((rule) => this.policyRuleMatches(rule, input.category, input.scope));
+    const defaultRule = DEFAULT_PROTECTED_POLICY_RULES.find((rule) =>
+      this.policyRuleMatches(rule, input.category, input.scope));
+    const baseAction: PolicyAction = input.operation === "assumption"
+      ? input.declaredRisk === "low" && input.reversible ? "assume_and_log" : "block"
+      : input.declaredRisk === "protected" ? "protected_approval"
+        : input.blocking || input.declaredRisk === "high" ? "block" : "ask_async";
+    let action = baseAction;
+    let risk = input.declaredRisk;
+    let policyRuleKey = input.operation === "assumption" ? "bridge-assumption-default" :
+      baseAction === "ask_async" ? "bridge-question-async" :
+        baseAction === "block" ? "bridge-question-blocking" : "bridge-agent-protected";
+    let requiredOwnerRoles: readonly string[] = [];
+    let requiredReviewerRoles: readonly string[] = baseAction === "protected_approval" ? ["security-reviewer"] : [];
+
+    if (defaultRule) {
+      action = this.strongerAction(action, defaultRule.action);
+      risk = this.higherRisk(risk, defaultRule.minimumRisk);
+      policyRuleKey = defaultRule.key;
+      requiredOwnerRoles = defaultRule.requiredOwnerRoles;
+      requiredReviewerRoles = defaultRule.requiredReviewerRoles;
+    }
+    if (configuredRule) {
+      const beforeAction = action;
+      const beforeRisk = risk;
+      action = this.strongerAction(action, configuredRule.action);
+      risk = this.higherRisk(risk, configuredRule.minimumRisk);
+      if (ACTION_RANK[configuredRule.action] >= ACTION_RANK[beforeAction] &&
+        RISK_RANK[configuredRule.minimumRisk] >= RISK_RANK[beforeRisk]) {
+        policyRuleKey = configuredRule.key;
+      }
+      requiredOwnerRoles = this.normalizedRoles([
+        ...requiredOwnerRoles,
+        ...configuredRule.requiredOwnerRoles,
+      ]);
+      requiredReviewerRoles = this.normalizedRoles([
+        ...requiredReviewerRoles,
+        ...configuredRule.requiredReviewerRoles,
+      ]);
+    }
+    if (action === "protected_approval") risk = "protected";
+    return {
+      action,
+      risk,
+      policyVersion: configuration?.version ?? 0,
+      policyRuleKey,
+      requiredOwnerRoles,
+      requiredReviewerRoles,
+    };
   }
 
   private normalizedRoles(roles: readonly string[]): readonly string[] {
@@ -5210,6 +5638,7 @@ export class BridgeService {
     subjectType: AuditEvent["subjectType"],
     subjectId: string,
     createdAt: string,
+    policyVersion?: number,
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
@@ -5221,6 +5650,7 @@ export class BridgeService {
       action,
       subjectType,
       subjectId,
+      ...(policyVersion === undefined ? {} : { policyVersion }),
       createdAt,
     });
   }

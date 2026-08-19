@@ -59,6 +59,31 @@ interface ProjectOwnershipConfiguration {
   readonly updatedAt?: string;
 }
 
+type PolicyAction = "assume_and_log" | "ask_async" | "block" | "protected_approval";
+type Risk = "low" | "medium" | "high" | "protected";
+
+interface ProjectPolicyRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly action: PolicyAction;
+  readonly minimumRisk: Risk;
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
+}
+
+interface ProjectPolicyConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly rules: readonly ProjectPolicyRule[];
+  readonly defaultRules: readonly ProjectPolicyRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
+}
+
 interface Principal {
   readonly id: string;
   readonly displayName: string;
@@ -131,11 +156,16 @@ interface Question {
   readonly context: string;
   readonly whyItMatters: string;
   readonly risk: "low" | "medium" | "high" | "protected";
+  readonly policyAction: PolicyAction;
+  readonly policyVersion: number;
+  readonly policyRuleKey: string;
   readonly blocking: boolean;
   readonly options: readonly Option[];
   readonly recommendationKey?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
   readonly status: string;
   readonly decisionId?: string;
   readonly responses: readonly QuestionResponse[];
@@ -427,6 +457,7 @@ interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly policyVersion?: number;
   readonly createdAt: string;
 }
 
@@ -451,6 +482,7 @@ type View =
   | "runs"
   | "repositories"
   | "ownership"
+  | "policy"
   | "organization"
   | "analytics"
   | "audit"
@@ -570,6 +602,8 @@ export default function Home() {
   const [repositories, setRepositories] = useState<readonly RepositoryRecord[]>([]);
   const [ownershipConfiguration, setOwnershipConfiguration] = useState<ProjectOwnershipConfiguration>();
   const [ownershipDraft, setOwnershipDraft] = useState<ProjectOwnershipConfiguration>();
+  const [policyConfiguration, setPolicyConfiguration] = useState<ProjectPolicyConfiguration>();
+  const [policyDraft, setPolicyDraft] = useState<ProjectPolicyConfiguration>();
   const [repositoryProvider, setRepositoryProvider] = useState("");
   const [repositoryOwner, setRepositoryOwner] = useState("");
   const [repositoryName, setRepositoryName] = useState("");
@@ -630,6 +664,7 @@ export default function Home() {
   const [supportLoading, setSupportLoading] = useState(false);
   const [repositoriesLoading, setRepositoriesLoading] = useState(false);
   const [ownershipLoading, setOwnershipLoading] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
@@ -913,6 +948,90 @@ export default function Home() {
         ...(component ? { component } : {}),
         owners,
         reviewers,
+      }],
+    });
+    event.currentTarget.reset();
+  };
+
+  const loadPolicy = useCallback(async () => {
+    if (!selectedProjectId) {
+      setPolicyConfiguration(undefined);
+      setPolicyDraft(undefined);
+      setPolicyLoading(false);
+      return;
+    }
+    setPolicyLoading(true);
+    setError(undefined);
+    try {
+      const configuration = await bridgeFetch<ProjectPolicyConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/policy`,
+        undefined,
+        activePrincipalId,
+      );
+      setPolicyConfiguration(configuration);
+      setPolicyDraft(configuration);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project policy configuration.");
+    } finally {
+      setPolicyLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const savePolicy = async () => {
+    if (!selectedProjectId || !policyConfiguration || !policyDraft) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<ProjectPolicyConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/policy`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: policyConfiguration.version,
+            rules: policyDraft.rules,
+          }),
+        },
+        activePrincipalId,
+      );
+      setPolicyConfiguration(saved);
+      setPolicyDraft(saved);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save project policy configuration.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addPolicyRule = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!policyDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("policyKey") ?? ""));
+    const name = String(form.get("policyName") ?? "").trim();
+    const priority = Number(form.get("policyPriority"));
+    const category = String(form.get("policyCategory") ?? "").trim();
+    const scope = Object.fromEntries([
+      ["repository", String(form.get("policyRepository") ?? "").trim()],
+      ["component", String(form.get("policyComponent") ?? "").trim()],
+      ["branch", String(form.get("policyBranch") ?? "").trim()],
+      ["environment", String(form.get("policyEnvironment") ?? "").trim()],
+      ["workItem", String(form.get("policyWorkItem") ?? "").trim()],
+    ].filter((entry): entry is [string, string] => Boolean(entry[1])));
+    const action = String(form.get("policyAction")) as PolicyAction;
+    const minimumRisk = String(form.get("policyRisk")) as Risk;
+    if (!key || !name || !Number.isInteger(priority) || !action || !minimumRisk) return;
+    setPolicyDraft({
+      ...policyDraft,
+      rules: [...policyDraft.rules, {
+        key,
+        name,
+        priority,
+        ...(category ? { category } : {}),
+        scope,
+        action,
+        minimumRisk,
+        requiredOwnerRoles: roleList(String(form.get("policyOwnerRoles") ?? "")),
+        requiredReviewerRoles: roleList(String(form.get("policyReviewerRoles") ?? "")),
       }],
     });
     event.currentTarget.reset();
@@ -1314,7 +1433,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "ownership", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "ownership", "policy", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -1372,6 +1491,10 @@ export default function Home() {
   }, [authenticationReady, loadOwnership, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "policy") void loadPolicy();
+  }, [authenticationReady, loadPolicy, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
   }, [authenticationReady, loadAudit, signedIn, view]);
 
@@ -1409,6 +1532,13 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "ownership" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "policy" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
       setError(undefined);
       setView("inbox");
     }
@@ -1485,6 +1615,7 @@ export default function Home() {
     runs: "Agent Runs",
     repositories: "Repositories",
     ownership: "Ownership",
+    policy: "Policy",
     organization: "Organization",
     analytics: "Analytics",
     audit: "Audit",
@@ -1887,6 +2018,13 @@ export default function Home() {
                 onClick={() => setView("ownership")}
               >Ownership</button>
             ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "policy" ? "page" : undefined}
+                onClick={() => setView("policy")}
+              >Policy</button>
+            ) : null}
             {isOrganizationAdmin ? (
               <button
                 type="button"
@@ -2248,6 +2386,81 @@ export default function Home() {
                 </div>
               ) : null}
             </>
+          ) : view === "policy" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project policy</h1>
+                  <p>Configure limited category/scope rules for risk, interruption, ownership, and protected review. Bridge safety floors cannot be weakened.</p>
+                </div>
+                <div className="member-form-actions">
+                  <button className="secondary" type="button" disabled={policyLoading} onClick={() => void loadPolicy()}>Refresh</button>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={submitting || !policyConfiguration || !policyDraft || JSON.stringify(policyConfiguration) === JSON.stringify(policyDraft)}
+                    onClick={() => void savePolicy()}
+                  >Save policy</button>
+                </div>
+              </div>
+              {policyLoading ? <div className="empty">Loading project policy…</div> : null}
+              {!policyLoading && policyDraft ? (
+                <div className="organization-stack">
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Pilot safety floors</h2><p>These protected categories always block and retain their required human authority. Custom rules may only add stricter requirements.</p></div>
+                      <small>{policyDraft.defaultRules.length} defaults</small>
+                    </div>
+                    <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Category</th><th>Action</th><th>Owners</th><th>Reviewers</th></tr></thead><tbody>
+                      {policyDraft.defaultRules.map((rule) => <tr key={rule.key}>
+                        <td><strong>{rule.category}</strong><small>{rule.key}</small></td>
+                        <td>{rule.action.replaceAll("_", " ")} · {rule.minimumRisk}</td>
+                        <td>{rule.requiredOwnerRoles.join(", ") || "Policy owner"}</td>
+                        <td>{rule.requiredReviewerRoles.join(", ") || "No separate reviewer"}</td>
+                      </tr>)}
+                    </tbody></table></div>
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Project rules</h2><p>Lower priority numbers win. Empty category/scope fields match broadly; equal-priority overlaps are rejected.</p></div>
+                      <small>{policyDraft.rules.length} custom rules</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addPolicyRule}>
+                      <label>Rule key<input name="policyKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Rule name<input name="policyName" placeholder="Block transfer quality changes" required /></label>
+                      <label>Priority<input name="policyPriority" type="number" min={1} max={1000} defaultValue={100} required /></label>
+                      <label>Category<input name="policyCategory" placeholder="quality" /></label>
+                      <label>Repository<input name="policyRepository" placeholder="payments-api" /></label>
+                      <label>Component<input name="policyComponent" placeholder="transfers" /></label>
+                      <label>Branch<input name="policyBranch" placeholder="main" /></label>
+                      <label>Environment<input name="policyEnvironment" placeholder="production" /></label>
+                      <label>Work item<input name="policyWorkItem" placeholder="PAY-142" /></label>
+                      <label>Interruption action<select name="policyAction" defaultValue="block"><option value="assume_and_log">Assume and log</option><option value="ask_async">Ask asynchronously</option><option value="block">Block</option><option value="protected_approval">Protected approval</option></select></label>
+                      <label>Minimum risk<select name="policyRisk" defaultValue="high"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="protected">Protected</option></select></label>
+                      <label>Required owner roles<input name="policyOwnerRoles" placeholder="qa-lead, component-owner" /></label>
+                      <label>Required reviewer roles<input name="policyReviewerRoles" placeholder="architecture-reviewer" /></label>
+                      <div className="member-form-actions"><small>Use comma-separated normalized role names. Reviewer roles are valid only for protected approval; protected rules require protected risk and at least one owner or reviewer role.</small><button className="secondary" type="submit">Add rule</button></div>
+                    </form>
+                    {policyDraft.rules.length === 0 ? <div className="empty">No custom rules are configured; Bridge defaults remain active.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Effect</th><th>Authority</th><th /></tr></thead><tbody>
+                        {policyDraft.rules.map((rule) => <tr key={rule.key}>
+                          <td><strong>{rule.name}</strong><small>Priority {rule.priority} · {rule.key}</small></td>
+                          <td>{[rule.category && `category ${rule.category}`, ...Object.entries(rule.scope).map(([field, value]) => `${field} ${value}`)].filter(Boolean).join(" · ") || "Project-wide"}</td>
+                          <td>{rule.action.replaceAll("_", " ")} · minimum {rule.minimumRisk}</td>
+                          <td>{[...rule.requiredOwnerRoles.map((role) => `owner:${role}`), ...rule.requiredReviewerRoles.map((role) => `reviewer:${role}`)].join(", ") || "No added roles"}</td>
+                          <td><button className="secondary" type="button" onClick={() => setPolicyDraft({ ...policyDraft, rules: policyDraft.rules.filter((candidate) => candidate !== rule) })}>Remove</button></td>
+                        </tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+                  <div className="member-form-actions">
+                    <small>Version {policyConfiguration?.version ?? 0}{policyConfiguration?.updatedAt ? ` · last saved ${new Date(policyConfiguration.updatedAt).toLocaleString()}` : " · no custom policy saved yet"}</small>
+                    <button className="primary" type="button" disabled={submitting || !policyConfiguration || JSON.stringify(policyConfiguration) === JSON.stringify(policyDraft)} onClick={() => void savePolicy()}>Save policy</button>
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : view === "organization" ? (
             <>
               <div className="title-row">
@@ -2453,7 +2666,7 @@ export default function Home() {
                       <tbody>{auditPage.items.map((event) => (
                         <tr key={event.id}>
                           <td>{new Date(event.createdAt).toLocaleString()}</td>
-                          <td><strong>{event.action}</strong><small>{event.actorType}</small></td>
+                          <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}</small></td>
                           <td><code>{event.actorId}</code></td>
                           <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
                           <td><code>{event.correlationId}</code></td>
@@ -3078,6 +3291,9 @@ export default function Home() {
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
+                        {selectedQuestion.requiredOwnerRoles.length > 0 ? <div className="owner-routing"><strong>Required owner roles:</strong> {selectedQuestion.requiredOwnerRoles.join(", ")}</div> : null}
+                        <div className="owner-routing"><strong>Policy:</strong> {selectedQuestion.policyRuleKey} · version {selectedQuestion.policyVersion} · {selectedQuestion.policyAction.replaceAll("_", " ")}</div>
+                        {selectedQuestion.requiredReviewerRoles.length > 0 ? <div className="owner-routing"><strong>Required reviewer roles:</strong> {selectedQuestion.requiredReviewerRoles.join(", ")}</div> : null}
                         {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
                           <div className="inbox-reason">
                             <strong>Inbox routing:</strong> {selectedQuestion.inboxReasons.map((reason) => reason.replaceAll("_", " ")).join(" · ")}
@@ -3223,9 +3439,9 @@ export default function Home() {
 
                       {selectedQuestion.risk === "protected" ? (
                         <details className="detail-disclosure">
-                          <summary>Security review <span className="section-count">{selectedQuestion.reviews.length}</span></summary>
+                          <summary>Protected policy review <span className="section-count">{selectedQuestion.reviews.length}</span></summary>
                           {selectedQuestion.reviews.length === 0 ? (
-                            <p className="muted-copy">No security review has been recorded. A separate security reviewer must approve or reject this protected question before the owner can accept it.</p>
+                            <p className="muted-copy">{selectedQuestion.requiredReviewerRoles.length > 0 ? `No policy review has been recorded. Required human roles: ${selectedQuestion.requiredReviewerRoles.join(", ")}.` : "This protected policy is satisfied by its required owner role and has no separate reviewer role."}</p>
                           ) : (
                             <div className="response-list">
                               {selectedQuestion.reviews.map((review) => (
@@ -3240,7 +3456,7 @@ export default function Home() {
                               ))}
                             </div>
                           )}
-                          {selectedQuestion.status !== "accepted" && activeRoles.includes("security-reviewer") && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId) ? (
+                          {selectedQuestion.status !== "accepted" && selectedQuestion.requiredReviewerRoles.some((role) => activeRoles.includes(role) && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId && review.reviewerRole === role)) ? (
                             <div className="response-form">
                               <label htmlFor="review-status">Review outcome</label>
                               <select
@@ -3248,15 +3464,15 @@ export default function Home() {
                                 value={reviewStatus}
                                 onChange={(event) => setReviewStatus(event.target.value as "approved" | "rejected")}
                               >
-                                <option value="approved">Approve security review</option>
-                                <option value="rejected">Reject security review</option>
+                                <option value="approved">Approve policy review</option>
+                                <option value="rejected">Reject policy review</option>
                               </select>
-                              <label htmlFor="review-rationale">Security review rationale</label>
+                              <label htmlFor="review-rationale">Policy review rationale</label>
                               <textarea
                                 id="review-rationale"
                                 value={reviewRationale}
                                 onChange={(event) => setReviewRationale(event.target.value)}
-                                placeholder="Explain the security evidence or gap."
+                                placeholder="Explain the evidence or gap for the required role."
                               />
                               <button
                                 className="secondary"

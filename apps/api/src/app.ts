@@ -28,6 +28,7 @@ import {
   recordAdapterDiagnosticInputSchema,
   recordAssumptionInputSchema,
   replaceProjectOwnershipInputSchema,
+  replaceProjectPolicyInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
   resolveAssumptionInputSchema,
@@ -473,6 +474,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = replaceProjectOwnershipInputSchema.parse(request.body);
       return options.service.replaceProjectOwnershipConfiguration(
+        principal,
+        request.params.projectId,
+        input,
+      );
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/admin/projects/:projectId/policy",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.getProjectPolicyConfiguration(principal, request.params.projectId);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/policy",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = replaceProjectPolicyInputSchema.parse(request.body);
+      return options.service.replaceProjectPolicyConfiguration(
         principal,
         request.params.projectId,
         input,

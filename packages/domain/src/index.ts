@@ -15,6 +15,7 @@ import type {
   NotificationDeliveryPreference,
   PrincipalType,
   NotificationType,
+  PolicyAction,
   OutboxDeliveryStatus,
   OutboxEventStatus,
   OutboxEventType,
@@ -212,6 +213,27 @@ export interface ProjectOwnershipConfiguration {
   readonly updatedAt?: string;
 }
 
+export interface ProjectPolicyRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly scope: Scope;
+  readonly action: PolicyAction;
+  readonly minimumRisk: Risk;
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
+}
+
+export interface ProjectPolicyConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly rules: readonly ProjectPolicyRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
+}
+
 export interface AgentRun {
   readonly id: string;
   readonly organizationId: string;
@@ -402,10 +424,15 @@ export interface Question {
   readonly context: string;
   readonly whyItMatters: string;
   readonly risk: Risk;
+  readonly policyAction: PolicyAction;
+  readonly policyVersion: number;
+  readonly policyRuleKey: string;
   readonly reversible: boolean;
   readonly blocking: boolean;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
   readonly options: readonly QuestionOption[];
   readonly recommendationKey?: string;
   readonly fallback?: string | null;
@@ -526,8 +553,9 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "ownership_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
+  readonly subjectType: "project" | "repository" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
+  readonly policyVersion?: number;
   readonly createdAt: string;
 }
 
@@ -601,16 +629,31 @@ export function assertPrincipalScope(
 }
 
 function hasQuestionOwnerMatch(principal: Principal, question: Question): boolean {
-  return question.ownerIds.includes(principal.id) ||
+  const assigned = question.ownerIds.includes(principal.id) ||
     question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId)) ||
     principalHasRole(principal, "project-admin", question.projectId);
+  return assigned && (question.requiredOwnerRoles ?? []).every((role) =>
+    principalHasRole(principal, role, question.projectId));
+}
+
+function requiredQuestionReviewerRoles(question: Question): readonly string[] {
+  return (question.requiredReviewerRoles ?? []).length > 0
+    ? question.requiredReviewerRoles.map(normalizeRoleName)
+    : question.risk === "protected" && (!question.policyRuleKey || question.policyRuleKey === "bridge-legacy-protected")
+      ? ["security-reviewer"]
+      : [];
+}
+
+function hasRequiredQuestionReviews(principal: Principal, question: Question): boolean {
+  return requiredQuestionReviewerRoles(question).every((requiredRole) =>
+    principalHasRole(principal, requiredRole, question.projectId) ||
+    question.reviews.some((review) =>
+      review.status === "approved" && normalizeRoleName(review.reviewerRole) === requiredRole));
 }
 
 export function canAcceptQuestion(principal: Principal, question: Question): boolean {
   if (principal.type !== "human" || !hasQuestionOwnerMatch(principal, question)) return false;
-  return question.risk !== "protected" ||
-    principalHasRole(principal, "security-reviewer", question.projectId) ||
-    question.reviews.some((review) => review.status === "approved" && normalizeRoleName(review.reviewerRole) === "security-reviewer");
+  return question.risk !== "protected" || hasRequiredQuestionReviews(principal, question);
 }
 
 export function questionInboxReasons(
@@ -622,7 +665,8 @@ export function questionInboxReasons(
   if (question.ownerIds.includes(principal.id)) reasons.push("direct_owner");
   if (question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId))) reasons.push("role_owner");
   if (principalHasRole(principal, "project-admin", question.projectId)) reasons.push("project_admin");
-  if (question.risk === "protected" && principalHasRole(principal, "security-reviewer", question.projectId)) {
+  if (question.risk === "protected" && requiredQuestionReviewerRoles(question).some((role) =>
+    principalHasRole(principal, role, question.projectId))) {
     reasons.push("protected_review");
   }
   return reasons;
@@ -635,14 +679,11 @@ export function assertCanAccept(principal: Principal, question: Question): void 
   }
   if (
     question.risk === "protected" &&
-    !principalHasRole(principal, "security-reviewer", question.projectId) &&
-    !question.reviews.some(
-      (review) => review.status === "approved" && normalizeRoleName(review.reviewerRole) === "security-reviewer",
-    )
+    !hasRequiredQuestionReviews(principal, question)
   ) {
     throw new BridgeError(
       "POLICY_BLOCKED",
-      "Protected decisions require a human security reviewer in this vertical slice.",
+      "Protected decisions require every policy-specified human review role.",
       403,
     );
   }
