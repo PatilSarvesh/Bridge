@@ -824,6 +824,7 @@ describe("Bridge API vertical slice", () => {
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
 
+    const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1_000).toISOString();
     const created = await app.inject({
       method: "POST",
       url: `/v1/projects/${demoProject.id}/questions`,
@@ -840,6 +841,7 @@ describe("Bridge API vertical slice", () => {
         risk: "high",
         reversible: false,
         blocking: true,
+        dueAt,
         options: [
           { key: "critical-only", label: "Block on critical failures", tradeoffs: "Keeps release flow moving while protecting critical paths." },
           { key: "any-failure", label: "Block on any failure", tradeoffs: "Maximizes caution but may delay fixes unrelated to the release." },
@@ -859,7 +861,14 @@ describe("Bridge API vertical slice", () => {
     expect(qaInbox.statusCode).toBe(200);
     expect(qaInbox.json<{ items: Array<{ id: string; canAccept: boolean; inboxReasons: string[] }> }>().items)
       .toEqual([
-        expect.objectContaining({ id: roleQuestionId, canAccept: true, inboxReasons: ["role_owner"] }),
+        expect.objectContaining({
+          id: roleQuestionId,
+          canAccept: true,
+          canReassign: false,
+          dueAt,
+          dueStatus: "due_soon",
+          inboxReasons: ["role_owner"],
+        }),
       ]);
 
     const filteredInbox = await app.inject({
@@ -871,12 +880,27 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ id: roleQuestionId }),
     ]);
 
+    const dueInbox = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?due=next_7_days`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(dueInbox.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: roleQuestionId }),
+    ]);
+
     const invalidFilter = await app.inject({
       method: "GET",
       url: `/v1/projects/${demoProject.id}/inbox?risk=urgent`,
       headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
     });
     expect(invalidFilter.statusCode).toBe(400);
+    const invalidDueFilter = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?due=eventually`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalidDueFilter.statusCode).toBe(400);
 
     const contributorInbox = await app.inject({
       method: "GET",
@@ -890,9 +914,16 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/projects/${demoProject.id}/questions`,
       headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
     });
-    expect(sharedQuestions.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toEqual(
+    const sharedItems = sharedQuestions.json<{
+      items: Array<{ id: string; canAccept: boolean; canReassign: boolean }>;
+    }>().items;
+    expect(sharedItems.map((item) => item.id)).toEqual(
       expect.arrayContaining([runtime.sampleQuestionId, roleQuestionId]),
     );
+    expect(sharedItems.find((item) => item.id === roleQuestionId)).toMatchObject({
+      canAccept: false,
+      canReassign: false,
+    });
   });
 
   it("registers and lists a fresh project for the local prototype", async () => {

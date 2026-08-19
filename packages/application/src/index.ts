@@ -51,8 +51,7 @@ import {
   assertCanAccept,
   assertHuman,
   assertProjectAccess,
-  canAcceptQuestion,
-  questionInboxReasons,
+  questionInboxItem,
   BridgeError,
   normalizeRoleName,
   principalHasRole,
@@ -3494,6 +3493,11 @@ export class BridgeService {
     }
 
     const timestamp = this.now().toISOString();
+    const parsedDueAt = input.dueAt === undefined ? undefined : Date.parse(input.dueAt);
+    if (parsedDueAt !== undefined && !Number.isFinite(parsedDueAt)) {
+      throw new BridgeError("VALIDATION_FAILED", "Question dueAt must be a valid timestamp.", 400);
+    }
+    const dueAt = parsedDueAt === undefined ? undefined : new Date(parsedDueAt).toISOString();
     const routing = await this.resolveQuestionRouting(repository, project, input, policy);
     const sourceRun = input.runId
       ? await this.requireLinkableRun(principal, input.runId, repository)
@@ -3506,6 +3510,7 @@ export class BridgeService {
       input,
       policy,
       routing,
+      dueAt,
       effectiveBlocking,
     );
     if (reusable) {
@@ -3559,6 +3564,7 @@ export class BridgeService {
       policyRuleKey: policy.policyRuleKey,
       reversible: input.reversible,
       blocking: effectiveBlocking,
+      ...(dueAt ? { dueAt } : {}),
       ownerIds: routing.ownerIds,
       ownerRoles: routing.ownerRoles,
       requiredOwnerRoles: policy.requiredOwnerRoles,
@@ -3698,6 +3704,7 @@ export class BridgeService {
     input: CreateQuestionInput,
     policy: PolicyEvaluation,
     routing: RoutingResolution,
+    dueAt: string | undefined,
     effectiveBlocking: boolean,
   ): Promise<Question | undefined> {
     const questions = await repository.listQuestions(projectId);
@@ -3712,6 +3719,7 @@ export class BridgeService {
       question.policyAction === policy.action &&
       question.reversible === input.reversible &&
       question.blocking === effectiveBlocking &&
+      question.dueAt === dueAt &&
       JSON.stringify([...question.ownerIds].sort()) === JSON.stringify([...routing.ownerIds].sort()) &&
       JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
         JSON.stringify([...routing.ownerRoles].sort()) &&
@@ -3786,10 +3794,12 @@ export class BridgeService {
     return intersection / union;
   }
 
-  async listQuestions(principal: Principal, projectId: string): Promise<readonly Question[]> {
+  async listQuestions(principal: Principal, projectId: string): Promise<readonly QuestionInboxItem[]> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
-      return repository.listQuestions(projectId);
+      const now = this.now();
+      return (await repository.listQuestions(projectId)).map((question) =>
+        questionInboxItem(principal, question, now));
     });
   }
 
@@ -3800,7 +3810,9 @@ export class BridgeService {
   ): Promise<readonly QuestionInboxItem[]> {
     return this.tenantTransaction(principal, async (repository) => {
     await this.requireProject(principal, projectId, repository);
-    const questions = await repository.listQuestions(projectId);
+    const now = this.now();
+    const questions = (await repository.listQuestions(projectId)).map((question) =>
+      questionInboxItem(principal, question, now));
     const normalizedCategory = filters.category?.normalize("NFKC").toLocaleLowerCase("en");
     const normalizedRole = filters.role ? normalizeRoleName(filters.role) : undefined;
     return questions
@@ -3809,19 +3821,31 @@ export class BridgeService {
         (!filters.risk || question.risk === filters.risk) &&
         (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
         (!normalizedRole || [...question.ownerRoles, ...(question.reviewerRoles ?? [])]
-          .some((role) => normalizeRoleName(role) === normalizedRole)),
+          .some((role) => normalizeRoleName(role) === normalizedRole)) &&
+        (!filters.due ||
+          (filters.due === "overdue" && question.dueStatus === "overdue") ||
+          (filters.due === "next_7_days" && question.dueStatus === "due_soon") ||
+          (filters.due === "scheduled" && question.dueStatus !== "none") ||
+          (filters.due === "none" && question.dueStatus === "none")),
       )
-      .map((question) => ({
-        ...question,
-        inboxReasons: questionInboxReasons(principal, question),
-        canAccept: canAcceptQuestion(principal, question),
-      }))
       .filter((question) => question.inboxReasons.length > 0)
       .sort((left, right) => {
         const riskRank = { protected: 4, high: 3, medium: 2, low: 1 } as const;
+        const protectedDifference = Number(right.risk === "protected") - Number(left.risk === "protected");
+        if (protectedDifference !== 0) return protectedDifference;
+        const overdueDifference = Number(right.dueStatus === "overdue") - Number(left.dueStatus === "overdue");
+        if (overdueDifference !== 0) return overdueDifference;
+        if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
+        const dueSoonDifference = Number(right.dueStatus === "due_soon") - Number(left.dueStatus === "due_soon");
+        if (dueSoonDifference !== 0) return dueSoonDifference;
         const riskDifference = riskRank[right.risk] - riskRank[left.risk];
         if (riskDifference !== 0) return riskDifference;
-        if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
+        if (left.dueAt && right.dueAt) {
+          const dueAtDifference = Date.parse(left.dueAt) - Date.parse(right.dueAt);
+          if (dueAtDifference !== 0) return dueAtDifference;
+        } else if (left.dueAt || right.dueAt) {
+          return left.dueAt ? -1 : 1;
+        }
         const discussionDifference = Number(right.status === "in_discussion") - Number(left.status === "in_discussion");
         if (discussionDifference !== 0) return discussionDifference;
         return Date.parse(right.createdAt) - Date.parse(left.createdAt);
@@ -3829,9 +3853,9 @@ export class BridgeService {
     });
   }
 
-  async getQuestion(principal: Principal, questionId: string): Promise<Question> {
-    return this.tenantTransaction(principal, (repository) =>
-      this.requireQuestion(principal, questionId, repository));
+  async getQuestion(principal: Principal, questionId: string): Promise<QuestionInboxItem> {
+    return this.tenantTransaction(principal, async (repository) =>
+      questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
   }
 
   async reassignQuestion(

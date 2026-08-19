@@ -183,6 +183,7 @@ interface Question {
   readonly policyVersion: number;
   readonly policyRuleKey: string;
   readonly blocking: boolean;
+  readonly dueAt?: string;
   readonly options: readonly Option[];
   readonly recommendationKey?: string;
   readonly ownerIds: readonly string[];
@@ -201,11 +202,14 @@ interface Question {
   readonly acceptedResponseId?: string;
   readonly scope: Readonly<Record<string, string>>;
   readonly version: number;
-  readonly inboxReasons?: readonly string[];
-  readonly canAccept?: boolean;
+  readonly inboxReasons: readonly string[];
+  readonly canAccept: boolean;
+  readonly reviewRoles: readonly string[];
+  readonly canReassign: boolean;
+  readonly dueStatus: "overdue" | "due_soon" | "scheduled" | "none";
 }
 
-type InboxFilterKey = "status" | "risk" | "category" | "role";
+type InboxFilterKey = "status" | "risk" | "category" | "role" | "due";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
 type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
 type DecisionFilters = Partial<Record<DecisionFilterKey, string>> & { readonly includeHistory?: boolean };
@@ -619,6 +623,7 @@ export default function Home() {
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
+  const [inboxFiltersReady, setInboxFiltersReady] = useState(false);
   const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
   const [decisionSearchDraft, setDecisionSearchDraft] = useState("");
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
@@ -763,7 +768,8 @@ export default function Home() {
 
   const inboxFilterOptions = useMemo(() => ({
     categories: [...new Set(questions.map((question) => question.category))].sort((left, right) => left.localeCompare(right)),
-    roles: [...new Set(questions.flatMap((question) => question.ownerRoles))].sort((left, right) => left.localeCompare(right)),
+    roles: [...new Set(questions.flatMap((question) => [...question.ownerRoles, ...question.reviewerRoles]))]
+      .sort((left, right) => left.localeCompare(right)),
   }), [questions]);
   const hasInboxFilters = Object.values(inboxFilters).some(Boolean);
   const hasDecisionFilters = Boolean(decisionFilters.includeHistory) ||
@@ -1065,6 +1071,7 @@ export default function Home() {
   };
 
   const loadQuestions = useCallback(async () => {
+    if (!inboxFiltersReady) return;
     if (!selectedProjectId) {
       setQuestions([]);
       setInboxQuestions([]);
@@ -1101,7 +1108,7 @@ export default function Home() {
     } finally {
       setQuestionsLoading(false);
     }
-  }, [activePrincipalId, inboxFilters, selectedProjectId]);
+  }, [activePrincipalId, inboxFilters, inboxFiltersReady, selectedProjectId]);
 
   const loadArtifacts = useCallback(async () => {
     if (!selectedProjectId) {
@@ -1479,7 +1486,34 @@ export default function Home() {
     }
     if (assumptionId) setSelectedAssumptionId(assumptionId);
     if (runId) setSelectedRunId(runId);
+    const restoredInboxFilters = Object.fromEntries([
+      ["status", parameters.get("inboxStatus")],
+      ["risk", parameters.get("inboxRisk")],
+      ["category", parameters.get("inboxCategory")],
+      ["role", parameters.get("inboxRole")],
+      ["due", parameters.get("inboxDue")],
+    ].filter((entry): entry is [InboxFilterKey, string] => Boolean(entry[1])));
+    setInboxFilters(restoredInboxFilters);
+    setInboxFiltersReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!inboxFiltersReady) return;
+    const url = new URL(window.location.href);
+    const parameterNames: Record<InboxFilterKey, string> = {
+      status: "inboxStatus",
+      risk: "inboxRisk",
+      category: "inboxCategory",
+      role: "inboxRole",
+      due: "inboxDue",
+    };
+    for (const [key, parameterName] of Object.entries(parameterNames) as [InboxFilterKey, string][]) {
+      const value = inboxFilters[key];
+      if (value) url.searchParams.set(parameterName, value);
+      else url.searchParams.delete(parameterName);
+    }
+    window.history.replaceState(window.history.state, "", url);
+  }, [inboxFilters, inboxFiltersReady]);
 
   useEffect(() => {
     void loadAuthentication();
@@ -1603,10 +1637,6 @@ export default function Home() {
   const selectedQuestion = useMemo(
     () => visibleQuestions.find((question) => question.id === selectedId) ?? visibleQuestions[0],
     [selectedId, visibleQuestions],
-  );
-  const selectedQuestionInboxItem = useMemo(
-    () => (selectedQuestion ? inboxQuestions.find((question) => question.id === selectedQuestion.id) : undefined),
-    [inboxQuestions, selectedQuestion],
   );
   const selectedArtifact = useMemo(
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId),
@@ -3299,6 +3329,18 @@ export default function Home() {
                     <option value="">All roles</option>
                     {inboxFilterOptions.roles.map((role) => <option key={role} value={role}>{role}</option>)}
                   </select>
+                  <label htmlFor="inbox-due">Due</label>
+                  <select
+                    id="inbox-due"
+                    value={inboxFilters.due ?? ""}
+                    onChange={(event) => updateInboxFilter("due", event.target.value)}
+                  >
+                    <option value="">Any due date</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="next_7_days">Next 7 days</option>
+                    <option value="scheduled">All scheduled</option>
+                    <option value="none">No due date</option>
+                  </select>
                   {hasInboxFilters ? (
                     <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
                   ) : null}
@@ -3328,7 +3370,7 @@ export default function Home() {
                         onClick={() => setSelectedId(question.id)}
                       >
                         <span className={`risk risk-${question.risk}`} aria-hidden="true" />
-                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}</small></span>
+                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}</small></span>
                         <span className={`status status-${question.status}`}>{question.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3345,6 +3387,7 @@ export default function Home() {
                         <h3>Context and impact</h3>
                         <p>{selectedQuestion.context}</p>
                         <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
+                        {selectedQuestion.dueAt ? <div className="owner-routing"><strong>Due:</strong> {new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</div> : null}
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
@@ -3374,7 +3417,7 @@ export default function Home() {
                             </article>
                           ))}
                         </div>
-                        {(isOrganizationAdmin || isProjectAdmin) && ["open", "in_discussion"].includes(selectedQuestion.status) ? (
+                        {selectedQuestion.canReassign ? (
                           <form className="member-form-grid" onSubmit={(event) => void reassignQuestion(event)}>
                             <label>Owner member IDs<input name="assignmentOwnerIds" defaultValue={selectedQuestion.ownerIds.join(", ")} placeholder="usr_architect" /></label>
                             <label>Owner roles<input name="assignmentOwnerRoles" defaultValue={selectedQuestion.ownerRoles.join(", ")} placeholder="qa-lead" /></label>
@@ -3540,7 +3583,7 @@ export default function Home() {
                               ))}
                             </div>
                           )}
-                          {selectedQuestion.status !== "accepted" && selectedQuestion.requiredReviewerRoles.some((role) => activeRoles.includes(role) && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId && review.reviewerRole === role)) ? (
+                          {selectedQuestion.reviewRoles.length > 0 ? (
                             <div className="response-form">
                               <label htmlFor="review-status">Review outcome</label>
                               <select
@@ -3573,7 +3616,7 @@ export default function Home() {
 
                       {selectedQuestion.status === "accepted" ? (
                         <div className="accepted"><strong>Decision accepted.</strong> Future agent context requests can retrieve {selectedQuestion.decisionId}.</div>
-                      ) : !selectedQuestionInboxItem?.canAccept ? (
+                      ) : !selectedQuestion.canAccept ? (
                         <div className="owner-routing"><strong>Shared review only.</strong> Add a response here; the configured owner or required security reviewer must accept the decision from My Inbox.</div>
                       ) : (
                         <section>

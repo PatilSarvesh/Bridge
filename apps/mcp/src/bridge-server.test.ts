@@ -302,6 +302,7 @@ describe("Bridge MCP tools", () => {
 
   it("lists the current human reviewer's routed inbox with filters", async () => {
     const runtime = await createDemoRuntime();
+    const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1_000).toISOString();
     const question = await runtime.service.createQuestion(demoPrincipals.agent, demoProject.id, {
       idempotencyKey: "mcp-inbox-question-001",
       title: "Which retention window should the patient export use?",
@@ -314,6 +315,7 @@ describe("Bridge MCP tools", () => {
       risk: "protected",
       reversible: false,
       blocking: true,
+      dueAt,
       options: [
         { key: "seven-days", label: "Seven days", tradeoffs: "Short retention with more re-exports." },
         { key: "thirty-days", label: "Thirty days", tradeoffs: "More recovery time with greater exposure." },
@@ -337,6 +339,7 @@ describe("Bridge MCP tools", () => {
         projectId: demoProject.id,
         risk: "protected",
         role: "qa-lead",
+        due: "next_7_days",
       },
     });
 
@@ -349,6 +352,8 @@ describe("Bridge MCP tools", () => {
           requiredReviewerRoles: ["security-reviewer"],
           inboxReasons: ["role_owner"],
           canAccept: false,
+          dueAt,
+          dueStatus: "due_soon",
           reviews: [],
         }),
       ],

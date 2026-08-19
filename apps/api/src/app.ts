@@ -684,6 +684,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         risk: request.query.risk,
         category: request.query.category,
         role: request.query.role,
+        due: request.query.due,
       });
       return {
         items: await options.service.listQuestionInbox(principal, request.params.projectId, filters),

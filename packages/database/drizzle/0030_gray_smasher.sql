@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_questions" ADD COLUMN "due_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "bridge_questions_project_due_idx" ON "bridge_questions" USING btree ("project_id","due_at");

@@ -2434,6 +2434,80 @@ describe("Bridge decision workflow", () => {
       protectedQuestion.id,
     ]);
     expect(await service.listQuestionInbox(contributor, project.id)).toEqual([]);
+
+    expect((await service.listQuestions(qaLead, project.id)).find((question) =>
+      question.id === roleQuestion.id)).toMatchObject({
+      canAccept: true,
+      canReassign: false,
+      reviewRoles: [],
+    });
+    expect(await service.getQuestion(owner, roleQuestion.id)).toMatchObject({
+      canAccept: true,
+      canReassign: true,
+    });
+    expect(await service.getQuestion(securityReviewer, protectedQuestion.id)).toMatchObject({
+      canAccept: false,
+      canReassign: false,
+      reviewRoles: ["security-reviewer"],
+    });
+  });
+
+  it("filters and prioritizes a due-aware inbox with canonical due timestamps", async () => {
+    const { service } = await runtime();
+    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "due-protected-question",
+      title: "Which privacy deletion control should ship?",
+      category: "privacy",
+      risk: "high",
+      blocking: true,
+      dueAt: "2026-02-01T00:00:00.000Z",
+    }));
+    const overdueQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "due-overdue-question",
+      title: "Which observability cleanup is already overdue?",
+      category: "observability",
+      risk: "low",
+      blocking: false,
+      dueAt: "2025-12-31T23:59:59.000Z",
+    }));
+    const blockingQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "due-blocking-question",
+      title: "Which rollout failure must block deployment?",
+      category: "operations",
+      risk: "high",
+      blocking: true,
+    }));
+    const dueSoonQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "due-soon-question",
+      title: "Which architecture follow-up is due this week?",
+      category: "architecture",
+      risk: "medium",
+      blocking: false,
+      dueAt: "2026-01-02T05:30:00+05:30",
+    }));
+
+    expect(dueSoonQuestion.dueAt).toBe("2026-01-02T00:00:00.000Z");
+    const inbox = await service.listQuestionInbox(owner, project.id);
+    expect(inbox.map((question) => question.id)).toEqual([
+      protectedQuestion.id,
+      overdueQuestion.id,
+      blockingQuestion.id,
+      dueSoonQuestion.id,
+    ]);
+    expect(inbox.map((question) => question.dueStatus)).toEqual([
+      "scheduled",
+      "overdue",
+      "none",
+      "due_soon",
+    ]);
+    expect((await service.listQuestionInbox(owner, project.id, { due: "overdue" })).map((question) =>
+      question.id)).toEqual([overdueQuestion.id]);
+    expect((await service.listQuestionInbox(owner, project.id, { due: "next_7_days" })).map((question) =>
+      question.id)).toEqual([dueSoonQuestion.id]);
+    expect((await service.listQuestionInbox(owner, project.id, { due: "scheduled" })).map((question) =>
+      question.id)).toEqual([protectedQuestion.id, overdueQuestion.id, dueSoonQuestion.id]);
+    expect((await service.listQuestionInbox(owner, project.id, { due: "none" })).map((question) =>
+      question.id)).toEqual([blockingQuestion.id]);
   });
 
   it("records a separate protected-question review before owner acceptance", async () => {

@@ -471,6 +471,7 @@ export interface Question {
   readonly policyRuleKey: string;
   readonly reversible: boolean;
   readonly blocking: boolean;
+  readonly dueAt?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
   readonly requiredOwnerRoles: readonly string[];
@@ -503,9 +504,14 @@ export type QuestionInboxReason =
   | "project_admin"
   | "protected_review";
 
+export type QuestionDueStatus = "overdue" | "due_soon" | "scheduled" | "none";
+
 export interface QuestionInboxItem extends Question {
   readonly inboxReasons: readonly QuestionInboxReason[];
   readonly canAccept: boolean;
+  readonly reviewRoles: readonly string[];
+  readonly canReassign: boolean;
+  readonly dueStatus: QuestionDueStatus;
 }
 
 export interface Decision {
@@ -704,8 +710,49 @@ function hasRequiredQuestionReviews(principal: Principal, question: Question): b
 }
 
 export function canAcceptQuestion(principal: Principal, question: Question): boolean {
-  if (principal.type !== "human" || !hasQuestionOwnerMatch(principal, question)) return false;
+  if (
+    principal.type !== "human" ||
+    !["open", "in_discussion"].includes(question.status) ||
+    !hasQuestionOwnerMatch(principal, question)
+  ) return false;
   return question.risk !== "protected" || hasRequiredQuestionReviews(principal, question);
+}
+
+export function questionReviewRoles(
+  principal: Principal,
+  question: Question,
+): readonly string[] {
+  if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
+  return requiredQuestionReviewerRoles(question).filter((role) =>
+    principalHasRole(principal, role, question.projectId) &&
+    !question.reviews.some((review) =>
+      review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role)));
+}
+
+export function questionDueStatus(question: Question, now: Date): QuestionDueStatus {
+  if (!question.dueAt) return "none";
+  const dueAt = Date.parse(question.dueAt);
+  if (!Number.isFinite(dueAt)) return "none";
+  if (dueAt < now.getTime()) return "overdue";
+  if (dueAt <= now.getTime() + 7 * 24 * 60 * 60 * 1_000) return "due_soon";
+  return "scheduled";
+}
+
+export function questionInboxItem(
+  principal: Principal,
+  question: Question,
+  now: Date,
+): QuestionInboxItem {
+  return {
+    ...question,
+    inboxReasons: questionInboxReasons(principal, question),
+    canAccept: canAcceptQuestion(principal, question),
+    reviewRoles: questionReviewRoles(principal, question),
+    canReassign: principal.type === "human" &&
+      ["open", "in_discussion"].includes(question.status) &&
+      principalHasRole(principal, "project-admin", question.projectId),
+    dueStatus: questionDueStatus(question, now),
+  };
 }
 
 export function questionInboxReasons(

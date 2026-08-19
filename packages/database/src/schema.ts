@@ -445,6 +445,7 @@ export const questions = pgTable(
     policyRuleKey: text("policy_rule_key").notNull(),
     reversible: boolean("reversible").notNull(),
     blocking: boolean("blocking").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true, mode: "string" }),
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
     requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
@@ -470,6 +471,7 @@ export const questions = pgTable(
   (table) => [
     index("bridge_questions_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_questions_project_status_idx").on(table.projectId, table.status),
+    index("bridge_questions_project_due_idx").on(table.projectId, table.dueAt),
     tenantPolicy("bridge_questions_tenant", table.organizationId),
   ],
 ).enableRLS();

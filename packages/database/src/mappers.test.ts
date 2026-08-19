@@ -114,6 +114,7 @@ const question: Question = {
   policyRuleKey: "bridge-question-blocking",
   reversible: false,
   blocking: true,
+  dueAt: "2026-08-09T10:00:00.000Z",
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
   requiredOwnerRoles: [],
@@ -739,6 +740,12 @@ describe("PostgreSQL domain mappings", () => {
     expect(routingMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
       routingMigration.indexOf('ALTER COLUMN "routing" SET NOT NULL'),
     );
+    const dueDateMigration = readFileSync(
+      new URL("../drizzle/0030_gray_smasher.sql", import.meta.url),
+      "utf8",
+    );
+    expect(dueDateMigration).toContain('ADD COLUMN "due_at" timestamp with time zone');
+    expect(dueDateMigration).toContain('CREATE INDEX "bridge_questions_project_due_idx"');
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

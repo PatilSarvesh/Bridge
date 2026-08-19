@@ -377,7 +377,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — personalized server-side inbox routing, default prioritization, status/risk/category/role filters, shared Questions view, fixed-principal reviewer switching, and the human notification feed are implemented; due-date/saved filters, separate multi-reviewer actions, and production authorization states remain
+- **Status:** Implemented for the controlled MVP slice — direct/role owner and reviewer routes, discussion/protected/admin visibility, server-derived action authority, optional due timestamps, overdue/due-soon prioritization, status/risk/category/owner-or-reviewer-role/due filters, URL-persisted web filter state, shared Questions, reviewer switching, and the human notification feed are implemented; configurable multi-role quorum and review reassignment remain BRG-043 work rather than inbox policy
 - **Dependencies:** BRG-030, BRG-031
 - **PRD references:** QST-06, NTF-01
 

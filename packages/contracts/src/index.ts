@@ -20,6 +20,7 @@ export const questionStatusSchema = z.enum([
   "expired",
 ]);
 export const questionReviewStatusSchema = z.enum(["approved", "rejected"]);
+export const questionDueFilterSchema = z.enum(["overdue", "next_7_days", "scheduled", "none"]);
 export const notificationTypeSchema = z.enum([
   "question_assigned",
   "question_response",
@@ -378,6 +379,7 @@ export const createQuestionInputSchema = z
     risk: riskSchema,
     reversible: z.boolean(),
     blocking: z.boolean(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
     options: z.array(questionOptionInputSchema).max(10).default([]),
     recommendationKey: z.string().trim().min(1).max(80).optional(),
     fallback: z.string().trim().min(1).max(2_000).nullable().optional(),
@@ -417,6 +419,7 @@ export const questionInboxQuerySchema = z.object({
   risk: riskSchema.optional(),
   category: z.string().trim().min(2).max(100).optional(),
   role: ownerRoleSchema.optional(),
+  due: questionDueFilterSchema.optional(),
 });
 
 export const questionSubmissionDispositionSchema = z.enum([
