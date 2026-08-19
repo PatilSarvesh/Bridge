@@ -23,9 +23,13 @@ import {
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
   questionReviewInputSchema,
+  reassignQuestionInputSchema,
   questionInboxQuerySchema,
+  linkRepositoryInputSchema,
   recordAdapterDiagnosticInputSchema,
   recordAssumptionInputSchema,
+  replaceProjectOwnershipInputSchema,
+  replaceProjectPolicyInputSchema,
   registerProjectInputSchema,
   reportAgentRunInputSchema,
   resolveAssumptionInputSchema,
@@ -438,6 +442,68 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/repositories",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = linkRepositoryInputSchema.parse(request.body);
+      const registration = await options.service.linkRepository(principal, request.params.projectId, input);
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/projects/:projectId/repositories",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/admin/projects/:projectId/ownership",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.getProjectOwnershipConfiguration(principal, request.params.projectId);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/ownership",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = replaceProjectOwnershipInputSchema.parse(request.body);
+      return options.service.replaceProjectOwnershipConfiguration(
+        principal,
+        request.params.projectId,
+        input,
+      );
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/v1/admin/projects/:projectId/policy",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      return options.service.getProjectPolicyConfiguration(principal, request.params.projectId);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/policy",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = replaceProjectPolicyInputSchema.parse(request.body);
+      return options.service.replaceProjectPolicyConfiguration(
+        principal,
+        request.params.projectId,
+        input,
+      );
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/adapter-diagnostics",
     async (request) => {
       const principal = await resolvePrincipal(request, options);
@@ -647,6 +713,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const input = questionReviewInputSchema.parse(request.body);
       const review = await options.service.reviewQuestion(principal, request.params.questionId, input);
       return reply.status(201).send(review);
+    },
+  );
+
+  app.post<{ Params: { questionId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/assignments",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = reassignQuestionInputSchema.parse(request.body);
+      return options.service.reassignQuestion(principal, request.params.questionId, input);
     },
   );
 

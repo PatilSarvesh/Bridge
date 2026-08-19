@@ -945,6 +945,300 @@ describe("Bridge API vertical slice", () => {
     });
     expect(projects.json<{ items: Array<{ id: string }> }>().items.map((project) => project.id))
       .toContain(registration.project.id);
+
+    const repositoryPayload = {
+      idempotencyKey: "api-repository-link-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    };
+    const deniedRepository = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: repositoryPayload,
+    });
+    expect(deniedRepository.statusCode).toBe(403);
+
+    const linkedRepository = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: repositoryPayload,
+    });
+    expect(linkedRepository.statusCode).toBe(201);
+    expect(linkedRepository.json()).toMatchObject({
+      disposition: "created",
+      repository: {
+        provider: "github",
+        owner: "bridge-org",
+        name: "bridge",
+      },
+    });
+
+    const repositoryReplay = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: repositoryPayload,
+    });
+    expect(repositoryReplay.statusCode).toBe(200);
+    expect(repositoryReplay.json<{ repository: { id: string } }>().repository.id)
+      .toBe(linkedRepository.json<{ repository: { id: string } }>().repository.id);
+
+    const visibleRepositories = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/repositories`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(visibleRepositories.statusCode).toBe(200);
+    expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items)
+      .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
+  });
+
+  it("exposes versioned project ownership configuration only to administrators", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const url = `/v1/admin/projects/${demoProject.id}/ownership`;
+    const denied = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const initial = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({ projectId: demoProject.id, version: 0 });
+
+    const configured = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 0,
+        roles: [{ name: "QA Lead", description: "Owns quality and release-readiness decisions." }],
+        teams: [{ key: "quality", name: "Quality", memberIds: [demoPrincipals.qaLead.id] }],
+        rules: [{
+          key: "quality-ownership",
+          name: "Quality ownership",
+          priority: 10,
+          category: "quality",
+          owners: { principalIds: [], roles: ["QA Lead"], teamKeys: ["quality"] },
+          reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
+        }],
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toMatchObject({
+      projectId: demoProject.id,
+      version: 1,
+      roles: [{ name: "qa-lead" }],
+      teams: [{ key: "quality", memberIds: [demoPrincipals.qaLead.id] }],
+      rules: [{ key: "quality-ownership" }],
+    });
+
+    const stale = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedVersion: 0, roles: [], teams: [], rules: [] },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+  });
+
+  it("exposes versioned project policy with immutable protected defaults", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const url = `/v1/admin/projects/${demoProject.id}/policy`;
+    expect((await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    })).statusCode).toBe(403);
+
+    const initial = await app.inject({
+      method: "GET",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({ projectId: demoProject.id, version: 0, rules: [] });
+    expect(initial.json<{ defaultRules: { key: string }[] }>().defaultRules.map((rule) => rule.key))
+      .toContain("bridge-authentication");
+
+    const configured = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 0,
+        rules: [{
+          key: "quality-transfer",
+          name: "Block transfer quality questions",
+          priority: 10,
+          category: "quality",
+          scope: { component: "transfers" },
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: ["QA Lead"],
+          requiredReviewerRoles: [],
+        }],
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.json()).toMatchObject({
+      version: 1,
+      rules: [{
+        key: "quality-transfer",
+        requiredOwnerRoles: ["qa-lead"],
+        requiredReviewerRoles: [],
+      }],
+    });
+
+    const weakened = await app.inject({
+      method: "POST",
+      url,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 1,
+        rules: [{
+          key: "weaken-authentication",
+          name: "Weaken authentication",
+          priority: 10,
+          category: "authentication",
+          scope: {},
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: [],
+          requiredReviewerRoles: [],
+        }],
+      },
+    });
+    expect(weakened.statusCode).toBe(403);
+    expect(weakened.json()).toMatchObject({ code: "POLICY_BLOCKED" });
+  });
+
+  it("routes through configured ownership and exposes administrator-only versioned reassignment", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const adminHeaders = { "x-bridge-principal-id": demoPrincipals.architect.id };
+    const configured = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/ownership`,
+      headers: adminHeaders,
+      payload: {
+        expectedVersion: 0,
+        roles: [],
+        teams: [{ key: "quality", name: "Quality", memberIds: [demoPrincipals.qaLead.id] }],
+        rules: [{
+          key: "transfer-quality",
+          name: "Transfer quality",
+          priority: 10,
+          category: "architecture",
+          component: "transfers",
+          owners: { principalIds: [], roles: [], teamKeys: ["quality"] },
+          reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
+        }],
+      },
+    });
+    expect(configured.statusCode).toBe(200);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-routed-question",
+        title: "Who should own transfer architecture readiness?",
+        type: "decision",
+        category: "architecture",
+        context: "The transfer component needs an accountable owner and an independent reviewer.",
+        whyItMatters: "Unclear ownership would delay the production-readiness decision.",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        reversible: true,
+        blocking: false,
+        options: [
+          { key: "ready", label: "Ready", tradeoffs: "Proceed after bounded validation." },
+          { key: "hold", label: "Hold", tradeoffs: "Delay while gaps are corrected." },
+        ],
+        recommendationKey: "hold",
+        scope: { component: "transfers" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string; version: number }>();
+    expect(created.json()).toMatchObject({
+      ownerIds: [demoPrincipals.qaLead.id],
+      reviewerIds: [demoPrincipals.architect.id],
+      routing: {
+        ownerSource: "scoped_ownership",
+        reviewerSource: "scoped_ownership",
+        ownerRuleKey: "transfer-quality",
+        reviewerRuleKey: "transfer-quality",
+        ownershipVersion: 1,
+      },
+      assignmentHistory: [{ kind: "initial", questionVersion: 1 }],
+    });
+
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/assignments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version,
+        ownerIds: [demoPrincipals.architect.id],
+        reviewerIds: [],
+        reason: "A contributor is not authorized to replace accountable ownership.",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const reassigned = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/assignments`,
+      headers: adminHeaders,
+      payload: {
+        expectedVersion: question.version,
+        ownerIds: [demoPrincipals.architect.id],
+        ownerRoles: [],
+        reviewerIds: [demoPrincipals.qaLead.id],
+        reviewerRoles: [],
+        reason: "Architecture now owns the decision and quality provides the independent review.",
+      },
+    });
+    expect(reassigned.statusCode).toBe(200);
+    expect(reassigned.json()).toMatchObject({
+      ownerIds: [demoPrincipals.architect.id],
+      reviewerIds: [demoPrincipals.qaLead.id],
+      routing: { ownerSource: "reassignment", reviewerSource: "reassignment" },
+      version: question.version + 1,
+    });
+    expect(reassigned.json<{ assignmentHistory: unknown[] }>().assignmentHistory).toHaveLength(2);
+
+    const stale = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/assignments`,
+      headers: adminHeaders,
+      payload: {
+        expectedVersion: question.version,
+        ownerIds: [demoPrincipals.architect.id],
+        reviewerIds: [],
+        reason: "This command intentionally carries the stale question version.",
+      },
+    });
+    expect(stale.statusCode).toBe(409);
   });
 
   it("supports the fresh Hospital project question-and-specification acceptance journey", async () => {

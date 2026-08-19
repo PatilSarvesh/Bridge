@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
@@ -9,6 +9,79 @@ interface Project {
   readonly id: string;
   readonly name: string;
   readonly decisionOwnerIds: readonly string[];
+}
+
+interface RepositoryRecord {
+  readonly id: string;
+  readonly provider: string;
+  readonly owner: string;
+  readonly name: string;
+  readonly canonicalUrl: string;
+  readonly createdAt: string;
+}
+
+interface ProjectRoleDefinition {
+  readonly name: string;
+  readonly description: string;
+}
+
+interface ProjectTeam {
+  readonly key: string;
+  readonly name: string;
+  readonly memberIds: readonly string[];
+}
+
+interface OwnershipRuleTarget {
+  readonly principalIds: readonly string[];
+  readonly roles: readonly string[];
+  readonly teamKeys: readonly string[];
+}
+
+interface ProjectOwnershipRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly repository?: string;
+  readonly component?: string;
+  readonly owners: OwnershipRuleTarget;
+  readonly reviewers: OwnershipRuleTarget;
+}
+
+interface ProjectOwnershipConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly roles: readonly ProjectRoleDefinition[];
+  readonly teams: readonly ProjectTeam[];
+  readonly rules: readonly ProjectOwnershipRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
+}
+
+type PolicyAction = "assume_and_log" | "ask_async" | "block" | "protected_approval";
+type Risk = "low" | "medium" | "high" | "protected";
+
+interface ProjectPolicyRule {
+  readonly key: string;
+  readonly name: string;
+  readonly priority: number;
+  readonly category?: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly action: PolicyAction;
+  readonly minimumRisk: Risk;
+  readonly requiredOwnerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
+}
+
+interface ProjectPolicyConfiguration {
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly rules: readonly ProjectPolicyRule[];
+  readonly defaultRules: readonly ProjectPolicyRule[];
+  readonly version: number;
+  readonly updatedById?: string;
+  readonly updatedAt?: string;
 }
 
 interface Principal {
@@ -76,6 +149,29 @@ interface QuestionComment {
   readonly createdAt: string;
 }
 
+interface QuestionRoutingExplanation {
+  readonly ownerSource: string;
+  readonly reviewerSource: string;
+  readonly ownerRuleKey?: string;
+  readonly reviewerRuleKey?: string;
+  readonly ownershipVersion: number;
+  readonly policyVersion: number;
+}
+
+interface QuestionAssignmentHistoryEntry {
+  readonly id: string;
+  readonly kind: "initial" | "reassigned";
+  readonly changedById: string;
+  readonly ownerIds: readonly string[];
+  readonly ownerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
+  readonly route: QuestionRoutingExplanation;
+  readonly reason?: string;
+  readonly createdAt: string;
+  readonly questionVersion: number;
+}
+
 interface Question {
   readonly id: string;
   readonly title: string;
@@ -83,11 +179,20 @@ interface Question {
   readonly context: string;
   readonly whyItMatters: string;
   readonly risk: "low" | "medium" | "high" | "protected";
+  readonly policyAction: PolicyAction;
+  readonly policyVersion: number;
+  readonly policyRuleKey: string;
   readonly blocking: boolean;
   readonly options: readonly Option[];
   readonly recommendationKey?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
+  readonly requiredOwnerRoles: readonly string[];
+  readonly reviewerIds: readonly string[];
+  readonly reviewerRoles: readonly string[];
+  readonly requiredReviewerRoles: readonly string[];
+  readonly routing: QuestionRoutingExplanation;
+  readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly status: string;
   readonly decisionId?: string;
   readonly responses: readonly QuestionResponse[];
@@ -379,6 +484,7 @@ interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly policyVersion?: number;
   readonly createdAt: string;
 }
 
@@ -401,6 +507,9 @@ type View =
   | "decisions"
   | "assumptions"
   | "runs"
+  | "repositories"
+  | "ownership"
+  | "policy"
   | "organization"
   | "analytics"
   | "audit"
@@ -517,6 +626,15 @@ export default function Home() {
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
+  const [repositories, setRepositories] = useState<readonly RepositoryRecord[]>([]);
+  const [ownershipConfiguration, setOwnershipConfiguration] = useState<ProjectOwnershipConfiguration>();
+  const [ownershipDraft, setOwnershipDraft] = useState<ProjectOwnershipConfiguration>();
+  const [policyConfiguration, setPolicyConfiguration] = useState<ProjectPolicyConfiguration>();
+  const [policyDraft, setPolicyDraft] = useState<ProjectPolicyConfiguration>();
+  const [repositoryProvider, setRepositoryProvider] = useState("");
+  const [repositoryOwner, setRepositoryOwner] = useState("");
+  const [repositoryName, setRepositoryName] = useState("");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics>();
   const [support, setSupport] = useState<ProjectSupport>();
   const [auditPage, setAuditPage] = useState<AuditPage>();
@@ -571,6 +689,9 @@ export default function Home() {
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+  const [ownershipLoading, setOwnershipLoading] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
@@ -691,6 +812,257 @@ export default function Home() {
       setProjectsLoading(false);
     }
   }, [activePrincipalId]);
+
+  const loadRepositories = useCallback(async () => {
+    if (!selectedProjectId) {
+      setRepositories([]);
+      setRepositoriesLoading(false);
+      return;
+    }
+    setRepositoriesLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly RepositoryRecord[] }>(
+        `/v1/projects/${selectedProjectId}/repositories`,
+        undefined,
+        activePrincipalId,
+      );
+      setRepositories(response.items);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project repositories.");
+    } finally {
+      setRepositoriesLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const linkRepository = async () => {
+    if (!selectedProjectId || !repositoryProvider.trim() || !repositoryOwner.trim() ||
+      !repositoryName.trim() || !repositoryUrl.trim()) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(
+        `/v1/projects/${selectedProjectId}/repositories`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: `web-repository-${crypto.randomUUID().replaceAll("-", "")}`,
+            provider: repositoryProvider,
+            owner: repositoryOwner,
+            name: repositoryName,
+            canonicalUrl: repositoryUrl,
+          }),
+        },
+        activePrincipalId,
+      );
+      setRepositoryProvider("");
+      setRepositoryOwner("");
+      setRepositoryName("");
+      setRepositoryUrl("");
+      await loadRepositories();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to link project repository.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const loadOwnership = useCallback(async () => {
+    if (!selectedProjectId) {
+      setOwnershipConfiguration(undefined);
+      setOwnershipDraft(undefined);
+      setOwnershipLoading(false);
+      return;
+    }
+    setOwnershipLoading(true);
+    setError(undefined);
+    try {
+      const configuration = await bridgeFetch<ProjectOwnershipConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/ownership`,
+        undefined,
+        activePrincipalId,
+      );
+      setOwnershipConfiguration(configuration);
+      setOwnershipDraft(configuration);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project ownership configuration.");
+    } finally {
+      setOwnershipLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const saveOwnership = async () => {
+    if (!selectedProjectId || !ownershipConfiguration || !ownershipDraft) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<ProjectOwnershipConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/ownership`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: ownershipConfiguration.version,
+            roles: ownershipDraft.roles,
+            teams: ownershipDraft.teams,
+            rules: ownershipDraft.rules,
+          }),
+        },
+        activePrincipalId,
+      );
+      setOwnershipConfiguration(saved);
+      setOwnershipDraft(saved);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save project ownership configuration.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addOwnershipRole = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("roleName") ?? "").trim();
+    const description = String(form.get("roleDescription") ?? "").trim();
+    if (!name || !description) return;
+    setOwnershipDraft({ ...ownershipDraft, roles: [...ownershipDraft.roles, { name, description }] });
+    event.currentTarget.reset();
+  };
+
+  const addOwnershipTeam = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("teamKey") ?? ""));
+    const name = String(form.get("teamName") ?? "").trim();
+    const memberIds = roleList(String(form.get("teamMembers") ?? ""));
+    if (!key || !name || memberIds.length === 0) return;
+    setOwnershipDraft({ ...ownershipDraft, teams: [...ownershipDraft.teams, { key, name, memberIds }] });
+    event.currentTarget.reset();
+  };
+
+  const addOwnershipRule = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownershipDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("ruleKey") ?? ""));
+    const name = String(form.get("ruleName") ?? "").trim();
+    const priority = Number(form.get("rulePriority"));
+    const category = String(form.get("ruleCategory") ?? "").trim();
+    const repository = String(form.get("ruleRepository") ?? "").trim();
+    const component = String(form.get("ruleComponent") ?? "").trim();
+    const owners: OwnershipRuleTarget = {
+      principalIds: roleList(String(form.get("ownerPrincipalIds") ?? "")),
+      roles: roleList(String(form.get("ownerRoles") ?? "")),
+      teamKeys: roleList(String(form.get("ownerTeamKeys") ?? "")).map(normalizedRole),
+    };
+    const reviewers: OwnershipRuleTarget = {
+      principalIds: roleList(String(form.get("reviewerPrincipalIds") ?? "")),
+      roles: roleList(String(form.get("reviewerRoles") ?? "")),
+      teamKeys: roleList(String(form.get("reviewerTeamKeys") ?? "")).map(normalizedRole),
+    };
+    const targetCount = [...owners.principalIds, ...owners.roles, ...owners.teamKeys,
+      ...reviewers.principalIds, ...reviewers.roles, ...reviewers.teamKeys].length;
+    if (!key || !name || !Number.isInteger(priority) || targetCount === 0) return;
+    setOwnershipDraft({
+      ...ownershipDraft,
+      rules: [...ownershipDraft.rules, {
+        key,
+        name,
+        priority,
+        ...(category ? { category } : {}),
+        ...(repository ? { repository } : {}),
+        ...(component ? { component } : {}),
+        owners,
+        reviewers,
+      }],
+    });
+    event.currentTarget.reset();
+  };
+
+  const loadPolicy = useCallback(async () => {
+    if (!selectedProjectId) {
+      setPolicyConfiguration(undefined);
+      setPolicyDraft(undefined);
+      setPolicyLoading(false);
+      return;
+    }
+    setPolicyLoading(true);
+    setError(undefined);
+    try {
+      const configuration = await bridgeFetch<ProjectPolicyConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/policy`,
+        undefined,
+        activePrincipalId,
+      );
+      setPolicyConfiguration(configuration);
+      setPolicyDraft(configuration);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load project policy configuration.");
+    } finally {
+      setPolicyLoading(false);
+    }
+  }, [activePrincipalId, selectedProjectId]);
+
+  const savePolicy = async () => {
+    if (!selectedProjectId || !policyConfiguration || !policyDraft) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<ProjectPolicyConfiguration>(
+        `/v1/admin/projects/${selectedProjectId}/policy`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedVersion: policyConfiguration.version,
+            rules: policyDraft.rules,
+          }),
+        },
+        activePrincipalId,
+      );
+      setPolicyConfiguration(saved);
+      setPolicyDraft(saved);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save project policy configuration.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addPolicyRule = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!policyDraft) return;
+    const form = new FormData(event.currentTarget);
+    const key = normalizedRole(String(form.get("policyKey") ?? ""));
+    const name = String(form.get("policyName") ?? "").trim();
+    const priority = Number(form.get("policyPriority"));
+    const category = String(form.get("policyCategory") ?? "").trim();
+    const scope = Object.fromEntries([
+      ["repository", String(form.get("policyRepository") ?? "").trim()],
+      ["component", String(form.get("policyComponent") ?? "").trim()],
+      ["branch", String(form.get("policyBranch") ?? "").trim()],
+      ["environment", String(form.get("policyEnvironment") ?? "").trim()],
+      ["workItem", String(form.get("policyWorkItem") ?? "").trim()],
+    ].filter((entry): entry is [string, string] => Boolean(entry[1])));
+    const action = String(form.get("policyAction")) as PolicyAction;
+    const minimumRisk = String(form.get("policyRisk")) as Risk;
+    if (!key || !name || !Number.isInteger(priority) || !action || !minimumRisk) return;
+    setPolicyDraft({
+      ...policyDraft,
+      rules: [...policyDraft.rules, {
+        key,
+        name,
+        priority,
+        ...(category ? { category } : {}),
+        scope,
+        action,
+        minimumRisk,
+        requiredOwnerRoles: roleList(String(form.get("policyOwnerRoles") ?? "")),
+        requiredReviewerRoles: roleList(String(form.get("policyReviewerRoles") ?? "")),
+      }],
+    });
+    event.currentTarget.reset();
+  };
 
   const loadQuestions = useCallback(async () => {
     if (!selectedProjectId) {
@@ -1088,7 +1460,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "ownership", "policy", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -1138,6 +1510,18 @@ export default function Home() {
   }, [authenticationReady, loadSupport, signedIn, view]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "repositories") void loadRepositories();
+  }, [authenticationReady, loadRepositories, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "ownership") void loadOwnership();
+  }, [authenticationReady, loadOwnership, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "policy") void loadPolicy();
+  }, [authenticationReady, loadPolicy, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "audit") void loadAudit(0);
   }, [authenticationReady, loadAudit, signedIn, view]);
 
@@ -1161,6 +1545,27 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "support" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "repositories" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "ownership" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
+      setError(undefined);
+      setView("inbox");
+    }
+  }, [authenticationReady, isOrganizationAdmin, isProjectAdmin, principalsLoading, signedIn, view]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "policy" && !principalsLoading && !isOrganizationAdmin && !isProjectAdmin) {
       setError(undefined);
       setView("inbox");
     }
@@ -1228,13 +1633,16 @@ export default function Home() {
     [runs, selectedRunId],
   );
   const viewTitle: Record<View, string> = {
-    inbox: "My Inbox",
+    inbox: "Inbox",
     questions: "Questions",
     specifications: "Specifications",
     notifications: "Notifications",
     decisions: "Decisions",
     assumptions: "Assumptions",
     runs: "Agent Runs",
+    repositories: "Repositories",
+    ownership: "Ownership",
+    policy: "Policy",
     organization: "Organization",
     analytics: "Analytics",
     audit: "Audit",
@@ -1328,6 +1736,36 @@ export default function Home() {
       await Promise.all([loadQuestions(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to record security review.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reassignQuestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedQuestion) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const reason = String(form.get("assignmentReason") ?? "").trim();
+    if (reason.length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/assignments`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          ownerIds: roleList(String(form.get("assignmentOwnerIds") ?? "")),
+          ownerRoles: roleList(String(form.get("assignmentOwnerRoles") ?? "")),
+          reviewerIds: roleList(String(form.get("assignmentReviewerIds") ?? "")),
+          reviewerRoles: roleList(String(form.get("assignmentReviewerRoles") ?? "")),
+          reason,
+        }),
+      }, activePrincipalId);
+      formElement.reset();
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to reassign the question.");
     } finally {
       setSubmitting(false);
     }
@@ -1580,67 +2018,97 @@ export default function Home() {
           </div>
         ) : null}
         <nav aria-label="Bridge navigation">
-          <button
-            type="button"
-            aria-current={view === "inbox" ? "page" : undefined}
-            onClick={() => setView("inbox")}
-          >Inbox <span>{pendingQuestions}</span></button>
-          <button
-            type="button"
-            aria-current={view === "notifications" ? "page" : undefined}
-            onClick={() => setView("notifications")}
-          >Notifications <span>{pendingNotifications}</span></button>
-          <button
-            type="button"
-            aria-current={view === "questions" ? "page" : undefined}
-            onClick={() => setView("questions")}
-          >Questions</button>
-          <button
-            type="button"
-            aria-current={view === "decisions" ? "page" : undefined}
-            onClick={() => setView("decisions")}
-          >Decisions</button>
-          <button
-            type="button"
-            aria-current={view === "specifications" ? "page" : undefined}
-            onClick={() => setView("specifications")}
-          >Specifications <span>{pendingSpecifications}</span></button>
-          <button
-            type="button"
-            aria-current={view === "assumptions" ? "page" : undefined}
-            onClick={() => setView("assumptions")}
-          >Assumptions</button>
-          <button
-            type="button"
-            aria-current={view === "runs" ? "page" : undefined}
-            onClick={() => setView("runs")}
-          >Agent Runs</button>
-          {isOrganizationAdmin ? (
+          <div className="nav-group">
+            <span className="nav-label">Work</span>
             <button
               type="button"
-              aria-current={view === "organization" ? "page" : undefined}
-              onClick={() => setView("organization")}
-            >Organization</button>
-          ) : null}
-          <button
-            type="button"
-            aria-current={view === "analytics" ? "page" : undefined}
-            onClick={() => setView("analytics")}
-          >Analytics</button>
-          {isOrganizationAdmin || isProjectAdmin ? (
+              aria-current={view === "inbox" ? "page" : undefined}
+              onClick={() => setView("inbox")}
+            >Inbox <span>{pendingQuestions}</span></button>
             <button
               type="button"
-              aria-current={view === "audit" ? "page" : undefined}
-              onClick={() => setView("audit")}
-            >Audit</button>
-          ) : null}
-          {isOrganizationAdmin || isProjectAdmin ? (
+              aria-current={view === "questions" ? "page" : undefined}
+              onClick={() => setView("questions")}
+            >Questions</button>
             <button
               type="button"
-              aria-current={view === "support" ? "page" : undefined}
-              onClick={() => setView("support")}
-            >Support</button>
-          ) : null}
+              aria-current={view === "notifications" ? "page" : undefined}
+              onClick={() => setView("notifications")}
+            >Notifications <span>{pendingNotifications}</span></button>
+          </div>
+          <div className="nav-group">
+            <span className="nav-label">Knowledge</span>
+            <button
+              type="button"
+              aria-current={view === "decisions" ? "page" : undefined}
+              onClick={() => setView("decisions")}
+            >Decisions</button>
+            <button
+              type="button"
+              aria-current={view === "specifications" ? "page" : undefined}
+              onClick={() => setView("specifications")}
+            >Specifications <span>{pendingSpecifications}</span></button>
+            <button
+              type="button"
+              aria-current={view === "assumptions" ? "page" : undefined}
+              onClick={() => setView("assumptions")}
+            >Assumptions</button>
+            <button
+              type="button"
+              aria-current={view === "runs" ? "page" : undefined}
+              onClick={() => setView("runs")}
+            >Agent runs</button>
+          </div>
+          <div className="nav-group nav-group-admin">
+            <span className="nav-label">Admin</span>
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "repositories" ? "page" : undefined}
+                onClick={() => setView("repositories")}
+              >Repositories</button>
+            ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "ownership" ? "page" : undefined}
+                onClick={() => setView("ownership")}
+              >Ownership</button>
+            ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "policy" ? "page" : undefined}
+                onClick={() => setView("policy")}
+              >Policy</button>
+            ) : null}
+            {isOrganizationAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "organization" ? "page" : undefined}
+                onClick={() => setView("organization")}
+              >Organization</button>
+            ) : null}
+            <button
+              type="button"
+              aria-current={view === "analytics" ? "page" : undefined}
+              onClick={() => setView("analytics")}
+            >Analytics</button>
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "audit" ? "page" : undefined}
+                onClick={() => setView("audit")}
+              >Audit</button>
+            ) : null}
+            {isOrganizationAdmin || isProjectAdmin ? (
+              <button
+                type="button"
+                aria-current={view === "support" ? "page" : undefined}
+                onClick={() => setView("support")}
+              >Support</button>
+            ) : null}
+          </div>
         </nav>
         <div className="identity">
           <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
@@ -1819,6 +2287,234 @@ export default function Home() {
                       </div>
                     )}
                   </section>
+                </div>
+              ) : null}
+            </>
+          ) : view === "repositories" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project repositories</h1>
+                  <p>Manage repository metadata for this project. Bridge stores the canonical link and does not fetch repository source.</p>
+                </div>
+                <button className="secondary" type="button" disabled={repositoriesLoading} onClick={() => void loadRepositories()}>Refresh</button>
+              </div>
+              <form
+                className="organization-panel member-create-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void linkRepository();
+                }}
+              >
+                <div className="organization-panel-heading">
+                  <div><h2>Link a repository</h2><p>Repository linking is restricted to project or organization administrators.</p></div>
+                </div>
+                <div className="member-form-grid">
+                  <label>Provider<input value={repositoryProvider} onChange={(event) => setRepositoryProvider(event.target.value)} placeholder="github" required /></label>
+                  <label>Owner<input value={repositoryOwner} onChange={(event) => setRepositoryOwner(event.target.value)} placeholder="bridge-org" required /></label>
+                  <label>Repository name<input value={repositoryName} onChange={(event) => setRepositoryName(event.target.value)} placeholder="bridge" required /></label>
+                  <label>Canonical URL<input type="url" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/bridge-org/bridge" required /></label>
+                </div>
+                <div className="member-form-actions">
+                  <small>Provider connectivity and source synchronization remain outside this metadata-only workflow.</small>
+                  <button className="primary" type="submit" disabled={submitting || !selectedProjectId}>Link repository</button>
+                </div>
+              </form>
+              <section className="organization-panel">
+                <div className="organization-panel-heading">
+                  <div><h2>Linked repositories</h2><p>Repository identity is unique within the organization and provider scope.</p></div>
+                  <small>{repositories.length} linked</small>
+                </div>
+                {repositoriesLoading ? <div className="empty">Loading project repositories…</div> : null}
+                {!repositoriesLoading && repositories.length === 0 ? <div className="empty">No repositories are linked to this project.</div> : null}
+                {!repositoriesLoading && repositories.length > 0 ? (
+                  <div className="analytics-table-wrap">
+                    <table className="analytics-table">
+                      <thead><tr><th>Provider</th><th>Repository</th><th>Canonical URL</th><th>Linked</th></tr></thead>
+                      <tbody>{repositories.map((repository) => (
+                        <tr key={repository.id}>
+                          <td><strong>{repository.provider}</strong></td>
+                          <td>{repository.owner}/{repository.name}</td>
+                          <td><a href={repository.canonicalUrl} target="_blank" rel="noreferrer">{repository.canonicalUrl}</a></td>
+                          <td>{new Date(repository.createdAt).toLocaleString()}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </section>
+            </>
+          ) : view === "ownership" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project ownership</h1>
+                  <p>Define project roles, human teams, and explainable owner/reviewer rules. Changes are saved as one versioned configuration.</p>
+                </div>
+                <div className="member-form-actions">
+                  <button className="secondary" type="button" disabled={ownershipLoading} onClick={() => void loadOwnership()}>Refresh</button>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={submitting || !ownershipConfiguration || !ownershipDraft || JSON.stringify(ownershipConfiguration) === JSON.stringify(ownershipDraft)}
+                    onClick={() => void saveOwnership()}
+                  >Save configuration</button>
+                </div>
+              </div>
+              {ownershipLoading ? <div className="empty">Loading project ownership…</div> : null}
+              {!ownershipLoading && ownershipDraft ? (
+                <div className="organization-stack">
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Role definitions</h2><p>Role names are normalized when saved. Member assignment remains in Organization access.</p></div>
+                      <small>{ownershipDraft.roles.length} roles</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipRole}>
+                      <label>Role name<input name="roleName" placeholder="QA Lead" required minLength={2} /></label>
+                      <label>Description<input name="roleDescription" placeholder="Owns quality and release-readiness decisions" required minLength={2} /></label>
+                      <div className="member-form-actions"><span /><button className="secondary" type="submit">Add role</button></div>
+                    </form>
+                    {ownershipDraft.roles.length === 0 ? <div className="empty">No custom project roles are defined.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Role</th><th>Description</th><th /></tr></thead><tbody>
+                        {ownershipDraft.roles.map((role) => <tr key={role.name}><td><strong>{role.name}</strong></td><td>{role.description}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, roles: ownershipDraft.roles.filter((candidate) => candidate !== role) })}>Remove</button></td></tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Human teams</h2><p>Teams contain active human members with access to this project; agents cannot satisfy human ownership.</p></div>
+                      <small>{ownershipDraft.teams.length} teams</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipTeam}>
+                      <label>Team key<input name="teamKey" placeholder="quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Team name<input name="teamName" placeholder="Quality" required /></label>
+                      <label>Member IDs<input name="teamMembers" placeholder="usr_qa_lead, usr_architect" required /></label>
+                      <div className="member-form-actions"><small>Available humans: {principals.map((principal) => principal.id).join(", ") || "none"}</small><button className="secondary" type="submit">Add team</button></div>
+                    </form>
+                    {ownershipDraft.teams.length === 0 ? <div className="empty">No project teams are configured.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Team</th><th>Members</th><th /></tr></thead><tbody>
+                        {ownershipDraft.teams.map((team) => <tr key={team.key}><td><strong>{team.name}</strong><small>{team.key}</small></td><td>{team.memberIds.join(", ")}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, teams: ownershipDraft.teams.filter((candidate) => candidate !== team) })}>Remove</button></td></tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Ownership rules</h2><p>An empty match applies project-wide. Equal-priority overlapping owner or reviewer rules are rejected.</p></div>
+                      <small>{ownershipDraft.rules.length} rules</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addOwnershipRule}>
+                      <label>Rule key<input name="ruleKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Rule name<input name="ruleName" placeholder="Transfer quality ownership" required /></label>
+                      <label>Priority<input name="rulePriority" type="number" min={1} max={1000} defaultValue={100} required /></label>
+                      <label>Category<input name="ruleCategory" placeholder="quality" /></label>
+                      <label>Repository<input name="ruleRepository" placeholder="payments-api" /></label>
+                      <label>Component<input name="ruleComponent" placeholder="transfers" /></label>
+                      <label>Owner member IDs<input name="ownerPrincipalIds" placeholder="usr_architect" /></label>
+                      <label>Owner roles<input name="ownerRoles" placeholder="qa-lead" /></label>
+                      <label>Owner team keys<input name="ownerTeamKeys" placeholder="quality" /></label>
+                      <label>Reviewer member IDs<input name="reviewerPrincipalIds" placeholder="usr_security_reviewer" /></label>
+                      <label>Reviewer roles<input name="reviewerRoles" placeholder="architecture-reviewer" /></label>
+                      <label>Reviewer team keys<input name="reviewerTeamKeys" placeholder="architecture" /></label>
+                      <div className="member-form-actions"><small>Use comma-separated values. Configure at least one owner or reviewer target.</small><button className="secondary" type="submit">Add rule</button></div>
+                    </form>
+                    {ownershipDraft.rules.length === 0 ? <div className="empty">No ownership rules are configured; project defaults remain unchanged.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Owners</th><th>Reviewers</th><th /></tr></thead><tbody>
+                        {ownershipDraft.rules.map((rule) => <tr key={rule.key}>
+                          <td><strong>{rule.name}</strong><small>Priority {rule.priority} · {rule.key}</small></td>
+                          <td>{[rule.category && `category ${rule.category}`, rule.repository && `repository ${rule.repository}`, rule.component && `component ${rule.component}`].filter(Boolean).join(" · ") || "Project-wide"}</td>
+                          <td>{[...rule.owners.principalIds, ...rule.owners.roles, ...rule.owners.teamKeys.map((key) => `team:${key}`)].join(", ") || "None"}</td>
+                          <td>{[...rule.reviewers.principalIds, ...rule.reviewers.roles, ...rule.reviewers.teamKeys.map((key) => `team:${key}`)].join(", ") || "None"}</td>
+                          <td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, rules: ownershipDraft.rules.filter((candidate) => candidate !== rule) })}>Remove</button></td>
+                        </tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+                  <div className="member-form-actions">
+                    <small>Version {ownershipConfiguration?.version ?? 0}{ownershipConfiguration?.updatedAt ? ` · last saved ${new Date(ownershipConfiguration.updatedAt).toLocaleString()}` : " · not saved yet"}</small>
+                    <button
+                      className="primary"
+                      type="button"
+                      disabled={submitting || !ownershipConfiguration || JSON.stringify(ownershipConfiguration) === JSON.stringify(ownershipDraft)}
+                      onClick={() => void saveOwnership()}
+                    >Save configuration</button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : view === "policy" ? (
+            <>
+              <div className="title-row">
+                <div>
+                  <h1>Project policy</h1>
+                  <p>Configure limited category/scope rules for risk, interruption, ownership, and protected review. Bridge safety floors cannot be weakened.</p>
+                </div>
+                <div className="member-form-actions">
+                  <button className="secondary" type="button" disabled={policyLoading} onClick={() => void loadPolicy()}>Refresh</button>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={submitting || !policyConfiguration || !policyDraft || JSON.stringify(policyConfiguration) === JSON.stringify(policyDraft)}
+                    onClick={() => void savePolicy()}
+                  >Save policy</button>
+                </div>
+              </div>
+              {policyLoading ? <div className="empty">Loading project policy…</div> : null}
+              {!policyLoading && policyDraft ? (
+                <div className="organization-stack">
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Pilot safety floors</h2><p>These protected categories always block and retain their required human authority. Custom rules may only add stricter requirements.</p></div>
+                      <small>{policyDraft.defaultRules.length} defaults</small>
+                    </div>
+                    <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Category</th><th>Action</th><th>Owners</th><th>Reviewers</th></tr></thead><tbody>
+                      {policyDraft.defaultRules.map((rule) => <tr key={rule.key}>
+                        <td><strong>{rule.category}</strong><small>{rule.key}</small></td>
+                        <td>{rule.action.replaceAll("_", " ")} · {rule.minimumRisk}</td>
+                        <td>{rule.requiredOwnerRoles.join(", ") || "Policy owner"}</td>
+                        <td>{rule.requiredReviewerRoles.join(", ") || "No separate reviewer"}</td>
+                      </tr>)}
+                    </tbody></table></div>
+                  </section>
+
+                  <section className="organization-panel">
+                    <div className="organization-panel-heading">
+                      <div><h2>Project rules</h2><p>Lower priority numbers win. Empty category/scope fields match broadly; equal-priority overlaps are rejected.</p></div>
+                      <small>{policyDraft.rules.length} custom rules</small>
+                    </div>
+                    <form className="member-form-grid" onSubmit={addPolicyRule}>
+                      <label>Rule key<input name="policyKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                      <label>Rule name<input name="policyName" placeholder="Block transfer quality changes" required /></label>
+                      <label>Priority<input name="policyPriority" type="number" min={1} max={1000} defaultValue={100} required /></label>
+                      <label>Category<input name="policyCategory" placeholder="quality" /></label>
+                      <label>Repository<input name="policyRepository" placeholder="payments-api" /></label>
+                      <label>Component<input name="policyComponent" placeholder="transfers" /></label>
+                      <label>Branch<input name="policyBranch" placeholder="main" /></label>
+                      <label>Environment<input name="policyEnvironment" placeholder="production" /></label>
+                      <label>Work item<input name="policyWorkItem" placeholder="PAY-142" /></label>
+                      <label>Interruption action<select name="policyAction" defaultValue="block"><option value="assume_and_log">Assume and log</option><option value="ask_async">Ask asynchronously</option><option value="block">Block</option><option value="protected_approval">Protected approval</option></select></label>
+                      <label>Minimum risk<select name="policyRisk" defaultValue="high"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="protected">Protected</option></select></label>
+                      <label>Required owner roles<input name="policyOwnerRoles" placeholder="qa-lead, component-owner" /></label>
+                      <label>Required reviewer roles<input name="policyReviewerRoles" placeholder="architecture-reviewer" /></label>
+                      <div className="member-form-actions"><small>Use comma-separated normalized role names. Reviewer roles are valid only for protected approval; protected rules require protected risk and at least one owner or reviewer role.</small><button className="secondary" type="submit">Add rule</button></div>
+                    </form>
+                    {policyDraft.rules.length === 0 ? <div className="empty">No custom rules are configured; Bridge defaults remain active.</div> : (
+                      <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Effect</th><th>Authority</th><th /></tr></thead><tbody>
+                        {policyDraft.rules.map((rule) => <tr key={rule.key}>
+                          <td><strong>{rule.name}</strong><small>Priority {rule.priority} · {rule.key}</small></td>
+                          <td>{[rule.category && `category ${rule.category}`, ...Object.entries(rule.scope).map(([field, value]) => `${field} ${value}`)].filter(Boolean).join(" · ") || "Project-wide"}</td>
+                          <td>{rule.action.replaceAll("_", " ")} · minimum {rule.minimumRisk}</td>
+                          <td>{[...rule.requiredOwnerRoles.map((role) => `owner:${role}`), ...rule.requiredReviewerRoles.map((role) => `reviewer:${role}`)].join(", ") || "No added roles"}</td>
+                          <td><button className="secondary" type="button" onClick={() => setPolicyDraft({ ...policyDraft, rules: policyDraft.rules.filter((candidate) => candidate !== rule) })}>Remove</button></td>
+                        </tr>)}
+                      </tbody></table></div>
+                    )}
+                  </section>
+                  <div className="member-form-actions">
+                    <small>Version {policyConfiguration?.version ?? 0}{policyConfiguration?.updatedAt ? ` · last saved ${new Date(policyConfiguration.updatedAt).toLocaleString()}` : " · no custom policy saved yet"}</small>
+                    <button className="primary" type="button" disabled={submitting || !policyConfiguration || JSON.stringify(policyConfiguration) === JSON.stringify(policyDraft)} onClick={() => void savePolicy()}>Save policy</button>
+                  </div>
                 </div>
               ) : null}
             </>
@@ -2027,7 +2723,7 @@ export default function Home() {
                       <tbody>{auditPage.items.map((event) => (
                         <tr key={event.id}>
                           <td>{new Date(event.createdAt).toLocaleString()}</td>
-                          <td><strong>{event.action}</strong><small>{event.actorType}</small></td>
+                          <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}</small></td>
                           <td><code>{event.actorId}</code></td>
                           <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
                           <td><code>{event.correlationId}</code></td>
@@ -2196,7 +2892,9 @@ export default function Home() {
                 <div><h1>Accepted project decisions</h1><p>Only human-accepted answers appear here as authoritative context.</p></div>
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
               </div>
-              <div className="filter-bar" aria-label="Decision filters">
+              <details className="filter-disclosure">
+                <summary>Filter decisions <span>{hasDecisionFilters ? "Filters active" : "Optional"}</span></summary>
+                <div className="filter-bar" aria-label="Decision filters">
                 <label htmlFor="decision-search">Search</label>
                 <input
                   id="decision-search"
@@ -2297,7 +2995,8 @@ export default function Home() {
                     }}
                   >Clear</button>
                 ) : null}
-              </div>
+                </div>
+              </details>
               {referenceDataLoading ? <div className="empty">Loading decisions…</div> : null}
               {!referenceDataLoading && decisions.length === 0 ? (
                 <div className="empty">
@@ -2544,9 +3243,9 @@ export default function Home() {
             <>
               <div className="title-row">
                 <div>
-                  <h1>{view === "inbox" ? "Decisions needing your authority" : "All project questions"}</h1>
-                  <p>{view === "inbox"
-                    ? "Agent recommendations remain advisory until a human owner accepts an answer."
+                    <h1>{view === "inbox" ? "Needs your attention" : "All project questions"}</h1>
+                    <p>{view === "inbox"
+                    ? "Review the decisions and specifications waiting for a human response."
                     : "Shared questions remain visible to the whole project team; use My Inbox for questions routed to you."}</p>
                 </div>
                 <button
@@ -2557,7 +3256,9 @@ export default function Home() {
               </div>
 
               {view === "inbox" ? (
-                <div className="filter-bar" aria-label="Inbox filters">
+                <details className="filter-disclosure">
+                  <summary>Filter inbox <span>{hasInboxFilters ? "Filters active" : "Optional"}</span></summary>
+                  <div className="filter-bar" aria-label="Inbox filters">
                   <label htmlFor="inbox-status">State</label>
                   <select
                     id="inbox-status"
@@ -2601,7 +3302,8 @@ export default function Home() {
                   {hasInboxFilters ? (
                     <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
                   ) : null}
-                </div>
+                  </div>
+                </details>
               ) : null}
 
               {questionsLoading ? <div className="empty">Loading Bridge questions…</div> : null}
@@ -2646,6 +3348,10 @@ export default function Home() {
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
+                        {selectedQuestion.requiredOwnerRoles.length > 0 ? <div className="owner-routing"><strong>Required owner roles:</strong> {selectedQuestion.requiredOwnerRoles.join(", ")}</div> : null}
+                        {selectedQuestion.reviewerIds.length + selectedQuestion.reviewerRoles.length > 0 ? <div className="owner-routing"><strong>Review lane:</strong> {[...selectedQuestion.reviewerIds, ...selectedQuestion.reviewerRoles].join(", ")}</div> : null}
+                        <div className="owner-routing"><strong>Policy:</strong> {selectedQuestion.policyRuleKey} · version {selectedQuestion.policyVersion} · {selectedQuestion.policyAction.replaceAll("_", " ")}</div>
+                        {selectedQuestion.requiredReviewerRoles.length > 0 ? <div className="owner-routing"><strong>Required reviewer roles:</strong> {selectedQuestion.requiredReviewerRoles.join(", ")}</div> : null}
                         {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
                           <div className="inbox-reason">
                             <strong>Inbox routing:</strong> {selectedQuestion.inboxReasons.map((reason) => reason.replaceAll("_", " ")).join(" · ")}
@@ -2653,6 +3359,32 @@ export default function Home() {
                           </div>
                         ) : null}
                       </section>
+
+                      <details className="detail-disclosure">
+                        <summary>Assignment routing <span className="section-count">{selectedQuestion.assignmentHistory.length}</span></summary>
+                        <div className="owner-routing"><strong>Current route:</strong> owner via {selectedQuestion.routing.ownerSource.replaceAll("_", " ")}{selectedQuestion.routing.ownerRuleKey ? ` (${selectedQuestion.routing.ownerRuleKey})` : ""} · reviewer via {selectedQuestion.routing.reviewerSource.replaceAll("_", " ")}{selectedQuestion.routing.reviewerRuleKey ? ` (${selectedQuestion.routing.reviewerRuleKey})` : ""} · ownership v{selectedQuestion.routing.ownershipVersion} · policy v{selectedQuestion.routing.policyVersion}</div>
+                        <div className="response-list">
+                          {selectedQuestion.assignmentHistory.map((assignment) => (
+                            <article className="response-card" key={assignment.id}>
+                              <div className="response-heading"><strong>{assignment.kind === "initial" ? "Initial route" : "Reassigned"}</strong><small>{new Date(assignment.createdAt).toLocaleString()}</small></div>
+                              <small>By {assignment.changedById} · question v{assignment.questionVersion}</small>
+                              <div className="response-rationale"><strong>Owners:</strong> {[...assignment.ownerIds, ...assignment.ownerRoles].join(", ") || "Administrator fallback"}</div>
+                              <div className="response-rationale"><strong>Reviewers:</strong> {[...assignment.reviewerIds, ...assignment.reviewerRoles].join(", ") || "None"}</div>
+                              {assignment.reason ? <div className="response-rationale"><strong>Reason:</strong> {assignment.reason}</div> : null}
+                            </article>
+                          ))}
+                        </div>
+                        {(isOrganizationAdmin || isProjectAdmin) && ["open", "in_discussion"].includes(selectedQuestion.status) ? (
+                          <form className="member-form-grid" onSubmit={(event) => void reassignQuestion(event)}>
+                            <label>Owner member IDs<input name="assignmentOwnerIds" defaultValue={selectedQuestion.ownerIds.join(", ")} placeholder="usr_architect" /></label>
+                            <label>Owner roles<input name="assignmentOwnerRoles" defaultValue={selectedQuestion.ownerRoles.join(", ")} placeholder="qa-lead" /></label>
+                            <label>Reviewer member IDs<input name="assignmentReviewerIds" defaultValue={selectedQuestion.reviewerIds.join(", ")} placeholder="usr_qa_lead" /></label>
+                            <label>Reviewer roles<input name="assignmentReviewerRoles" defaultValue={selectedQuestion.reviewerRoles.join(", ")} placeholder="architecture-reviewer" /></label>
+                            <label>Reason<textarea name="assignmentReason" minLength={10} required placeholder="Explain why accountable ownership or review changed." /></label>
+                            <div className="member-form-actions"><small>Active humans: {principals.map((principal) => principal.id).join(", ") || "none"}. Required policy roles are retained automatically.</small><button className="secondary" type="submit" disabled={submitting}>Reassign</button></div>
+                          </form>
+                        ) : null}
+                      </details>
 
                       <section>
                         <h3>Options</h3>
@@ -2673,8 +3405,8 @@ export default function Home() {
                         </div>
                       </section>
 
-                      <section>
-                        <h3>Team discussion <span className="section-count">{selectedQuestion.responses.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Team discussion <span className="section-count">{selectedQuestion.responses.length}</span></summary>
                         {selectedQuestion.responses.length === 0 ? (
                           <p className="muted-copy">No responses yet. Share your perspective so the decision owner can compare the trade-offs.</p>
                         ) : (
@@ -2732,10 +3464,10 @@ export default function Home() {
                             </button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Clarifications <span className="section-count">{selectedQuestion.comments.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Clarifications <span className="section-count">{selectedQuestion.comments.length}</span></summary>
                         {selectedQuestion.comments.length === 0 ? (
                           <p className="muted-copy">No clarification thread yet. Ask a focused follow-up so the team can resolve missing context without reopening the agent session.</p>
                         ) : (
@@ -2787,13 +3519,13 @@ export default function Home() {
                             </button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
                       {selectedQuestion.risk === "protected" ? (
-                        <section>
-                          <h3>Security review <span className="section-count">{selectedQuestion.reviews.length}</span></h3>
+                        <details className="detail-disclosure">
+                          <summary>Protected policy review <span className="section-count">{selectedQuestion.reviews.length}</span></summary>
                           {selectedQuestion.reviews.length === 0 ? (
-                            <p className="muted-copy">No security review has been recorded. A separate security reviewer must approve or reject this protected question before the owner can accept it.</p>
+                            <p className="muted-copy">{selectedQuestion.requiredReviewerRoles.length > 0 ? `No policy review has been recorded. Required human roles: ${selectedQuestion.requiredReviewerRoles.join(", ")}.` : "This protected policy is satisfied by its required owner role and has no separate reviewer role."}</p>
                           ) : (
                             <div className="response-list">
                               {selectedQuestion.reviews.map((review) => (
@@ -2808,7 +3540,7 @@ export default function Home() {
                               ))}
                             </div>
                           )}
-                          {selectedQuestion.status !== "accepted" && activeRoles.includes("security-reviewer") && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId) ? (
+                          {selectedQuestion.status !== "accepted" && selectedQuestion.requiredReviewerRoles.some((role) => activeRoles.includes(role) && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId && review.reviewerRole === role)) ? (
                             <div className="response-form">
                               <label htmlFor="review-status">Review outcome</label>
                               <select
@@ -2816,15 +3548,15 @@ export default function Home() {
                                 value={reviewStatus}
                                 onChange={(event) => setReviewStatus(event.target.value as "approved" | "rejected")}
                               >
-                                <option value="approved">Approve security review</option>
-                                <option value="rejected">Reject security review</option>
+                                <option value="approved">Approve policy review</option>
+                                <option value="rejected">Reject policy review</option>
                               </select>
-                              <label htmlFor="review-rationale">Security review rationale</label>
+                              <label htmlFor="review-rationale">Policy review rationale</label>
                               <textarea
                                 id="review-rationale"
                                 value={reviewRationale}
                                 onChange={(event) => setReviewRationale(event.target.value)}
-                                placeholder="Explain the security evidence or gap."
+                                placeholder="Explain the evidence or gap for the required role."
                               />
                               <button
                                 className="secondary"
@@ -2836,7 +3568,7 @@ export default function Home() {
                               </button>
                             </div>
                           ) : null}
-                        </section>
+                        </details>
                       ) : null}
 
                       {selectedQuestion.status === "accepted" ? (
@@ -2910,8 +3642,8 @@ export default function Home() {
                         <pre className="spec-body">{selectedArtifactVersion.body}</pre>
                       </section>
 
-                      <section>
-                        <h3>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></h3>
+                      <details className="detail-disclosure">
+                        <summary>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></summary>
                         {selectedArtifactVersion.reviews.length === 0 ? (
                           <p className="muted-copy">No reviewer feedback has been recorded for this version.</p>
                         ) : (
@@ -2954,10 +3686,10 @@ export default function Home() {
                             >{submitting ? "Recording feedback…" : artifactReviewStatus === "changes_requested" ? "Request changes" : "Post review comment"}</button>
                           </div>
                         ) : null}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Compare immutable versions</h3>
+                      <details className="detail-disclosure">
+                        <summary>Compare immutable versions</summary>
                         {selectedArtifact.versions.length < 2 ? (
                           <p className="muted-copy">Publish another version to compare specification changes.</p>
                         ) : (
@@ -3046,10 +3778,10 @@ export default function Home() {
                             ) : null}
                           </>
                         )}
-                      </section>
+                      </details>
 
-                      <section>
-                        <h3>Version history</h3>
+                      <details className="detail-disclosure">
+                        <summary>Version history</summary>
                         <div className="version-list">
                           {[...selectedArtifact.versions].reverse().map((version) => (
                             <div key={version.id}>
@@ -3059,7 +3791,7 @@ export default function Home() {
                             </div>
                           ))}
                         </div>
-                      </section>
+                      </details>
 
                       {selectedArtifactVersion.status === "approved" ? (
                         <div className="accepted">

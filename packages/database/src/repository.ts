@@ -23,6 +23,9 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
+  RepositoryRecord,
   Question,
   ServiceCredential,
   ServiceTokenResolution,
@@ -58,8 +61,14 @@ import {
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
+  projectOwnershipConfigurationFromRow,
+  projectOwnershipConfigurationToRow,
+  projectPolicyConfigurationFromRow,
+  projectPolicyConfigurationToRow,
   projectFromRow,
   projectToRow,
+  repositoryRecordFromRow,
+  repositoryRecordToRow,
   serviceCredentialToRow,
   questionFromRows,
   questionToRow,
@@ -79,6 +88,7 @@ import {
   decisions,
   idempotencyRecords,
   projects,
+  projectRepositories,
   questionResponses,
   questions,
   runContinuationLocators,
@@ -90,6 +100,8 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  projectOwnershipConfigurations,
+  projectPolicyConfigurations,
   serviceCredentials,
 } from "./schema.js";
 
@@ -629,6 +641,127 @@ export class PostgresBridgeRepository implements BridgeRepository {
           decisionOwnerIds: row.decisionOwnerIds,
         },
       });
+  }
+
+  async getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectRepositories)
+      .where(eq(projectRepositories.id, repositoryId))
+      .limit(1);
+    return row ? repositoryRecordFromRow(row) : undefined;
+  }
+
+  async listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]> {
+    const rows = await this.database
+      .select()
+      .from(projectRepositories)
+      .where(eq(projectRepositories.projectId, projectId))
+      .orderBy(asc(projectRepositories.name), asc(projectRepositories.id));
+    return rows.map(repositoryRecordFromRow);
+  }
+
+  async saveRepositoryRecord(repository: RepositoryRecord): Promise<void> {
+    const row = repositoryRecordToRow(repository);
+    await this.database
+      .insert(projectRepositories)
+      .values(row)
+      .onConflictDoUpdate({
+        target: projectRepositories.id,
+        set: {
+          organizationId: row.organizationId,
+          projectId: row.projectId,
+          provider: row.provider,
+          owner: row.owner,
+          name: row.name,
+          canonicalUrl: row.canonicalUrl,
+          createdAt: row.createdAt,
+        },
+      });
+  }
+
+  async getProjectOwnershipConfiguration(
+    projectId: string,
+  ): Promise<ProjectOwnershipConfiguration | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectOwnershipConfigurations)
+      .where(eq(projectOwnershipConfigurations.projectId, projectId))
+      .limit(1);
+    return row ? projectOwnershipConfigurationFromRow(row) : undefined;
+  }
+
+  async saveProjectOwnershipConfiguration(
+    configuration: ProjectOwnershipConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const row = projectOwnershipConfigurationToRow(configuration);
+    if (expectedVersion === 0) {
+      const inserted = await this.database
+        .insert(projectOwnershipConfigurations)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ projectId: projectOwnershipConfigurations.projectId });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(projectOwnershipConfigurations)
+      .set({
+        roles: row.roles,
+        teams: row.teams,
+        rules: row.rules,
+        version: row.version,
+        updatedById: row.updatedById,
+        updatedAt: row.updatedAt,
+      })
+      .where(and(
+        eq(projectOwnershipConfigurations.organizationId, configuration.organizationId),
+        eq(projectOwnershipConfigurations.projectId, configuration.projectId),
+        eq(projectOwnershipConfigurations.version, expectedVersion),
+      ))
+      .returning({ projectId: projectOwnershipConfigurations.projectId });
+    return updated.length === 1;
+  }
+
+  async getProjectPolicyConfiguration(
+    projectId: string,
+  ): Promise<ProjectPolicyConfiguration | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(projectPolicyConfigurations)
+      .where(eq(projectPolicyConfigurations.projectId, projectId))
+      .limit(1);
+    return row ? projectPolicyConfigurationFromRow(row) : undefined;
+  }
+
+  async saveProjectPolicyConfiguration(
+    configuration: ProjectPolicyConfiguration,
+    expectedVersion: number,
+  ): Promise<boolean> {
+    const row = projectPolicyConfigurationToRow(configuration);
+    if (expectedVersion === 0) {
+      const inserted = await this.database
+        .insert(projectPolicyConfigurations)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ projectId: projectPolicyConfigurations.projectId });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(projectPolicyConfigurations)
+      .set({
+        rules: row.rules,
+        version: row.version,
+        updatedById: row.updatedById,
+        updatedAt: row.updatedAt,
+      })
+      .where(and(
+        eq(projectPolicyConfigurations.organizationId, configuration.organizationId),
+        eq(projectPolicyConfigurations.projectId, configuration.projectId),
+        eq(projectPolicyConfigurations.version, expectedVersion),
+      ))
+      .returning({ projectId: projectPolicyConfigurations.projectId });
+    return updated.length === 1;
   }
 
   async getRun(runId: string): Promise<AgentRun | undefined> {

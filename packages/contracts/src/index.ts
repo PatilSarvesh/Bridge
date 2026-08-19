@@ -10,6 +10,7 @@ export const questionTypeSchema = z.enum([
   "blocker",
 ]);
 export const riskSchema = z.enum(["low", "medium", "high", "protected"]);
+export const policyActionSchema = z.enum(["assume_and_log", "ask_async", "block", "protected_approval"]);
 export const questionStatusSchema = z.enum([
   "open",
   "in_discussion",
@@ -30,7 +31,11 @@ export const notificationTypeSchema = z.enum([
   "artifact_review_feedback",
   "artifact_approved",
 ]);
-export const outboxEventTypeSchema = z.enum(["notification.created", "decision.lifecycle_changed"]);
+export const outboxEventTypeSchema = z.enum([
+  "notification.created",
+  "decision.lifecycle_changed",
+  "question.reassigned",
+]);
 export const outboxEventStatusSchema = z.enum([
   "pending",
   "processing",
@@ -125,6 +130,145 @@ export const scopeSchema = z.object({
 
 export const ownerRoleSchema = z.string().trim().min(2).max(80);
 
+export const projectRoleDefinitionSchema = z.object({
+  name: ownerRoleSchema,
+  description: z.string().trim().min(2).max(500),
+});
+
+export const projectTeamInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  memberIds: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+});
+
+export const ownershipRuleTargetSchema = z.object({
+  principalIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  roles: z.array(ownerRoleSchema).max(20).default([]),
+  teamKeys: z.array(z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/)).max(20).default([]),
+});
+
+export const ownershipRuleInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  priority: z.number().int().min(1).max(1_000),
+  category: z.string().trim().min(2).max(100).optional(),
+  repository: z.string().trim().min(1).max(200).optional(),
+  component: z.string().trim().min(1).max(200).optional(),
+  owners: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+  reviewers: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+}).superRefine((value, context) => {
+  const targetCount = (target: z.infer<typeof ownershipRuleTargetSchema>) =>
+    target.principalIds.length + target.roles.length + target.teamKeys.length;
+  if (targetCount(value.owners) + targetCount(value.reviewers) === 0) {
+    context.addIssue({
+      code: "custom",
+      message: "An ownership rule must configure at least one owner or reviewer target.",
+      path: ["owners"],
+    });
+  }
+});
+
+export const replaceProjectOwnershipInputSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  roles: z.array(projectRoleDefinitionSchema).max(50).default([]),
+  teams: z.array(projectTeamInputSchema).max(50).default([]),
+  rules: z.array(ownershipRuleInputSchema).max(100).default([]),
+}).superRefine((value, context) => {
+  const addUniqueIssues = (
+    values: readonly string[],
+    path: "roles" | "teams" | "rules",
+    label: string,
+  ) => {
+    const seen = new Set<string>();
+    for (const [index, current] of values.entries()) {
+      const normalized = current.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+      if (seen.has(normalized)) {
+        context.addIssue({
+          code: "custom",
+          message: `${label} values must be unique.`,
+          path: [path, index],
+        });
+      }
+      seen.add(normalized);
+    }
+  };
+  addUniqueIssues(value.roles.map((role) => role.name), "roles", "Role name");
+  addUniqueIssues(value.teams.map((team) => team.key), "teams", "Team key");
+  addUniqueIssues(value.rules.map((rule) => rule.key), "rules", "Rule key");
+
+  for (const [teamIndex, team] of value.teams.entries()) {
+    const seen = new Set<string>();
+    for (const [memberIndex, memberId] of team.memberIds.entries()) {
+      if (seen.has(memberId)) {
+        context.addIssue({
+          code: "custom",
+          message: "A team member can appear only once.",
+          path: ["teams", teamIndex, "memberIds", memberIndex],
+        });
+      }
+      seen.add(memberId);
+    }
+  }
+});
+
+export const projectPolicyRuleInputSchema = z.object({
+  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().trim().min(2).max(120),
+  priority: z.number().int().min(1).max(1_000),
+  category: z.string().trim().min(2).max(100).optional(),
+  scope: scopeSchema.default({}),
+  action: policyActionSchema,
+  minimumRisk: riskSchema,
+  requiredOwnerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  requiredReviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+}).superRefine((value, context) => {
+  if (value.action === "assume_and_log" && value.minimumRisk !== "low") {
+    context.addIssue({
+      code: "custom",
+      message: "Assume-and-log rules must keep the minimum risk low.",
+      path: ["minimumRisk"],
+    });
+  }
+  if (value.action === "protected_approval" && value.minimumRisk !== "protected") {
+    context.addIssue({
+      code: "custom",
+      message: "Protected-approval rules must set protected minimum risk.",
+      path: ["minimumRisk"],
+    });
+  }
+});
+
+export const replaceProjectPolicyInputSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  rules: z.array(projectPolicyRuleInputSchema).max(100).default([]),
+}).superRefine((value, context) => {
+  const seenKeys = new Set<string>();
+  for (const [index, rule] of value.rules.entries()) {
+    const normalized = rule.key.normalize("NFKC").toLocaleLowerCase("en");
+    if (seenKeys.has(normalized)) {
+      context.addIssue({ code: "custom", message: "Policy rule keys must be unique.", path: ["rules", index, "key"] });
+    }
+    seenKeys.add(normalized);
+    for (const [field, roles] of [
+      ["requiredOwnerRoles", rule.requiredOwnerRoles],
+      ["requiredReviewerRoles", rule.requiredReviewerRoles],
+    ] as const) {
+      const seenRoles = new Set<string>();
+      for (const [roleIndex, role] of roles.entries()) {
+        const normalizedRole = role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+        if (seenRoles.has(normalizedRole)) {
+          context.addIssue({
+            code: "custom",
+            message: "Required policy roles must be unique.",
+            path: ["rules", index, field, roleIndex],
+          });
+        }
+        seenRoles.add(normalizedRole);
+      }
+    }
+  }
+});
+
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
 export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
 export const serviceCapabilityScopeSchema = z.enum(["bridge:read", "bridge:write", "bridge:admin"]);
@@ -196,6 +340,22 @@ export const registerProjectInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   name: z.string().trim().min(2).max(200),
   decisionOwnerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+});
+
+export const repositoryProviderSchema = z.string()
+  .trim()
+  .min(2)
+  .max(50)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+export const linkRepositoryInputSchema = z.object({
+  idempotencyKey: z.string().trim().min(8).max(200),
+  provider: repositoryProviderSchema,
+  owner: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("http://") || value.startsWith("https://"),
+    "canonicalUrl must use HTTP or HTTPS.",
+  ),
 });
 
 export const questionOptionInputSchema = z.object({
@@ -310,6 +470,28 @@ export const questionReviewInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
   status: questionReviewStatusSchema,
   rationale: z.string().trim().min(10).max(5_000),
+});
+
+export const reassignQuestionInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  ownerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  ownerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  reviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  reviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  reason: z.string().trim().min(10).max(2_000),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["ownerIds", value.ownerIds],
+    ["reviewerIds", value.reviewerIds],
+  ] as const) {
+    const seen = new Set<string>();
+    for (const [index, id] of values.entries()) {
+      if (seen.has(id)) {
+        context.addIssue({ code: "custom", message: "Assignment principal IDs must be unique.", path: [field, index] });
+      }
+      seen.add(id);
+    }
+  }
 });
 
 export const questionCommentInputSchema = z.object({
@@ -537,6 +719,7 @@ export const resolveAssumptionInputSchema = z
 export type PrincipalType = z.infer<typeof principalTypeSchema>;
 export type QuestionType = z.infer<typeof questionTypeSchema>;
 export type Risk = z.infer<typeof riskSchema>;
+export type PolicyAction = z.infer<typeof policyActionSchema>;
 export type QuestionStatus = z.infer<typeof questionStatusSchema>;
 export type QuestionReviewStatus = z.infer<typeof questionReviewStatusSchema>;
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
@@ -563,12 +746,20 @@ export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 export type ServiceIdentityType = z.infer<typeof serviceIdentityTypeSchema>;
 export type ServiceCapabilityScope = z.infer<typeof serviceCapabilityScopeSchema>;
 export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
+export type ProjectRoleDefinitionInput = z.infer<typeof projectRoleDefinitionSchema>;
+export type ProjectTeamInput = z.infer<typeof projectTeamInputSchema>;
+export type OwnershipRuleTargetInput = z.infer<typeof ownershipRuleTargetSchema>;
+export type OwnershipRuleInput = z.infer<typeof ownershipRuleInputSchema>;
+export type ReplaceProjectOwnershipInput = z.infer<typeof replaceProjectOwnershipInputSchema>;
+export type ProjectPolicyRuleInput = z.infer<typeof projectPolicyRuleInputSchema>;
+export type ReplaceProjectPolicyInput = z.infer<typeof replaceProjectPolicyInputSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;
 export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
 export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
+export type LinkRepositoryInput = z.infer<typeof linkRepositoryInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;
@@ -578,6 +769,7 @@ export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
 export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycleInputSchema>;
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
+export type ReassignQuestionInput = z.infer<typeof reassignQuestionInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;

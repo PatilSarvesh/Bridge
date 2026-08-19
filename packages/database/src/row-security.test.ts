@@ -73,3 +73,42 @@ describe("tenant row-security migration", () => {
     expect(migration).not.toContain('"record"."kind"');
   });
 });
+
+describe("project repository row security migration", () => {
+  it("forces tenant isolation for repository records", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0025_calm_vengeance.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_project_repositories" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_project_repositories" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain('CREATE POLICY "bridge_project_repositories_tenant" ON "bridge_project_repositories"');
+    expect(migration).toContain("bridge_project_repositories_organization_project_fk");
+  });
+});
+
+describe("project ownership row security migration", () => {
+  it("forces tenant isolation for project ownership configuration", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0026_thin_sheva_callister.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_project_ownership_configurations" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_project_ownership_configurations" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain('CREATE POLICY "bridge_project_ownership_configurations_tenant" ON "bridge_project_ownership_configurations"');
+    expect(migration).toContain("bridge_project_ownership_configurations_project_fk");
+  });
+});
+
+describe("project policy row security migration", () => {
+  it("forces tenant isolation for project policy configuration", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_project_policy_configurations" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_project_policy_configurations" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain('CREATE POLICY "bridge_project_policy_configurations_tenant" ON "bridge_project_policy_configurations"');
+    expect(migration).toContain("bridge_project_policy_configurations_project_fk");
+  });
+});

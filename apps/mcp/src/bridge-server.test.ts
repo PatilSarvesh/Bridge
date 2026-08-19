@@ -345,7 +345,8 @@ describe("Bridge MCP tools", () => {
         expect.objectContaining({
           id: question.id,
           risk: "protected",
-          ownerRoles: ["qa-lead"],
+          ownerRoles: expect.arrayContaining(["qa-lead", "data-privacy-owner"]),
+          requiredReviewerRoles: ["security-reviewer"],
           inboxReasons: ["role_owner"],
           canAccept: false,
           reviews: [],

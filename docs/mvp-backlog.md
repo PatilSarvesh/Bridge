@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-08 |
+| Last updated | 2026-08-19 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -243,7 +243,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 19 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
+- **Status:** Partial — tenant/project keys, application authorization, transaction-local organization scope, forced RLS on 22 tenant/project tables, security-definer protection for the three pre-tenant authentication directories, repeatable production role/grant reconciliation, static migration checks, an opt-in live isolation test, and an explicitly separate maintenance-store boundary are implemented; live deployment evidence remains
 - **Dependencies:** BRG-003, BRG-011
 - **PRD references:** AUTH-04, PRJ-03, MVP acceptance criterion 14
 
@@ -283,7 +283,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** M
-- **Status:** Partial — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, and version-checked member/project-access administration UI are implemented; repository records remain
+- **Status:** Implemented for the controlled MVP slice — durable organization/membership tables, protected first-admin bootstrap, authorized project registration, membership-enforced discovery, version-checked member/project-access administration UI, REST-canonical repository records, and administrator web/CLI list/link surfaces are implemented; provider-backed repository validation and source synchronization remain deferred
 - **Dependencies:** BRG-010, BRG-012
 - **PRD references:** PRJ-01, PRJ-03
 
@@ -301,7 +301,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — normalized roles, explicit owners, scoped defaults, separate protected reviewers, and audited administrator-managed organization/project membership roles are implemented; reusable teams, ownership rules, and versioned role definitions remain
+- **Status:** Implemented for the controlled MVP slice — project administrators can atomically manage versioned role definitions, reusable human teams, and ordered project/repository/component/category owner and reviewer rules; equal-priority overlapping responsibility lanes are rejected and every change is audited
 - **Dependencies:** BRG-020
 - **PRD references:** PRJ-02, QST-03, QST-05
 
@@ -319,7 +319,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — server-side risk elevation, protected-category rules, owner/reviewer separation, and audit policy references are implemented as fixed prototype policy; administrator-managed versioned policy remains
+- **Status:** Implemented for the controlled MVP slice — project administrators can atomically manage versioned exact category/scope rules for assume-and-log, asynchronous ask, blocking, and protected approval; configured minimum risk can only raise agent input, protected pilot floors cannot be weakened, equal-priority overlap is rejected, required owner/reviewer roles are preserved on questions, and governed audits record policy version
 - **Dependencies:** BRG-021
 - **PRD references:** ADM-01, QST-05, risk and interruption policy
 
@@ -359,7 +359,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — explicit owner IDs, project defaults, normalized role assignment, and role-based acceptance are implemented; configurable routing rules, reassignment, and route audit explanations remain
+- **Status:** Implemented for the controlled MVP slice — question creation resolves explicit owners, scoped ownership, category rules, project defaults, and an administrator-visible fallback; owner/reviewer lanes and rule/version explanations are persisted separately, while administrator-only unresolved-question reassignment preserves append-only history and emits audit, notification, and outbox events
 - **Dependencies:** BRG-021, BRG-022, BRG-030
 - **PRD references:** QST-03, QST-06
 
@@ -512,7 +512,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — protected questions, separate security-review records, review rationale, and owner acceptance after an approved security review are implemented; configurable quorum, multiple required roles, administrative override, and review reassignment remain
+- **Status:** Partial — protected questions, separate policy-required human review records, one-or-more required role enforcement, review rationale, and owner acceptance only after every required role is satisfied are implemented; configurable quorum per role, administrative override, approval-status summaries, and review reassignment remain
 - **Dependencies:** BRG-022, BRG-040
 - **PRD references:** QST-05, protected approvals
 
@@ -662,7 +662,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — fixed-principal registration by name/ID, Bridge-owned file protection, and non-mutating dry-run previews are implemented; interactive selection, human-confirmed diff application, and API-side mapping validation in init remain
+- **Status:** Implemented for the local REST-canonical prototype — repository metadata detection, authorized-project selection, Bridge-owned file protection, interactive diff confirmation, non-mutating dry-run previews, and API-side project mapping validation are covered; provider-backed repository validation remains outside this story
 - **Dependencies:** BRG-002
 - **PRD references:** PRJ-01, repository configuration
 
@@ -670,17 +670,17 @@ As a repository maintainer, I need `bridge init` to connect the repository to a 
 
 Acceptance criteria:
 
-1. Command detects repository metadata and asks the user to select an authorized project.
+1. Command detects repository metadata and asks the user to select an authorized project. **Implemented through bridge init --interactive; explicit project IDs remain supported for automation.**
 2. Command writes a versioned `.bridge/project.yaml` without unrelated changes.
-3. Existing conflicting configuration produces a diff and confirmation requirement.
+3. Existing conflicting configuration produces a diff and confirmation requirement. **Implemented for interactive runs; --force remains an explicit noninteractive override and --yes supports separately approved automation.**
 4. `--dry-run` prints proposed changes without mutating the API or repository. **Implemented with create/update/unchanged actions.**
-5. Command validates the mapping against the API.
+5. Command validates the mapping against the API. **Implemented through the authorized REST project read before any repository file is written.**
 
 ### BRG-062 — Install and diagnose the first agent adapter
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, API/project/instruction doctor checks, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; vendor-specific MCP configuration generation, authentication, hooks, and expanded integration diagnostics remain
+- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, project-scoped Codex/Claude MCP configuration generation, API/project/instruction doctor checks, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; MCP authentication, Cursor/Copilot vendor configuration, hooks, and expanded integration diagnostics remain
 - **Dependencies:** BRG-001, BRG-052, BRG-061
 - **PRD references:** MCP and CLI design
 
@@ -688,9 +688,9 @@ As a repository maintainer, I need `bridge install <adapter>` and `bridge doctor
 
 Acceptance criteria:
 
-1. Installer generates MCP and instruction configuration appropriate to the selected client.
+1. Installer generates MCP and instruction configuration appropriate to the selected client. **Implemented for Codex project-scoped `.codex/config.toml` and Claude Code project-scoped `.mcp.json` when an approved `mcp_url` is configured; Cursor and Copilot remain instruction-only.**
 2. Generated content includes a version marker and source ownership.
-3. Existing unrelated configuration is preserved.
+3. Existing unrelated configuration is preserved. **Implemented with managed TOML markers/JSON ownership metadata and conflict refusal for an unrelated `bridge` server.**
 4. Dry-run displays file changes. **Implemented through `bridge init --dry-run` and `bridge install --dry-run`.**
 5. Doctor verifies endpoint reachability, project mapping, and required instructions. **Implemented; when `mcp_url` is configured, doctor also verifies an MCP JSON-RPC `initialize` response. Authentication and vendor discovery are intentionally not claimed.**
 6. Capability level is reported accurately. **Implemented for instructions/CLI plus `instructions+mcp`, `instructions+mcp-failed`, and `not_configured` MCP states; hooks remain unconfigured.**
@@ -984,7 +984,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, forced RLS, and bootstrap-directory function boundaries; reassignment/project-policy commands, endpoint-specific scopes, and live-provider/database evidence remain
+- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, administrator-only versioned reassignment, project ownership/policy administration, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, forced RLS, and bootstrap-directory function boundaries; endpoint-specific scopes and live-provider/database evidence remain
 - **Dependencies:** BRG-012, BRG-040, BRG-043, BRG-081
 - **PRD references:** MVP acceptance criteria 11 and 14
 
@@ -998,7 +998,7 @@ Acceptance criteria:
 4. Protected approval requirements cannot be bypassed through REST, MCP, or concurrent requests.
 5. Search, inbox, notifications, object links, and audit views are tenant-safe.
 
-Implementation note: `docs/authorization-matrix.md` is the evidence map. Rows for reassignment and project-policy mutation are explicitly unavailable rather than silently granted. BRG-012 now supplies core data-plane RLS defense in depth, bounded security-definer authentication-bootstrap lookups, and repeatable role/grant reconciliation, while live deployment evidence remains explicitly incomplete.
+Implementation note: `docs/authorization-matrix.md` is the evidence map. Project ownership, policy mutation, and unresolved-question reassignment have explicit administrator-only rows and adversarial coverage. BRG-012 supplies core data-plane RLS defense in depth, bounded security-definer authentication-bootstrap lookups, and repeatable role/grant reconciliation, while live deployment evidence remains explicitly incomplete.
 
 ### BRG-103 — Add backup, restore, and operational health procedures
 

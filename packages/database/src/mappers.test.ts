@@ -16,6 +16,9 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
+  RepositoryRecord,
   Question,
   ServiceCredential,
 } from "@bridge/domain";
@@ -35,6 +38,8 @@ import {
   contextSnapshotToRow,
   projectFromRow,
   projectToRow,
+  repositoryRecordFromRow,
+  repositoryRecordToRow,
   notificationFromRow,
   notificationToRow,
   organizationFromRow,
@@ -51,6 +56,10 @@ import {
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
+  projectOwnershipConfigurationFromRow,
+  projectOwnershipConfigurationToRow,
+  projectPolicyConfigurationFromRow,
+  projectPolicyConfigurationToRow,
   serviceCredentialFromRow,
   serviceCredentialToRow,
   questionFromRows,
@@ -66,6 +75,7 @@ import {
   type DecisionRow,
   type ContextSnapshotRow,
   type ProjectRow,
+  type RepositoryRecordRow,
   type QuestionResponseRow,
   type QuestionRow,
   type NotificationRow,
@@ -76,6 +86,8 @@ import {
   type OrganizationRow,
   type PrincipalIdentityRow,
   type ProjectMembershipRow,
+  type ProjectOwnershipConfigurationRow,
+  type ProjectPolicyConfigurationRow,
   type ServiceCredentialRow,
 } from "./mappers.js";
 
@@ -97,10 +109,43 @@ const question: Question = {
   context: "The component needs durable decisions across agent and API restarts.",
   whyItMatters: "Losing accepted decisions would make later agent sessions repeat questions.",
   risk: "high",
+  policyAction: "block",
+  policyVersion: 0,
+  policyRuleKey: "bridge-question-blocking",
   reversible: false,
   blocking: true,
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
+  requiredOwnerRoles: [],
+  reviewerIds: ["usr_reviewer"],
+  reviewerRoles: ["architecture-reviewer"],
+  requiredReviewerRoles: [],
+  routing: {
+    ownerSource: "explicit_owner",
+    reviewerSource: "scoped_ownership",
+    reviewerRuleKey: "architecture-review",
+    ownershipVersion: 1,
+    policyVersion: 0,
+  },
+  assignmentHistory: [{
+    id: "qas_mapping",
+    kind: "initial",
+    changedById: "agt_codex",
+    changedByType: "agent",
+    ownerIds: ["usr_owner"],
+    ownerRoles: ["architect"],
+    reviewerIds: ["usr_reviewer"],
+    reviewerRoles: ["architecture-reviewer"],
+    route: {
+      ownerSource: "explicit_owner",
+      reviewerSource: "scoped_ownership",
+      reviewerRuleKey: "architecture-review",
+      ownershipVersion: 1,
+      policyVersion: 0,
+    },
+    createdAt: "2026-08-07T10:00:00.000Z",
+    questionVersion: 1,
+  }],
   options: [
     { key: "postgres", label: "PostgreSQL", tradeoffs: "Operational dependency with strong transactions." },
     { key: "memory", label: "Memory", tradeoffs: "Simple but state is lost on restart." },
@@ -412,6 +457,59 @@ describe("PostgreSQL domain mappings", () => {
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
     expect(projectFromRow(projectToRow(project) as ProjectRow)).toEqual(project);
+    const repositoryRecord: RepositoryRecord = {
+      id: "repo_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+      createdAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
+      .toEqual(repositoryRecord);
+    const ownershipConfiguration: ProjectOwnershipConfiguration = {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: [{ name: "qa-lead", description: "Owns project quality decisions." }],
+      teams: [{ key: "quality", name: "Quality", memberIds: ["usr_qa"] }],
+      rules: [{
+        key: "quality",
+        name: "Quality ownership",
+        priority: 10,
+        category: "quality",
+        owners: { principalIds: [], roles: ["qa-lead"], teamKeys: ["quality"] },
+        reviewers: { principalIds: ["usr_owner"], roles: [], teamKeys: [] },
+      }],
+      version: 1,
+      updatedById: "usr_owner",
+      updatedAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(projectOwnershipConfigurationFromRow(
+      projectOwnershipConfigurationToRow(ownershipConfiguration) as ProjectOwnershipConfigurationRow,
+    )).toEqual(ownershipConfiguration);
+    const policyConfiguration: ProjectPolicyConfiguration = {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      rules: [{
+        key: "quality-transfer",
+        name: "Transfer quality",
+        priority: 10,
+        category: "quality",
+        scope: { component: "transfers" },
+        action: "block",
+        minimumRisk: "high",
+        requiredOwnerRoles: ["qa-lead"],
+        requiredReviewerRoles: [],
+      }],
+      version: 1,
+      updatedById: "usr_owner",
+      updatedAt: "2026-08-07T10:00:00.000Z",
+    };
+    expect(projectPolicyConfigurationFromRow(
+      projectPolicyConfigurationToRow(policyConfiguration) as ProjectPolicyConfigurationRow,
+    )).toEqual(policyConfiguration);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -589,6 +687,58 @@ describe("PostgreSQL domain mappings", () => {
     expect(adapterDiagnosticMigration).toContain("FORCE ROW LEVEL SECURITY");
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_mcp_status_check");
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_status_check");
+
+    const repositoryMigration = readFileSync(
+      new URL("../drizzle/0025_calm_vengeance.sql", import.meta.url),
+      "utf8",
+    );
+    expect(repositoryMigration).toContain('CREATE TABLE "bridge_project_repositories"');
+    expect(repositoryMigration).toContain("bridge_project_repositories_org_provider_owner_name_unique");
+    expect(repositoryMigration).toContain("bridge_project_repositories_organization_project_fk");
+    expect(repositoryMigration).toContain("FORCE ROW LEVEL SECURITY");
+
+    const ownershipMigration = readFileSync(
+      new URL("../drizzle/0026_thin_sheva_callister.sql", import.meta.url),
+      "utf8",
+    );
+    expect(ownershipMigration).toContain('CREATE TABLE "bridge_project_ownership_configurations"');
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_project_fk");
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_tenant");
+    expect(ownershipMigration).toContain("FORCE ROW LEVEL SECURITY");
+    expect(ownershipMigration).toContain("bridge_project_ownership_configurations_roles_shape_check");
+    expect(ownershipMigration).toContain("'ownership_configuration'");
+
+    const policyMigration = readFileSync(
+      new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url),
+      "utf8",
+    );
+    expect(policyMigration).toContain('CREATE TABLE "bridge_project_policy_configurations"');
+    expect(policyMigration).toContain("bridge_project_policy_configurations_project_fk");
+    expect(policyMigration).toContain("bridge_project_policy_configurations_tenant");
+    expect(policyMigration).toContain("FORCE ROW LEVEL SECURITY");
+    expect(policyMigration).toContain("bridge_questions_policy_action_check");
+    expect(policyMigration).toContain("'policy_configuration'");
+    expect(policyMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
+      policyMigration.indexOf('ALTER COLUMN "policy_action" SET NOT NULL'),
+    );
+    const requiredOwnerMigration = readFileSync(
+      new URL("../drizzle/0028_cold_tombstone.sql", import.meta.url),
+      "utf8",
+    );
+    expect(requiredOwnerMigration).toContain('ADD COLUMN "required_owner_roles"');
+    expect(requiredOwnerMigration).toContain("bridge_questions_required_owner_roles_shape_check");
+    const routingMigration = readFileSync(
+      new URL("../drizzle/0029_unknown_madame_hydra.sql", import.meta.url),
+      "utf8",
+    );
+    expect(routingMigration).toContain('ADD COLUMN "reviewer_ids"');
+    expect(routingMigration).toContain('ADD COLUMN "routing"');
+    expect(routingMigration).toContain('ADD COLUMN "assignment_history"');
+    expect(routingMigration).toContain("bridge_questions_assignment_history_shape_check");
+    expect(routingMigration).toContain("'question.reassigned'");
+    expect(routingMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
+      routingMigration.indexOf('ALTER COLUMN "routing" SET NOT NULL'),
+    );
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

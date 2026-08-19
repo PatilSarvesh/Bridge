@@ -1,12 +1,17 @@
-import type { Scope } from "@bridge/contracts";
+import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
+  ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
   QuestionComment,
+  QuestionAssignmentHistoryEntry,
   QuestionOption,
   QuestionReview,
+  QuestionRoutingExplanation,
+  RepositoryRecord,
 } from "@bridge/domain";
 import { sql } from "drizzle-orm";
 import {
@@ -219,6 +224,37 @@ export const projects = pgTable(
   (table) => [tenantPolicy("bridge_projects_tenant", table.organizationId)],
 ).enableRLS();
 
+export const projectRepositories = pgTable(
+  "bridge_project_repositories",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    provider: text("provider").notNull(),
+    owner: text("owner").notNull(),
+    name: text("name").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    unique("bridge_project_repositories_org_provider_owner_name_unique").on(
+      table.organizationId,
+      table.provider,
+      table.owner,
+      table.name,
+    ),
+    index("bridge_project_repositories_project_name_idx").on(table.projectId, table.name),
+    foreignKey({
+      name: "bridge_project_repositories_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_repositories_tenant", table.organizationId),
+  ],
+).enableRLS();
+
 export const projectMemberships = pgTable(
   "bridge_project_memberships",
   {
@@ -246,6 +282,57 @@ export const projectMemberships = pgTable(
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
     tenantPolicy("bridge_project_memberships_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const projectOwnershipConfigurations = pgTable(
+  "bridge_project_ownership_configurations",
+  {
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    roles: jsonb("roles").$type<ProjectOwnershipConfiguration["roles"]>().notNull(),
+    teams: jsonb("teams").$type<ProjectOwnershipConfiguration["teams"]>().notNull(),
+    rules: jsonb("rules").$type<ProjectOwnershipConfiguration["rules"]>().notNull(),
+    version: integer("version").notNull(),
+    updatedById: text("updated_by_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId] }),
+    index("bridge_project_ownership_configurations_project_updated_idx").on(
+      table.projectId,
+      table.updatedAt,
+    ),
+    check("bridge_project_ownership_configurations_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_project_ownership_configurations_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_ownership_configurations_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const projectPolicyConfigurations = pgTable(
+  "bridge_project_policy_configurations",
+  {
+    organizationId: text("organization_id").notNull(),
+    projectId: text("project_id").notNull(),
+    rules: jsonb("rules").$type<ProjectPolicyConfiguration["rules"]>().notNull(),
+    version: integer("version").notNull(),
+    updatedById: text("updated_by_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.projectId] }),
+    index("bridge_project_policy_configurations_project_updated_idx").on(table.projectId, table.updatedAt),
+    check("bridge_project_policy_configurations_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_project_policy_configurations_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_project_policy_configurations_tenant", table.organizationId),
   ],
 ).enableRLS();
 
@@ -353,10 +440,19 @@ export const questions = pgTable(
     context: text("context").notNull(),
     whyItMatters: text("why_it_matters").notNull(),
     risk: riskEnum("risk").notNull(),
+    policyAction: text("policy_action").$type<PolicyAction>().notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    policyRuleKey: text("policy_rule_key").notNull(),
     reversible: boolean("reversible").notNull(),
     blocking: boolean("blocking").notNull(),
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
+    requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
+    reviewerIds: jsonb("reviewer_ids").$type<readonly string[]>().default([]).notNull(),
+    reviewerRoles: jsonb("reviewer_roles").$type<readonly string[]>().default([]).notNull(),
+    requiredReviewerRoles: jsonb("required_reviewer_roles").$type<readonly string[]>().default([]).notNull(),
+    routing: jsonb("routing").$type<QuestionRoutingExplanation>().notNull(),
+    assignmentHistory: jsonb("assignment_history").$type<readonly QuestionAssignmentHistoryEntry[]>().notNull(),
     options: jsonb("options").$type<readonly QuestionOption[]>().notNull(),
     reviews: jsonb("reviews").$type<readonly QuestionReview[]>().default([]).notNull(),
     comments: jsonb("comments").$type<readonly QuestionComment[]>().default([]).notNull(),
@@ -599,6 +695,7 @@ export const auditEvents = pgTable(
     action: text("action").notNull(),
     subjectType: text("subject_type").notNull(),
     subjectId: text("subject_id").notNull(),
+    policyVersion: integer("policy_version"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [

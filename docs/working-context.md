@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-15, Asia/Kolkata |
+| Last updated | 2026-08-19, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -39,7 +39,7 @@ Current explicit founder directives:
 4. MCP must be optional because some organizations do not approve MCP.
 5. Provide CLI and repository-file workflows for organizations where agents cannot use MCP or initiate network requests.
 6. Only humans may accept decisions or approve specification versions.
-7. UI feedback exists but is deferred; the founder will revisit it later.
+7. The founder requested a UI refresh on 2026-08-16 after finding the first pilot dashboard too clustered and dated. The active direction is a minimal workbench: warm neutral surfaces with a restrained teal action accent, grouped Work / Knowledge / Admin navigation, calmer spacing, and progressive disclosure for filters, discussion, review, comparison, and history. Each screen should foreground one primary task and keep secondary context available without presenting it all at once. This is a visual information-architecture change only; existing approval boundaries and workflows remain unchanged.
 8. Maintain this file as durable context for future sessions.
 9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
 
@@ -708,7 +708,7 @@ It also safely creates or updates the selected client's native repository instru
 
 Unrelated existing content is preserved. `bridge init --name` uses the fixed local project-admin principal to register the project; this is a prototype seam, not organization onboarding or authentication. The CLI can be packaged locally with `pnpm cli:pack`, producing `dist/bridge-cli-0.1.0.tgz`.
 
-The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; `BRIDGE_MCP_URL` can override it for diagnostics. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
+The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; for Codex and Claude Code it also plans a project-scoped vendor MCP configuration with no credentials. `BRIDGE_MCP_URL` can override the endpoint for diagnostics only. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
 `bridge install --client <client>` activates or switches the native adapter for an existing `.bridge/project.yaml` without registering another project. It safely preserves unrelated content, updates only the managed Bridge block, and supports `--dry-run` for a no-mutation preview.
 
 `bridge sync` creates approved repository context:
@@ -1132,7 +1132,7 @@ Deliberate boundaries:
 
 - Role names are a lightweight policy seam, not a production directory or organization role-management system.
 - The prototype does not yet provide a UI for configuring project role memberships; role configuration remains fixed in development fixtures.
-- Due-date filters, reassignment, route explanations beyond compact labels, and notification preferences remain future work.
+- Due-date filters and notification preferences remain future work; configurable route explanations and question reassignment were completed later in section 20.56.
 
 ### 20.8 Implemented prototype reviewer switcher slice
 
@@ -1163,7 +1163,7 @@ Deliberate boundaries:
 
 - Filters by state, category, risk, and assigned role are implemented; due-date filtering is not yet applicable to questions because the prototype has no question due-date field.
 - Protected review is represented as a routing reason, but the prototype still has no separate multi-person review/approval command.
-- Notification preferences, reassignment, route explanations beyond the compact reason labels, and real identity propagation remain future work.
+- Notification preferences remain future work; real OIDC identity propagation and explainable routing/reassignment were completed in later slices.
 
 ### 20.10 Implemented inbox filter slice
 
@@ -1177,7 +1177,7 @@ Implemented:
 Deliberate boundaries:
 
 - Due dates, saved filters, URL-persisted filter state, and cross-project filtering remain future work.
-- Notification preferences, reassignment, separate multi-reviewer actions, and real identity propagation remain future work.
+- Notification preferences and separate multi-reviewer actions remain future work; real identity propagation and question reassignment were completed in later slices.
 
 ### 20.11 Implemented protected-question review slice
 
@@ -1260,7 +1260,7 @@ Deliberate boundaries:
 
 Implemented:
 
-1. `bridge init --dry-run` previews project registration, Bridge-owned files, and the selected native instruction adapter without making an API request or writing files.
+1. `bridge init --dry-run` previews project registration, Bridge-owned files, and the selected native instruction adapter without mutating API or repository state; when a project ID is known, it may perform a read-only REST mapping validation.
 2. Dry-run plans report `create`, `update`, or `unchanged` actions and use a safe placeholder when a new project ID would be assigned by registration.
 3. `bridge doctor` verifies API health, the configured project mapping, `.bridge/agent-instructions.md`, and the client-specific managed instruction block.
 4. Doctor output reports structured checks, stable failure exit codes, and capability levels: instructions and CLI are available; MCP and hooks are not implicitly claimed unless explicitly configured.
@@ -1268,7 +1268,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- Interactive project selection, human-confirmed diff application, hooks, vendor-native configuration generation, and universal vendor-native interception remain future adapter work.
+- Provider-backed repository validation/synchronization, hooks, vendor-native configuration generation, and universal vendor-native interception remain future adapter work. The init mapping check confirms authorized project identity through REST; it does not claim that a provider URL is reachable.
 - Doctor validates the fixed-principal prototype boundary; it is not an authentication or organization-membership check.
 
 ### 20.17 Implemented optional MCP endpoint discovery slice
@@ -1284,7 +1284,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- This slice does not generate vendor-specific MCP config files, negotiate authentication, persist MCP sessions, install hooks, or claim that MCP is approved by an organization.
+- This slice does not negotiate authentication, persist MCP sessions, install hooks, or generate vendor configuration for Cursor/Copilot; Codex and Claude project configuration generation is covered by the later adapter slice.
 - MCP remains an opt-in adapter; repositories without `mcp_url` continue to operate through generated instructions, CLI commands, repository snapshots, and the web UI.
 
 ### 20.18 Implemented adapter-only installation slice
@@ -1729,7 +1729,7 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- Reassignment and project-policy mutation are unavailable, so their future implementation still requires role, audit, and adversarial test slices.
+- Reassignment remains unavailable, so its implementation still requires role, history, audit, and adversarial test slices. Project-policy mutation is now an explicit administrator-only, versioned command as recorded in section 20.55.
 - RLS, the maintenance-store boundary, security-definer bootstrap-directory lookups, and repeatable role/grant reconciliation are now implemented as recorded in sections 20.43-20.45; endpoint-specific non-human scopes and live provider/isolated-database evidence remain BRG-011/BRG-013/BRG-012 work.
 - CLI and MCP are agent integration surfaces and intentionally do not implement human approval commands; humans approve through REST-backed UI/API workflows.
 
@@ -1739,7 +1739,7 @@ Implemented and locally verified:
 
 1. The repository transaction contract accepts immutable organization or maintenance context. Every principal-bearing application operation now executes inside an organization-scoped transaction; a nested transaction cannot change its tenant or elevate itself to maintenance.
 2. PostgreSQL sets `bridge.organization_id` with transaction-local `set_config`. Policies use missing-safe `current_setting`, so absent scope exposes no protected rows and rejects writes.
-3. Forward-only migration `0020_tenant_row_security.sql` enables and forces RLS on 18 core tenant/project tables, and migration `0024_amazing_blindfold.sql` adds the persisted adapter-diagnostic table with its own forced policy, bringing the current protected set to 19. Direct tables compare organization ownership; artifact versions, question responses, and run continuation locators verify ownership through their RLS-protected parent.
+3. Forward-only migration `0020_tenant_row_security.sql` enables and forces RLS on 18 core tenant/project tables; migrations `0024_amazing_blindfold.sql` through `0027_vengeful_lady_ursula.sql` add adapter diagnostics, project repositories, ownership configuration, and policy configuration with the same forced policy, bringing the current protected set to 22. Direct tables compare organization ownership; artifact versions, question responses, and run continuation locators verify ownership through their RLS-protected parent.
 4. Idempotency records now store non-null organization ownership and use `(organization_id, key)` as their primary key so equal client keys cannot collide across tenants. The migration backfills existing question, artifact-version, run, and assumption records, discards only orphaned cache rows whose referenced resource no longer exists, then enforces the constraint; schema, repository behavior, migration metadata, and regression coverage match.
 5. The default PostgreSQL store rejects maintenance operations. A separately opted-in `mode: "maintenance"` store is required for cross-tenant outbox claims/completion/failure, and PostgreSQL itself must authenticate that connection with `BYPASSRLS`.
 6. Repository readiness rejects an API/MCP role that is a superuser or has `BYPASSRLS`, and rejects a maintenance configuration whose role cannot bypass RLS. The restore verifier also refuses a connection that cannot inspect all tenants and disables policy filtering as an additional fail-loud check. This prevents an unsafe or incomplete check without exposing credentials in health output.
@@ -1853,6 +1853,102 @@ Deliberate boundaries:
 - The telemetry remains process-local and optional with MCP; REST remains the canonical business boundary and CLI/repository snapshots remain viable when MCP is not approved.
 - Tool errors are diagnostic outcomes, not automatic approval, policy, or incident decisions. Hosted collection, alert delivery, durable worker export, provider pool saturation, and pilot calibration remain deployment work.
 
+### 20.51 Implemented REST-canonical project repository records
+
+Implemented and locally verified:
+
+1. `POST /v1/projects/:projectId/repositories` links provider, owner, repository name, and canonical HTTP(S) URL metadata to an authorized project; `GET` returns the records to any principal with project access.
+2. Repository identity is deterministic and unique within an organization/provider/owner/name scope. Repeating the same link returns an idempotent replay, while attempting to link the same identity to another project returns a conflict without leaking unrelated project data.
+3. The in-memory and PostgreSQL repositories share the same contract. Migration `0025_calm_vengeance.sql` adds a tenant-scoped, forced-RLS table with a composite project foreign key, uniqueness constraint, index, mapper, restore-verifier coverage, and migration regression checks.
+4. Linking is project-admin/human controlled and writes a project audit event. Repository metadata remains separate from source code and is never fetched or stored by Bridge.
+
+The administrator web **Repositories** view and MCP-independent CLI now provide list/link presentation over the same REST endpoints. They preserve the metadata-only boundary and leave provider validation and source synchronization to a future integration slice.
+
+Deliberate boundaries:
+
+- REST is the canonical repository-association boundary; MCP remains optional and does not gain a direct database path.
+- Provider-backed repository validation and synchronization remain follow-up work. The canonical URL is caller-supplied metadata, not proof of provider connectivity.
+
+### 20.52 Completed interactive repository initialization
+
+Implemented and locally verified:
+
+1. `bridge init --interactive` lists only projects returned by the canonical authorized REST project list, displays stable project names/IDs, and accepts a numbered selection, project ID, or project name.
+2. `bridge init` detects a repository name from the local `origin` remote when available, with an explicit `--repository` override and directory-name fallback.
+3. Explicitly selected and newly registered project IDs are read back through `GET /v1/projects/:projectId` before any `.bridge/` or native adapter file is written; a failed mapping leaves the repository unchanged.
+4. Existing Bridge-owned changes are planned as create/update/unchanged actions. Interactive runs show the changed paths and require an affirmative confirmation; `--force` preserves the existing explicit noninteractive override and `--yes` supports separately approved automation.
+5. CLI regression coverage proves authorized selection, mapping-failure no-write behavior, and confirmation refusal/approval. No schema, migration, MCP, or direct database path was added.
+
+Deliberate boundaries:
+
+- REST validates project identity and caller access, not provider connectivity or source synchronization. Repository records remain metadata-only and continue to use the separate REST repository-management commands.
+- Interactive initialization is a human setup workflow. Agents and CI can continue using explicit project IDs or a pre-approved `--name` registration flow without MCP.
+
+### 20.53 Implemented project-scoped Codex and Claude MCP configuration
+
+Implemented and locally verified:
+
+1. When `mcp_url` is configured, `bridge init` and `bridge install` generate Codex's project-scoped `.codex/config.toml` or Claude Code's project-scoped `.mcp.json` alongside the existing Bridge instruction adapter.
+2. Codex uses a managed `[mcp_servers.bridge]` block with the approved HTTP endpoint. Claude Code uses an `mcpServers.bridge` entry with explicit HTTP transport; no token, OAuth secret, bearer header, or other credential is written.
+3. Existing unrelated TOML/JSON settings and MCP servers are preserved. Bridge-owned markers permit safe regeneration; an unrelated existing `bridge` server or malformed config fails closed instead of being overwritten.
+4. Dry-run plans include vendor MCP config changes, and switching clients leaves the previous client's config file untouched so unrelated client state is not deleted.
+5. CLI regression coverage verifies Codex generation, Claude JSON merging, client switching, and preservation of unrelated settings.
+
+Deliberate boundaries:
+
+- MCP remains optional. Cursor and Copilot continue to receive instruction-only adapters in this slice; vendor-specific configuration for them, hooks, vendor discovery, and authentication remain pending.
+- Generated project config only points the client at the approved endpoint. The user or approved client performs any OAuth login through its own supported flow; Bridge never stores client credentials in the repository.
+
+### 20.54 Implemented configurable project roles, teams, and ownership rules
+
+Implemented and locally verified:
+
+1. Human project and organization administrators can read and replace one project-scoped ownership configuration through canonical `GET` and `POST /v1/admin/projects/:projectId/ownership` REST endpoints and the web **Ownership** view.
+2. The aggregate contains normalized custom role definitions, reusable teams of active human project members, and ordered rules that can match repository, component, and category within the project. Owner and reviewer targets remain separate and may reference direct humans, roles, or team keys.
+3. Equal-priority rules whose selectors overlap are rejected independently for the owner and reviewer lanes. Missing teams, duplicate targets, non-human or inaccessible principals, empty responsibility rules, stale versions, and secret-bearing labels fail before persistence.
+4. The complete aggregate is written with optimistic concurrency and a `project.ownership_configured` audit record in one transaction. In-memory rollback, PostgreSQL compare-and-set behavior, tenant masking, human administrator authority, and REST validation have regression coverage.
+5. Forward-only migration `0026_thin_sheva_callister.sql` adds the project-composite foreign key, JSON shape/count checks, forced tenant RLS, mapper/repository/restore support, and an expanded audit-subject constraint for ownership configuration.
+
+Deliberate boundaries:
+
+- Role assignment remains in versioned organization/project membership administration. Teams and direct responsibility targets can contain only active humans; no agent recommendation or configuration change creates human approval authority.
+- BRG-022 supplies the separate risk/protected-action policy; BRG-031 now consumes these ownership rules for explainable question routing and reassignment as recorded in section 20.56.
+- REST remains canonical. MCP has no ownership-management tool or direct database path and remains optional.
+
+### 20.55 Implemented versioned risk, routing, and protected-action policy
+
+Implemented and locally verified:
+
+1. Human project and organization administrators can read and replace one project-scoped policy through canonical `GET` and `POST /v1/admin/projects/:projectId/policy` REST endpoints and the web **Policy** view. Updates use optimistic aggregate versions and append `project.policy_configured` atomically.
+2. The limited application-owned matcher supports exact normalized category plus optional repository, component, branch, environment, and work-item scope. Ordered rules set minimum risk, one of `assume_and_log`, `ask_async`, `block`, or `protected_approval`, and separate required owner/reviewer roles; equal-priority overlap is rejected.
+3. Evaluation takes the strongest outcome across agent-declared risk/interruption, the first matching configured rule, and code-owned PILOT-008 safety floors. An exact configured protected category must retain every default authority role, so administrators may strengthen but cannot silently weaken the pilot matrix.
+4. Assumption writes proceed only when the effective action remains low-risk `assume_and_log`. Questions persist effective action, policy version, matched rule key, and required owner/reviewer roles; policy owner roles augment explicit routing, protected questions always block, and automatic fallback is rejected.
+5. Protected review now recognizes the policy-required human roles instead of one hard-coded title. Acceptance requires the accepting human to hold every required owner role, while each reviewer role must be held by that owner or represented by an approved human review; an agent still cannot review or accept.
+6. Question creation/reuse/review/decision/lifecycle audits and assumption-recorded audits retain policy version. Forward-only migration `0027_vengeful_lady_ursula.sql` safely backfills existing questions before adding non-null policy provenance, adds audit provenance, and creates the tenant-scoped forced-RLS policy aggregate with mapper/repository/restore coverage; `0028_cold_tombstone.sql` adds bounded required-owner-role provenance.
+
+Deliberate boundaries:
+
+- This is the PILOT-021 limited declarative schema evaluated in application code, not a general policy language. Selectors are exact, the safety matrix is code-owned, and custom quorum/conditional expressions remain outside this slice.
+- BRG-031 now applies ownership rules and policy authority to explainable routing and reassignment as recorded in section 20.56.
+- REST remains canonical. MCP consumes the resulting governed question behavior through existing application commands but has no policy-management or direct database path.
+
+### 20.56 Implemented explainable question routing and reassignment
+
+Implemented and locally verified:
+
+1. Question creation resolves explicit owner targets, scoped repository/component ownership, category ownership, project-wide ownership or configured decision owners, then an administrator-visible fallback. Owner and reviewer lanes resolve independently and policy-required roles are always retained.
+2. Every question persists owner/reviewer route sources, matched rule keys, ownership/policy versions, and an initial append-only assignment-history entry. The administrator support view exposes questions with no resolved owner target.
+3. Personalized inbox routing now includes direct reviewers and reviewer roles without granting them owner acceptance authority. The web Questions detail shows current lanes, route provenance, and assignment history.
+4. Human project administrators can reassign an unresolved question through canonical `POST /v1/questions/:questionId/assignments` or the web form. Direct targets must be active human project members, stale versions fail, required policy roles cannot be removed, and agents/contributors are denied.
+5. Reassignment updates the aggregate, appends history, writes a policy-versioned `question.reassigned` audit, stores a typed transactional outbox event, and notifies direct owners/reviewers atomically. Injected audit failure proves the assignment and event roll back together.
+6. Forward-only migration `0029_unknown_madame_hydra.sql` backfills legacy current assignments and history before enforcing JSON shape/non-null constraints and adding the reassignment outbox type. Mapper, migration, domain/application, API, MCP compatibility, worker, and web type coverage pass without running a database command.
+
+Deliberate boundaries:
+
+- Reassignment is a human project-administrator coordination command, not approval. Decision acceptance and protected-review rules remain separate, and no agent can become a direct human assignment target or invoke the command.
+- REST remains canonical. MCP retains existing governed question creation/read behavior but exposes no reassignment tool and remains optional.
+- Due dates, notification preferences, configurable reviewer quorum, and live isolated-PostgreSQL evidence remain separate backlog/deployment work.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -1873,6 +1969,7 @@ Deliberate boundaries:
 - Persisted-content secret detector: `packages/application/src/content-security.ts`
 - Database schema: `packages/database/src/schema.ts`
 - PostgreSQL repository: `packages/database/src/repository.ts`
+- Project repository metadata schema/mappers: `packages/database/src/schema.ts`, `packages/database/src/mappers.ts`
 - Initial migration: `packages/database/drizzle/0000_nice_bulldozer.sql`
 - Agent-run migration: `packages/database/drizzle/0001_early_ricochet.sql`
 - Assumption migration: `packages/database/drizzle/0002_complex_moondragon.sql`
@@ -1898,6 +1995,11 @@ Deliberate boundaries:
 - Slack delivery-channel migration: `packages/database/drizzle/0022_blue_betty_ross.sql`
 - Slack semantic-dedupe migration: `packages/database/drizzle/0023_normal_synch.sql`
 - Persisted adapter-diagnostic migration: `packages/database/drizzle/0024_amazing_blindfold.sql`
+- Project repository metadata migration: `packages/database/drizzle/0025_calm_vengeance.sql`
+- Project ownership configuration migration: `packages/database/drizzle/0026_thin_sheva_callister.sql`
+- Project policy and question provenance migration: `packages/database/drizzle/0027_vengeful_lady_ursula.sql`
+- Required policy owner-role provenance migration: `packages/database/drizzle/0028_cold_tombstone.sql`
+- Explainable question routing and assignment-history migration: `packages/database/drizzle/0029_unknown_madame_hydra.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -1950,4 +2052,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, explainable owner/reviewer routing and administrator-only versioned reassignment, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

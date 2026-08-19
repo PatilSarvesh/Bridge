@@ -47,7 +47,7 @@ export const demoPrincipals = {
     organizationId: "org_acme",
     projectIds: [demoProject.id],
     allProjects: true,
-    roles: ["architecture-owner", "organization-admin", "project-admin", "security-reviewer"],
+    roles: ["architecture-owner", "organization-admin", "project-admin", "security-reviewer", "data-privacy-owner"],
     displayName: "Sarvesh Patil",
   },
   contributor: {
@@ -65,7 +65,7 @@ export const demoPrincipals = {
     organizationId: "org_acme",
     projectIds: [demoProject.id],
     allProjects: true,
-    roles: ["qa-lead", "qa"],
+    roles: ["qa-lead", "qa", "data-privacy-owner"],
     displayName: "QA Lead",
   },
   securityReviewer: {

@@ -16,6 +16,9 @@ import type {
   PrincipalIdentity,
   Project,
   ProjectMembership,
+  ProjectOwnershipConfiguration,
+  ProjectPolicyConfiguration,
+  RepositoryRecord,
   Question,
   QuestionResponse,
   ServiceCredential,
@@ -31,6 +34,7 @@ import {
   contextSnapshots,
   decisions,
   projects,
+  projectRepositories,
   questionResponses,
   questions,
   notifications,
@@ -41,6 +45,8 @@ import {
   outboxEvents,
   principalIdentities,
   projectMemberships,
+  projectOwnershipConfigurations,
+  projectPolicyConfigurations,
   serviceCredentials,
 } from "./schema.js";
 
@@ -49,8 +55,11 @@ export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
 export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
+export type ProjectOwnershipConfigurationRow = typeof projectOwnershipConfigurations.$inferSelect;
+export type ProjectPolicyConfigurationRow = typeof projectPolicyConfigurations.$inferSelect;
 export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
+export type RepositoryRecordRow = typeof projectRepositories.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AdapterDiagnosticRow = typeof adapterDiagnostics.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -109,6 +118,68 @@ export function projectMembershipToRow(
 
 export function projectMembershipFromRow(row: ProjectMembershipRow): ProjectMembership {
   return { ...row };
+}
+
+export function projectOwnershipConfigurationToRow(
+  configuration: ProjectOwnershipConfiguration,
+): typeof projectOwnershipConfigurations.$inferInsert {
+  if (!configuration.updatedById || !configuration.updatedAt) {
+    throw new Error("Persisted project ownership configuration requires update provenance.");
+  }
+  return {
+    organizationId: configuration.organizationId,
+    projectId: configuration.projectId,
+    roles: configuration.roles,
+    teams: configuration.teams,
+    rules: configuration.rules,
+    version: configuration.version,
+    updatedById: configuration.updatedById,
+    updatedAt: configuration.updatedAt,
+  };
+}
+
+export function projectOwnershipConfigurationFromRow(
+  row: ProjectOwnershipConfigurationRow,
+): ProjectOwnershipConfiguration {
+  return {
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    roles: row.roles,
+    teams: row.teams,
+    rules: row.rules,
+    version: row.version,
+    updatedById: row.updatedById,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function projectPolicyConfigurationToRow(
+  configuration: ProjectPolicyConfiguration,
+): typeof projectPolicyConfigurations.$inferInsert {
+  if (!configuration.updatedById || !configuration.updatedAt) {
+    throw new Error("Persisted project policy configuration requires update provenance.");
+  }
+  return {
+    organizationId: configuration.organizationId,
+    projectId: configuration.projectId,
+    rules: configuration.rules,
+    version: configuration.version,
+    updatedById: configuration.updatedById,
+    updatedAt: configuration.updatedAt,
+  };
+}
+
+export function projectPolicyConfigurationFromRow(
+  row: ProjectPolicyConfigurationRow,
+): ProjectPolicyConfiguration {
+  return {
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    rules: row.rules,
+    version: row.version,
+    updatedById: row.updatedById,
+    updatedAt: row.updatedAt,
+  };
 }
 
 export function serviceCredentialToRow(
@@ -285,6 +356,16 @@ export function projectFromRow(row: ProjectRow): Project {
   };
 }
 
+export function repositoryRecordToRow(
+  repository: RepositoryRecord,
+): typeof projectRepositories.$inferInsert {
+  return { ...repository };
+}
+
+export function repositoryRecordFromRow(row: RepositoryRecordRow): RepositoryRecord {
+  return { ...row };
+}
+
 export function runToRow(run: AgentRun): typeof agentRuns.$inferInsert {
   return {
     id: run.id,
@@ -445,10 +526,19 @@ export function questionToRow(question: Question): typeof questions.$inferInsert
     context: question.context,
     whyItMatters: question.whyItMatters,
     risk: question.risk,
+    policyAction: question.policyAction,
+    policyVersion: question.policyVersion,
+    policyRuleKey: question.policyRuleKey,
     reversible: question.reversible,
     blocking: question.blocking,
     ownerIds: question.ownerIds,
     ownerRoles: question.ownerRoles,
+    requiredOwnerRoles: question.requiredOwnerRoles,
+    reviewerIds: question.reviewerIds,
+    reviewerRoles: question.reviewerRoles,
+    requiredReviewerRoles: question.requiredReviewerRoles,
+    routing: question.routing,
+    assignmentHistory: question.assignmentHistory,
     options: question.options,
     reviews: question.reviews,
     comments: question.comments,
@@ -506,10 +596,19 @@ export function questionFromRows(
     context: row.context,
     whyItMatters: row.whyItMatters,
     risk: row.risk,
+    policyAction: row.policyAction,
+    policyVersion: row.policyVersion,
+    policyRuleKey: row.policyRuleKey,
     reversible: row.reversible,
     blocking: row.blocking,
     ownerIds: row.ownerIds,
     ownerRoles: row.ownerRoles,
+    requiredOwnerRoles: row.requiredOwnerRoles,
+    reviewerIds: row.reviewerIds,
+    reviewerRoles: row.reviewerRoles,
+    requiredReviewerRoles: row.requiredReviewerRoles,
+    routing: row.routing,
+    assignmentHistory: row.assignmentHistory,
     options: row.options,
     reviews: row.reviews,
     comments: row.comments,
@@ -700,6 +799,7 @@ export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferIns
     action: event.action,
     subjectType: event.subjectType,
     subjectId: event.subjectId,
+    policyVersion: event.policyVersion ?? null,
     createdAt: event.createdAt,
   };
 }
@@ -715,6 +815,7 @@ export function auditEventFromRow(row: AuditEventRow): AuditEvent {
     action: row.action,
     subjectType: row.subjectType as AuditEvent["subjectType"],
     subjectId: row.subjectId,
+    ...(row.policyVersion === null ? {} : { policyVersion: row.policyVersion }),
     createdAt: row.createdAt,
   };
 }

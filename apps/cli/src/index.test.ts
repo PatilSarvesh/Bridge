@@ -14,8 +14,10 @@ interface MockState {
   projects?: Array<Record<string, unknown>>;
   serviceIdentities?: Array<Record<string, unknown>>;
   serviceRequestBodies?: Array<Record<string, unknown>>;
+  repositories?: Array<Record<string, unknown>>;
   serviceToken?: string;
   rejectSecretWrites?: boolean;
+  rejectProjectReads?: boolean;
   run?: Record<string, unknown>;
   mcpAvailable?: boolean;
   mcpMalformed?: boolean;
@@ -112,6 +114,31 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       }, existing ? 200 : 201);
     }
     if (url.pathname === "/v1/projects") return json({ items: state.projects ?? [] });
+    if (/^\/v1\/projects\/[^/]+\/repositories$/.test(url.pathname)) {
+      const projectId = url.pathname.split("/")[3];
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        const existing = state.repositories?.find((repository) =>
+          repository.projectId === projectId &&
+          repository.provider === body.provider &&
+          repository.owner === body.owner &&
+          repository.name === body.name,
+        );
+        const repository = existing ?? {
+          id: "repo_cli_1",
+          organizationId: "org_acme",
+          projectId,
+          provider: body.provider,
+          owner: body.owner,
+          name: body.name,
+          canonicalUrl: body.canonicalUrl,
+          createdAt: "2026-08-16T00:00:00.000Z",
+        };
+        if (!existing) state.repositories = [...(state.repositories ?? []), repository];
+        return json({ repository, disposition: existing ? "idempotent_replay" : "created" }, existing ? 200 : 201);
+      }
+      return json({ items: state.repositories?.filter((repository) => repository.projectId === projectId) ?? [] });
+    }
     if (/^\/v1\/projects\/[^/]+\/adapter-diagnostics$/.test(url.pathname) && init?.method === "POST") {
       if (state.diagnosticPersistenceAvailable === false) {
         return json({ code: "UNAVAILABLE", message: "Diagnostic persistence unavailable." }, 503);
@@ -132,6 +159,9 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
     }
     if (/^\/v1\/projects\/[^/]+$/.test(url.pathname)) {
       const projectId = url.pathname.split("/").at(-1);
+      if (state.rejectProjectReads) {
+        return json({ code: "NOT_FOUND", message: "Project not found." }, 404);
+      }
       return json(
         state.projects?.find((project) => project.id === projectId) ?? {
           id: projectId,
@@ -379,6 +409,120 @@ describe("Bridge CLI fallback adapter", () => {
     await expect(readFile(join(cwd, ".bridge", "project.yaml"), "utf8")).rejects.toThrow();
   });
 
+  it("selects an authorized project interactively and validates the mapping before writing", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-interactive-init-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const prompts: string[] = [];
+    const state: MockState = {
+      question: {},
+      artifacts: [],
+      assumptions: [],
+      projects: [
+        { id: "prj_alpha", organizationId: "org_acme", name: "Alpha", decisionOwnerIds: [] },
+        { id: "prj_payments", organizationId: "org_acme", name: "Payments", decisionOwnerIds: [] },
+      ],
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+      isInteractive: true,
+      prompt: async (message) => {
+        prompts.push(message);
+        return "2";
+      },
+    };
+
+    expect(await runCli(["init", "--interactive", "--repository", "bridge-repo", "--api-url", "http://bridge.test"], runtime))
+      .toBe(0);
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
+      .toContain('project_id: "prj_payments"');
+    expect(JSON.parse(stdout.at(-1) ?? "{}")).toMatchObject({
+      projectId: "prj_payments",
+      projectName: "Payments",
+      repository: "bridge-repo",
+      mappingValidated: true,
+    });
+    expect(prompts).toEqual(["Select a project number (or q to cancel): "]);
+    expect(stderr.join("\n")).toContain("Authorized Bridge projects for bridge-repo");
+  });
+
+  it("does not write repository files when API mapping validation fails", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-invalid-mapping-"));
+    const stderr: string[] = [];
+    const state: MockState = {
+      question: {},
+      artifacts: [],
+      assumptions: [],
+      rejectProjectReads: true,
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+      isInteractive: false,
+    };
+
+    expect(await runCli(["init", "prj_missing", "--api-url", "http://bridge.test"], runtime))
+      .toBe(cliExitCodes.notFound);
+    await expect(readFile(join(cwd, ".bridge", "project.yaml"), "utf8")).rejects.toThrow();
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("requires confirmation before applying an existing configuration diff", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-init-confirmation-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+      isInteractive: false,
+    };
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+    const originalConfig = await readFile(join(cwd, ".bridge", "project.yaml"), "utf8");
+
+    const interactiveRuntime: Partial<CliRuntime> = {
+      ...runtime,
+      isInteractive: true,
+      prompt: async () => "n",
+    };
+    expect(await runCli([
+      "init",
+      "prj_payments",
+      "--client",
+      "claude_code",
+      "--api-url",
+      "http://bridge.test",
+    ], interactiveRuntime)).toBe(cliExitCodes.conflict);
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8")).toBe(originalConfig);
+    expect(stderr.join("\n")).toContain("Bridge will change these files");
+
+    const approvedRuntime: Partial<CliRuntime> = {
+      ...runtime,
+      isInteractive: true,
+      prompt: async () => "yes",
+    };
+    expect(await runCli([
+      "init",
+      "prj_payments",
+      "--client",
+      "claude_code",
+      "--api-url",
+      "http://bridge.test",
+    ], approvedRuntime)).toBe(0);
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
+      .toContain('client: "claude_code"');
+    expect(stdout.at(-1)).toContain('"mappingValidated": true');
+  });
+
   it("installs or switches an adapter without registering another project", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-install-"));
     const stdout: string[] = [];
@@ -446,6 +590,11 @@ describe("Bridge CLI fallback adapter", () => {
     ], runtime)).toBe(0);
     expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
       .toContain('mcp_url: "http://mcp.test/mcp"');
+    const codexMcpConfig = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
+    expect(codexMcpConfig).toContain("# bridge:mcp:start");
+    expect(codexMcpConfig).toContain("Bridge-managed MCP configuration version: 1");
+    expect(codexMcpConfig).toContain('[mcp_servers.bridge]');
+    expect(codexMcpConfig).toContain('url = "http://mcp.test/mcp"');
     expect(await runCli(["doctor"], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain('"capabilityLevel": "instructions+mcp"');
     expect(stdout.at(-1)).toContain('"mcp": "ready"');
@@ -458,6 +607,66 @@ describe("Bridge CLI fallback adapter", () => {
     state.mcpMalformed = true;
     expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
     expect(stdout.at(-1)).toContain('"mcp": "failed"');
+  });
+
+  it("generates and safely merges the Claude project MCP configuration", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-claude-mcp-config-"));
+    const stdout: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+      environment: {},
+    };
+    await writeFile(join(cwd, ".mcp.json"), `${JSON.stringify({
+      customSetting: true,
+      mcpServers: {
+        other: { type: "http", url: "https://example.test/mcp" },
+      },
+    }, null, 2)}\n`, "utf8");
+
+    expect(await runCli([
+      "init",
+      "prj_payments",
+      "--client",
+      "claude_code",
+      "--api-url",
+      "http://bridge.test",
+      "--mcp-url",
+      "https://bridge.test/mcp",
+    ], runtime)).toBe(0);
+    const firstConfig = JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8")) as {
+      customSetting: boolean;
+      mcpServers: Record<string, Record<string, unknown>>;
+      "x-bridge": Record<string, unknown>;
+    };
+    expect(firstConfig.customSetting).toBe(true);
+    expect(firstConfig.mcpServers.other?.url).toBe("https://example.test/mcp");
+    expect(firstConfig.mcpServers.bridge).toMatchObject({
+      type: "http",
+      url: "https://bridge.test/mcp",
+      "x-bridge": { managedBy: "bridge-cli", version: 1 },
+    });
+    expect(firstConfig["x-bridge"]).toEqual({ managedBy: "bridge-cli", version: 1 });
+    expect(stdout.at(-1)).toContain('".mcp.json"');
+
+    expect(await runCli(["install", "--client", "codex"], runtime)).toBe(0);
+    expect(await readFile(join(cwd, ".codex", "config.toml"), "utf8"))
+      .toContain('[mcp_servers.bridge]');
+    const preservedClaudeConfig = JSON.parse(await readFile(join(cwd, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    expect(preservedClaudeConfig.mcpServers.other?.url).toBe("https://example.test/mcp");
+    expect(preservedClaudeConfig.mcpServers.bridge?.url).toBe("https://bridge.test/mcp");
+
+    await writeFile(join(cwd, ".mcp.json"), `${JSON.stringify({
+      mcpServers: { bridge: { type: "http", url: "https://unrelated.test/mcp" } },
+    }, null, 2)}\n`, "utf8");
+    expect(await runCli(["install", "--client", "claude_code"], runtime)).toBe(cliExitCodes.conflict);
+    expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8"))
+      .toContain('client: "codex"');
   });
 
   it("starts, reads, continues, and reports an agent run without MCP", async () => {
@@ -768,6 +977,43 @@ describe("Bridge CLI fallback adapter", () => {
       code: "INVALID_OUTPUT_MODE",
       exitCode: cliExitCodes.usage,
     });
+  });
+
+  it("links and lists project repositories through the CLI", async () => {
+    const stdout: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [], repositories: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd: "/tmp/bridge-cli",
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+      environment: {},
+    };
+
+    expect(await runCli([
+      "repository",
+      "link",
+      "prj_payments",
+      "--provider",
+      "GitHub",
+      "--owner",
+      "bridge-org",
+      "--name",
+      "bridge",
+      "--url",
+      "https://github.com/bridge-org/bridge",
+    ], runtime)).toBe(0);
+    expect(state.repositories).toEqual([expect.objectContaining({
+      projectId: "prj_payments",
+      provider: "github",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    })]);
+    expect(JSON.parse(stdout.at(-1) ?? "{}")).toMatchObject({ disposition: "created" });
+
+    expect(await runCli(["repository", "list", "prj_payments"], runtime)).toBe(0);
+    expect(JSON.parse(stdout.at(-1) ?? "{}").items).toEqual([
+      expect.objectContaining({ name: "bridge", owner: "bridge-org" }),
+    ]);
   });
 
   it("surfaces a secret rejection without printing the submitted credential", async () => {
@@ -1091,6 +1337,14 @@ describe("Bridge CLI fallback adapter", () => {
             projectRoles: { prj_payments: ["contributor"] },
             projectIds: ["prj_payments"],
             allProjects: false,
+          });
+        }
+        if (url.origin === "http://bridge.test" && url.pathname === "/v1/projects/prj_payments") {
+          return json({
+            id: "prj_payments",
+            organizationId: "org_acme",
+            name: "Payments",
+            decisionOwnerIds: [],
           });
         }
         if (url.pathname.endsWith("/context")) {
