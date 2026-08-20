@@ -80,6 +80,12 @@ const architectureReviewer: Principal = {
   displayName: "Architecture Reviewer",
 };
 
+const secondArchitectureReviewer: Principal = {
+  ...architectureReviewer,
+  id: "usr_architecture_reviewer_two",
+  displayName: "Second Architecture Reviewer",
+};
+
 const componentOwner: Principal = {
   ...owner,
   id: "usr_component_owner",
@@ -459,6 +465,24 @@ describe("Bridge decision workflow", () => {
       event.type === "question.reassigned" && "assignmentId" in event.payload)).toBe(true);
     expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id)).some((notification) =>
       notification.targetId === question.id && notification.title === "Question assignment changed")).toBe(true);
+
+    const reviewReassigned = await service.reassignQuestion(owner, question.id, {
+      expectedVersion: reassigned.version,
+      ownerIds: [owner.id],
+      ownerRoles: [],
+      reviewerIds: [owner.id],
+      reviewerRoles: ["architecture-reviewer"],
+      reason: "A second human reviewer now owns the independent architecture review lane.",
+    });
+    expect(reviewReassigned).toMatchObject({
+      ownerIds: [owner.id],
+      reviewerIds: [owner.id],
+      version: reassigned.version + 1,
+    });
+    expect((await repository.listAuditEvents(project.id)).some((event) =>
+      event.action === "question.review_reassigned" &&
+      event.subjectId === question.id &&
+      event.reason === "A second human reviewer now owns the independent architecture review lane.")).toBe(true);
   });
 
   it("rolls back a reassignment when its audit record cannot be written", async () => {
@@ -546,6 +570,7 @@ describe("Bridge decision workflow", () => {
           minimumRisk: "protected",
           requiredOwnerRoles: ["component-owner"],
           requiredReviewerRoles: ["architecture-reviewer"],
+          reviewerQuorum: { "architecture-reviewer": 2 },
         },
       ],
     };
@@ -560,6 +585,10 @@ describe("Bridge decision workflow", () => {
         requiredReviewerRoles: [],
       })]),
     });
+    expect(configured.rules).toEqual(expect.arrayContaining([expect.objectContaining({
+      key: "release-protected",
+      reviewerQuorum: { "architecture-reviewer": 2 },
+    })]));
 
     const governed = await service.createQuestion(agent, project.id, questionInput({
       idempotencyKey: "policy-quality-question",
@@ -603,6 +632,7 @@ describe("Bridge decision workflow", () => {
       blocking: true,
       policyAction: "protected_approval",
       requiredReviewerRoles: ["architecture-reviewer"],
+      requiredReviewerQuorum: { "architecture-reviewer": 2 },
     });
     await expect(service.reviewQuestion(securityReviewer, protectedQuestion.id, {
       expectedVersion: protectedQuestion.version,
@@ -615,10 +645,22 @@ describe("Bridge decision workflow", () => {
       rationale: "The production release architecture remains reversible and operationally bounded.",
     });
     expect(review).toMatchObject({ reviewerId: architectureReviewer.id, reviewerRole: "architecture-reviewer" });
+    const afterFirstReview = await service.getQuestion(owner, protectedQuestion.id);
+    expect(afterFirstReview).toMatchObject({
+      approvalStatus: {
+        satisfied: false,
+        requirements: [{ role: "architecture-reviewer", approvedCount: 1, requiredCount: 2, remainingCount: 1 }],
+      },
+    });
     await expect(service.acceptAnswer(owner, protectedQuestion.id, {
       optionKey: "transient",
       rationale: "A direct assignment does not replace the policy-required component-owner role.",
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await service.reviewQuestion(secondArchitectureReviewer, protectedQuestion.id, {
+      expectedVersion: afterFirstReview.version,
+      status: "approved",
+      rationale: "A second independent architecture reviewer confirms the protected release trade-off.",
+    });
     const protectedDecision = await service.acceptAnswer(componentOwner, protectedQuestion.id, {
       optionKey: "transient",
       rationale: "The component owner accepts after the architecture reviewer approved the protected release.",
@@ -2578,6 +2620,79 @@ describe("Bridge decision workflow", () => {
         rationale: "This must remain blocked until security review is approved.",
       }),
     ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+  });
+
+  it("exposes approval status and limits overrides to audited project administrators", async () => {
+    const { repository, service } = await runtime();
+    const pending = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-approval-override",
+      title: "Which privacy retention control should be accepted administratively?",
+      category: "privacy",
+      risk: "low",
+      intendedOwnerIds: [owner.id],
+    }));
+    const pendingDetail = await service.getQuestion(organizationAdmin, pending.id);
+    expect(pendingDetail).toMatchObject({
+      risk: "protected",
+      approvalStatus: {
+        satisfied: false,
+        overridden: false,
+        requirements: [{ role: "security-reviewer", approvedCount: 0, requiredCount: 1, status: "pending" }],
+      },
+      canOverrideApproval: true,
+    });
+    await expect(service.overrideQuestionApproval(agent, pending.id, {
+      expectedVersion: pending.version,
+      optionKey: "transient",
+      rationale: "The agent cannot authorize a protected decision.",
+      reason: "Only a project administrator may use this override path.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.overrideQuestionApproval(contributor, pending.id, {
+      expectedVersion: pending.version,
+      optionKey: "transient",
+      rationale: "A contributor cannot authorize a protected decision.",
+      reason: "The contributor does not hold the project administrator role.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const decision = await service.overrideQuestionApproval(organizationAdmin, pending.id, {
+      expectedVersion: pending.version,
+      optionKey: "transient",
+      rationale: "The privacy control is bounded and the designated reviewer is unavailable for this pilot decision.",
+      reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+    });
+    expect(decision.ownerId).toBe(organizationAdmin.id);
+    expect(await service.getQuestion(organizationAdmin, pending.id)).toMatchObject({
+      status: "accepted",
+      approvalOverride: {
+        changedById: organizationAdmin.id,
+        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+        questionVersion: pending.version + 1,
+      },
+    });
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "question.approval_overridden" && event.subjectId === pending.id)).toMatchObject({
+      actorId: organizationAdmin.id,
+      reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+    });
+
+    const alreadyReviewed = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-approval-override-satisfied",
+      title: "Which privacy deletion control should be accepted normally?",
+      category: "privacy",
+      risk: "low",
+      intendedOwnerIds: [owner.id],
+    }));
+    await service.reviewQuestion(securityReviewer, alreadyReviewed.id, {
+      expectedVersion: alreadyReviewed.version,
+      status: "approved",
+      rationale: "The privacy control is bounded and includes an enforceable deletion path.",
+    });
+    await expect(service.overrideQuestionApproval(owner, alreadyReviewed.id, {
+      expectedVersion: alreadyReviewed.version + 1,
+      optionKey: "transient",
+      rationale: "An override cannot replace an approval that is already complete.",
+      reason: "The required reviewer approval is already recorded and ordinary acceptance is available.",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("versions specifications, requires human approval, and returns only approved versions as context", async () => {

@@ -10,7 +10,7 @@ This document records the implemented server-side authorization contract for BRG
 - A human decision owner may be selected by question owner ID/role or by the project's configured decision-owner IDs.
 - A specification approver must be a configured artifact reviewer, configured project decision owner, project administrator, or organization administrator.
 - A non-human principal can never satisfy `assertHuman`, even if it is assigned a human-looking role or appears in an owner/reviewer list.
-- Protected acceptance requires both ordinary acceptance authority and an approved human security review, unless the accepting human independently has the security-reviewer role.
+- Protected acceptance requires ordinary owner authority plus every configured reviewer-role quorum. A rejection blocks ordinary acceptance; only a human project administrator may use the versioned override path, which records a bounded reason and does not manufacture reviewer evidence.
 
 ## PRD permissions matrix mapping
 
@@ -22,6 +22,7 @@ This document records the implemented server-side authorization contract for BRG
 | Reassign question | Deny | Deny | Deny | Deny | Allow | Allow | `reassignQuestion`; unresolved questions only, human project-admin policy, active-human direct targets, optimistic version, append-only assignment history, audit, notification, and outbox event |
 | Accept ordinary decision | Deny | Deny | Deny unless also owner | Allow | Allow | Allow | `acceptAnswer`; human owner/owner-role/project-admin policy |
 | Accept protected approval | Deny | Deny | Policy-based | Policy-based | Policy-based | Policy-based | `reviewQuestion` plus `acceptAnswer`; separate approved security review and atomic acceptance |
+| Override protected approval | Deny | Deny | Deny | Deny | Allow | Allow | `overrideQuestionApproval`; unresolved protected question, project-admin role, expected version, rationale, bounded reason, and `question.approval_overridden` audit |
 | Record assumption | Allow within assumption policy | Allow | Allow | Allow | Allow | Allow | `recordAssumption`; agents require linked run provenance and all callers remain subject to low-risk/reversible policy |
 | Publish artifact draft | Allow | Allow | Allow | Allow | Allow | Allow | `publishArtifact`; publishing never creates approval |
 | Approve artifact | Deny | Deny | Policy-based | Allow | Allow | Allow | `approveArtifactVersion`; immutable version, human authority, and configured reviewer/owner/admin policy |
@@ -56,7 +57,7 @@ This masks record existence while preserving `FORBIDDEN` for an authenticated pr
 
 - `packages/domain/src/index.test.ts` covers project-role isolation, same-organization org-admin inheritance, cross-organization denial, configured decision-owner approval, and non-human approval denial.
 - `packages/application/src/index.test.ts` covers matrix-level human/agent policies, administrator-only reassignment with active-human targets and rollback, same-organization and cross-organization ID guessing for all implemented aggregate types, search/inbox/notification/outbox/audit isolation, and stable absent-versus-inaccessible errors.
-- `apps/api/src/app.test.ts` covers REST scope enforcement, resource-specific ID masking, administrator-only versioned reassignment, human-only approval, protected-review sequencing, and exactly one successful decision under concurrent protected acceptance requests.
+- `apps/api/src/app.test.ts` covers REST scope enforcement, resource-specific ID masking, administrator-only versioned reassignment, quorum policy validation, human-only approval/override, protected-review sequencing, audit-reason export, and exactly one successful decision under concurrent protected acceptance requests.
 - `apps/mcp/src/bridge-server.test.ts` verifies the MCP tool list contains agent submission/context tools but no human approval or lifecycle commands.
 - `packages/database/src/row-security.test.ts` verifies the forward-only migration enables and forces every expected tenant policy even when CI has no live database.
 - `packages/database/src/repository.integration.test.ts` covers serializable aggregate transactions, row locking, tenant predicates, composite tenant/project constraints, forced RLS catalog state, missing-scope default denial, and cross-organization read/write filtering when `BRIDGE_TEST_DATABASE_URL` points to an isolated PostgreSQL database.

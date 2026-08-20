@@ -223,6 +223,7 @@ export interface ProjectPolicyRule {
   readonly minimumRisk: Risk;
   readonly requiredOwnerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly reviewerQuorum?: Readonly<Record<string, number>>;
 }
 
 export interface ProjectPolicyConfiguration {
@@ -339,6 +340,32 @@ export interface QuestionComment {
   readonly authorType: PrincipalType;
   readonly body: string;
   readonly createdAt: string;
+}
+
+export interface QuestionApprovalOverride {
+  readonly changedById: string;
+  readonly changedByType: PrincipalType;
+  readonly reason: string;
+  readonly createdAt: string;
+  readonly questionVersion: number;
+}
+
+export type QuestionApprovalRequirementStatus = "satisfied" | "pending" | "rejected";
+
+export interface QuestionApprovalRequirement {
+  readonly role: string;
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly rejectedCount: number;
+  readonly remainingCount: number;
+  readonly status: QuestionApprovalRequirementStatus;
+  readonly reviewerIds: readonly string[];
+}
+
+export interface QuestionApprovalStatus {
+  readonly requirements: readonly QuestionApprovalRequirement[];
+  readonly satisfied: boolean;
+  readonly overridden: boolean;
 }
 
 export type QuestionRouteSource =
@@ -478,6 +505,7 @@ export interface Question {
   readonly reviewerIds: readonly string[];
   readonly reviewerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly requiredReviewerQuorum?: Readonly<Record<string, number>>;
   readonly routing: QuestionRoutingExplanation;
   readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly options: readonly QuestionOption[];
@@ -491,6 +519,7 @@ export interface Question {
   readonly responses: readonly QuestionResponse[];
   readonly reviews: readonly QuestionReview[];
   readonly comments: readonly QuestionComment[];
+  readonly approvalOverride?: QuestionApprovalOverride;
   readonly acceptedResponseId?: string;
   readonly decisionId?: string;
   readonly version: number;
@@ -511,6 +540,8 @@ export interface QuestionInboxItem extends Question {
   readonly canAccept: boolean;
   readonly reviewRoles: readonly string[];
   readonly canReassign: boolean;
+  readonly canOverrideApproval: boolean;
+  readonly approvalStatus: QuestionApprovalStatus;
   readonly dueStatus: QuestionDueStatus;
 }
 
@@ -613,6 +644,7 @@ export interface AuditEvent {
   readonly action: string;
   readonly subjectType: "project" | "repository" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
+  readonly reason?: string;
   readonly policyVersion?: number;
   readonly createdAt: string;
 }
@@ -702,11 +734,45 @@ function requiredQuestionReviewerRoles(question: Question): readonly string[] {
       : [];
 }
 
+export function questionApprovalStatus(question: Question): QuestionApprovalStatus {
+  const quorum = question.requiredReviewerQuorum ?? {};
+  const requirements = requiredQuestionReviewerRoles(question).map((role): QuestionApprovalRequirement => {
+    const configuredCount = Object.entries(quorum).find(([configuredRole]) => normalizeRoleName(configuredRole) === role)?.[1];
+    const requiredCount = Math.max(1, configuredCount ?? 1);
+    const roleReviews = question.reviews.filter((review) => normalizeRoleName(review.reviewerRole) === role);
+    const approvedReviewerIds = [...new Set(
+      roleReviews.filter((review) => review.status === "approved").map((review) => review.reviewerId),
+    )];
+    const rejectedReviewerIds = [...new Set(
+      roleReviews.filter((review) => review.status === "rejected").map((review) => review.reviewerId),
+    )];
+    const approvedCount = Math.min(requiredCount, approvedReviewerIds.length);
+    const satisfied = approvedCount >= requiredCount;
+    return {
+      role,
+      requiredCount,
+      approvedCount,
+      rejectedCount: rejectedReviewerIds.length,
+      remainingCount: Math.max(0, requiredCount - approvedCount),
+      status: satisfied ? "satisfied" : rejectedReviewerIds.length > 0 ? "rejected" : "pending",
+      reviewerIds: [...new Set(roleReviews.map((review) => review.reviewerId))],
+    };
+  });
+  return {
+    requirements,
+    satisfied: requirements.every((requirement) => requirement.status === "satisfied"),
+    overridden: Boolean(question.approvalOverride),
+  };
+}
+
 function hasRequiredQuestionReviews(principal: Principal, question: Question): boolean {
-  return requiredQuestionReviewerRoles(question).every((requiredRole) =>
-    principalHasRole(principal, requiredRole, question.projectId) ||
-    question.reviews.some((review) =>
-      review.status === "approved" && normalizeRoleName(review.reviewerRole) === requiredRole));
+  if (question.risk !== "protected") return true;
+  return questionApprovalStatus(question).requirements.every((requirement) => {
+    if (requirement.status === "rejected" && requirement.approvedCount < requirement.requiredCount) return false;
+    const principalCountsAsApproval = principalHasRole(principal, requirement.role, question.projectId) &&
+      !requirement.reviewerIds.includes(principal.id);
+    return requirement.approvedCount + (principalCountsAsApproval ? 1 : 0) >= requirement.requiredCount;
+  });
 }
 
 export function canAcceptQuestion(principal: Principal, question: Question): boolean {
@@ -743,6 +809,7 @@ export function questionInboxItem(
   question: Question,
   now: Date,
 ): QuestionInboxItem {
+  const approvalStatus = questionApprovalStatus(question);
   return {
     ...question,
     inboxReasons: questionInboxReasons(principal, question),
@@ -751,6 +818,12 @@ export function questionInboxItem(
     canReassign: principal.type === "human" &&
       ["open", "in_discussion"].includes(question.status) &&
       principalHasRole(principal, "project-admin", question.projectId),
+    canOverrideApproval: principal.type === "human" &&
+      ["open", "in_discussion"].includes(question.status) &&
+      question.risk === "protected" &&
+      principalHasRole(principal, "project-admin", question.projectId) &&
+      !canAcceptQuestion(principal, question),
+    approvalStatus,
     dueStatus: questionDueStatus(question, now),
   };
 }

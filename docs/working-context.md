@@ -1928,7 +1928,7 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- This is the PILOT-021 limited declarative schema evaluated in application code, not a general policy language. Selectors are exact, the safety matrix is code-owned, and custom quorum/conditional expressions remain outside this slice.
+- This is the PILOT-021 limited declarative schema evaluated in application code, not a general policy language. Selectors are exact, the safety matrix is code-owned, and conditional expressions remain outside this slice; bounded per-reviewer-role quorum is implemented.
 - BRG-031 now applies ownership rules and policy authority to explainable routing and reassignment as recorded in section 20.56.
 - REST remains canonical. MCP consumes the resulting governed question behavior through existing application commands but has no policy-management or direct database path.
 
@@ -1947,7 +1947,7 @@ Deliberate boundaries:
 
 - Reassignment is a human project-administrator coordination command, not approval. Decision acceptance and protected-review rules remain separate, and no agent can become a direct human assignment target or invoke the command.
 - REST remains canonical. MCP retains existing governed question creation/read behavior but exposes no reassignment tool and remains optional.
-- Notification preferences, configurable reviewer quorum, and live isolated-PostgreSQL evidence remain separate backlog/deployment work. Due-aware inbox behavior is recorded in section 20.57.
+- Notification preferences and live isolated-PostgreSQL evidence remain separate backlog/deployment work. Due-aware inbox behavior is recorded in section 20.57.
 
 ### 20.57 Implemented due-aware personalized inbox and server action authority
 
@@ -1963,9 +1963,26 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - Due timestamps are optional question metadata supplied through canonical question creation. A separate deadline-change command, reminders/escalations, and notification preferences remain future workflow policy.
-- Multi-role quorum, administrative approval override, and review reassignment remain BRG-043 work; this inbox slice only exposes the current server-authorized review roles and never grants approval authority locally.
+- Multi-role quorum, administrative approval override, and review reassignment are now implemented in BRG-043; this inbox slice exposes their server-derived status and action authority and never grants approval authority locally.
 - URL state makes one project inbox view shareable and restorable without introducing another persisted preference aggregate. Server-stored personal views and a cross-project aggregate remain later product choices.
 - REST remains canonical. MCP uses the same read contract and remains optional; no human mutation path was added to MCP.
+
+### 20.58 Implemented protected approval quorum, override, reassignment audit, and question provenance
+
+Implemented and locally verified:
+
+1. Project policy rules accept an optional bounded reviewer quorum per normalized required reviewer role. Non-required roles and non-protected actions are rejected at the REST contract and application boundaries; stronger matching policy rules merge quorum requirements conservatively.
+2. Protected question reads expose approval requirements with approved, rejected, remaining, and satisfied/pending/rejected status. Quorum counts distinct human reviewer IDs, and rejected requirements block ordinary acceptance until enough approved reviews exist.
+3. Human project administrators can use canonical `POST /v1/questions/:questionId/override` with an expected version, decision rationale, and bounded reason when a protected reviewer requirement cannot be completed. Agents and non-admin humans are denied; the command creates the decision as a human action, stores only bounded override metadata, and writes a separate `question.approval_overridden` audit reason.
+4. Reviewer-only reassignment is distinguished as `question.review_reassigned` while retaining the existing versioned assignment history, notification, and transactional outbox behavior. Reassignment remains coordination, not approval authority.
+5. The web Questions detail adds a compact provenance disclosure for the linked run and scope, displays approval counts, exposes only server-authorized review/override actions, and the Audit view/CSV includes bounded administrative reasons.
+6. Forward-only migration `0031_deep_vampiro.sql` adds effective reviewer quorum and approval-override JSON metadata to questions plus a nullable audit reason. Domain/application/REST/API/web/database mapper and migration tests cover quorum, rejection blocking, override authorization/conflicts, reassignment auditing, audit export, and legacy mapper compatibility. No database command was run; PostgreSQL integration remains gated by an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
+
+Deliberate boundaries:
+
+- The override is an exceptional human administrative decision, not synthetic reviewer evidence; MCP exposes no approval or override mutation and REST remains canonical.
+- Reviewer assignment still uses the existing role/direct-target coordination model. Reviewer directory UX, notification preferences, comment edit history, mentions, reopen workflow, related work links, and live isolated-PostgreSQL evidence remain follow-up work.
+- Reasons are operational audit metadata only. Bridge continues to reject and avoid storing secrets, raw transcripts, prompts, answers outside their governed records, or private reasoning.
 
 ## 21. Important implementation files
 
@@ -2019,6 +2036,7 @@ Deliberate boundaries:
 - Required policy owner-role provenance migration: `packages/database/drizzle/0028_cold_tombstone.sql`
 - Explainable question routing and assignment-history migration: `packages/database/drizzle/0029_unknown_madame_hydra.sql`
 - Question due-date and project/due index migration: `packages/database/drizzle/0030_gray_smasher.sql`
+- Protected approval quorum, override metadata, and audit-reason migration: `packages/database/drizzle/0031_deep_vampiro.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -2071,4 +2089,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, explainable owner/reviewer routing and administrator-only versioned reassignment, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
