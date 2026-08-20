@@ -187,7 +187,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — GitHub Actions runs typecheck, tests, builds, and the isolated PostgreSQL integration test; formatting/lint, schema compatibility, dependency, and secret-scanning gates remain
+- **Status:** Partial — GitHub Actions runs deterministic format/boundary/REST-MCP surface/secret gates, typecheck, tests, builds, isolated PostgreSQL integration, and a production dependency audit; full formatter/linter integration, request/response schema compatibility, and deeper dependency-policy gates remain
 - **Dependencies:** BRG-002
 - **PRD references:** MVP acceptance criteria 14
 

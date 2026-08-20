@@ -55,5 +55,8 @@ jobs:
             -v bridge_maintenance_role=bridge_maintenance \
             -f scripts/provision-postgres-roles.sql
 
-      - name: Run typecheck, tests, and production builds
+      - name: Run repository quality gates, typecheck, tests, and production builds
         run: pnpm check
+
+      - name: Audit production dependencies
+        run: pnpm dependency:check

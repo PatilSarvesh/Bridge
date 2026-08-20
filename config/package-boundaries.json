@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "requiredScripts": ["build", "test", "typecheck"],
+  "packages": {
+    "@bridge/contracts": {
+      "path": "packages/contracts",
+      "allowedWorkspaceDependencies": []
+    },
+    "@bridge/domain": {
+      "path": "packages/domain",
+      "allowedWorkspaceDependencies": ["@bridge/contracts"]
+    },
+    "@bridge/observability": {
+      "path": "packages/observability",
+      "allowedWorkspaceDependencies": []
+    },
+    "@bridge/application": {
+      "path": "packages/application",
+      "allowedWorkspaceDependencies": [
+        "@bridge/contracts",
+        "@bridge/domain",
+        "@bridge/observability"
+      ]
+    },
+    "@bridge/auth": {
+      "path": "packages/auth",
+      "allowedWorkspaceDependencies": ["@bridge/domain"]
+    },
+    "@bridge/database": {
+      "path": "packages/database",
+      "allowedWorkspaceDependencies": [
+        "@bridge/application",
+        "@bridge/contracts",
+        "@bridge/domain",
+        "@bridge/observability"
+      ]
+    },
+    "@bridge/test-support": {
+      "path": "packages/test-support",
+      "allowedWorkspaceDependencies": ["@bridge/application", "@bridge/domain"]
+    },
+    "@bridge/api": {
+      "path": "apps/api",
+      "allowedWorkspaceDependencies": [
+        "@bridge/application",
+        "@bridge/auth",
+        "@bridge/contracts",
+        "@bridge/database",
+        "@bridge/domain",
+        "@bridge/observability",
+        "@bridge/test-support"
+      ]
+    },
+    "@bridge/mcp": {
+      "path": "apps/mcp",
+      "allowedWorkspaceDependencies": [
+        "@bridge/application",
+        "@bridge/auth",
+        "@bridge/contracts",
+        "@bridge/database",
+        "@bridge/domain",
+        "@bridge/observability",
+        "@bridge/test-support"
+      ]
+    },
+    "@bridge/cli": {
+      "path": "apps/cli",
+      "allowedWorkspaceDependencies": []
+    },
+    "@bridge/web": {
+      "path": "apps/web",
+      "allowedWorkspaceDependencies": []
+    },
+    "@bridge/worker": {
+      "path": "apps/worker",
+      "allowedWorkspaceDependencies": [
+        "@bridge/application",
+        "@bridge/database",
+        "@bridge/domain",
+        "@bridge/observability"
+      ]
+    }
+  }
+}
