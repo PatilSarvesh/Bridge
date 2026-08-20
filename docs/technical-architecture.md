@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes and MCP-side token issuance remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse/mapped REST/MCP bearer capabilities | Server-side membership remains authoritative; external scope issuance and MCP-side token issuance remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -220,7 +220,7 @@ The domain package must not depend on web frameworks, MCP transports, SQL client
 
 ## 7. Tenant and identity model
 
-The web/API foundation implements the human OIDC portion of this model and a coarse capability gate for non-human bearer principals. Other principal flows and endpoint-specific grants remain the target architecture and are identified below where incomplete.
+The web/API foundation implements the human OIDC portion of this model and a coarse-compatible, mapped capability gate for non-human bearer principals. External authorization-server scope issuance and other principal flows remain the target architecture and are identified below where incomplete.
 
 ### 7.1 Principal types
 
@@ -261,7 +261,7 @@ The implemented CLI flow uses a separate native/public client ID and never recei
 
 ### 7.3 Authorization model
 
-Use RBAC for broad capabilities and ABAC/policy checks for record-specific authority.
+Use RBAC for broad capabilities and ABAC/policy checks for record-specific authority. Non-human bearer principals may use coarse compatibility grants or a bounded mapped scope such as `bridge:questions:read`, `bridge:runs:write`, or `bridge:project:admin`; the transport checks the mapped capability before application policy runs. A fine-grained scope never broadens a human-only application command, and human principals continue to rely on membership and role policy rather than provider scopes.
 
 Examples:
 
@@ -614,7 +614,7 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the coarse REST capability boundary (`bridge:read`, `bridge:write`, or `bridge:admin`); endpoint-specific OAuth admin scopes remain deferred.
+Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the mapped REST capability boundary (`bridge:project:admin`, `bridge:organization:admin`, or the explicit `bridge:admin` wildcard), with coarse `bridge:read`/`bridge:write` compatibility grants retained; application role and human-approval checks remain authoritative.
 
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
 
@@ -635,7 +635,7 @@ Project policy configuration is managed through canonical administrator REST end
 - Serve Streamable HTTP at a versioned endpoint such as `/mcp` with protocol negotiation handled by the MCP library.
 - Authenticate before MCP initialization completes.
 - In OIDC mode, validate `Authorization: Bearer` through the shared issuer/JWKS verifier, require the dedicated `BRIDGE_MCP_OIDC_AUDIENCE`, resolve the subject and organization claim through active Bridge membership, and expose protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`.
-- Enforce coarse capabilities per tool: `bridge:read` for reads, `bridge:write` for writes, and `bridge:admin` for both. Human principals remain governed by server-side membership and role policy.
+- Enforce the mapped capability for each tool family, retaining `bridge:read`/`bridge:write` compatibility grants and the explicit `bridge:admin` wildcard. Human principals remain governed by server-side membership and role policy.
 - In local development only, permit the explicit fixed principal fallback when OIDC is not configured. Production startup fails closed without MCP OIDC configuration.
 - Attach a stable agent identity and optional delegated human operator.
 - Keep MCP sessions stateless with respect to domain data; durable state lives in Bridge.
@@ -670,7 +670,7 @@ Human acceptance and approval operations are intentionally absent from ordinary 
 
 Tools should declare accurate read/write behavior so clients can apply approval policies. The server must still enforce authorization even if a client auto-approves a tool call.
 
-The first implemented capability boundary uses these coarse scopes:
+The capability boundary supports these coarse compatibility scopes:
 
 ```text
 bridge:read
@@ -678,17 +678,33 @@ bridge:write
 bridge:admin
 ```
 
-Recommended future endpoint-specific scopes:
+The mapped least-privilege catalog additionally includes:
 
 ```text
+bridge:projects:read
+bridge:projects:write
+bridge:repositories:read
+bridge:repositories:write
 bridge:context:read
-bridge:questions:read
-bridge:questions:create
-bridge:assumptions:create
-bridge:artifacts:read
-bridge:artifacts:publish
+bridge:runs:read
 bridge:runs:write
+bridge:questions:read
+bridge:questions:write
+bridge:assumptions:read
+bridge:assumptions:write
+bridge:decisions:read
+bridge:decisions:write
+bridge:artifacts:read
+bridge:artifacts:write
+bridge:notifications:read
+bridge:notifications:write
+bridge:diagnostics:write
+bridge:organization:read
+bridge:organization:admin
+bridge:project:admin
 ```
+
+REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible, and `bridge:admin` is the explicit wildcard; Bridge does not issue these scopes itself.
 
 ### 13.4 Idempotency
 
@@ -925,7 +941,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 ### 20.2 Required controls
 
 - TLS for all network communication.
-- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific tool scopes and MCP-side token issuance remain future work.
+- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require a mapped resource/admin scope, a compatible coarse `bridge:read`/`bridge:write` capability, or the explicit `bridge:admin` wildcard; external scope issuance and MCP-side token issuance remain future work.
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.

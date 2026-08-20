@@ -895,7 +895,7 @@ describe("Bridge CLI fallback adapter", () => {
       "--scope",
       "bridge:read",
       "--scope",
-      "bridge:write",
+      "bridge:questions:write",
       "--role",
       "agent",
       "--project",
@@ -918,7 +918,7 @@ describe("Bridge CLI fallback adapter", () => {
       roles: ["agent"],
       allProjects: true,
       projectMemberships: [{ projectId: "prj_hospital", roles: ["contributor", "qa"] }],
-      scopes: ["bridge:read", "bridge:write"],
+      scopes: ["bridge:read", "bridge:questions:write"],
       expiresAt: "2026-12-01T00:00:00Z",
     });
     expect(await readFile(join(cwd, ".bridge", "project.yaml"), "utf8").catch(() => "")).toBe("");

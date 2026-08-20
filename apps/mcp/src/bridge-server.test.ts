@@ -408,7 +408,7 @@ describe("Bridge MCP tools", () => {
     });
     expect(writeResult.isError).toBe(true);
     expect((writeResult.content as Array<{ readonly text?: string }>)[0])
-      .toMatchObject({ text: expect.stringContaining("bridge:write") });
+      .toMatchObject({ text: expect.stringContaining("bridge:runs:write") });
 
     const noScopeServer = createBridgeMcpServer(runtime.service, { ...demoPrincipals.agent, scopes: [] });
     const noScopeClient = new Client({ name: "bridge-missing-scope-test-client", version: "0.1.0" });
@@ -425,7 +425,34 @@ describe("Bridge MCP tools", () => {
     });
     expect(noScopeResult.isError).toBe(true);
     expect((noScopeResult.content as Array<{ readonly text?: string }>)[0])
-      .toMatchObject({ text: expect.stringContaining("bridge:read") });
+      .toMatchObject({ text: expect.stringContaining("bridge:artifacts:read") });
+  });
+
+  it("limits fine-grained MCP scopes to their mapped tool family", async () => {
+    const runtime = await createDemoRuntime();
+    const questionsOnlyAgent = { ...demoPrincipals.agent, scopes: ["bridge:questions:read"] } as const;
+    const server = createBridgeMcpServer(runtime.service, questionsOnlyAgent);
+    const client = new Client({ name: "mcp-fine-scope-test-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    const questions = await client.callTool({
+      name: "bridge_list_pending",
+      arguments: { projectId: demoProject.id },
+    });
+    expect(questions.isError).not.toBe(true);
+    const artifacts = await client.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    expect(artifacts.isError).toBe(true);
+    expect((artifacts.content as Array<{ readonly text?: string }>)[0])
+      .toMatchObject({ text: expect.stringContaining("bridge:artifacts:read") });
   });
 
   it("records bounded tool success and error telemetry without request arguments", async () => {

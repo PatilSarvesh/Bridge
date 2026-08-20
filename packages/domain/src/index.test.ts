@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   assertCanApproveArtifact,
   assertProjectAccess,
+  bridgeScopes,
   principalHasRole,
+  principalHasScope,
   reviewDateFor,
   type Artifact,
   type Principal,
@@ -19,6 +21,25 @@ describe("decision review policy", () => {
 
   it("reviews protected decisions after 90 days", () => {
     expect(reviewDateFor("protected", createdAt)).toBe("2026-04-01T00:00:00.000Z");
+  });
+});
+
+describe("capability scopes", () => {
+  const agent: Principal = {
+    id: "agt_scope_test",
+    type: "agent",
+    organizationId: "org_one",
+    projectIds: ["prj_one"],
+    roles: ["agent"],
+    displayName: "Scoped Agent",
+  };
+
+  it("supports least-privilege resource scopes without widening admin capabilities", () => {
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.questionsRead] }, bridgeScopes.questionsRead)).toBe(true);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.questionsRead] }, bridgeScopes.projectsRead)).toBe(false);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.questionsRead)).toBe(true);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.projectAdmin)).toBe(false);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.admin] }, bridgeScopes.projectAdmin)).toBe(true);
   });
 });
 

@@ -1157,7 +1157,33 @@ async function runLogout(
 }
 
 type ServiceIdentityType = "agent" | "ci" | "integration";
-type ServiceCapabilityScope = "bridge:read" | "bridge:write" | "bridge:admin";
+const serviceCapabilityScopes = [
+  "bridge:read",
+  "bridge:write",
+  "bridge:admin",
+  "bridge:projects:read",
+  "bridge:projects:write",
+  "bridge:repositories:read",
+  "bridge:repositories:write",
+  "bridge:context:read",
+  "bridge:runs:read",
+  "bridge:runs:write",
+  "bridge:questions:read",
+  "bridge:questions:write",
+  "bridge:assumptions:read",
+  "bridge:assumptions:write",
+  "bridge:decisions:read",
+  "bridge:decisions:write",
+  "bridge:artifacts:read",
+  "bridge:artifacts:write",
+  "bridge:notifications:read",
+  "bridge:notifications:write",
+  "bridge:diagnostics:write",
+  "bridge:organization:read",
+  "bridge:organization:admin",
+  "bridge:project:admin",
+] as const;
+type ServiceCapabilityScope = (typeof serviceCapabilityScopes)[number];
 
 function parseServiceIdentityType(value: string): ServiceIdentityType {
   if (value !== "agent" && value !== "ci" && value !== "integration") {
@@ -1171,12 +1197,12 @@ function parseServiceIdentityType(value: string): ServiceIdentityType {
 }
 
 function parseServiceScopes(args: readonly string[]): readonly ServiceCapabilityScope[] {
-  const supported = new Set<ServiceCapabilityScope>(["bridge:read", "bridge:write", "bridge:admin"]);
+  const supported = new Set<ServiceCapabilityScope>(serviceCapabilityScopes);
   const values = commaSeparatedOptionValues(args, "--scope");
   if (values.length === 0) {
     throw new CliError(
       "SERVICE_SCOPES_REQUIRED",
-      "service identity create requires at least one --scope (bridge:read, bridge:write, or bridge:admin).",
+      "service identity create requires at least one --scope (for example bridge:read or bridge:questions:write).",
       cliExitCodes.usage,
     );
   }
@@ -1184,7 +1210,7 @@ function parseServiceScopes(args: readonly string[]): readonly ServiceCapability
     if (!supported.has(value as ServiceCapabilityScope)) {
       throw new CliError(
         "INVALID_SERVICE_SCOPE",
-        "--scope values must be bridge:read, bridge:write, or bridge:admin.",
+        "--scope must be a supported Bridge capability such as bridge:read or bridge:questions:write.",
         cliExitCodes.usage,
       );
     }

@@ -1,3 +1,4 @@
+import { bridgeCapabilityScopes } from "@bridge/contracts";
 import type {
   AdapterDiagnosticCheckName,
   AdapterDiagnosticCheckStatus,
@@ -24,6 +25,7 @@ import type {
   QuestionType,
   Risk,
   Scope,
+  BridgeCapabilityScope,
 } from "@bridge/contracts";
 
 export type {
@@ -733,16 +735,41 @@ export function principalHasRole(principal: Principal, role: string, projectId?:
   ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
 }
 
-export const bridgeScopes = {
-  read: "bridge:read",
-  write: "bridge:write",
-} as const;
+export const bridgeScopes = bridgeCapabilityScopes;
 
-export type BridgeScope = (typeof bridgeScopes)[keyof typeof bridgeScopes];
+export type BridgeScope = BridgeCapabilityScope;
+
+const fineGrainedReadScopes = new Set<BridgeScope>([
+  bridgeScopes.projectsRead,
+  bridgeScopes.repositoriesRead,
+  bridgeScopes.contextRead,
+  bridgeScopes.runsRead,
+  bridgeScopes.questionsRead,
+  bridgeScopes.assumptionsRead,
+  bridgeScopes.decisionsRead,
+  bridgeScopes.artifactsRead,
+  bridgeScopes.notificationsRead,
+  bridgeScopes.organizationRead,
+]);
+const fineGrainedWriteScopes = new Set<BridgeScope>([
+  bridgeScopes.projectsWrite,
+  bridgeScopes.repositoriesWrite,
+  bridgeScopes.runsWrite,
+  bridgeScopes.questionsWrite,
+  bridgeScopes.assumptionsWrite,
+  bridgeScopes.decisionsWrite,
+  bridgeScopes.artifactsWrite,
+  bridgeScopes.notificationsWrite,
+  bridgeScopes.diagnosticsWrite,
+]);
 
 export function principalHasScope(principal: Principal, scope: BridgeScope): boolean {
   if (principal.type === "human") return true;
-  return principal.scopes?.includes(scope) === true || principal.scopes?.includes("bridge:admin") === true;
+  const granted = new Set(principal.scopes ?? []);
+  if (granted.has(bridgeScopes.admin) || granted.has(scope)) return true;
+  if (fineGrainedReadScopes.has(scope)) return granted.has(bridgeScopes.read);
+  if (fineGrainedWriteScopes.has(scope)) return granted.has(bridgeScopes.write);
+  return false;
 }
 
 export function assertPrincipalScope(

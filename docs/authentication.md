@@ -5,7 +5,7 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse REST bearer-capability enforcement, standalone MCP bearer validation, revocable scoped service identities, and durable human web sign-in/logout audit events are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, and failed/unknown authentication attribution remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse and mapped least-privilege REST/MCP bearer-capability enforcement, standalone MCP bearer validation, revocable scoped service identities, and durable human web sign-in/logout audit events are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, external scope issuance, and failed/unknown authentication attribution remain separate work.
 
 ## Security boundary
 
@@ -22,22 +22,23 @@ Browser sign-in uses Authorization Code with PKCE. Bridge keeps the verifier, st
 
 After the callback resolves an active human organization member, the API appends `authentication.succeeded` to the tenant-scoped organization audit stream before returning the session redirect. Cookie-backed logout resolves the trusted session principal and appends `authentication.logged_out` before clearing the session. Non-human principals cannot establish a web session. Missing, invalid, expired, or otherwise untrusted credentials are not assigned a durable authentication audit event because the request has no trusted tenant context; they are recorded only through privacy-safe correlation-aware logs.
 
-For non-human bearer principals, Bridge validates the optional scope claim and applies coarse capabilities at the REST boundary:
+For non-human bearer principals, Bridge validates the optional scope claim and applies capabilities at the REST boundary:
 
-- `bridge:read` is required for `GET` and `HEAD` requests under `/v1` (except `/v1/auth/*`).
-- `bridge:write` is required for mutating `/v1` requests.
-- `bridge:admin` satisfies both coarse capabilities.
+- `bridge:read` and `bridge:write` remain compatibility grants for every mapped read or write resource family.
+- Fine-grained scopes such as `bridge:projects:read`, `bridge:questions:write`, `bridge:runs:read`, and `bridge:artifacts:write` grant only their mapped REST resource family.
+- `bridge:organization:admin` and `bridge:project:admin` identify administrative endpoint families; existing application policy still requires a human administrator for the current organization/project administration commands.
+- `bridge:admin` is the explicit wildcard and satisfies every mapped scope.
 - Human principals continue to use server-side membership and role policy; provider scopes do not replace those checks.
 
-Missing capabilities return `403` with the required capability in structured error details. Malformed scope claims return `401`. This is intentionally a first coarse boundary; endpoint-specific tool scopes and MCP-side token issuance remain separate work.
+Missing capabilities return `403` with the required capability in structured error details. Malformed scope claims return `401`. Unknown provider scopes never grant access; only the bounded Bridge catalog is enforced.
 
 ## Standalone MCP bearer authentication
 
 The standalone MCP process remains optional. In development, it can use `BRIDGE_MCP_PRINCIPAL_ID` with the durable PostgreSQL adapter. In production, it refuses to start without `BRIDGE_OIDC_ISSUER`, `BRIDGE_MCP_OIDC_AUDIENCE`, and a bearer-token verifier; the fixed principal is never a production fallback.
 
-MCP uses the shared issuer/JWKS verifier and resolves the token subject plus organization claim through the same active membership directory as the API. MCP must use a dedicated audience (`BRIDGE_MCP_OIDC_AUDIENCE`) so an API token cannot be reused accidentally as an unrestricted MCP credential. The process publishes OAuth protected-resource metadata at `/.well-known/oauth-protected-resource/mcp` and advertises `bridge:read`, `bridge:write`, and `bridge:admin`.
+MCP uses the shared issuer/JWKS verifier and resolves the token subject plus organization claim through the same active membership directory as the API. MCP must use a dedicated audience (`BRIDGE_MCP_OIDC_AUDIENCE`) so an API token cannot be reused accidentally as an unrestricted MCP credential. The process publishes OAuth protected-resource metadata at `/.well-known/oauth-protected-resource/mcp` and advertises the bounded Bridge capability catalog.
 
-Authenticated non-human MCP principals are checked per tool: read tools require `bridge:read`, write tools require `bridge:write`, and `bridge:admin` satisfies both. Human principals still rely on server-side membership and role policy. Missing bearer credentials return `401` with a `WWW-Authenticate` metadata reference; invalid audience, signature, expiry, membership, or scope claims fail closed. MCP does not issue tokens itself; the configured external OIDC authorization server remains responsible for login and token issuance.
+Authenticated non-human MCP principals are checked per tool family: run tools use `bridge:runs:read/write`, context uses `bridge:context:read`, question tools use `bridge:questions:read/write`, assumption tools use `bridge:assumptions:read/write`, decision search uses `bridge:decisions:read`, and specification tools use `bridge:artifacts:read/write`. Coarse `bridge:read`/`bridge:write` compatibility grants and the explicit `bridge:admin` wildcard remain supported. Human principals still rely on server-side membership and role policy. Missing bearer credentials return `401` with a `WWW-Authenticate` metadata reference; invalid audience, signature, expiry, membership, or scope claims fail closed. MCP does not issue tokens itself; the configured external OIDC authorization server remains responsible for login and token issuance.
 
 ## Auth0 pilot setup
 
@@ -133,11 +134,11 @@ POST /v1/admin/organization/service-identities/:serviceCredentialId/rotate
 POST /v1/admin/organization/service-identities/:serviceCredentialId/revoke
 ```
 
-The creation body selects `type` (`agent`, `ci`, or `integration`), normalized roles, optional all-project or explicit project memberships, one or more capabilities (`bridge:read`, `bridge:write`, or `bridge:admin`), and an expiry no more than one year away. The response includes a generated `brg_srv_...` bearer token once. Bridge stores only its SHA-256 hash; list and revoke responses never contain the token or hash. Save the token immediately in the CI platform's secret manager and send it as `Authorization: Bearer <token>`.
+The creation body selects `type` (`agent`, `ci`, or `integration`), normalized roles, optional all-project or explicit project memberships, one or more bounded capabilities (`bridge:read`, `bridge:write`, `bridge:admin`, or a mapped resource/admin scope), and an expiry no more than one year away. The response includes a generated `brg_srv_...` bearer token once. Bridge stores only its SHA-256 hash; list and revoke responses never contain the token or hash. Save the token immediately in the CI platform's secret manager and send it as `Authorization: Bearer <token>`.
 
 Service-token resolution re-checks expiry, revocation, active organization membership, and active project memberships on every request. Revoking the credential or disabling its identity's organization membership therefore takes effect without waiting for a provider token cache. The same bearer path works for REST and optional MCP; JWT/OIDC MCP tokens still require the configured MCP audience, while the opaque Bridge service-token prefix is resolved by the Bridge directory.
 
-Rotation is optimistic-versioned and immediately invalidates the previous token. The replacement token is returned once, while Bridge stores only its hash and an audit event records the rotation. This is a credential-management foundation, not workload identity federation; provider-side exchange, rate limits, and endpoint-specific scopes remain follow-up work. Never commit, print, or log a service token.
+Rotation is optimistic-versioned and immediately invalidates the previous token. The replacement token is returned once, while Bridge stores only its hash and an audit event records the rotation. This is a credential-management foundation, not workload identity federation; provider-side exchange, rate limits, and live authorization-provider validation remain follow-up work. Never commit, print, or log a service token.
 
 The CLI provides the same REST-backed administration path for an organization administrator:
 
@@ -197,8 +198,8 @@ This is an interactive delegated-human flow. CI and unattended agents must use a
 
 ## Remaining limitations
 
-- The standalone MCP process now validates external OIDC bearer tokens when configured; development may still use the fixed principal. Dynamic client registration, MCP-side authorization-server/token issuance, fine-grained tool scopes, and live-provider validation remain pending.
-- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities are enforced for non-human REST and MCP bearer principals, including revocable Bridge service tokens. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and live-provider validation remain pending.
+- The standalone MCP process now validates external OIDC bearer tokens when configured; development may still use the fixed principal. Dynamic client registration, MCP-side authorization-server/token issuance, and live-provider validation remain pending.
+- Coarse and mapped fine-grained capabilities are enforced for non-human REST and MCP bearer principals, including revocable Bridge service tokens. External authorization-server scope issuance, provider-specific policy mapping, and live-provider validation remain pending.
 - Windows Credential Manager is not supported by the current CLI build; the implemented pilot stores are macOS Keychain and Linux Secret Service.
 - Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.

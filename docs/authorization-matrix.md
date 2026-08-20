@@ -40,10 +40,10 @@ This document records the implemented server-side authorization contract for BRG
 
 | Transport | Authorization behavior |
 |---|---|
-| REST API | Canonical external boundary. Resolves the principal, applies coarse non-human read/write capability, then delegates to application policy. |
+| REST API | Canonical external boundary. Resolves the principal, applies a mapped non-human resource/admin scope (or compatible coarse grant), then delegates to application policy. |
 | Web UI | Calls REST and cannot manufacture approval state locally. |
 | CLI | Calls REST. The agent-oriented CLI does not provide decision/specification approval commands. Repository snapshots contain server-approved context only; local edits do not create approval. |
-| MCP | Optional agent surface. Uses the same application policy and coarse non-human capabilities. It intentionally exposes no accept, approve, protected-review, lifecycle, or organization-management tools. |
+| MCP | Optional agent surface. Uses the same application policy and mapped per-tool-family non-human capabilities. It intentionally exposes no accept, approve, protected-review, lifecycle, or organization-management tools. |
 
 ## ID-guessing and denial behavior
 
@@ -69,4 +69,4 @@ This masks record existence while preserving `FORBIDDEN` for an authenticated pr
 
 - RLS now protects 22 tenant/project tables and application operations set transaction-local tenant context. The pre-tenant organization, principal-identity, and service-credential directories remain bounded bootstrap exceptions; repeatable production role/grant reconciliation is documented and live deployment evidence remains BRG-012 work. Application policy and composite constraints remain required alongside RLS.
 - Live identity-provider and isolated PostgreSQL concurrency/ID-guessing evidence is deployment validation, not implied by the deterministic in-memory and optional integration suites.
-- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities remain; endpoint-specific non-human scopes are BRG-011/BRG-013 follow-up work.
+- Coarse `bridge:read`, `bridge:write`, and `bridge:admin` capabilities remain backward-compatible; mapped resource-family/admin scopes now provide least-privilege non-human REST/MCP access. External token issuance and live authorization/database evidence remain BRG-011/BRG-013/BRG-012 follow-up work.

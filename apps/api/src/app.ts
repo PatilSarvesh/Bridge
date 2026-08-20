@@ -103,6 +103,115 @@ async function resolvePrincipal(
   return principal;
 }
 
+type ScopedHttpMethod = "GET" | "HEAD" | "POST" | "PATCH";
+type EndpointScopeRule = {
+  readonly match: RegExp;
+  readonly scopes: Partial<Record<ScopedHttpMethod, BridgeScope>>;
+};
+
+function readWriteScopes(read: BridgeScope, write: BridgeScope): EndpointScopeRule["scopes"] {
+  return { GET: read, HEAD: read, POST: write, PATCH: write };
+}
+
+function allMutationMethods(scope: BridgeScope): EndpointScopeRule["scopes"] {
+  return { GET: scope, HEAD: scope, POST: scope, PATCH: scope };
+}
+
+const endpointScopeRules: readonly EndpointScopeRule[] = [
+  {
+    match: /^\/v1\/notifications(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.notificationsRead, bridgeScopes.notificationsWrite),
+  },
+  {
+    match: /^\/v1\/admin\/organization\//,
+    scopes: allMutationMethods(bridgeScopes.organizationAdmin),
+  },
+  {
+    match: /^\/v1\/admin\/projects\/[^/]+\//,
+    scopes: allMutationMethods(bridgeScopes.projectAdmin),
+  },
+  {
+    match: /^\/v1\/admin\/outbox\//,
+    scopes: { POST: bridgeScopes.projectAdmin },
+  },
+  {
+    match: /^\/v1\/principals$/,
+    scopes: { GET: bridgeScopes.organizationRead, HEAD: bridgeScopes.organizationRead },
+  },
+  {
+    match: /^\/v1\/projects(?:$|\/[^/]+$)/,
+    scopes: { GET: bridgeScopes.projectsRead, HEAD: bridgeScopes.projectsRead, POST: bridgeScopes.projectsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/repositories$/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/adapter-diagnostics$/,
+    scopes: { POST: bridgeScopes.diagnosticsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/context$/,
+    scopes: { GET: bridgeScopes.contextRead, HEAD: bridgeScopes.contextRead },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/runs$/,
+    scopes: readWriteScopes(bridgeScopes.runsRead, bridgeScopes.runsWrite),
+  },
+  {
+    match: /^\/v1\/runs\/[^/]+\/continuation$/,
+    scopes: { POST: bridgeScopes.runsRead },
+  },
+  {
+    match: /^\/v1\/runs\/[^/]+$/,
+    scopes: { GET: bridgeScopes.runsRead, HEAD: bridgeScopes.runsRead, PATCH: bridgeScopes.runsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/decisions$/,
+    scopes: { GET: bridgeScopes.decisionsRead, HEAD: bridgeScopes.decisionsRead },
+  },
+  {
+    match: /^\/v1\/decisions\/[^/]+\/(?:lifecycle|supersede|expire|revoke)$/,
+    scopes: { POST: bridgeScopes.decisionsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/questions\/matches$/,
+    scopes: { POST: bridgeScopes.questionsRead },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/(?:questions|inbox)(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.questionsRead, bridgeScopes.questionsWrite),
+  },
+  {
+    match: /^\/v1\/questions\/[^/]+(?:\/|$)/,
+    scopes: readWriteScopes(bridgeScopes.questionsRead, bridgeScopes.questionsWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/assumptions$/,
+    scopes: readWriteScopes(bridgeScopes.assumptionsRead, bridgeScopes.assumptionsWrite),
+  },
+  {
+    match: /^\/v1\/assumptions\/[^/]+$/,
+    scopes: { GET: bridgeScopes.assumptionsRead, HEAD: bridgeScopes.assumptionsRead },
+  },
+  {
+    match: /^\/v1\/assumptions\/[^/]+\/resolve$/,
+    scopes: { POST: bridgeScopes.assumptionsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/artifacts$/,
+    scopes: readWriteScopes(bridgeScopes.artifactsRead, bridgeScopes.artifactsWrite),
+  },
+  {
+    match: /^\/v1\/artifacts\/[^/]+(?:\/diff)?$/,
+    scopes: { GET: bridgeScopes.artifactsRead, HEAD: bridgeScopes.artifactsRead },
+  },
+  {
+    match: /^\/v1\/artifact-versions\/[^/]+\/(?:reviews|approve)$/,
+    scopes: { POST: bridgeScopes.artifactsWrite },
+  },
+];
+
 async function resolveOptionalWebPrincipal(
   request: FastifyRequest,
   options: BuildAppOptions,
@@ -121,7 +230,10 @@ async function resolveOptionalWebPrincipal(
 function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
   const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
   if (!route.startsWith("/v1/") || route.startsWith("/v1/auth/")) return undefined;
-  return request.method === "GET" || request.method === "HEAD"
+  const method = request.method as ScopedHttpMethod;
+  const rule = endpointScopeRules.find((candidate) => candidate.match.test(route));
+  if (rule?.scopes[method]) return rule.scopes[method];
+  return method === "GET" || method === "HEAD"
     ? bridgeScopes.read
     : bridgeScopes.write;
 }

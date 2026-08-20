@@ -49,7 +49,7 @@ describe("Bridge API vertical slice", () => {
     expect(missingRead.statusCode).toBe(403);
     expect(missingRead.json()).toMatchObject({
       code: "FORBIDDEN",
-      details: { requiredScope: "bridge:read" },
+      details: { requiredScope: "bridge:projects:read" },
     });
 
     currentPrincipal = { ...currentPrincipal, scopes: ["bridge:read"] };
@@ -71,6 +71,52 @@ describe("Bridge API vertical slice", () => {
 
     currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
     expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+  });
+
+  it("limits fine-grained bearer scopes to their mapped REST resource family", async () => {
+    const runtime = await createDemoRuntime();
+    let currentPrincipal: Principal = {
+      ...demoPrincipals.agent,
+      scopes: ["bridge:questions:read"],
+    };
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => currentPrincipal,
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, authenticator });
+    apps.push(app);
+
+    expect((await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/questions`,
+    })).statusCode).toBe(200);
+    const projectsDenied = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(projectsDenied.statusCode).toBe(403);
+    expect(projectsDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:projects:read" },
+    });
+    const contextDenied = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context`,
+    });
+    expect(contextDenied.statusCode).toBe(403);
+    expect(contextDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:context:read" },
+    });
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:questions:write"] };
+    const writeOnlyQuestion = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/questions`,
+    });
+    expect(writeOnlyQuestion.statusCode).toBe(403);
+    expect(writeOnlyQuestion.json()).toMatchObject({
+      details: { requiredScope: "bridge:questions:read" },
+    });
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {

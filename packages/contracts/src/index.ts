@@ -301,7 +301,59 @@ export const replaceProjectPolicyInputSchema = z.object({
 
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
 export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
-export const serviceCapabilityScopeSchema = z.enum(["bridge:read", "bridge:write", "bridge:admin"]);
+export const bridgeCapabilityScopeSchema = z.enum([
+  "bridge:read",
+  "bridge:write",
+  "bridge:admin",
+  "bridge:projects:read",
+  "bridge:projects:write",
+  "bridge:repositories:read",
+  "bridge:repositories:write",
+  "bridge:context:read",
+  "bridge:runs:read",
+  "bridge:runs:write",
+  "bridge:questions:read",
+  "bridge:questions:write",
+  "bridge:assumptions:read",
+  "bridge:assumptions:write",
+  "bridge:decisions:read",
+  "bridge:decisions:write",
+  "bridge:artifacts:read",
+  "bridge:artifacts:write",
+  "bridge:notifications:read",
+  "bridge:notifications:write",
+  "bridge:diagnostics:write",
+  "bridge:organization:read",
+  "bridge:organization:admin",
+  "bridge:project:admin",
+]);
+export const bridgeCapabilityScopes = {
+  read: "bridge:read",
+  write: "bridge:write",
+  admin: "bridge:admin",
+  projectsRead: "bridge:projects:read",
+  projectsWrite: "bridge:projects:write",
+  repositoriesRead: "bridge:repositories:read",
+  repositoriesWrite: "bridge:repositories:write",
+  contextRead: "bridge:context:read",
+  runsRead: "bridge:runs:read",
+  runsWrite: "bridge:runs:write",
+  questionsRead: "bridge:questions:read",
+  questionsWrite: "bridge:questions:write",
+  assumptionsRead: "bridge:assumptions:read",
+  assumptionsWrite: "bridge:assumptions:write",
+  decisionsRead: "bridge:decisions:read",
+  decisionsWrite: "bridge:decisions:write",
+  artifactsRead: "bridge:artifacts:read",
+  artifactsWrite: "bridge:artifacts:write",
+  notificationsRead: "bridge:notifications:read",
+  notificationsWrite: "bridge:notifications:write",
+  diagnosticsWrite: "bridge:diagnostics:write",
+  organizationRead: "bridge:organization:read",
+  organizationAdmin: "bridge:organization:admin",
+  projectAdmin: "bridge:project:admin",
+} as const satisfies Record<string, z.infer<typeof bridgeCapabilityScopeSchema>>;
+export const serviceCapabilityScopeSchema = bridgeCapabilityScopeSchema;
 
 export const projectMembershipConfigurationSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -342,7 +394,7 @@ const serviceIdentityConfigurationSchema = z.object({
   roles: z.array(ownerRoleSchema).max(30).default([]),
   allProjects: z.boolean().default(false),
   projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
-  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(3),
+  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(30),
   expiresAt: z.string().datetime({ offset: true }).optional(),
 }).superRefine((value, context) => {
   const projectIds = new Set<string>();
@@ -822,6 +874,7 @@ export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 export type ServiceIdentityType = z.infer<typeof serviceIdentityTypeSchema>;
+export type BridgeCapabilityScope = z.infer<typeof bridgeCapabilityScopeSchema>;
 export type ServiceCapabilityScope = z.infer<typeof serviceCapabilityScopeSchema>;
 export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
 export type ProjectRoleDefinitionInput = z.infer<typeof projectRoleDefinitionSchema>;

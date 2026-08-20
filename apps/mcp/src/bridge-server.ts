@@ -104,7 +104,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
-      requireScope(bridgeScopes.write, "Starting an MCP run");
+      requireScope(bridgeScopes.runsWrite, "Starting an MCP run");
       const input = startAgentRunInputSchema.parse(rawInput);
       const registration = await service.startRun(principal, projectId, input);
       return result({
@@ -135,7 +135,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ runId, ...rawInput }) => {
-      requireScope(bridgeScopes.write, "Reporting an MCP run");
+      requireScope(bridgeScopes.runsWrite, "Reporting an MCP run");
       const input = reportAgentRunInputSchema.parse(rawInput);
       return result({ run: await service.reportRun(principal, runId, input) });
     },
@@ -155,7 +155,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ runId }) => {
-      requireScope(bridgeScopes.read, "Reading an MCP run");
+      requireScope(bridgeScopes.runsRead, "Reading an MCP run");
       return result({ run: await service.getRun(principal, runId) });
     },
   );
@@ -177,7 +177,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ runId, resumeContextKey }) => {
-      requireScope(bridgeScopes.read, "Reading MCP continuation");
+      requireScope(bridgeScopes.runsRead, "Reading MCP continuation");
       return result({ ...(await service.getContinuation(principal, runId, resumeContextKey)) });
     },
   );
@@ -199,7 +199,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawQuery }) => {
-      requireScope(bridgeScopes.read, "Reading MCP context");
+      requireScope(bridgeScopes.contextRead, "Reading MCP context");
       const query = contextQuerySchema.parse(rawQuery);
       return result(await service.getContext(principal, projectId, query));
     },
@@ -222,7 +222,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
-      requireScope(bridgeScopes.write, "Recording an MCP assumption");
+      requireScope(bridgeScopes.assumptionsWrite, "Recording an MCP assumption");
       const input = recordAssumptionInputSchema.parse(rawInput);
       const assumption = await service.recordAssumption(principal, projectId, input);
       return result({
@@ -250,7 +250,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ assumptionId }) => {
-      requireScope(bridgeScopes.read, "Reading an MCP assumption");
+      requireScope(bridgeScopes.assumptionsRead, "Reading an MCP assumption");
       return result({ assumption: await service.getAssumption(principal, assumptionId) });
     },
   );
@@ -269,7 +269,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId }) => {
-      requireScope(bridgeScopes.read, "Listing MCP assumptions");
+      requireScope(bridgeScopes.assumptionsRead, "Listing MCP assumptions");
       return result({ items: await service.listAssumptions(principal, projectId) });
     },
   );
@@ -291,7 +291,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, query }) => {
-      requireScope(bridgeScopes.read, "Searching MCP decisions");
+      requireScope(bridgeScopes.decisionsRead, "Searching MCP decisions");
       const decisions = await service.listDecisions(principal, projectId, {
         includeHistory: false,
         search: query,
@@ -318,7 +318,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
-      requireScope(bridgeScopes.read, "Finding MCP question matches");
+      requireScope(bridgeScopes.questionsRead, "Finding MCP question matches");
       const input = findQuestionMatchesInputSchema.parse(rawInput);
       const items = await service.findQuestionMatches(principal, projectId, input);
       return result({ items });
@@ -342,7 +342,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
-      requireScope(bridgeScopes.write, "Creating an MCP question");
+      requireScope(bridgeScopes.questionsWrite, "Creating an MCP question");
       const input = createQuestionInputSchema.parse(rawInput);
       const question = await service.createQuestion(principal, projectId, input);
       return result({
@@ -376,7 +376,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ questionId }) => {
-      requireScope(bridgeScopes.read, "Reading an MCP question");
+      requireScope(bridgeScopes.questionsRead, "Reading an MCP question");
       const question = await service.getQuestion(principal, questionId);
       return result({ question });
     },
@@ -399,7 +399,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, runId }) => {
-      requireScope(bridgeScopes.read, "Listing MCP questions");
+      requireScope(bridgeScopes.questionsRead, "Listing MCP questions");
       const questions = (await service.listQuestions(principal, projectId)).filter(
         (question) =>
           ["open", "in_discussion"].includes(question.status) && (!runId || question.runId === runId),
@@ -426,7 +426,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawFilters }) => {
-      requireScope(bridgeScopes.read, "Listing the MCP reviewer inbox");
+      requireScope(bridgeScopes.questionsRead, "Listing the MCP reviewer inbox");
       const filters = questionInboxQuerySchema.parse(rawFilters);
       return result({ items: await service.listQuestionInbox(principal, projectId, filters) });
     },
@@ -449,7 +449,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId, ...rawInput }) => {
-      requireScope(bridgeScopes.write, "Publishing an MCP specification");
+      requireScope(bridgeScopes.artifactsWrite, "Publishing an MCP specification");
       const input = publishArtifactInputSchema.parse(rawInput);
       const publication = await service.publishArtifact(principal, projectId, input);
       return result({
@@ -478,7 +478,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ artifactId }) => {
-      requireScope(bridgeScopes.read, "Reading an MCP specification");
+      requireScope(bridgeScopes.artifactsRead, "Reading an MCP specification");
       return result({ artifact: await service.getArtifact(principal, artifactId) });
     },
   );
@@ -497,7 +497,7 @@ export function createBridgeMcpServer(
       },
     },
     async ({ projectId }) => {
-      requireScope(bridgeScopes.read, "Listing MCP specifications");
+      requireScope(bridgeScopes.artifactsRead, "Listing MCP specifications");
       return result({ items: await service.listArtifacts(principal, projectId) });
     },
   );
