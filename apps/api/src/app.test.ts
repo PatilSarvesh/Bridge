@@ -802,6 +802,10 @@ describe("Bridge API vertical slice", () => {
       projectId: demoProject.id,
       routing: { unroutedQuestions: [] },
       decisions: { overdueProtected: [] },
+      assumptions: { expiring: [] },
+      runs: {
+        blocked: [expect.objectContaining({ status: "waiting_for_human", remainingBlockingQuestionCount: 1 })],
+      },
       delivery: { pendingCount: 1, failedCount: 0, deadLetterEvents: [] },
       adapters: {
         items: [expect.objectContaining({ client: "codex", capabilities: ["cli"] })],

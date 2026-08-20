@@ -789,7 +789,7 @@ The local web application provides:
 - Approved specification state.
 - Project-scoped notification feed with unread count, individual mark-read, and mark-all-read controls.
 
-The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Decision lifecycle changes now use the same application authority path from the web UI. Assumption resolution and run lifecycle mutations intentionally remain API/CLI operations.
+The UI defaults to the fixed human principal `usr_architect` and exposes a local **Reviewing as** selector for the same-organization human fixtures. Decision lifecycle changes and assumption resolution now use the same application authority path from the web UI. Agent-run lifecycle mutations intentionally remain API/CLI operations; the web runs view is read-only.
 
 The founder has additional UI feedback that will be addressed later.
 
@@ -804,7 +804,7 @@ pnpm check
 Current validation result after interactive CLI authentication:
 
 - Type-check: passed across all twelve workspace packages.
-- Tests: 88 behavioral tests plus 4 observability tests passed (92 total); the one opt-in live PostgreSQL integration test was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Tests: 175 tests passed across the application, API, CLI, MCP, worker, auth, database, domain, observability, and test-support packages; the three-test opt-in live PostgreSQL integration file was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -851,6 +851,7 @@ Current validation result after interactive CLI authentication:
 - In-app notification browser verification passed: the human reviewer saw the seeded assignment, opened it from the Notifications view, and the unread state changed to Read.
 - Transactional-outbox application, mapper/migration, and worker-cycle tests passed: each notification creates a pending delivery intent, claims acquire a lease and increment attempts, successful handlers complete events, and repeated failures become dead letters.
 - Outbox-operations application/API tests passed: only project administrators can inspect delivery state, metrics report status/failure/ready/lease/age data, stale replay requests conflict, cross-tenant IDs remain hidden, successful replay retains the event ID, and the reset plus audit record commit atomically.
+- Project support regressions passed: operator-only support reads now include active assumptions due within seven days and runs waiting for human input with remaining blocker counts, while assumption statements and run task summaries remain excluded from the support payload.
 - Provider-neutral email tests passed: all five essential template families render bounded plain text, subjects resist header injection, immediate sends use stable idempotency keys, duplicate completed delivery is skipped, ordinary muted/digest choices are recorded, protected-review mail bypasses muting, addresses are never persisted, and provider errors are redacted before retry/dead-letter storage.
 - CLI bootstrap diagnostics passed: dry-run registration leaves API/files untouched, while doctor verifies the mapped project and generated client instructions.
 - Optional MCP CLI diagnostics passed: `bridge init --mcp-url` records the endpoint, `bridge doctor` verifies an MCP `initialize` response when available, and an unavailable endpoint fails transparently without changing the CLI-only fallback.
@@ -933,17 +934,16 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 
 - OIDC web/API authentication and encrypted bounded sessions, interactive CLI PKCE, and optional standalone MCP bearer validation are implemented; MCP-side authorization-server/token issuance is not.
 - Durable organization/project membership, protected first-admin bootstrap, versioned member administration, project-role assignment, and organization audit events are implemented.
-- Endpoint-specific OAuth scopes, refresh/revocation administration, durable authentication audits, RLS, and deployment-provider validation remain incomplete.
+- Endpoint-specific OAuth scopes, refresh/revocation administration, durable authentication audits, and deployment-provider validation remain incomplete; RLS is implemented for the core tenant data plane but still needs live deployment evidence.
 - Fixed local principals remain development-only.
 - Application organization/project checks are active for both identity modes, but this is not yet complete production tenant security.
 
 ### 17.4 Not yet implemented
 
-- Database row-level security.
 - Live email/team provider installations, scheduled worker deployment, digest batching, jitter, and time-series delivery telemetry/alerts.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
-- Assumption resolution and agent-run lifecycle mutation controls in the web UI; their corresponding list/detail views remain read-only in the current prototype.
-- Connected scheduled assumption-expiry jobs; current authoritative reads expire due records, the worker exposes the pure selection policy plus the outbox cycle, and deployment scheduling remains.
+- Agent-run lifecycle mutation controls in the web UI; the corresponding run list/detail view remains read-only in the current prototype.
+- Hosted worker role provisioning and live PostgreSQL verification for scheduled assumption expiry; the application cycle and bounded worker schedule are implemented locally.
 - Hashed or encrypted-at-rest continuation locators; the current prototype stores them as values for exact idempotent replay.
 - A live recipient directory/preferences store, SES sender, digest scheduler, and production Slack workspace/runtime; provider-neutral email/Slack contracts and preference outcomes are implemented.
 - GitHub integration.
@@ -2030,6 +2030,20 @@ Deliberate boundaries:
 - Confirming an assumption does not silently create a decision; the human must choose the explicit create option or link an existing decision. Confirmed assumptions remain visibly distinct from authoritative decisions even when linked.
 - The worker schedule is deployable but not a claim that a hosted scheduler, provider delivery, live PostgreSQL role, or production alerting configuration has been validated. REST remains canonical for human actions and MCP remains optional.
 
+### 20.61 Completed pilot support signals for assumptions and blocked runs
+
+Implemented and locally verified:
+
+1. `GET /v1/admin/projects/:projectId/support` now reports active assumptions due within seven days, including an overdue flag for records whose maintenance expiry has not yet run. Resolved assumptions are excluded.
+2. The same support read model reports runs in `waiting_for_human` with bounded client/capability metadata and remaining blocking-question counts. Task summaries and assumption statements are intentionally omitted from the support payload.
+3. The web **Support** view adds summary counts and progressive-disclosure signal panels that link assumptions to **Assumptions** and blocked runs to **Agent Runs**; existing unrouted-question, overdue-decision, delivery, adapter, and doctor links remain unchanged.
+4. Application and REST regressions cover expiring-assumption ordering, blocked-run counts, operator-only access, seeded blocked-run behavior, and the support payload's content-minimization boundary. No schema or database command was added; PostgreSQL integration remains gated by an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
+
+Deliberate boundaries:
+
+- The seven-day window is an operator signal, not a new assumption lifecycle state or a replacement for the scheduled worker expiry cycle.
+- Support rows are bounded metadata and do not grant mutation authority. REST remains canonical, MCP remains optional, and human approval boundaries are unchanged.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2084,6 +2098,9 @@ Deliberate boundaries:
 - Question due-date and project/due index migration: `packages/database/drizzle/0030_gray_smasher.sql`
 - Protected approval quorum, override metadata, and audit-reason migration: `packages/database/drizzle/0031_deep_vampiro.sql`
 - Governed question collaboration, related links, mentions, and revision-history migration: `packages/database/drizzle/0032_bitter_lethal_legion.sql`
+- Assumption-sourced decisions migration: `packages/database/drizzle/0033_sparkling_carlie_cooper.sql`
+- Decision source-shape constraint migration: `packages/database/drizzle/0034_mute_energizer.sql`
+- Assumption-expiry notification migration: `packages/database/drizzle/0035_odd_gravity.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`

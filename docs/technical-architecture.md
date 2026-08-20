@@ -4,7 +4,7 @@
 |---|---|
 | Status | Approved MVP baseline; implementation validation required |
 | Version | 0.1 |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-08-20 |
 | Related documents | [Bridge PRD](./bridge-prd.md), [Pilot Decisions](./pilot-decisions.md) |
 | Architecture stage | MVP and controlled pilot |
 
@@ -1004,7 +1004,7 @@ Use structured logs with record IDs and correlation IDs. Redact tokens, secrets,
 
 The web **Analytics** view is the pilot product dashboard for the technically available PRD metrics. It shows context compliance, question creation/reuse/routing coverage, response and acceptance activity, later-run decision reuse, assumption resolution, specification approval, question-volume/context-size guardrails, and client breakdowns. This read-time approach adds no schema or duplicate analytics store and works with in-memory or PostgreSQL repositories without MCP.
 
-`POST /v1/projects/:projectId/adapter-diagnostics` is the canonical write path for a client adapter to record a bounded doctor result: client, capabilities, MCP state, check names/statuses, reporter envelope, correlation ID, and observation time. PostgreSQL keeps only the latest result per project/client behind tenant RLS; it does not store URLs, check details, repository content, secrets, or an approval decision. `GET /v1/admin/projects/:projectId/support` reuses the application repository boundary to report active unrouted questions, overdue protected decisions, dead-letter/pending delivery counts, recorded agent client/capability observations, and those latest diagnostic summaries. The web **Support** view links governance signals back to canonical question/decision views. Persisted doctor metadata is an operational observation, not provider connectivity proof or human approval.
+`POST /v1/projects/:projectId/adapter-diagnostics` is the canonical write path for a client adapter to record a bounded doctor result: client, capabilities, MCP state, check names/statuses, reporter envelope, correlation ID, and observation time. PostgreSQL keeps only the latest result per project/client behind tenant RLS; it does not store URLs, check details, repository content, secrets, or an approval decision. `GET /v1/admin/projects/:projectId/support` reuses the application repository boundary to report active unrouted questions, overdue protected decisions, active assumptions due within seven days, runs waiting for human input with remaining blocking-question counts, dead-letter/pending delivery counts, recorded agent client/capability observations, and those latest diagnostic summaries. The web **Support** view links each signal back to the canonical Assumptions, Agent Runs, Questions, Decisions, or Outbox view without exposing assumption statements or run task summaries. Persisted doctor metadata is an operational observation, not provider connectivity proof or human approval.
 
 Routing coverage is owner/role presence, not a claim that the assigned expert was correct. Decision retrieval proves that Bridge returned approved context, not that an agent followed it. Cohorts select runs by start time and report current outcomes rather than immutable historical as-of state. The full definitions, exclusions, and later materialization boundary are in `docs/product-analytics.md`.
 
