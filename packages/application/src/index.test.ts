@@ -2363,6 +2363,28 @@ describe("Bridge decision workflow", () => {
     const [unroutedQuestion] = await repository.listQuestions(project.id);
     expect(unroutedQuestion).toBeDefined();
     await repository.saveQuestion({ ...unroutedQuestion!, ownerIds: [], ownerRoles: [] });
+    const blockedRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "support-blocked-run-001",
+      client: "claude_code",
+      capability: "cli",
+      taskSummary: "Wait for the export retention decision",
+      scope: { component: "exports" },
+      externalLinks: [],
+    });
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "support-blocked-question-001",
+      runId: blockedRun.run.id,
+      title: "Which retention policy should govern exports?",
+      context: "The export workflow needs a human retention decision before implementation can continue.",
+      whyItMatters: "A wrong retention period can violate policy or retain sensitive exports too long.",
+      category: "data-retention",
+      scope: { component: "exports" },
+    }));
+    const expiringAssumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "support-expiring-assumption-001",
+      runId: blockedRun.run.id,
+      expiresAt: "2026-01-05T00:00:00.000Z",
+    }));
     const run = await service.startRun(agent, project.id, {
       idempotencyKey: "support-mcp-run-001",
       client: "codex",
@@ -2396,12 +2418,30 @@ describe("Bridge decision workflow", () => {
     expect(support.routing.unroutedQuestions).toEqual([
       expect.objectContaining({ category: "architecture", blocking: true, ownerIds: [], ownerRoles: [] }),
     ]);
+    expect(support.assumptions.expiring).toEqual([
+      expect.objectContaining({
+        id: expiringAssumption.id,
+        category: "observability",
+        confidence: "medium",
+        overdue: false,
+      }),
+    ]);
+    expect(support.runs.blocked).toEqual([
+      expect.objectContaining({
+        id: blockedRun.run.id,
+        client: "claude_code",
+        capability: "cli",
+        status: "waiting_for_human",
+        remainingBlockingQuestionCount: 1,
+      }),
+    ]);
     expect(support.delivery.deadLetterEvents).toEqual([
       expect.objectContaining({ id: pending!.id, hasError: true }),
     ]);
-    expect(support.adapters.items).toEqual([
+    expect(support.adapters.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ client: "codex", capabilities: ["mcp"] }),
-    ]);
+      expect.objectContaining({ client: "claude_code", capabilities: ["cli"] }),
+    ]));
     expect(support.adapters.mcpDiagnostics).toBe("observed_from_runs");
     expect(support.diagnostics).toEqual([
       expect.objectContaining({
@@ -2417,6 +2457,7 @@ describe("Bridge decision workflow", () => {
       }),
     ]);
     expect(JSON.stringify(support)).not.toContain("provider unavailable");
+    expect(JSON.stringify(support)).not.toContain(expiringAssumption.statement);
     await expect(service.getProjectSupport(contributor, project.id))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(service.getProjectSupport(agent, project.id))

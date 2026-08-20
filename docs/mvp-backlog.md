@@ -1066,7 +1066,7 @@ Implementation note: project and controlled-client filtering, lifecycle attribut
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, dead-letter delivery jobs, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata; provider-backed disconnected integrations, time-series history, and richer diagnostics remain
+- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, active assumptions nearing expiry, runs waiting for human input, dead-letter delivery jobs, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata; provider-backed disconnected integrations, time-series history, and richer diagnostics remain
 - **Dependencies:** BRG-032, BRG-090, BRG-104
 - **PRD references:** ADM-01, pilot plan
 
@@ -1079,6 +1079,8 @@ Acceptance criteria:
 3. View lists adapter capability levels and last successful MCP check.
 4. Actions respect project and organization administration boundaries.
 5. Support access never bypasses tenant authorization silently.
+
+Implementation note: the support read model returns bounded operator metadata only: it does not expose assumption statements or run task summaries, and each signal links back to the canonical Assumptions, Agent Runs, Questions, Decisions, or Outbox view.
 
 ### BRG-112 — Execute controlled pilot readiness review
 

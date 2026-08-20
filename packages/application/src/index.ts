@@ -403,6 +403,29 @@ export interface ProjectSupportView {
       readonly reviewAt: string;
     }[];
   };
+  readonly assumptions: {
+    readonly expiring: readonly {
+      readonly id: string;
+      readonly category: string;
+      readonly risk: Assumption["risk"];
+      readonly confidence: Assumption["confidence"];
+      readonly expiresAt: string;
+      readonly overdue: boolean;
+      readonly createdById: string;
+      readonly runId?: string;
+    }[];
+  };
+  readonly runs: {
+    readonly blocked: readonly {
+      readonly id: string;
+      readonly client: AgentRun["client"];
+      readonly capability: AgentRun["capability"];
+      readonly status: "waiting_for_human";
+      readonly remainingBlockingQuestionCount: number;
+      readonly startedAt: string;
+      readonly updatedAt: string;
+    }[];
+  };
   readonly delivery: {
     readonly pendingCount: number;
     readonly failedCount: number;
@@ -741,6 +764,7 @@ type RawArtifactDiffLine = Pick<ArtifactDiffLine, "kind" | "text">;
 const MAX_EXACT_DIFF_CELLS = 1_000_000;
 const MAX_EXACT_DIFF_DIMENSION = 5_000;
 const MAX_RENDERED_DIFF_LINES = 2_000;
+const SUPPORT_ASSUMPTION_EXPIRY_WINDOW_MS = 7 * 86_400_000;
 
 const policyRule = (
   key: string,
@@ -2730,9 +2754,10 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project support operations", projectId);
-      const [questions, decisions, runs, events, adapterDiagnostics] = await Promise.all([
+      const [questions, decisions, assumptions, runs, events, adapterDiagnostics] = await Promise.all([
         repository.listQuestions(projectId),
         repository.listDecisions(projectId),
+        repository.listAssumptions(projectId),
         repository.listRuns(projectId),
         repository.listOutboxEvents(projectId),
         repository.listAdapterDiagnostics(projectId),
@@ -2772,6 +2797,48 @@ export class BridgeService {
             }]
           : [];
       });
+      const expiringAssumptions = assumptions
+        .filter((assumption) => {
+          if (assumption.status !== "active") return false;
+          const expiresAt = Date.parse(assumption.expiresAt);
+          return Number.isFinite(expiresAt) && expiresAt <= now + SUPPORT_ASSUMPTION_EXPIRY_WINDOW_MS;
+        })
+        .sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))
+        .map((assumption) => ({
+          id: assumption.id,
+          category: assumption.category,
+          risk: assumption.risk,
+          confidence: assumption.confidence,
+          expiresAt: assumption.expiresAt,
+          overdue: Date.parse(assumption.expiresAt) <= now,
+          createdById: assumption.createdById,
+          ...(assumption.runId ? { runId: assumption.runId } : {}),
+        }));
+      const remainingBlockingQuestionCounts = new Map<string, number>();
+      for (const question of questions) {
+        if (
+          question.runId &&
+          question.blocking &&
+          ["open", "in_discussion"].includes(question.status)
+        ) {
+          remainingBlockingQuestionCounts.set(
+            question.runId,
+            (remainingBlockingQuestionCounts.get(question.runId) ?? 0) + 1,
+          );
+        }
+      }
+      const blockedRuns = runs
+        .filter((run) => run.status === "waiting_for_human")
+        .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+        .map((run) => ({
+          id: run.id,
+          client: run.client,
+          capability: run.capability,
+          status: "waiting_for_human" as const,
+          remainingBlockingQuestionCount: remainingBlockingQuestionCounts.get(run.id) ?? 0,
+          startedAt: run.startedAt,
+          updatedAt: run.updatedAt,
+        }));
       const adapterMap = new Map<AgentRun["client"], AgentRun[]>();
       for (const run of runs) {
         const existing = adapterMap.get(run.client) ?? [];
@@ -2810,6 +2877,8 @@ export class BridgeService {
         generatedAt: this.now().toISOString(),
         routing: { unroutedQuestions },
         decisions: { overdueProtected },
+        assumptions: { expiring: expiringAssumptions },
+        runs: { blocked: blockedRuns },
         delivery: {
           pendingCount: events.filter((event) => event.status === "pending" || event.status === "processing").length,
           failedCount: events.filter((event) => event.status === "failed" || event.status === "dead_letter").length,

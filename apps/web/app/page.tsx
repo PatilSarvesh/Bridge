@@ -506,6 +506,29 @@ interface ProjectSupport {
       readonly reviewAt: string;
     }[];
   };
+  readonly assumptions: {
+    readonly expiring: readonly {
+      readonly id: string;
+      readonly category: string;
+      readonly risk: string;
+      readonly confidence: string;
+      readonly expiresAt: string;
+      readonly overdue: boolean;
+      readonly createdById: string;
+      readonly runId?: string;
+    }[];
+  };
+  readonly runs: {
+    readonly blocked: readonly {
+      readonly id: string;
+      readonly client: string;
+      readonly capability: string;
+      readonly status: string;
+      readonly remainingBlockingQuestionCount: number;
+      readonly startedAt: string;
+      readonly updatedAt: string;
+    }[];
+  };
   readonly delivery: {
     readonly pendingCount: number;
     readonly failedCount: number;
@@ -2470,6 +2493,14 @@ export default function Home() {
                       <span>overdue protected decisions</span>
                     </article>
                     <article className="analytics-card">
+                      <strong>{support.assumptions.expiring.length}</strong>
+                      <span>assumptions expiring within seven days</span>
+                    </article>
+                    <article className="analytics-card">
+                      <strong>{support.runs.blocked.length}</strong>
+                      <span>runs waiting for human input</span>
+                    </article>
+                    <article className="analytics-card">
                       <strong>{support.delivery.deadLetterEvents.length}</strong>
                       <span>dead-letter jobs · {support.delivery.failedCount} failed total</span>
                     </article>
@@ -2526,6 +2557,59 @@ export default function Home() {
                             <span className="risk risk-protected" aria-hidden="true" />
                             <span><strong>{decision.category} decision</strong><small>Owner {decision.ownerId} · review due {new Date(decision.reviewAt).toLocaleDateString()}</small></span>
                             <span className="status status-rejected">overdue</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Assumptions nearing expiry</h2><p>Active assumptions due within seven days are listed without exposing their governed statement; overdue items may indicate a delayed maintenance cycle.</p></div>
+                      <small>{support.assumptions.expiring.length} items</small>
+                    </div>
+                    {support.assumptions.expiring.length === 0 ? <div className="empty">No active assumptions are due within seven days.</div> : (
+                      <div className="support-list">
+                        {support.assumptions.expiring.map((assumption) => (
+                          <button
+                            type="button"
+                            key={assumption.id}
+                            className="support-row"
+                            onClick={() => {
+                              setSelectedAssumptionId(assumption.id);
+                              setAssumptionStatusFilter("all");
+                              setView("assumptions");
+                            }}
+                          >
+                            <span className={assumption.overdue ? "risk risk-protected" : "risk"} aria-hidden="true" />
+                            <span><strong>{assumption.category} assumption</strong><small>{assumption.overdue ? "overdue" : `expires ${new Date(assumption.expiresAt).toLocaleDateString()}`} · {assumption.confidence} confidence · created by {assumption.createdById}</small></span>
+                            <span className={assumption.overdue ? "status status-rejected" : "status"}>{assumption.overdue ? "overdue" : "expiring"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="analytics-panel support-panel">
+                    <div className="analytics-panel-heading">
+                      <div><h2>Runs waiting for human input</h2><p>These runs remain blocked until their linked questions are resolved; open a run to inspect its governed handoff.</p></div>
+                      <small>{support.runs.blocked.length} items</small>
+                    </div>
+                    {support.runs.blocked.length === 0 ? <div className="empty">No runs are currently waiting for human input.</div> : (
+                      <div className="support-list">
+                        {support.runs.blocked.map((run) => (
+                          <button
+                            type="button"
+                            key={run.id}
+                            className="support-row"
+                            onClick={() => {
+                              setSelectedRunId(run.id);
+                              setView("runs");
+                            }}
+                          >
+                            <span className="risk" aria-hidden="true" />
+                            <span><strong>{run.id}</strong><small>{run.client} · {run.capability} · {run.remainingBlockingQuestionCount} blocking question{run.remainingBlockingQuestionCount === 1 ? "" : "s"} · updated {new Date(run.updatedAt).toLocaleDateString()}</small></span>
+                            <span className="status">waiting</span>
                           </button>
                         ))}
                       </div>
