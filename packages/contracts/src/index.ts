@@ -20,6 +20,7 @@ export const questionStatusSchema = z.enum([
   "expired",
 ]);
 export const questionReviewStatusSchema = z.enum(["approved", "rejected"]);
+export const questionDueFilterSchema = z.enum(["overdue", "next_7_days", "scheduled", "none"]);
 export const notificationTypeSchema = z.enum([
   "question_assigned",
   "question_response",
@@ -221,6 +222,7 @@ export const projectPolicyRuleInputSchema = z.object({
   minimumRisk: riskSchema,
   requiredOwnerRoles: z.array(ownerRoleSchema).max(20).default([]),
   requiredReviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+  reviewerQuorum: z.record(z.string().trim().min(1).max(100), z.number().int().min(1).max(20)).optional(),
 }).superRefine((value, context) => {
   if (value.action === "assume_and_log" && value.minimumRisk !== "low") {
     context.addIssue({
@@ -234,6 +236,25 @@ export const projectPolicyRuleInputSchema = z.object({
       code: "custom",
       message: "Protected-approval rules must set protected minimum risk.",
       path: ["minimumRisk"],
+    });
+  }
+  const reviewerRoles = new Set(value.requiredReviewerRoles.map((role) =>
+    role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")));
+  for (const role of Object.keys(value.reviewerQuorum ?? {})) {
+    const normalizedRole = role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+    if (!reviewerRoles.has(normalizedRole)) {
+      context.addIssue({
+        code: "custom",
+        message: "Reviewer quorum can only be configured for a required reviewer role.",
+        path: ["reviewerQuorum", role],
+      });
+    }
+  }
+  if (Object.keys(value.reviewerQuorum ?? {}).length > 0 && value.action !== "protected_approval") {
+    context.addIssue({
+      code: "custom",
+      message: "Reviewer quorum is supported only by protected-approval policy.",
+      path: ["reviewerQuorum"],
     });
   }
 });
@@ -378,6 +399,7 @@ export const createQuestionInputSchema = z
     risk: riskSchema,
     reversible: z.boolean(),
     blocking: z.boolean(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
     options: z.array(questionOptionInputSchema).max(10).default([]),
     recommendationKey: z.string().trim().min(1).max(80).optional(),
     fallback: z.string().trim().min(1).max(2_000).nullable().optional(),
@@ -417,6 +439,7 @@ export const questionInboxQuerySchema = z.object({
   risk: riskSchema.optional(),
   category: z.string().trim().min(2).max(100).optional(),
   role: ownerRoleSchema.optional(),
+  due: questionDueFilterSchema.optional(),
 });
 
 export const questionSubmissionDispositionSchema = z.enum([
@@ -441,6 +464,11 @@ export const acceptAnswerInputSchema = z
   .refine((value) => Boolean(value.optionKey || value.answer), {
     message: "Either optionKey or answer is required.",
   });
+
+export const overrideQuestionApprovalInputSchema = acceptAnswerInputSchema.extend({
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(10).max(2_000),
+});
 
 export const changeDecisionLifecycleInputSchema = z
   .object({
@@ -767,6 +795,7 @@ export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
+export type OverrideQuestionApprovalInput = z.infer<typeof overrideQuestionApprovalInputSchema>;
 export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycleInputSchema>;
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type ReassignQuestionInput = z.infer<typeof reassignQuestionInputSchema>;

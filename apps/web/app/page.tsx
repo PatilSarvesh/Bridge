@@ -72,6 +72,7 @@ interface ProjectPolicyRule {
   readonly minimumRisk: Risk;
   readonly requiredOwnerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly reviewerQuorum?: Readonly<Record<string, number>>;
 }
 
 interface ProjectPolicyConfiguration {
@@ -149,6 +150,29 @@ interface QuestionComment {
   readonly createdAt: string;
 }
 
+interface QuestionApprovalOverride {
+  readonly changedById: string;
+  readonly reason: string;
+  readonly createdAt: string;
+  readonly questionVersion: number;
+}
+
+interface QuestionApprovalRequirement {
+  readonly role: string;
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly rejectedCount: number;
+  readonly remainingCount: number;
+  readonly status: "satisfied" | "pending" | "rejected";
+  readonly reviewerIds: readonly string[];
+}
+
+interface QuestionApprovalStatus {
+  readonly requirements: readonly QuestionApprovalRequirement[];
+  readonly satisfied: boolean;
+  readonly overridden: boolean;
+}
+
 interface QuestionRoutingExplanation {
   readonly ownerSource: string;
   readonly reviewerSource: string;
@@ -174,6 +198,7 @@ interface QuestionAssignmentHistoryEntry {
 
 interface Question {
   readonly id: string;
+  readonly runId?: string;
   readonly title: string;
   readonly category: string;
   readonly context: string;
@@ -183,6 +208,7 @@ interface Question {
   readonly policyVersion: number;
   readonly policyRuleKey: string;
   readonly blocking: boolean;
+  readonly dueAt?: string;
   readonly options: readonly Option[];
   readonly recommendationKey?: string;
   readonly ownerIds: readonly string[];
@@ -191,6 +217,7 @@ interface Question {
   readonly reviewerIds: readonly string[];
   readonly reviewerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly requiredReviewerQuorum?: Readonly<Record<string, number>>;
   readonly routing: QuestionRoutingExplanation;
   readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly status: string;
@@ -198,14 +225,20 @@ interface Question {
   readonly responses: readonly QuestionResponse[];
   readonly reviews: readonly QuestionReview[];
   readonly comments: readonly QuestionComment[];
+  readonly approvalOverride?: QuestionApprovalOverride;
   readonly acceptedResponseId?: string;
   readonly scope: Readonly<Record<string, string>>;
   readonly version: number;
-  readonly inboxReasons?: readonly string[];
-  readonly canAccept?: boolean;
+  readonly inboxReasons: readonly string[];
+  readonly canAccept: boolean;
+  readonly reviewRoles: readonly string[];
+  readonly canReassign: boolean;
+  readonly canOverrideApproval: boolean;
+  readonly approvalStatus: QuestionApprovalStatus;
+  readonly dueStatus: "overdue" | "due_soon" | "scheduled" | "none";
 }
 
-type InboxFilterKey = "status" | "risk" | "category" | "role";
+type InboxFilterKey = "status" | "risk" | "category" | "role" | "due";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
 type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
 type DecisionFilters = Partial<Record<DecisionFilterKey, string>> & { readonly includeHistory?: boolean };
@@ -484,6 +517,7 @@ interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly reason?: string;
   readonly policyVersion?: number;
   readonly createdAt: string;
 }
@@ -619,6 +653,7 @@ export default function Home() {
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
+  const [inboxFiltersReady, setInboxFiltersReady] = useState(false);
   const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
   const [decisionSearchDraft, setDecisionSearchDraft] = useState("");
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
@@ -667,6 +702,8 @@ export default function Home() {
   const [replyToCommentId, setReplyToCommentId] = useState<string>();
   const [reviewStatus, setReviewStatus] = useState<"approved" | "rejected">("approved");
   const [reviewRationale, setReviewRationale] = useState("");
+  const [overrideRationale, setOverrideRationale] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
   const [rationale, setRationale] = useState(
     "Retry only transient failures with bounded exponential backoff and idempotency keys.",
   );
@@ -763,7 +800,8 @@ export default function Home() {
 
   const inboxFilterOptions = useMemo(() => ({
     categories: [...new Set(questions.map((question) => question.category))].sort((left, right) => left.localeCompare(right)),
-    roles: [...new Set(questions.flatMap((question) => question.ownerRoles))].sort((left, right) => left.localeCompare(right)),
+    roles: [...new Set(questions.flatMap((question) => [...question.ownerRoles, ...question.reviewerRoles]))]
+      .sort((left, right) => left.localeCompare(right)),
   }), [questions]);
   const hasInboxFilters = Object.values(inboxFilters).some(Boolean);
   const hasDecisionFilters = Boolean(decisionFilters.includeHistory) ||
@@ -1047,6 +1085,12 @@ export default function Home() {
     const action = String(form.get("policyAction")) as PolicyAction;
     const minimumRisk = String(form.get("policyRisk")) as Risk;
     if (!key || !name || !Number.isInteger(priority) || !action || !minimumRisk) return;
+    const reviewerQuorum = Object.fromEntries(
+      roleList(String(form.get("policyReviewerQuorum") ?? ""))
+        .map((entry) => entry.split("=", 2))
+        .filter((entry): entry is [string, string] => entry.length === 2 && Number.isInteger(Number(entry[1])) && Number(entry[1]) >= 1)
+        .map(([role, count]) => [normalizedRole(role), Number(count)]),
+    );
     setPolicyDraft({
       ...policyDraft,
       rules: [...policyDraft.rules, {
@@ -1059,12 +1103,14 @@ export default function Home() {
         minimumRisk,
         requiredOwnerRoles: roleList(String(form.get("policyOwnerRoles") ?? "")),
         requiredReviewerRoles: roleList(String(form.get("policyReviewerRoles") ?? "")),
+        reviewerQuorum,
       }],
     });
     event.currentTarget.reset();
   };
 
   const loadQuestions = useCallback(async () => {
+    if (!inboxFiltersReady) return;
     if (!selectedProjectId) {
       setQuestions([]);
       setInboxQuestions([]);
@@ -1101,7 +1147,7 @@ export default function Home() {
     } finally {
       setQuestionsLoading(false);
     }
-  }, [activePrincipalId, inboxFilters, selectedProjectId]);
+  }, [activePrincipalId, inboxFilters, inboxFiltersReady, selectedProjectId]);
 
   const loadArtifacts = useCallback(async () => {
     if (!selectedProjectId) {
@@ -1479,7 +1525,34 @@ export default function Home() {
     }
     if (assumptionId) setSelectedAssumptionId(assumptionId);
     if (runId) setSelectedRunId(runId);
+    const restoredInboxFilters = Object.fromEntries([
+      ["status", parameters.get("inboxStatus")],
+      ["risk", parameters.get("inboxRisk")],
+      ["category", parameters.get("inboxCategory")],
+      ["role", parameters.get("inboxRole")],
+      ["due", parameters.get("inboxDue")],
+    ].filter((entry): entry is [InboxFilterKey, string] => Boolean(entry[1])));
+    setInboxFilters(restoredInboxFilters);
+    setInboxFiltersReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!inboxFiltersReady) return;
+    const url = new URL(window.location.href);
+    const parameterNames: Record<InboxFilterKey, string> = {
+      status: "inboxStatus",
+      risk: "inboxRisk",
+      category: "inboxCategory",
+      role: "inboxRole",
+      due: "inboxDue",
+    };
+    for (const [key, parameterName] of Object.entries(parameterNames) as [InboxFilterKey, string][]) {
+      const value = inboxFilters[key];
+      if (value) url.searchParams.set(parameterName, value);
+      else url.searchParams.delete(parameterName);
+    }
+    window.history.replaceState(window.history.state, "", url);
+  }, [inboxFilters, inboxFiltersReady]);
 
   useEffect(() => {
     void loadAuthentication();
@@ -1604,10 +1677,6 @@ export default function Home() {
     () => visibleQuestions.find((question) => question.id === selectedId) ?? visibleQuestions[0],
     [selectedId, visibleQuestions],
   );
-  const selectedQuestionInboxItem = useMemo(
-    () => (selectedQuestion ? inboxQuestions.find((question) => question.id === selectedQuestion.id) : undefined),
-    [inboxQuestions, selectedQuestion],
-  );
   const selectedArtifact = useMemo(
     () => artifacts.find((artifact) => artifact.id === selectedArtifactId),
     [artifacts, selectedArtifactId],
@@ -1659,6 +1728,8 @@ export default function Home() {
       setReplyToCommentId(undefined);
       setReviewStatus("approved");
       setReviewRationale("");
+      setOverrideRationale("");
+      setOverrideReason("");
     }
   }, [selectedQuestion]);
 
@@ -1736,6 +1807,35 @@ export default function Home() {
       await Promise.all([loadQuestions(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to record security review.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const overrideQuestionApproval = async () => {
+    if (
+      !selectedQuestion ||
+      !selectedQuestion.canOverrideApproval ||
+      overrideRationale.trim().length < 10 ||
+      overrideReason.trim().length < 10
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/override`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          ...(selectedOption ? { optionKey: selectedOption } : {}),
+          rationale: overrideRationale,
+          reason: overrideReason,
+        }),
+      }, activePrincipalId);
+      setOverrideRationale("");
+      setOverrideReason("");
+      await Promise.all([loadQuestions(), loadNotifications(), loadReferenceData()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to record the administrative override.");
     } finally {
       setSubmitting(false);
     }
@@ -2473,7 +2573,7 @@ export default function Home() {
                         <td><strong>{rule.category}</strong><small>{rule.key}</small></td>
                         <td>{rule.action.replaceAll("_", " ")} · {rule.minimumRisk}</td>
                         <td>{rule.requiredOwnerRoles.join(", ") || "Policy owner"}</td>
-                        <td>{rule.requiredReviewerRoles.join(", ") || "No separate reviewer"}</td>
+                        <td>{[...rule.requiredReviewerRoles, ...Object.entries(rule.reviewerQuorum ?? {}).map(([role, count]) => `${role} ×${count}`)].join(", ") || "No separate reviewer"}</td>
                       </tr>)}
                     </tbody></table></div>
                   </section>
@@ -2497,7 +2597,8 @@ export default function Home() {
                       <label>Minimum risk<select name="policyRisk" defaultValue="high"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="protected">Protected</option></select></label>
                       <label>Required owner roles<input name="policyOwnerRoles" placeholder="qa-lead, component-owner" /></label>
                       <label>Required reviewer roles<input name="policyReviewerRoles" placeholder="architecture-reviewer" /></label>
-                      <div className="member-form-actions"><small>Use comma-separated normalized role names. Reviewer roles are valid only for protected approval; protected rules require protected risk and at least one owner or reviewer role.</small><button className="secondary" type="submit">Add rule</button></div>
+                      <label>Reviewer quorum<input name="policyReviewerQuorum" placeholder="security-reviewer=2" /></label>
+                      <div className="member-form-actions"><small>Use comma-separated normalized role names. Quorum uses role=count pairs and is valid only for required reviewer roles on protected approval rules.</small><button className="secondary" type="submit">Add rule</button></div>
                     </form>
                     {policyDraft.rules.length === 0 ? <div className="empty">No custom rules are configured; Bridge defaults remain active.</div> : (
                       <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Effect</th><th>Authority</th><th /></tr></thead><tbody>
@@ -2505,7 +2606,7 @@ export default function Home() {
                           <td><strong>{rule.name}</strong><small>Priority {rule.priority} · {rule.key}</small></td>
                           <td>{[rule.category && `category ${rule.category}`, ...Object.entries(rule.scope).map(([field, value]) => `${field} ${value}`)].filter(Boolean).join(" · ") || "Project-wide"}</td>
                           <td>{rule.action.replaceAll("_", " ")} · minimum {rule.minimumRisk}</td>
-                          <td>{[...rule.requiredOwnerRoles.map((role) => `owner:${role}`), ...rule.requiredReviewerRoles.map((role) => `reviewer:${role}`)].join(", ") || "No added roles"}</td>
+                          <td>{[...rule.requiredOwnerRoles.map((role) => `owner:${role}`), ...rule.requiredReviewerRoles.map((role) => `reviewer:${role}`), ...Object.entries(rule.reviewerQuorum ?? {}).map(([role, count]) => `quorum:${role}=${count}`)].join(", ") || "No added roles"}</td>
                           <td><button className="secondary" type="button" onClick={() => setPolicyDraft({ ...policyDraft, rules: policyDraft.rules.filter((candidate) => candidate !== rule) })}>Remove</button></td>
                         </tr>)}
                       </tbody></table></div>
@@ -2719,13 +2820,14 @@ export default function Home() {
                   </div>
                   <div className="analytics-table-wrap">
                     <table className="analytics-table audit-table">
-                      <thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Subject</th><th>Correlation</th></tr></thead>
+                      <thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Subject</th><th>Reason</th><th>Correlation</th></tr></thead>
                       <tbody>{auditPage.items.map((event) => (
                         <tr key={event.id}>
                           <td>{new Date(event.createdAt).toLocaleString()}</td>
                           <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}</small></td>
                           <td><code>{event.actorId}</code></td>
                           <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
+                          <td>{event.reason ?? "—"}</td>
                           <td><code>{event.correlationId}</code></td>
                         </tr>
                       ))}</tbody>
@@ -3299,6 +3401,18 @@ export default function Home() {
                     <option value="">All roles</option>
                     {inboxFilterOptions.roles.map((role) => <option key={role} value={role}>{role}</option>)}
                   </select>
+                  <label htmlFor="inbox-due">Due</label>
+                  <select
+                    id="inbox-due"
+                    value={inboxFilters.due ?? ""}
+                    onChange={(event) => updateInboxFilter("due", event.target.value)}
+                  >
+                    <option value="">Any due date</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="next_7_days">Next 7 days</option>
+                    <option value="scheduled">All scheduled</option>
+                    <option value="none">No due date</option>
+                  </select>
                   {hasInboxFilters ? (
                     <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
                   ) : null}
@@ -3328,7 +3442,7 @@ export default function Home() {
                         onClick={() => setSelectedId(question.id)}
                       >
                         <span className={`risk risk-${question.risk}`} aria-hidden="true" />
-                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}</small></span>
+                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}</small></span>
                         <span className={`status status-${question.status}`}>{question.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3345,6 +3459,7 @@ export default function Home() {
                         <h3>Context and impact</h3>
                         <p>{selectedQuestion.context}</p>
                         <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
+                        {selectedQuestion.dueAt ? <div className="owner-routing"><strong>Due:</strong> {new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</div> : null}
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
@@ -3352,6 +3467,13 @@ export default function Home() {
                         {selectedQuestion.reviewerIds.length + selectedQuestion.reviewerRoles.length > 0 ? <div className="owner-routing"><strong>Review lane:</strong> {[...selectedQuestion.reviewerIds, ...selectedQuestion.reviewerRoles].join(", ")}</div> : null}
                         <div className="owner-routing"><strong>Policy:</strong> {selectedQuestion.policyRuleKey} · version {selectedQuestion.policyVersion} · {selectedQuestion.policyAction.replaceAll("_", " ")}</div>
                         {selectedQuestion.requiredReviewerRoles.length > 0 ? <div className="owner-routing"><strong>Required reviewer roles:</strong> {selectedQuestion.requiredReviewerRoles.join(", ")}</div> : null}
+                        {selectedQuestion.approvalStatus.requirements.length > 0 ? (
+                          <div className="owner-routing">
+                            <strong>Approval status:</strong>{" "}
+                            {selectedQuestion.approvalStatus.requirements.map((requirement) =>
+                              `${requirement.role} ${requirement.approvedCount}/${requirement.requiredCount} ${requirement.status}`).join(" · ")}
+                          </div>
+                        ) : null}
                         {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
                           <div className="inbox-reason">
                             <strong>Inbox routing:</strong> {selectedQuestion.inboxReasons.map((reason) => reason.replaceAll("_", " ")).join(" · ")}
@@ -3359,6 +3481,26 @@ export default function Home() {
                           </div>
                         ) : null}
                       </section>
+
+                      <details className="detail-disclosure">
+                        <summary>Provenance <span className="section-count">{selectedQuestion.runId ? "linked" : "direct"}</span></summary>
+                        <div className="owner-routing"><strong>Scope:</strong> {Object.entries(selectedQuestion.scope).map(([field, value]) => `${field} ${value}`).join(" · ") || "Project-wide"}</div>
+                        {selectedQuestion.runId ? (
+                          <div className="owner-routing">
+                            <strong>Agent run:</strong> <code>{selectedQuestion.runId}</code>
+                            {runs.some((run) => run.id === selectedQuestion.runId) ? (
+                              <button
+                                className="text-button"
+                                type="button"
+                                onClick={() => {
+                                  setSelectedRunId(selectedQuestion.runId);
+                                  setView("runs");
+                                }}
+                              >Open run</button>
+                            ) : <span className="muted-copy">Run details are outside the current list.</span>}
+                          </div>
+                        ) : <div className="muted-copy">No agent run was linked to this question.</div>}
+                      </details>
 
                       <details className="detail-disclosure">
                         <summary>Assignment routing <span className="section-count">{selectedQuestion.assignmentHistory.length}</span></summary>
@@ -3374,7 +3516,7 @@ export default function Home() {
                             </article>
                           ))}
                         </div>
-                        {(isOrganizationAdmin || isProjectAdmin) && ["open", "in_discussion"].includes(selectedQuestion.status) ? (
+                        {selectedQuestion.canReassign ? (
                           <form className="member-form-grid" onSubmit={(event) => void reassignQuestion(event)}>
                             <label>Owner member IDs<input name="assignmentOwnerIds" defaultValue={selectedQuestion.ownerIds.join(", ")} placeholder="usr_architect" /></label>
                             <label>Owner roles<input name="assignmentOwnerRoles" defaultValue={selectedQuestion.ownerRoles.join(", ")} placeholder="qa-lead" /></label>
@@ -3540,7 +3682,7 @@ export default function Home() {
                               ))}
                             </div>
                           )}
-                          {selectedQuestion.status !== "accepted" && selectedQuestion.requiredReviewerRoles.some((role) => activeRoles.includes(role) && !selectedQuestion.reviews.some((review) => review.reviewerId === activePrincipalId && review.reviewerRole === role)) ? (
+                          {selectedQuestion.reviewRoles.length > 0 ? (
                             <div className="response-form">
                               <label htmlFor="review-status">Review outcome</label>
                               <select
@@ -3564,7 +3706,42 @@ export default function Home() {
                                 disabled={submitting || reviewRationale.trim().length < 10}
                                 onClick={() => void reviewQuestion()}
                               >
-                                {submitting ? "Recording review…" : "Record security review"}
+                                {submitting ? "Recording review…" : "Record policy review"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {selectedQuestion.approvalOverride ? (
+                            <div className="accepted">
+                              <strong>Administrative override recorded.</strong>{" "}
+                              {selectedQuestion.approvalOverride.changedById} · {new Date(selectedQuestion.approvalOverride.createdAt).toLocaleString()}
+                              <div>{selectedQuestion.approvalOverride.reason}</div>
+                            </div>
+                          ) : null}
+                          {selectedQuestion.canOverrideApproval ? (
+                            <div className="response-form">
+                              <h3>Administrative approval override</h3>
+                              <p className="muted-copy">Use only when the protected requirement cannot be satisfied through the configured human reviewer route. This action is audited under your identity.</p>
+                              <label htmlFor="override-rationale">Decision rationale</label>
+                              <textarea
+                                id="override-rationale"
+                                value={overrideRationale}
+                                onChange={(event) => setOverrideRationale(event.target.value)}
+                                placeholder="Explain the decision and the evidence supporting it."
+                              />
+                              <label htmlFor="override-reason">Override reason</label>
+                              <textarea
+                                id="override-reason"
+                                value={overrideReason}
+                                onChange={(event) => setOverrideReason(event.target.value)}
+                                placeholder="Explain why the configured approval requirement cannot be completed."
+                              />
+                              <button
+                                className="secondary"
+                                type="button"
+                                disabled={submitting || overrideRationale.trim().length < 10 || overrideReason.trim().length < 10}
+                                onClick={() => void overrideQuestionApproval()}
+                              >
+                                {submitting ? "Recording override…" : "Accept with administrative override"}
                               </button>
                             </div>
                           ) : null}
@@ -3573,7 +3750,7 @@ export default function Home() {
 
                       {selectedQuestion.status === "accepted" ? (
                         <div className="accepted"><strong>Decision accepted.</strong> Future agent context requests can retrieve {selectedQuestion.decisionId}.</div>
-                      ) : !selectedQuestionInboxItem?.canAccept ? (
+                      ) : !selectedQuestion.canAccept ? (
                         <div className="owner-routing"><strong>Shared review only.</strong> Add a response here; the configured owner or required security reviewer must accept the decision from My Inbox.</div>
                       ) : (
                         <section>

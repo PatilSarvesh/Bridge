@@ -5,6 +5,7 @@ import type {
   AgentRun,
   Assumption,
   Artifact,
+  AuditEvent,
   ContextSnapshot,
   Decision,
   Notification,
@@ -27,6 +28,8 @@ import { describe, expect, it } from "vitest";
 import {
   adapterDiagnosticFromRow,
   adapterDiagnosticToRow,
+  auditEventFromRow,
+  auditEventToRow,
   artifactFromRows,
   assumptionFromRow,
   assumptionToRow,
@@ -72,6 +75,7 @@ import {
   type AssumptionRow,
   type ArtifactRow,
   type ArtifactVersionRow,
+  type AuditEventRow,
   type DecisionRow,
   type ContextSnapshotRow,
   type ProjectRow,
@@ -114,12 +118,14 @@ const question: Question = {
   policyRuleKey: "bridge-question-blocking",
   reversible: false,
   blocking: true,
+  dueAt: "2026-08-09T10:00:00.000Z",
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
   requiredOwnerRoles: [],
   reviewerIds: ["usr_reviewer"],
   reviewerRoles: ["architecture-reviewer"],
-  requiredReviewerRoles: [],
+  requiredReviewerRoles: ["security-reviewer"],
+  requiredReviewerQuorum: { "security-reviewer": 2 },
   routing: {
     ownerSource: "explicit_owner",
     reviewerSource: "scoped_ownership",
@@ -510,6 +516,21 @@ describe("PostgreSQL domain mappings", () => {
     expect(projectPolicyConfigurationFromRow(
       projectPolicyConfigurationToRow(policyConfiguration) as ProjectPolicyConfigurationRow,
     )).toEqual(policyConfiguration);
+    const auditEvent: AuditEvent = {
+      id: "aud_mapping",
+      correlationId: "cor_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      actorId: "usr_owner",
+      actorType: "human",
+      action: "question.approval_overridden",
+      subjectType: "question",
+      subjectId: question.id,
+      reason: "The configured reviewer was unavailable during the release window.",
+      policyVersion: 1,
+      createdAt: "2026-08-07T10:03:00.000Z",
+    };
+    expect(auditEventFromRow(auditEventToRow(auditEvent) as AuditEventRow)).toEqual(auditEvent);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -739,6 +760,21 @@ describe("PostgreSQL domain mappings", () => {
     expect(routingMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
       routingMigration.indexOf('ALTER COLUMN "routing" SET NOT NULL'),
     );
+    const dueDateMigration = readFileSync(
+      new URL("../drizzle/0030_gray_smasher.sql", import.meta.url),
+      "utf8",
+    );
+    expect(dueDateMigration).toContain('ADD COLUMN "due_at" timestamp with time zone');
+    expect(dueDateMigration).toContain('CREATE INDEX "bridge_questions_project_due_idx"');
+
+    const approvalMigration = readFileSync(
+      new URL("../drizzle/0031_deep_vampiro.sql", import.meta.url),
+      "utf8",
+    );
+    expect(approvalMigration).toContain('ADD COLUMN "reason" text');
+    expect(approvalMigration).toContain('ADD COLUMN "required_reviewer_quorum" jsonb');
+    expect(approvalMigration).toContain('ADD COLUMN "approval_override" jsonb');
+    expect(approvalMigration).toContain("bridge_questions_required_reviewer_quorum_shape_check");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),

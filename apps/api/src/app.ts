@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import { developmentAuthConfiguration, type AuthenticationProvider } from "@bridge/auth";
 import {
   acceptAnswerInputSchema,
+  overrideQuestionApprovalInputSchema,
   auditExportInputSchema,
   auditListQuerySchema,
   approveArtifactVersionInputSchema,
@@ -684,6 +685,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         risk: request.query.risk,
         category: request.query.category,
         role: request.query.role,
+        due: request.query.due,
       });
       return {
         items: await options.service.listQuestionInbox(principal, request.params.projectId, filters),
@@ -741,6 +743,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = acceptAnswerInputSchema.parse(request.body);
       const decision = await options.service.acceptAnswer(principal, request.params.questionId, input);
+      return reply.status(201).send(decision);
+    },
+  );
+
+  app.post<{ Params: { questionId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/override",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = overrideQuestionApprovalInputSchema.parse(request.body);
+      const decision = await options.service.overrideQuestionApproval(principal, request.params.questionId, input);
       return reply.status(201).send(decision);
     },
   );

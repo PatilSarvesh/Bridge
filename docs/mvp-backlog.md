@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-08-20 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -377,7 +377,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — personalized server-side inbox routing, default prioritization, status/risk/category/role filters, shared Questions view, fixed-principal reviewer switching, and the human notification feed are implemented; due-date/saved filters, separate multi-reviewer actions, and production authorization states remain
+- **Status:** Implemented for the controlled MVP slice — direct/role owner and reviewer routes, discussion/protected/admin visibility, server-derived action authority, optional due timestamps, overdue/due-soon prioritization, status/risk/category/owner-or-reviewer-role/due filters, URL-persisted web filter state, shared Questions, reviewer switching, approval summaries, and the human notification feed are implemented; quorum enforcement remains owned by BRG-043 rather than inbox policy
 - **Dependencies:** BRG-030, BRG-031
 - **PRD references:** QST-06, NTF-01
 
@@ -413,7 +413,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped detail now includes discussion responses and the response form; provenance links, related work, and personalized authorization states remain
+- **Status:** Partial — project-scoped detail now includes discussion responses, the response form, run/scope provenance, approval summaries, and server-derived personalized authorization states; related work, edit history, mentions, and reopen workflow remain
 - **Dependencies:** BRG-031, BRG-033
 - **PRD references:** QST-02, QST-04
 
@@ -512,7 +512,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — protected questions, separate policy-required human review records, one-or-more required role enforcement, review rationale, and owner acceptance only after every required role is satisfied are implemented; configurable quorum per role, administrative override, approval-status summaries, and review reassignment remain
+- **Status:** Implemented for the controlled MVP slice — protected questions, separate policy-required human review records, configurable distinct-human quorum per reviewer role, approval-status summaries, audited project-administrator override, reviewer-only reassignment, and owner acceptance only after every required role is satisfied are implemented
 - **Dependencies:** BRG-022, BRG-040
 - **PRD references:** QST-05, protected approvals
 

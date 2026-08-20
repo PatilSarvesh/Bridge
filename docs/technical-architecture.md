@@ -334,9 +334,13 @@ The current implementation uses versioned organization and project membership ro
 
 Project role definitions, reusable teams, and owner/reviewer rules are persisted atomically in `bridge_project_ownership_configurations`. The aggregate has one optimistic version per project, records its last human administrator, and rejects ambiguous equal-priority rules separately for owner and reviewer responsibility. Rules may narrow from the implicit project scope by repository, component, and category. Team membership and direct principal targets accept only active humans with project access; organization/project role assignments remain in the membership model.
 
-Limited declarative risk/routing policy is persisted atomically in `bridge_project_policy_configurations`. Each version contains ordered rules with an exact optional category and scope selector, minimum risk, interruption action, and required human owner/reviewer roles. Application evaluation selects the first matching custom rule, then takes the stronger outcome across declared risk, the custom rule, and code-owned pilot safety floors. Equal-priority overlapping custom rules fail activation; exact attempts to weaken a protected default fail explicitly. Questions retain policy action/version/rule plus required owner/reviewer-role requirements, while relevant audit records retain policy version. Migrations `0027_vengeful_lady_ursula.sql` and `0028_cold_tombstone.sql` add this provenance with safe legacy backfills.
+Limited declarative risk/routing policy is persisted atomically in `bridge_project_policy_configurations`. Each version contains ordered rules with an exact optional category and scope selector, minimum risk, interruption action, required human owner/reviewer roles, and optional per-reviewer-role quorum. Application evaluation selects the first matching custom rule, then takes the stronger outcome across declared risk, the custom rule, and code-owned pilot safety floors. Equal-priority overlapping custom rules fail activation; exact attempts to weaken a protected default fail explicitly. Questions retain policy action/version/rule, required owner/reviewer-role requirements, effective reviewer quorum, approval-status summaries, and any audited human administrative override, while relevant audit records retain policy version and supplied protected-action reason. Migrations `0027_vengeful_lady_ursula.sql` and `0028_cold_tombstone.sql` add the original provenance with safe legacy backfills; `0031_deep_vampiro.sql` adds quorum/override storage and audit reasons.
 
 Question assignment remains part of the question aggregate rather than a separately mutable authority store. The current owner and reviewer IDs/roles, the resolved owner/reviewer source and matched rule keys, ownership/policy versions, and append-only assignment history are persisted on `bridge_questions`. Forward-only migration `0029_unknown_madame_hydra.sql` safely backfills legacy assignments before enforcing non-null routing/history shape constraints and extends the outbox event type constraint for reassignment.
+
+An optional UTC `due_at` remains question metadata, indexed with project scope by migration `0030_gray_smasher.sql`. Inbox reads derive `overdue`, `due_soon` (within seven days), `scheduled`, or `none` from the application clock rather than persisting a stale calculated state. Every shared-list, detail, and inbox question representation also derives current `canAccept`, available policy-review roles, and `canReassign` authority from the authenticated principal; the browser never manufactures these permissions from local role labels or filtered collection membership.
+
+Protected question approval is still part of the question aggregate. `required_reviewer_quorum` stores the effective count per normalized reviewer role, while `reviews` remains append-only and counts distinct human reviewer IDs. Reads expose each requirement's approved, rejected, remaining, and satisfied/pending/rejected state. `approval_override` is written only by a project administrator through the REST command after a version check and reason validation; it never creates reviewer evidence and is separately recorded in `bridge_audit_events.reason`. Reviewer-only reassignment keeps the same human coordination boundary and uses the existing append-only assignment history.
 
 #### Work and knowledge
 
@@ -386,6 +390,8 @@ notifications
 - Artifact bodies are content-addressed to prevent accidental duplicate storage.
 - Agent identities cannot appear as human approvers.
 - A response used as an accepted answer must belong to the same organization and question.
+- A protected reviewer requirement is satisfied only by its configured count of distinct approved human reviewers; a rejection blocks ordinary acceptance until the requirement is satisfied or an authorized override is recorded.
+- Administrative override is limited to unresolved protected questions, requires a project administrator, expected version, decision rationale, and non-empty reason, and creates both an override audit event and the ordinary accepted decision event.
 - Every dependency and link must remain within the tenant unless its type explicitly represents an external URL.
 - Audit events and accepted records cannot be hard-deleted through ordinary application APIs.
 
@@ -416,7 +422,9 @@ RequestClarification
 AssignQuestion
 ProposeAnswer
 RejectProposedAnswer
+ReviewQuestion
 AcceptAnswer
+OverrideQuestionApproval
 MarkDuplicate
 CancelQuestion
 ExpireQuestion
@@ -454,7 +462,7 @@ The `AcceptAnswer` command performs one database transaction:
 1. Lock or version-check the question.
 2. Verify it is accept-capable and the proposed response belongs to it.
 3. Resolve decision authority from principal, scope, ownership, and policy.
-4. Verify required protected approvers, if any.
+4. Verify every protected reviewer-role quorum, unless the same transaction is an explicitly authorized administrative override with a recorded reason.
 5. Mark the response accepted and the question accepted/closed.
 6. Insert an immutable decision referencing the question and response.
 7. Insert dependency/link rows.
@@ -546,6 +554,7 @@ POST   /v1/questions/:questionId/comments
 POST   /v1/questions/:questionId/reviews
 POST   /v1/questions/:questionId/assignments
 POST   /v1/questions/:questionId/accept
+POST   /v1/questions/:questionId/override
 POST   /v1/questions/:questionId/duplicate
 
 GET    /v1/projects/:projectId/decisions
@@ -574,7 +583,7 @@ GET    /v1/runs/:runId
 POST   /v1/runs/:runId/continuation
 
 POST   /v1/projects/:projectId/adapter-diagnostics
-GET    /v1/projects/:projectId/inbox?status=&risk=&category=&role=
+GET    /v1/projects/:projectId/inbox?status=&risk=&category=&role=&due=
 GET    /v1/notifications?projectId=&unreadOnly=
 POST   /v1/notifications/:notificationId/read
 POST   /v1/notifications/read-all
@@ -598,7 +607,7 @@ Administrative endpoints are separated under `/v1/admin`. Outbox operations and 
 
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
 
-`GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint accepts validated status, risk, category, and assigned-role filters after authority routing; it does not yet support due dates or saved filter state. Protected questions expose a separate human policy-review command for each required reviewer role before an owner lacking that reviewer role may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
+`GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint applies validated status, risk, category, owner-or-reviewer role, and due-state filters only after project authorization and personalized routing. Web filters round-trip through prefixed URL query parameters without becoming a separate authority boundary. Protected questions expose a separate human policy-review command for each required reviewer role before an owner lacking that reviewer role may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
 Project repository metadata is managed through the canonical REST endpoints, the administrator-only web **Repositories** view, or the equivalent CLI `repository list` and `repository link` commands. These surfaces exchange only provider, owner, repository name, canonical URL, project scope, and timestamps. They do not fetch source or infer provider connectivity from a caller-supplied URL; provider-backed validation and synchronization remain integration work.
 
@@ -606,7 +615,7 @@ Project ownership configuration is managed through canonical administrator REST 
 
 Only a human project administrator may replace the owner/reviewer assignment on an unresolved question through canonical `POST /v1/questions/:questionId/assignments`. Direct targets must be active human project members, policy-required roles cannot be removed, and optimistic concurrency prevents stale reassignment. The aggregate update, append-only assignment-history entry, `question.reassigned` audit, typed outbox event, and direct-recipient notifications share one transaction. MCP exposes neither ownership management nor reassignment, remains optional, and gains no separate authority path.
 
-Project policy configuration is managed through canonical administrator REST endpoints and the web **Policy** view. The limited matcher supports `assume_and_log`, `ask_async`, `block`, and `protected_approval`; category and each supplied scope dimension are normalized exact matches, with lower priority numbers winning. Policy can raise but cannot lower caller-declared risk or interruption, and the code-owned PILOT-008 matrix remains an immutable floor. Policy-required owner roles join explicit question owners but must be held by the accepting human; reviewer roles remain separate and must be held by that owner or represented by approved human reviews. Policy provenance remains attached to question lifecycle audits. MCP has no policy-management surface.
+Project policy configuration is managed through canonical administrator REST endpoints and the web **Policy** view. The limited matcher supports `assume_and_log`, `ask_async`, `block`, and `protected_approval`; category and each supplied scope dimension are normalized exact matches, with lower priority numbers winning. Policy can raise but cannot lower caller-declared risk or interruption, and the code-owned PILOT-008 matrix remains an immutable floor. Policy-required owner roles join explicit question owners but must be held by the accepting human; reviewer roles remain separate and require a configured quorum of distinct approved human reviews. Question reads expose the approval summary, while only a project administrator can use the versioned REST override command when ordinary acceptance cannot complete; the override's reason is included in the metadata audit stream and exports. Policy provenance remains attached to question lifecycle audits. MCP has no policy-management or human approval-mutation surface.
 
 ## 13. MCP architecture
 
@@ -883,10 +892,10 @@ Audit events record:
 - Timestamp and correlation ID
 - Authentication method
 - Before/after state identifiers or version numbers
-- Reason supplied for protected actions
+- Reason supplied for protected actions, including administrative protected-approval overrides and reviewer-lane changes
 - Request source: web, API, MCP, CLI, worker, integration
 
-Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Exports are themselves audited.
+Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Override/reassignment reasons are bounded operational explanations, not prompts, answers, raw transcripts, or private reasoning. Exports are themselves audited.
 
 ## 20. Security design
 
@@ -1165,7 +1174,7 @@ The founder-level choices are resolved in the pilot decision record. Implementat
 
 The fresh-repository portion of gate 2 is now validated twice for the local Codex-first path. The packaged simulation proved registration, transport, and project-aware presentation. A separate ephemeral Codex CLI session then received only `Build a Hospital Management System.`, used the repository-installed CLI without MCP, linked a context snapshot, published all four required specification types, corrected a missing-question failure reported by `bridge conformance`, routed a protected production-boundary question to human roles, and entered `waiting_for_human`. This proves observable adherence for that Codex client/version/environment, not universal vendor instruction compliance or interception of an unexposed native clarification UI; Claude Code remains the second conformance client.
 
-The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, the configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox now routes direct owners, direct reviewers, assigned owner/reviewer roles, project administrators, and protected-review principals, with status/risk/category/role filters. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; comment editing, notification preferences, and due-date filtering remain future work. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
+The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, the configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox routes direct owners, direct reviewers, assigned owner/reviewer roles, project administrators, and protected-review principals, with status/risk/category/role/due filters and protected, overdue, blocking, then due-soon prioritization. Shared list/detail reads carry the same server-derived action authority, so a filter cannot hide an owner's acceptance capability. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; comment editing and notification preferences remain future work. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
 
 Explainable role-aware routing is validated locally across explicit, scoped, category, project-default, and administrator-fallback paths. A question assigned to `qa-lead` can be accepted by a matching member, separately routed reviewers receive review visibility without acceptance authority, and an ordinary contributor or agent receives a deterministic reassignment denial. OIDC memberships support project-specific role data and administrators can manage project role/team/ownership configuration.
 

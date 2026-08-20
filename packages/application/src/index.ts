@@ -35,6 +35,7 @@ import type {
   ProjectAnalyticsQuery,
   ProjectMembershipConfiguration,
   QuestionReviewInput,
+  OverrideQuestionApprovalInput,
   ReassignQuestionInput,
   QuestionInboxQuery,
   QuestionSubmissionDisposition,
@@ -52,7 +53,7 @@ import {
   assertHuman,
   assertProjectAccess,
   canAcceptQuestion,
-  questionInboxReasons,
+  questionInboxItem,
   BridgeError,
   normalizeRoleName,
   principalHasRole,
@@ -73,6 +74,7 @@ import {
   type Question,
   type QuestionAssignmentHistoryEntry,
   type QuestionComment,
+  type QuestionApprovalOverride,
   type QuestionInboxItem,
   type QuestionReview,
   type QuestionRouteSource,
@@ -435,6 +437,7 @@ export interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly reason?: string;
   readonly policyVersion?: number;
   readonly createdAt: string;
 }
@@ -705,6 +708,7 @@ interface PolicyEvaluation {
   readonly policyRuleKey: string;
   readonly requiredOwnerRoles: readonly string[];
   readonly requiredReviewerRoles: readonly string[];
+  readonly requiredReviewerQuorum: Readonly<Record<string, number>>;
 }
 
 interface RoutingResolution {
@@ -3494,6 +3498,11 @@ export class BridgeService {
     }
 
     const timestamp = this.now().toISOString();
+    const parsedDueAt = input.dueAt === undefined ? undefined : Date.parse(input.dueAt);
+    if (parsedDueAt !== undefined && !Number.isFinite(parsedDueAt)) {
+      throw new BridgeError("VALIDATION_FAILED", "Question dueAt must be a valid timestamp.", 400);
+    }
+    const dueAt = parsedDueAt === undefined ? undefined : new Date(parsedDueAt).toISOString();
     const routing = await this.resolveQuestionRouting(repository, project, input, policy);
     const sourceRun = input.runId
       ? await this.requireLinkableRun(principal, input.runId, repository)
@@ -3506,6 +3515,7 @@ export class BridgeService {
       input,
       policy,
       routing,
+      dueAt,
       effectiveBlocking,
     );
     if (reusable) {
@@ -3559,12 +3569,16 @@ export class BridgeService {
       policyRuleKey: policy.policyRuleKey,
       reversible: input.reversible,
       blocking: effectiveBlocking,
+      ...(dueAt ? { dueAt } : {}),
       ownerIds: routing.ownerIds,
       ownerRoles: routing.ownerRoles,
       requiredOwnerRoles: policy.requiredOwnerRoles,
       reviewerIds: routing.reviewerIds,
       reviewerRoles: routing.reviewerRoles,
       requiredReviewerRoles: policy.requiredReviewerRoles,
+      ...(Object.keys(policy.requiredReviewerQuorum).length > 0
+        ? { requiredReviewerQuorum: policy.requiredReviewerQuorum }
+        : {}),
       routing: routing.explanation,
       assignmentHistory: [initialAssignment],
       options: input.options.map((option) => ({ ...option })),
@@ -3698,6 +3712,7 @@ export class BridgeService {
     input: CreateQuestionInput,
     policy: PolicyEvaluation,
     routing: RoutingResolution,
+    dueAt: string | undefined,
     effectiveBlocking: boolean,
   ): Promise<Question | undefined> {
     const questions = await repository.listQuestions(projectId);
@@ -3712,6 +3727,7 @@ export class BridgeService {
       question.policyAction === policy.action &&
       question.reversible === input.reversible &&
       question.blocking === effectiveBlocking &&
+      question.dueAt === dueAt &&
       JSON.stringify([...question.ownerIds].sort()) === JSON.stringify([...routing.ownerIds].sort()) &&
       JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
         JSON.stringify([...routing.ownerRoles].sort()) &&
@@ -3722,7 +3738,9 @@ export class BridgeService {
       JSON.stringify([...question.requiredOwnerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
         JSON.stringify([...policy.requiredOwnerRoles].sort()) &&
       JSON.stringify([...question.requiredReviewerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...policy.requiredReviewerRoles].sort())
+        JSON.stringify([...policy.requiredReviewerRoles].sort()) &&
+      JSON.stringify(Object.entries(question.requiredReviewerQuorum ?? {}).sort(([left], [right]) => left.localeCompare(right))) ===
+        JSON.stringify(Object.entries(policy.requiredReviewerQuorum).sort(([left], [right]) => left.localeCompare(right)))
     );
     for (const question of candidates.sort((left, right) =>
       Number(right.status === "accepted") - Number(left.status === "accepted") ||
@@ -3786,10 +3804,12 @@ export class BridgeService {
     return intersection / union;
   }
 
-  async listQuestions(principal: Principal, projectId: string): Promise<readonly Question[]> {
+  async listQuestions(principal: Principal, projectId: string): Promise<readonly QuestionInboxItem[]> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
-      return repository.listQuestions(projectId);
+      const now = this.now();
+      return (await repository.listQuestions(projectId)).map((question) =>
+        questionInboxItem(principal, question, now));
     });
   }
 
@@ -3800,7 +3820,9 @@ export class BridgeService {
   ): Promise<readonly QuestionInboxItem[]> {
     return this.tenantTransaction(principal, async (repository) => {
     await this.requireProject(principal, projectId, repository);
-    const questions = await repository.listQuestions(projectId);
+    const now = this.now();
+    const questions = (await repository.listQuestions(projectId)).map((question) =>
+      questionInboxItem(principal, question, now));
     const normalizedCategory = filters.category?.normalize("NFKC").toLocaleLowerCase("en");
     const normalizedRole = filters.role ? normalizeRoleName(filters.role) : undefined;
     return questions
@@ -3809,19 +3831,31 @@ export class BridgeService {
         (!filters.risk || question.risk === filters.risk) &&
         (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
         (!normalizedRole || [...question.ownerRoles, ...(question.reviewerRoles ?? [])]
-          .some((role) => normalizeRoleName(role) === normalizedRole)),
+          .some((role) => normalizeRoleName(role) === normalizedRole)) &&
+        (!filters.due ||
+          (filters.due === "overdue" && question.dueStatus === "overdue") ||
+          (filters.due === "next_7_days" && question.dueStatus === "due_soon") ||
+          (filters.due === "scheduled" && question.dueStatus !== "none") ||
+          (filters.due === "none" && question.dueStatus === "none")),
       )
-      .map((question) => ({
-        ...question,
-        inboxReasons: questionInboxReasons(principal, question),
-        canAccept: canAcceptQuestion(principal, question),
-      }))
       .filter((question) => question.inboxReasons.length > 0)
       .sort((left, right) => {
         const riskRank = { protected: 4, high: 3, medium: 2, low: 1 } as const;
+        const protectedDifference = Number(right.risk === "protected") - Number(left.risk === "protected");
+        if (protectedDifference !== 0) return protectedDifference;
+        const overdueDifference = Number(right.dueStatus === "overdue") - Number(left.dueStatus === "overdue");
+        if (overdueDifference !== 0) return overdueDifference;
+        if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
+        const dueSoonDifference = Number(right.dueStatus === "due_soon") - Number(left.dueStatus === "due_soon");
+        if (dueSoonDifference !== 0) return dueSoonDifference;
         const riskDifference = riskRank[right.risk] - riskRank[left.risk];
         if (riskDifference !== 0) return riskDifference;
-        if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
+        if (left.dueAt && right.dueAt) {
+          const dueAtDifference = Date.parse(left.dueAt) - Date.parse(right.dueAt);
+          if (dueAtDifference !== 0) return dueAtDifference;
+        } else if (left.dueAt || right.dueAt) {
+          return left.dueAt ? -1 : 1;
+        }
         const discussionDifference = Number(right.status === "in_discussion") - Number(left.status === "in_discussion");
         if (discussionDifference !== 0) return discussionDifference;
         return Date.parse(right.createdAt) - Date.parse(left.createdAt);
@@ -3829,9 +3863,9 @@ export class BridgeService {
     });
   }
 
-  async getQuestion(principal: Principal, questionId: string): Promise<Question> {
-    return this.tenantTransaction(principal, (repository) =>
-      this.requireQuestion(principal, questionId, repository));
+  async getQuestion(principal: Principal, questionId: string): Promise<QuestionInboxItem> {
+    return this.tenantTransaction(principal, async (repository) =>
+      questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
   }
 
   async reassignQuestion(
@@ -3887,6 +3921,13 @@ export class BridgeService {
         ...normalizedReviewerRoles,
         ...(question.requiredReviewerRoles ?? []),
       ]);
+      const ownersChanged = JSON.stringify([...input.ownerIds].sort()) !== JSON.stringify([...question.ownerIds].sort()) ||
+        JSON.stringify(ownerRoles) !== JSON.stringify(this.normalizedRoles(question.ownerRoles));
+      const reviewersChanged = JSON.stringify([...input.reviewerIds].sort()) !== JSON.stringify([...question.reviewerIds].sort()) ||
+        JSON.stringify(reviewerRoles) !== JSON.stringify(this.normalizedRoles(question.reviewerRoles));
+      if (!ownersChanged && !reviewersChanged) {
+        throw new BridgeError("CONFLICT", "The reassignment does not change the current owner or reviewer route.", 409);
+      }
       const timestamp = this.now().toISOString();
       const ownershipVersion = (await repository.getProjectOwnershipConfiguration(project.id))?.version ?? 0;
       const route: QuestionRoutingExplanation = {
@@ -3924,11 +3965,12 @@ export class BridgeService {
         repository,
         principal,
         question.projectId,
-        "question.reassigned",
+        !ownersChanged && reviewersChanged ? "question.review_reassigned" : "question.reassigned",
         "question",
         question.id,
         timestamp,
         question.policyVersion,
+        input.reason,
       );
       await repository.saveOutboxEvent({
         id: `evt_${this.id()}`,
@@ -4243,15 +4285,47 @@ export class BridgeService {
     );
   }
 
+  async overrideQuestionApproval(
+    principal: Principal,
+    questionId: string,
+    input: OverrideQuestionApprovalInput,
+  ): Promise<Decision> {
+    return this.tenantTransaction(principal, (repository) => {
+      const { expectedVersion, reason, ...acceptInput } = input;
+      return this.acceptAnswerInTransaction(repository, principal, questionId, acceptInput, {
+        expectedVersion,
+        reason,
+      });
+    });
+  }
+
   private async acceptAnswerInTransaction(
     repository: BridgeRepository,
     principal: Principal,
     questionId: string,
     input: AcceptAnswerInput,
+    override?: { readonly expectedVersion: number; readonly reason: string },
   ): Promise<Decision> {
     const question = await this.requireQuestion(principal, questionId, repository);
-    assertCanAccept(principal, question);
-    this.assertSecretSafe("decision", input);
+    if (override) {
+      this.assertProjectOperator(principal, "Overriding protected approval", question.projectId);
+      if (question.version !== override.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+          expectedVersion: override.expectedVersion,
+          currentVersion: question.version,
+        });
+      }
+      if (question.risk !== "protected") {
+        throw new BridgeError("POLICY_BLOCKED", "Administrative approval override is limited to protected questions.", 403);
+      }
+      if (canAcceptQuestion(principal, question)) {
+        throw new BridgeError("CONFLICT", "Protected approval requirements are already satisfied for this administrator; use ordinary acceptance.", 409);
+      }
+      this.assertSecretSafe("question", { ...input, reason: override.reason });
+    } else {
+      assertCanAccept(principal, question);
+      this.assertSecretSafe("decision", input);
+    }
     if (!["open", "in_discussion"].includes(question.status)) {
       throw new BridgeError("CONFLICT", "This question has already been resolved.", 409);
     }
@@ -4299,8 +4373,30 @@ export class BridgeService {
       responses: [...question.responses, response],
       acceptedResponseId: response.id,
       decisionId: decision.id,
+      ...(override ? {
+        approvalOverride: {
+          changedById: principal.id,
+          changedByType: principal.type,
+          reason: override.reason,
+          createdAt: timestamp,
+          questionVersion: question.version + 1,
+        } satisfies QuestionApprovalOverride,
+      } : {}),
       version: question.version + 1,
     });
+    if (override) {
+      await this.audit(
+        repository,
+        principal,
+        question.projectId,
+        "question.approval_overridden",
+        "question",
+        question.id,
+        timestamp,
+        question.policyVersion,
+        override.reason,
+      );
+    }
     await this.audit(
       repository, principal, question.projectId, "decision.accepted", "decision", decision.id, timestamp,
       question.policyVersion,
@@ -4316,8 +4412,10 @@ export class BridgeService {
       ],
       {
         type: "question_accepted",
-        title: "Question accepted",
-        body: `${principal.displayName} accepted the decision for “${question.title}”.`,
+        title: override ? "Question accepted with administrative override" : "Question accepted",
+        body: override
+          ? `${principal.displayName} accepted the decision for “${question.title}” with an audited administrative override.`
+          : `${principal.displayName} accepted the decision for “${question.title}”.`,
         targetType: "decision",
         targetId: decision.id,
         questionContext: {
@@ -5260,7 +5358,7 @@ export class BridgeService {
     }
     const fields: readonly (keyof AuditRecord)[] = [
       "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
-      "action", "subjectType", "subjectId", "policyVersion", "createdAt",
+      "action", "subjectType", "subjectId", "reason", "policyVersion", "createdAt",
     ];
     const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const body = [
@@ -5451,6 +5549,7 @@ export class BridgeService {
       keys.add(key);
       const requiredOwnerRoles = this.normalizedRoles(inputRule.requiredOwnerRoles);
       const requiredReviewerRoles = this.normalizedRoles(inputRule.requiredReviewerRoles);
+      const reviewerQuorum = this.normalizedReviewerQuorum(inputRule.reviewerQuorum, requiredReviewerRoles);
       if (requiredOwnerRoles.length !== inputRule.requiredOwnerRoles.length ||
         requiredReviewerRoles.length !== inputRule.requiredReviewerRoles.length) {
         throw new BridgeError("VALIDATION_FAILED", "Required policy roles must be unique after normalization.", 400);
@@ -5470,7 +5569,7 @@ export class BridgeService {
           400,
         );
       }
-      if (inputRule.action !== "protected_approval" && requiredReviewerRoles.length > 0) {
+      if (inputRule.action !== "protected_approval" && (requiredReviewerRoles.length > 0 || Object.keys(reviewerQuorum).length > 0)) {
         throw new BridgeError(
           "VALIDATION_FAILED",
           "Required reviewer roles are supported only by protected-approval policy.",
@@ -5515,6 +5614,7 @@ export class BridgeService {
         minimumRisk: inputRule.minimumRisk,
         requiredOwnerRoles,
         requiredReviewerRoles,
+        ...(Object.keys(reviewerQuorum).length > 0 ? { reviewerQuorum } : {}),
       });
     }
     for (const [index, left] of rules.entries()) {
@@ -5578,6 +5678,7 @@ export class BridgeService {
         baseAction === "block" ? "bridge-question-blocking" : "bridge-agent-protected";
     let requiredOwnerRoles: readonly string[] = [];
     let requiredReviewerRoles: readonly string[] = baseAction === "protected_approval" ? ["security-reviewer"] : [];
+    let requiredReviewerQuorum: Readonly<Record<string, number>> = {};
 
     if (defaultRule) {
       action = this.strongerAction(action, defaultRule.action);
@@ -5585,6 +5686,7 @@ export class BridgeService {
       policyRuleKey = defaultRule.key;
       requiredOwnerRoles = defaultRule.requiredOwnerRoles;
       requiredReviewerRoles = defaultRule.requiredReviewerRoles;
+      requiredReviewerQuorum = defaultRule.reviewerQuorum ?? {};
     }
     if (configuredRule) {
       const beforeAction = action;
@@ -5603,6 +5705,10 @@ export class BridgeService {
         ...requiredReviewerRoles,
         ...configuredRule.requiredReviewerRoles,
       ]);
+      requiredReviewerQuorum = this.mergeReviewerQuorum(
+        requiredReviewerQuorum,
+        configuredRule.reviewerQuorum ?? {},
+      );
     }
     if (action === "protected_approval") risk = "protected";
     return {
@@ -5612,6 +5718,7 @@ export class BridgeService {
       policyRuleKey,
       requiredOwnerRoles,
       requiredReviewerRoles,
+      requiredReviewerQuorum,
     };
   }
 
@@ -5728,6 +5835,42 @@ export class BridgeService {
   private normalizedRoles(roles: readonly string[]): readonly string[] {
     return [...new Set(roles.map(normalizeRoleName).filter(Boolean))].sort((left, right) =>
       left.localeCompare(right));
+  }
+
+  private normalizedReviewerQuorum(
+    quorum: Readonly<Record<string, number>> | undefined,
+    requiredReviewerRoles: readonly string[],
+  ): Readonly<Record<string, number>> {
+    const allowedRoles = new Set(requiredReviewerRoles);
+    const normalized = Object.fromEntries(
+      Object.entries(quorum ?? {}).map(([role, count]) => {
+        const normalizedRole = normalizeRoleName(role);
+        if (!normalizedRole || !allowedRoles.has(normalizedRole)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Reviewer quorum can only be configured for a required reviewer role.",
+            400,
+            { role },
+          );
+        }
+        if (!Number.isInteger(count) || count < 1 || count > 20) {
+          throw new BridgeError("VALIDATION_FAILED", "Reviewer quorum must be between 1 and 20.", 400, { role });
+        }
+        return [normalizedRole, count] as const;
+      }),
+    );
+    return normalized;
+  }
+
+  private mergeReviewerQuorum(
+    left: Readonly<Record<string, number>>,
+    right: Readonly<Record<string, number>>,
+  ): Readonly<Record<string, number>> {
+    const merged: Record<string, number> = { ...left };
+    for (const [role, count] of Object.entries(right)) {
+      merged[normalizeRoleName(role)] = Math.max(merged[normalizeRoleName(role)] ?? 1, count);
+    }
+    return merged;
   }
 
   private sameRoles(left: readonly string[], right: readonly string[]): boolean {
@@ -5907,6 +6050,7 @@ export class BridgeService {
     subjectId: string,
     createdAt: string,
     policyVersion?: number,
+    reason?: string,
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
@@ -5918,6 +6062,7 @@ export class BridgeService {
       action,
       subjectType,
       subjectId,
+      ...(reason ? { reason } : {}),
       ...(policyVersion === undefined ? {} : { policyVersion }),
       createdAt,
     });

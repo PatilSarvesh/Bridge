@@ -824,6 +824,7 @@ describe("Bridge API vertical slice", () => {
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
 
+    const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1_000).toISOString();
     const created = await app.inject({
       method: "POST",
       url: `/v1/projects/${demoProject.id}/questions`,
@@ -840,6 +841,7 @@ describe("Bridge API vertical slice", () => {
         risk: "high",
         reversible: false,
         blocking: true,
+        dueAt,
         options: [
           { key: "critical-only", label: "Block on critical failures", tradeoffs: "Keeps release flow moving while protecting critical paths." },
           { key: "any-failure", label: "Block on any failure", tradeoffs: "Maximizes caution but may delay fixes unrelated to the release." },
@@ -859,7 +861,14 @@ describe("Bridge API vertical slice", () => {
     expect(qaInbox.statusCode).toBe(200);
     expect(qaInbox.json<{ items: Array<{ id: string; canAccept: boolean; inboxReasons: string[] }> }>().items)
       .toEqual([
-        expect.objectContaining({ id: roleQuestionId, canAccept: true, inboxReasons: ["role_owner"] }),
+        expect.objectContaining({
+          id: roleQuestionId,
+          canAccept: true,
+          canReassign: false,
+          dueAt,
+          dueStatus: "due_soon",
+          inboxReasons: ["role_owner"],
+        }),
       ]);
 
     const filteredInbox = await app.inject({
@@ -871,12 +880,27 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ id: roleQuestionId }),
     ]);
 
+    const dueInbox = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?due=next_7_days`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(dueInbox.json<{ items: Array<{ id: string }> }>().items).toEqual([
+      expect.objectContaining({ id: roleQuestionId }),
+    ]);
+
     const invalidFilter = await app.inject({
       method: "GET",
       url: `/v1/projects/${demoProject.id}/inbox?risk=urgent`,
       headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
     });
     expect(invalidFilter.statusCode).toBe(400);
+    const invalidDueFilter = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/inbox?due=eventually`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalidDueFilter.statusCode).toBe(400);
 
     const contributorInbox = await app.inject({
       method: "GET",
@@ -890,9 +914,16 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/projects/${demoProject.id}/questions`,
       headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
     });
-    expect(sharedQuestions.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toEqual(
+    const sharedItems = sharedQuestions.json<{
+      items: Array<{ id: string; canAccept: boolean; canReassign: boolean }>;
+    }>().items;
+    expect(sharedItems.map((item) => item.id)).toEqual(
       expect.arrayContaining([runtime.sampleQuestionId, roleQuestionId]),
     );
+    expect(sharedItems.find((item) => item.id === roleQuestionId)).toMatchObject({
+      canAccept: false,
+      canReassign: false,
+    });
   });
 
   it("registers and lists a fresh project for the local prototype", async () => {
@@ -2015,6 +2046,211 @@ describe("Bridge API vertical slice", () => {
     expect(detail.json<{ reviews: Array<{ reviewerId: string; status: string }> }>().reviews).toEqual([
       expect.objectContaining({ reviewerId: demoPrincipals.securityReviewer.id, status: "approved" }),
     ]);
+  });
+
+  it("exposes reviewer quorum and an audited administrator override through REST", async () => {
+    const runtime = await createDemoRuntime();
+    const secondReviewer: Principal = {
+      ...demoPrincipals.securityReviewer,
+      id: "usr_security_reviewer_two",
+      displayName: "Second Security Reviewer",
+    };
+    const overrideAdmin: Principal = {
+      ...demoPrincipals.architect,
+      id: "usr_override_admin",
+      roles: ["project-admin"],
+      displayName: "Override Administrator",
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: {
+        ...runtime.principals,
+        [secondReviewer.id]: secondReviewer,
+        [overrideAdmin.id]: overrideAdmin,
+      },
+    });
+    apps.push(app);
+    const policy = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/policy`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 0,
+        rules: [{
+          key: "release-quorum",
+          name: "Require two security reviews for release decisions",
+          priority: 10,
+          category: "release",
+          scope: {},
+          action: "protected_approval",
+          minimumRisk: "protected",
+          requiredOwnerRoles: [],
+          requiredReviewerRoles: ["security-reviewer"],
+          reviewerQuorum: { "security-reviewer": 2 },
+        }],
+      },
+    });
+    expect(policy.statusCode).toBe(200);
+    expect(policy.json<{ rules: Array<{ reviewerQuorum?: Record<string, number> }> }>().rules[0]?.reviewerQuorum)
+      .toEqual({ "security-reviewer": 2 });
+    const invalidPolicy = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/policy`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: {
+        expectedVersion: 1,
+        rules: [{
+          key: "invalid-quorum",
+          name: "Invalid reviewer quorum",
+          priority: 10,
+          category: "release",
+          scope: {},
+          action: "protected_approval",
+          minimumRisk: "protected",
+          requiredOwnerRoles: [],
+          requiredReviewerRoles: ["security-reviewer"],
+          reviewerQuorum: { "architecture-reviewer": 2 },
+        }],
+      },
+    });
+    expect(invalidPolicy.statusCode).toBe(400);
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-reviewer-quorum-question",
+        title: "Which release guard should be enabled?",
+        type: "decision",
+        category: "release",
+        context: "The release path needs an independent security decision before activation.",
+        whyItMatters: "A weak release guard could expose protected changes.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        intendedOwnerRoles: [],
+        risk: "low",
+        reversible: false,
+        blocking: false,
+        options: [
+          { key: "guarded", label: "Enable the guarded release path", tradeoffs: "Requires two security reviews." },
+          { key: "defer", label: "Defer the release", tradeoffs: "Keeps the protected change paused." },
+        ],
+        recommendationKey: "guarded",
+        scope: { component: "release" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string; version: number }>();
+
+    const initialDetail = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${question.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(initialDetail.json<{ approvalStatus: { satisfied: boolean; requirements: Array<{ approvedCount: number; requiredCount: number }> } }>()
+      .approvalStatus).toMatchObject({ satisfied: false, requirements: [{ approvedCount: 0, requiredCount: 2 }] });
+
+    const firstReview = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/reviews`,
+      headers: { "x-bridge-principal-id": demoPrincipals.securityReviewer.id },
+      payload: {
+        expectedVersion: question.version,
+        status: "approved",
+        rationale: "The release guard is bounded and the first independent review is complete.",
+      },
+    });
+    expect(firstReview.statusCode).toBe(201);
+    const secondReview = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/reviews`,
+      headers: { "x-bridge-principal-id": secondReviewer.id },
+      payload: {
+        expectedVersion: question.version + 1,
+        status: "approved",
+        rationale: "The second independent reviewer confirms the guarded release trade-off.",
+      },
+    });
+    expect(secondReview.statusCode).toBe(201);
+    const satisfiedDetail = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${question.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(satisfiedDetail.json<{ approvalStatus: { satisfied: boolean } }>().approvalStatus.satisfied).toBe(true);
+
+    const overrideCreated = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-administrator-override-question",
+        title: "Which privacy control needs an administrative decision?",
+        type: "decision",
+        category: "privacy",
+        context: "The privacy control needs a time-bound human decision.",
+        whyItMatters: "An unreviewed privacy control could retain protected data too broadly.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        intendedOwnerRoles: [],
+        risk: "low",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "bounded", label: "Use a bounded retention period", tradeoffs: "Requires the administrator to record why the normal reviewer route was unavailable." },
+          { key: "defer", label: "Defer the retention change", tradeoffs: "Keeps the current control in place." },
+        ],
+        recommendationKey: "bounded",
+        scope: { component: "patient-records" },
+      },
+    });
+    expect(overrideCreated.statusCode).toBe(201);
+    const overrideQuestion = overrideCreated.json<{ id: string; version: number }>();
+    const deniedOverride = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${overrideQuestion.id}/override`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: overrideQuestion.version,
+        optionKey: "bounded",
+        rationale: "A contributor cannot authorize the protected decision.",
+        reason: "The contributor does not hold the project administrator role.",
+      },
+    });
+    expect(deniedOverride.statusCode).toBe(403);
+
+    const acceptedOverride = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${overrideQuestion.id}/override`,
+      headers: { "x-bridge-principal-id": overrideAdmin.id },
+      payload: {
+        expectedVersion: overrideQuestion.version,
+        optionKey: "bounded",
+        rationale: "The administrator reviewed the bounded privacy control and accepted the residual risk.",
+        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+      },
+    });
+    expect(acceptedOverride.statusCode).toBe(201);
+
+    const audit = await app.inject({
+      method: "GET",
+      url: `/v1/admin/projects/${demoProject.id}/audit?action=question.approval_overridden`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+    });
+    expect(audit.json<{ items: Array<{ action: string; reason?: string }> }>().items).toEqual([
+      expect.objectContaining({
+        action: "question.approval_overridden",
+        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+      }),
+    ]);
+    const exportResponse = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/audit/export`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { format: "csv", maxItems: 100 },
+    });
+    expect(exportResponse.statusCode).toBe(200);
+    expect(exportResponse.body).toContain("reason");
+    expect(exportResponse.body).toContain("configured reviewer is unavailable");
   });
 
   it("allows exactly one protected acceptance across concurrent REST requests", async () => {
