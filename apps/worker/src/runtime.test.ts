@@ -62,6 +62,7 @@ describe("worker runtime", () => {
       channel: "slack",
       pollIntervalMs: 1_000,
       batchSize: 25,
+      assumptionExpiryIntervalMs: 60_000,
       maxAttempts: 5,
       baseBackoffMs: 1_000,
     });
@@ -100,6 +101,33 @@ describe("worker runtime", () => {
     expect(store.completed).toBe(1);
     expect(store.failed).toBe(0);
     expect(logs).toContain("worker.cycle_completed");
+  });
+
+  it("runs the scheduled assumption expiry cycle before delivery work", async () => {
+    const store = new RuntimeStore();
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let expiryRuns = 0;
+    await runOutboxWorker({
+      store,
+      handler: async () => controller.abort(),
+      assumptionExpiryCycle: async () => {
+        expiryRuns += 1;
+        return { expiredCount: 2 };
+      },
+      assumptionExpiryIntervalMs: 1_000,
+      pollIntervalMs: 250,
+      signal: controller.signal,
+      logger: {
+        info: (name) => logs.push(name),
+        warn: (name) => logs.push(name),
+        error: (name) => logs.push(name),
+      },
+      sleep: async () => undefined,
+    });
+
+    expect(expiryRuns).toBe(1);
+    expect(logs).toContain("assumption_expiry.cycle_completed");
   });
 
   it("validates the polling interval before opening a worker loop", async () => {

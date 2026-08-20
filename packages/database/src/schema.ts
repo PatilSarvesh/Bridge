@@ -536,14 +536,13 @@ export const decisions = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
     questionId: text("question_id")
-      .notNull()
       .references(() => questions.id, { onDelete: "restrict" }),
     answer: text("answer").notNull(),
     rationale: text("rationale").notNull(),
     category: text("category").notNull(),
     scope: jsonb("scope").$type<Scope>().notNull(),
     ownerId: text("owner_id").notNull(),
-    sourceResponseId: text("source_response_id").notNull(),
+    sourceResponseId: text("source_response_id"),
     status: decisionStatusEnum("status").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     reviewAt: timestamp("review_at", { withTimezone: true, mode: "string" }).notNull(),
@@ -577,6 +576,10 @@ export const decisions = pgTable(
       columns: [table.organizationId, table.projectId, table.replacementDecisionId],
       foreignColumns: [table.organizationId, table.projectId, table.id],
     }).onDelete("restrict"),
+    check(
+      "bridge_decisions_source_shape_check",
+      sql`((${table.questionId} IS NOT NULL AND ${table.sourceResponseId} IS NOT NULL) OR (${table.questionId} IS NULL AND ${table.sourceResponseId} IS NULL))`,
+    ),
     tenantPolicy("bridge_decisions_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -794,6 +797,10 @@ export const notifications = pgTable(
       columns: [table.organizationId, table.projectId],
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
+    check(
+      "bridge_notifications_type_check",
+      sql`${table.type} IN ('question_assigned', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved')`,
+    ),
     tenantPolicy("bridge_notifications_tenant", table.organizationId),
   ],
 ).enableRLS();

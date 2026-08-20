@@ -562,6 +562,24 @@ describe("PostgreSQL domain mappings", () => {
     )).toEqual(adapterDiagnostic);
     expect(assumptionFromRow(assumptionToRow(assumption) as AssumptionRow)).toEqual(assumption);
     expect(decisionFromRow(decisionToRow(decision) as DecisionRow)).toEqual(decision);
+    const {
+      questionId: _questionId,
+      sourceResponseId: _sourceResponseId,
+      lifecycleRationale: _lifecycleRationale,
+      lifecycleChangedById: _lifecycleChangedById,
+      lifecycleChangedAt: _lifecycleChangedAt,
+      replacementDecisionId: _replacementDecisionId,
+      ...assumptionDecisionBase
+    } = decision;
+    const assumptionDecision: Decision = {
+      ...assumptionDecisionBase,
+      id: "dec_assumption_mapping",
+      answer: assumption.statement,
+      rationale: "The human reviewer confirmed this premise as an authoritative decision.",
+      status: "active",
+      version: 1,
+    };
+    expect(decisionFromRow(decisionToRow(assumptionDecision) as DecisionRow)).toEqual(assumptionDecision);
     expect(contextSnapshotFromRow(contextSnapshotToRow(contextSnapshot) as ContextSnapshotRow))
       .toEqual(contextSnapshot);
 
@@ -681,6 +699,24 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(artifactReviewMigration).toContain("bridge_artifact_versions_reviews_shape_check");
     expect(artifactReviewMigration).toContain("artifact_review_feedback");
+
+    const assumptionDecisionMigration = readFileSync(
+      new URL("../drizzle/0033_sparkling_carlie_cooper.sql", import.meta.url),
+      "utf8",
+    );
+    expect(assumptionDecisionMigration).toContain('ALTER COLUMN "question_id" DROP NOT NULL');
+    expect(assumptionDecisionMigration).toContain('ALTER COLUMN "source_response_id" DROP NOT NULL');
+    const decisionSourceMigration = readFileSync(
+      new URL("../drizzle/0034_mute_energizer.sql", import.meta.url),
+      "utf8",
+    );
+    expect(decisionSourceMigration).toContain("bridge_decisions_source_shape_check");
+    const assumptionNotificationMigration = readFileSync(
+      new URL("../drizzle/0035_odd_gravity.sql", import.meta.url),
+      "utf8",
+    );
+    expect(assumptionNotificationMigration).toContain("assumption_expired");
+    expect(assumptionNotificationMigration).toContain("DROP CONSTRAINT IF EXISTS");
 
     const decisionSearchMigration = readFileSync(
       new URL("../drizzle/0011_keen_galactus.sql", import.meta.url),

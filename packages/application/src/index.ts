@@ -129,6 +129,7 @@ export interface BridgeRepository {
     context?: RepositoryTransactionContext,
   ): Promise<T>;
   getOrganizationByExternalId(externalIdentityProviderId: string): Promise<Organization | undefined>;
+  listOrganizations(): Promise<readonly Organization[]>;
   saveOrganization(organization: Organization): Promise<void>;
   getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined>;
   getPrincipalIdentity(principalId: string): Promise<PrincipalIdentity | undefined>;
@@ -351,6 +352,10 @@ export interface DecisionLifecycleImpact {
 export interface DecisionLifecycleChange {
   readonly decision: Decision;
   readonly impact: DecisionLifecycleImpact;
+}
+
+export interface AssumptionExpiryCycleResult {
+  readonly expiredCount: number;
 }
 
 export interface OutboxOperationsMetrics {
@@ -599,7 +604,7 @@ function calculateAnalyticsCohort(
   for (const snapshot of snapshots) {
     for (const itemId of snapshot.itemIds) {
       const decision = decisionsById.get(itemId);
-      if (!decision || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt)) continue;
+      if (!decision || !decision.questionId || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt)) continue;
       const originQuestion = questionsById.get(decision.questionId);
       if (originQuestion?.runId === snapshot.runId) continue;
       reusedDecisionIds.add(decision.id);
@@ -1043,6 +1048,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return [...this.organizations.values()].find(
       (organization) => organization.externalIdentityProviderId === externalIdentityProviderId,
     );
+  }
+
+  async listOrganizations(): Promise<readonly Organization[]> {
+    return [...this.organizations.values()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async saveOrganization(organization: Organization): Promise<void> {
@@ -2747,21 +2756,22 @@ export class BridgeService {
           ownerRoles: question.ownerRoles,
           createdAt: question.createdAt,
         }));
-      const overdueProtected = decisions
-        .filter((decision) => {
-          const question = questionById.get(decision.questionId);
-          return decision.status === "active" &&
-            question?.risk === "protected" &&
-            Date.parse(decision.reviewAt) <= now;
-        })
-        .map((decision) => ({
-          id: decision.id,
-          questionId: decision.questionId,
-          category: decision.category,
-          ownerId: decision.ownerId,
-          status: decision.status,
-          reviewAt: decision.reviewAt,
-        }));
+      const overdueProtected = decisions.flatMap((decision) => {
+        if (!decision.questionId) return [];
+        const question = questionById.get(decision.questionId);
+        return decision.status === "active" &&
+          question?.risk === "protected" &&
+          Date.parse(decision.reviewAt) <= now
+          ? [{
+              id: decision.id,
+              questionId: decision.questionId,
+              category: decision.category,
+              ownerId: decision.ownerId,
+              status: decision.status,
+              reviewAt: decision.reviewAt,
+            }]
+          : [];
+      });
       const adapterMap = new Map<AgentRun["client"], AgentRun[]>();
       for (const run of runs) {
         const existing = adapterMap.get(run.client) ?? [];
@@ -3361,6 +3371,35 @@ export class BridgeService {
     });
   }
 
+  async expireDueAssumptions(): Promise<AssumptionExpiryCycleResult> {
+    return this.repository.transaction(async (repository) => {
+      let expiredCount = 0;
+      for (const organization of await repository.listOrganizations()) {
+        const maintenancePrincipal: Principal = {
+          id: "bridge-worker",
+          type: "integration",
+          organizationId: organization.id,
+          projectIds: [],
+          allProjects: true,
+          roles: ["system-maintenance"],
+          displayName: "Bridge worker",
+        };
+        for (const project of await repository.listProjects(organization.id)) {
+          for (const assumption of await repository.listAssumptions(project.id)) {
+            const refreshed = await this.expireAssumptionIfDue(
+              repository,
+              maintenancePrincipal,
+              assumption,
+              { notify: true },
+            );
+            if (refreshed.status === "expired" && assumption.status === "active") expiredCount += 1;
+          }
+        }
+      }
+      return { expiredCount };
+    }, { maintenance: true });
+  }
+
   async resolveAssumption(
     principal: Principal,
     assumptionId: string,
@@ -3433,6 +3472,75 @@ export class BridgeService {
         }
       }
 
+      if (input.createDecision && input.status !== "confirmed") {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "An authoritative decision can only be created when an assumption is confirmed.",
+          422,
+        );
+      }
+      if (input.createDecision && input.confirmedDecisionId) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Choose an existing confirmed decision or create a new one, not both.",
+          422,
+        );
+      }
+
+      let confirmedDecisionId = input.confirmedDecisionId;
+      if (input.createDecision) {
+        const exactScopeDecisions = (await repository.listDecisions(assumption.projectId)).filter(
+          (decision) =>
+            decision.status === "active" &&
+            decision.category.toLowerCase() === assumption.category.toLowerCase() &&
+            this.scopesEqual(decision.scope, assumption.scope),
+        );
+        const duplicateDecision = exactScopeDecisions.find(
+          (decision) => this.normalizePremise(decision.answer) === this.normalizePremise(assumption.statement),
+        );
+        const conflictingDecision = exactScopeDecisions.find((decision) =>
+          this.areDirectNegations(decision.answer, assumption.statement),
+        );
+        if (conflictingDecision) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The assumption conflicts with an active human decision and cannot become authoritative.",
+            409,
+            { decisionId: conflictingDecision.id },
+          );
+        }
+        if (duplicateDecision) {
+          confirmedDecisionId = duplicateDecision.id;
+        } else {
+          const timestampDate = this.now();
+          const decision: Decision = {
+            id: `dec_${this.id()}`,
+            organizationId: assumption.organizationId,
+            projectId: assumption.projectId,
+            answer: assumption.statement,
+            rationale: input.rationale,
+            category: assumption.category,
+            scope: { ...assumption.scope },
+            ownerId: principal.id,
+            status: "active",
+            createdAt: timestampDate.toISOString(),
+            reviewAt: reviewDateFor(assumption.risk, timestampDate),
+            version: 1,
+          };
+          await repository.saveDecision(decision);
+          await this.audit(
+            repository,
+            principal,
+            assumption.projectId,
+            "decision.accepted",
+            "decision",
+            decision.id,
+            decision.createdAt,
+          );
+          confirmedDecisionId = decision.id;
+        }
+      }
+
       const timestamp = this.now().toISOString();
       const updated: Assumption = {
         ...assumption,
@@ -3440,7 +3548,7 @@ export class BridgeService {
         resolvedById: principal.id,
         resolvedAt: timestamp,
         resolutionRationale: input.rationale,
-        ...(input.confirmedDecisionId ? { confirmedDecisionId: input.confirmedDecisionId } : {}),
+        ...(confirmedDecisionId ? { confirmedDecisionId } : {}),
         ...(input.supersedingAssumptionId
           ? { supersedingAssumptionId: input.supersedingAssumptionId }
           : {}),
@@ -4943,12 +5051,14 @@ export class BridgeService {
     };
     await repository.saveDecision(changed);
 
-    const [artifacts, assumptions, sourceQuestion, contextSnapshots] = await Promise.all([
+    const [artifacts, assumptions, contextSnapshots] = await Promise.all([
       repository.listArtifacts(decision.projectId),
       repository.listAssumptions(decision.projectId),
-      repository.getQuestion(decision.questionId),
       repository.listContextSnapshots(decision.projectId),
     ]);
+    const sourceQuestion = decision.questionId
+      ? await repository.getQuestion(decision.questionId)
+      : undefined;
     const affectedArtifacts = artifacts.filter((artifact) =>
       artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
     );
@@ -5620,6 +5730,7 @@ export class BridgeService {
     repository: BridgeRepository,
     principal: Principal,
     assumption: Assumption,
+    options: { readonly notify?: boolean } = {},
   ): Promise<Assumption> {
     const timestamp = this.now().toISOString();
     if (assumption.status !== "active" || Date.parse(assumption.expiresAt) > Date.parse(timestamp)) {
@@ -5642,6 +5753,24 @@ export class BridgeService {
       assumption.id,
       timestamp,
     );
+    if (options.notify) {
+      const project = await repository.getProject(assumption.projectId);
+      if (project) {
+        await this.notify(
+          repository,
+          principal,
+          assumption.projectId,
+          [...project.decisionOwnerIds, assumption.createdById],
+          {
+            type: "assumption_expired",
+            title: "Assumption expired",
+            body: `The assumption “${assumption.statement}” expired and is no longer supplied as agent context.`,
+            targetType: "assumption",
+            targetId: assumption.id,
+          },
+        );
+      }
+    }
     return expired;
   }
 

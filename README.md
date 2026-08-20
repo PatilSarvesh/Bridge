@@ -209,9 +209,9 @@ For local policy testing, development mode exposes a **Reviewing as** selector b
 
 The UI separates **My Inbox** from shared **Questions**. The inbox is personalized by direct owner, assigned role, project-admin fallback, and protected-review role, with State, Risk, Category, and Role filters; the shared Questions view remains available to every authorized project participant so contributors can read and propose responses.
 
-The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, and specification review-feedback/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
+The **Notifications** view is a project-scoped human feed for question assignments, proposed responses, clarification comments, protected reviews, accepted decisions, decision lifecycle changes, assumption expiry, and specification review-feedback/approval events. Clicking a notification marks it read and opens the related Bridge area; **Mark all read** updates the current project's unread state. Agents are intentionally denied this human-only feed.
 
-The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. Decisions include governed human lifecycle actions and direct impact counts; assumption resolution and run lifecycle mutations remain explicit CLI/API operations in the prototype.
+The **Decisions**, **Assumptions**, and **Agent Runs** views expose durable authority and provenance outside the originating agent session. Decisions include governed human lifecycle actions and direct impact counts; assumption resolution and run lifecycle mutations remain explicit, authorization-checked operations in the prototype. Confirmation can link an existing decision or explicitly create an authoritative decision from an assumption; agents cannot perform either action.
 
 Protected questions also have a separate policy-review step. Each configured reviewer role can require one or more distinct human approvals; the detail and inbox contracts expose satisfied, pending, or rejected requirements. A routed owner can finalize only after the configured quorum is satisfied. A project administrator may use canonical `POST /v1/questions/:questionId/override` only when the protected requirement is not satisfied; the override requires a rationale and reason, creates the decision as a human action, and records an auditable reason. MCP remains optional and exposes no human approval mutation path.
 
@@ -250,6 +250,10 @@ pnpm --filter @bridge/cli dev -- assumption add \
 # Inspect current assumptions. Only a human decision owner/admin may resolve one.
 pnpm --filter @bridge/cli dev -- assumption list
 pnpm --filter @bridge/cli dev -- assumption get <assumption-id>
+# A human decision owner/admin can confirm an assumption and explicitly create its decision.
+pnpm --filter @bridge/cli dev -- assumption resolve <assumption-id> \
+  --status confirmed --version <version> \
+  --rationale "The premise is now an approved project rule." --create-decision
 
 # Check unresolved questions and active accepted decisions before interrupting the team.
 pnpm --filter @bridge/cli dev -- question matches \

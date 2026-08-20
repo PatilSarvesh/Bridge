@@ -58,6 +58,7 @@ import {
   outboxDeliveryToRow,
   outboxEventFromRow,
   outboxEventToRow,
+  organizationFromRow,
   principalIdentityToRow,
   projectMembershipFromRow,
   projectMembershipToRow,
@@ -298,6 +299,14 @@ export class PostgresBridgeRepository implements BridgeRepository {
       select * from public.bridge_lookup_organization_by_external_id(${externalIdentityProviderId})
     `);
     return rows[0] ? organizationFromLookupRow(rows[0]) : undefined;
+  }
+
+  async listOrganizations(): Promise<readonly Organization[]> {
+    const rows = await this.database
+      .select()
+      .from(organizations)
+      .orderBy(asc(organizations.id));
+    return rows.map(organizationFromRow);
   }
 
   async saveOrganization(organization: Organization): Promise<void> {

@@ -45,6 +45,12 @@ export interface OutboxCycleOptions {
   readonly metrics?: BridgeMetrics;
 }
 
+export interface AssumptionExpiryCycleResult {
+  readonly expiredCount: number;
+}
+
+export type AssumptionExpiryCycle = () => Promise<AssumptionExpiryCycleResult>;
+
 export interface OutboxCycleResult {
   readonly claimed: number;
   readonly processed: number;
@@ -181,6 +187,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
             maxAttempts: configuration.maxAttempts,
             baseBackoffMs: configuration.baseBackoffMs,
           },
+          assumptionExpiryCycle: runtime.assumptionExpiryCycle,
+          assumptionExpiryIntervalMs: configuration.assumptionExpiryIntervalMs,
           signal: controller.signal,
         });
       } finally {

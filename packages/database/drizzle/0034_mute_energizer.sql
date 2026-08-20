@@ -1,0 +1,1 @@
+ALTER TABLE "bridge_decisions" ADD CONSTRAINT "bridge_decisions_source_shape_check" CHECK ((("bridge_decisions"."question_id" IS NOT NULL AND "bridge_decisions"."source_response_id" IS NOT NULL) OR ("bridge_decisions"."question_id" IS NULL AND "bridge_decisions"."source_response_id" IS NULL)));

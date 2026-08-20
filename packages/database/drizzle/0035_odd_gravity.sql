@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_notifications" DROP CONSTRAINT IF EXISTS "bridge_notifications_type_check";--> statement-breakpoint
+ALTER TABLE "bridge_notifications" ADD CONSTRAINT "bridge_notifications_type_check" CHECK ("bridge_notifications"."type" IN ('question_assigned', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved'));

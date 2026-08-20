@@ -776,7 +776,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — list/detail UI, CLI/API resolution, context filtering, provenance, and authoritative-read expiry are implemented; scheduled expiry notification and decision creation on confirmation remain
+- **Status:** Implemented — status-filtered list/detail UI, REST/API resolution, context filtering, provenance, human-controlled decision link/creation, and scheduled maintenance expiry notifications are covered
 - **Dependencies:** BRG-070, BRG-040
 - **PRD references:** ASM-02
 
@@ -789,6 +789,8 @@ Acceptance criteria:
 3. Rejection requires rationale and lists directly linked work.
 4. Expiry job marks overdue active assumptions and notifies owners.
 5. Resolved assumptions are excluded or clearly labeled in agent context.
+
+Implementation note: `POST /v1/assumptions/:assumptionId/resolve` remains the canonical human command. Confirmation may link an active same-project decision or explicitly create one from the assumption; the worker runs the expiry cycle through the application service using the maintenance database role, and each automatic expiry creates owner/creator in-app notifications plus transactional outbox intents.
 
 ## 16. E8 — Specifications and reviews
 
@@ -870,7 +872,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, and a bounded maintenance-role worker runtime are implemented; live email delivery, jitter, telemetry export, and deployment validation remain
+- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry, and a bounded maintenance-role worker runtime are implemented; live email delivery, jitter, telemetry export, and deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -889,7 +891,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — core durable in-app notification records, human-only REST reads, scoped mark-read commands, web feed, and transactional outbox linkage are implemented; role-directory fanout, preferences, external channels, and operator delivery controls remain
+- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, and transactional outbox linkage are implemented; role-directory fanout, preferences, external channels, and operator delivery controls remain
 - **Dependencies:** BRG-031, BRG-090
 - **PRD references:** NTF-01
 
