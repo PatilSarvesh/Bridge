@@ -207,7 +207,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — Auth0-compatible Authorization Code + PKCE web sign-in/sign-out, encrypted bounded sessions, issuer/audience/signature/expiry/state/nonce validation, active organization membership resolution, disabled-member denial, and safe correlation-aware request logging are implemented; live-tenant validation and durable authentication audit events remain
+- **Status:** Partial — Auth0-compatible Authorization Code + PKCE web sign-in/sign-out, encrypted bounded sessions, issuer/audience/signature/expiry/state/nonce validation, active organization membership resolution, disabled-member denial, safe correlation-aware request logging, and durable human web sign-in/logout audit events are implemented; failed/unknown authentication attribution and live-tenant validation remain
 - **Dependencies:** BRG-001, BRG-002
 - **PRD references:** AUTH-01, AUTH-04
 
@@ -949,7 +949,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, and self-auditing exports are implemented; broader policy/assignment/authentication event coverage and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, and durable human web sign-in/logout events are implemented; broader policy/assignment coverage, failed/unknown authentication attribution, and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 

@@ -7,8 +7,8 @@
 | Last updated | 2026-08-20, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; failed/unknown authentication attribution, endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -804,7 +804,8 @@ pnpm check
 Current validation result after interactive CLI authentication:
 
 - Type-check: passed across all twelve workspace packages.
-- Tests: 175 tests passed across the application, API, CLI, MCP, worker, auth, database, domain, observability, and test-support packages; the three-test opt-in live PostgreSQL integration file was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Tests: 177 tests passed across the application, API, CLI, MCP, worker, auth, database, domain, observability, and test-support packages; the three-test opt-in live PostgreSQL integration file was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Durable authentication coverage: trusted human web callbacks and cookie-backed logout append organization audit events, while non-human web principals are rejected before a browser session is established.
 - Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
@@ -934,7 +935,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 
 - OIDC web/API authentication and encrypted bounded sessions, interactive CLI PKCE, and optional standalone MCP bearer validation are implemented; MCP-side authorization-server/token issuance is not.
 - Durable organization/project membership, protected first-admin bootstrap, versioned member administration, project-role assignment, and organization audit events are implemented.
-- Endpoint-specific OAuth scopes, refresh/revocation administration, durable authentication audits, and deployment-provider validation remain incomplete; RLS is implemented for the core tenant data plane but still needs live deployment evidence.
+- Endpoint-specific OAuth scopes, failed/unknown authentication attribution, provider-side refresh/revocation administration, and deployment-provider validation remain incomplete; trusted human web sign-in/logout audit events are durable, while RLS is implemented for the core tenant data plane but still needs live deployment evidence.
 - Fixed local principals remain development-only.
 - Application organization/project checks are active for both identity modes, but this is not yet complete production tenant security.
 
@@ -1599,7 +1600,7 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- This slice completes the BRG-010 code foundation but not live Auth0 tenant validation or durable authentication audit events.
+- This slice completes the BRG-010 code foundation plus durable trusted-human web sign-in/logout audit events, but not live Auth0 tenant validation or failed/unknown authentication attribution.
 - The standalone MCP server now supports external OIDC bearer validation with a dedicated audience and coarse per-tool scopes; its fixed principal remains development-only. Noninteractive CLI/CI service identities use the separate REST-administered Bridge credential path rather than the delegated-human CLI flow.
 - Provider-backed organization invitations and enterprise group provisioning remain BRG-127 work; versioned member/role/project-access administration is recorded in section 20.35.
 - Coarse REST capability enforcement is now implemented for non-human bearer principals, but endpoint-specific OAuth scopes, CI/service grants, web refresh/revocation administration, PostgreSQL RLS, and maintenance roles remain incomplete.
@@ -1624,7 +1625,7 @@ Deliberate boundaries:
 - Provisioning currently requires the exact provider subject; Bridge does not send provider email invitations or synchronize identity profile changes.
 - Reusable teams, ownership-rule configuration, custom role-definition lifecycle, SCIM/group provisioning, and enterprise directory reconciliation remain future slices.
 - Organization audit retrieval has a repository boundary but no separate operator audit-view UI yet.
-- Endpoint-specific authentication audits, MCP-side token issuance, RLS, provider-side refresh/revocation administration, and live-provider validation remain incomplete; REST/MCP bearer capabilities and the service-identity foundation are implemented in sections 20.37-20.39.
+- Failed/unknown authentication attribution, endpoint-specific authentication audits, MCP-side token issuance, RLS, provider-side refresh/revocation administration, and live-provider validation remain incomplete; trusted human web sign-in/logout events are implemented, while REST/MCP bearer capabilities and the service-identity foundation are implemented in sections 20.37-20.39.
 
 ### 20.36 Implemented interactive CLI public-client authentication
 
@@ -1644,7 +1645,7 @@ Deliberate boundaries:
 - Windows Credential Manager is not supported by this build. The pilot operating-system implementations are macOS Keychain and Linux Secret Service (`secret-tool`).
 - Refresh-token issuance and rotation must be enabled on the external native OIDC client; otherwise the CLI safely asks the user to log in again after access-token expiry.
 - The interactive session represents a delegated human. CI and unattended agents need a separate narrowly scoped service-identity flow and must not copy a person's keychain credential.
-- Endpoint-specific API/tool scopes, MCP-side authorization-server/token issuance, durable authentication audits, and live-provider validation remain pending; REST/MCP bearer capabilities and protected-resource metadata are covered in sections 20.37-20.38.
+- Failed/unknown authentication attribution, endpoint-specific API/tool scopes, MCP-side authorization-server/token issuance, and live-provider validation remain pending; trusted human web sign-in/logout events are implemented, while REST/MCP bearer capabilities and protected-resource metadata are covered in sections 20.37-20.38.
 
 ### 20.37 Implemented coarse REST bearer capability enforcement
 
@@ -2044,6 +2045,20 @@ Deliberate boundaries:
 - The seven-day window is an operator signal, not a new assumption lifecycle state or a replacement for the scheduled worker expiry cycle.
 - Support rows are bounded metadata and do not grant mutation authority. REST remains canonical, MCP remains optional, and human approval boundaries are unchanged.
 
+### 20.63 Implemented durable human web authentication audit events
+
+Implemented and locally verified:
+
+1. A successful OIDC web callback now returns the trusted active human principal to the API boundary, creates the encrypted browser session, and appends a tenant-scoped `authentication.succeeded` organization audit event through the application transaction boundary.
+2. Cookie-backed web logout resolves only the trusted session cookie and appends `authentication.logged_out` before clearing the session. Missing or invalid cookies still log out safely without fabricating an audit record.
+3. Non-human principals are rejected from establishing browser sessions, preserving the distinction between agent recommendation authority and human web approval authority.
+4. Organization audit constraints, domain types, mappers, in-memory/application behavior, REST callback/logout tests, and the opt-in PostgreSQL integration path cover the new `principal_identity` subject type and authentication actions through forward-only migration `0036_clammy_paper_doll.sql`.
+
+Deliberate boundaries:
+
+- Failed, malformed, expired, or otherwise unknown authentication attempts are not durably attributed because no trusted tenant/principal context exists; they remain correlation-aware safe logs.
+- This covers trusted human web sign-in/logout only. CLI token lifecycle, bearer authentication failures, provider-side audit feeds, production retention, and live tenant/deployment evidence remain follow-up work. REST remains canonical, MCP remains optional, and no database command was run against a production target.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2101,6 +2116,7 @@ Deliberate boundaries:
 - Assumption-sourced decisions migration: `packages/database/drizzle/0033_sparkling_carlie_cooper.sql`
 - Decision source-shape constraint migration: `packages/database/drizzle/0034_mute_energizer.sql`
 - Assumption-expiry notification migration: `packages/database/drizzle/0035_odd_gravity.sql`
+- Human web authentication audit migration: `packages/database/drizzle/0036_clammy_paper_doll.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -2153,4 +2169,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, completed human assumption confirmation and scheduled expiry notification, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; endpoint-specific tool scopes, broader audit-event coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, completed human assumption confirmation and scheduled expiry notification, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; failed/unknown authentication attribution, endpoint-specific tool scopes, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.

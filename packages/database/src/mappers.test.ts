@@ -469,6 +469,17 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: identity.id,
       createdAt: organization.createdAt,
     };
+    const authenticationAuditEvent: OrganizationAuditEvent = {
+      id: "oaud_authentication_mapping",
+      correlationId: "cor_authentication_mapping",
+      organizationId: organization.id,
+      actorId: identity.id,
+      actorType: "human",
+      action: "authentication.succeeded",
+      subjectType: "principal_identity",
+      subjectId: identity.id,
+      createdAt: organization.createdAt,
+    };
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
     expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
@@ -484,6 +495,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(organizationAuditEventFromRow(
       organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
     )).toEqual(organizationAuditEvent);
+    expect(organizationAuditEventFromRow(
+      organizationAuditEventToRow(authenticationAuditEvent) as OrganizationAuditEventRow,
+    )).toEqual(authenticationAuditEvent);
   });
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
@@ -903,5 +917,13 @@ describe("PostgreSQL domain mappings", () => {
     expect(auditExportMigration).toContain("DROP CONSTRAINT IF EXISTS \"bridge_organization_audit_events_action_check\"");
     expect(auditExportMigration).toContain("'audit.exported'");
     expect(auditExportMigration).toContain("'audit_export'");
+
+    const authenticationAuditMigration = readFileSync(
+      new URL("../drizzle/0036_clammy_paper_doll.sql", import.meta.url),
+      "utf8",
+    );
+    expect(authenticationAuditMigration).toContain("'authentication.succeeded'");
+    expect(authenticationAuditMigration).toContain("'authentication.logged_out'");
+    expect(authenticationAuditMigration).toContain("'principal_identity'");
   });
 });

@@ -2644,6 +2644,7 @@ describe("Bridge API vertical slice", () => {
         transactionCookie: "bridge_oidc_transaction=encrypted; HttpOnly; SameSite=Lax; Secure",
       }),
       completeWebLogin: async () => ({
+        principal: demoPrincipals.architect,
         redirectUrl: "https://bridge.example/",
         sessionCookie: "bridge_session=encrypted; HttpOnly; SameSite=Lax; Secure",
         clearTransactionCookie: "bridge_oidc_transaction=; Max-Age=0",
@@ -2693,5 +2694,36 @@ describe("Bridge API vertical slice", () => {
     expect(login.statusCode).toBe(302);
     expect(login.headers.location).toContain("identity.example/authorize");
     expect(login.headers["set-cookie"]).toContain("HttpOnly");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: "/v1/auth/callback?code=callback-code&state=callback-state",
+    });
+    expect(callback.statusCode).toBe(302);
+    await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "authentication.succeeded",
+          subjectType: "principal_identity",
+          subjectId: demoPrincipals.architect.id,
+        }),
+      ]),
+    );
+
+    const logout = await app.inject({
+      method: "GET",
+      url: "/v1/auth/logout",
+      headers: { cookie: "bridge_session=valid" },
+    });
+    expect(logout.statusCode).toBe(302);
+    await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "authentication.logged_out",
+          subjectType: "principal_identity",
+          subjectId: demoPrincipals.architect.id,
+        }),
+      ]),
+    );
   });
 });

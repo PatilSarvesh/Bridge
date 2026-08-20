@@ -150,8 +150,14 @@ export interface OrganizationAuditEvent {
     | "service_identity.created"
     | "service_identity.rotated"
     | "service_identity.revoked"
-    | "audit.exported";
-  readonly subjectType: "organization_membership" | "service_credential" | "audit_export";
+    | "audit.exported"
+    | "authentication.succeeded"
+    | "authentication.logged_out";
+  readonly subjectType:
+    | "organization_membership"
+    | "service_credential"
+    | "audit_export"
+    | "principal_identity";
   readonly subjectId: string;
   readonly createdAt: string;
 }

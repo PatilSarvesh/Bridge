@@ -103,6 +103,21 @@ async function resolvePrincipal(
   return principal;
 }
 
+async function resolveOptionalWebPrincipal(
+  request: FastifyRequest,
+  options: BuildAppOptions,
+): Promise<Principal | undefined> {
+  if (!options.authenticator) return undefined;
+  const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
+  if (!cookie) return undefined;
+  try {
+    return await options.authenticator.authenticateRequest({ cookie });
+  } catch (error) {
+    if (error instanceof BridgeError && error.code === "UNAUTHENTICATED") return undefined;
+    throw error;
+  }
+}
+
 function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
   const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
   if (!route.startsWith("/v1/") || route.startsWith("/v1/auth/")) return undefined;
@@ -222,12 +237,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         ...(request.query.state ? { state: request.query.state } : {}),
         ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
       });
+      await options.service.recordAuthenticationEvent(callback.principal, "authentication.succeeded");
       return reply
         .header("set-cookie", [callback.sessionCookie, callback.clearTransactionCookie])
         .redirect(callback.redirectUrl);
     });
     app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/logout", async (request, reply) => {
+      const principal = await resolveOptionalWebPrincipal(request, options);
       const logout = options.authenticator!.endWebSession(request.query.returnTo);
+      if (principal) await options.service.recordAuthenticationEvent(principal, "authentication.logged_out");
       return reply
         .header("set-cookie", logout.clearSessionCookie)
         .redirect(logout.redirectUrl);

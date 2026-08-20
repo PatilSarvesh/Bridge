@@ -1748,6 +1748,23 @@ export class BridgeService {
     }
   }
 
+  async recordAuthenticationEvent(
+    principal: Principal,
+    action: "authentication.succeeded" | "authentication.logged_out",
+  ): Promise<void> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Recording web authentication");
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        action,
+        principal.id,
+        this.now().toISOString(),
+        "principal_identity",
+      );
+    });
+  }
+
   async registerProject(
     principal: Principal,
     input: RegisterProjectInput,

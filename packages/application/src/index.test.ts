@@ -945,6 +945,32 @@ describe("Bridge decision workflow", () => {
     ]);
   });
 
+  it("records human web authentication events without granting agents an audit path", async () => {
+    const { repository, service } = await runtime();
+
+    await service.recordAuthenticationEvent(owner, "authentication.succeeded");
+    await service.recordAuthenticationEvent(owner, "authentication.logged_out");
+
+    await expect(service.recordAuthenticationEvent(agent, "authentication.succeeded"))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "authentication.succeeded",
+          subjectType: "principal_identity",
+          subjectId: owner.id,
+          actorType: "human",
+        }),
+        expect.objectContaining({
+          action: "authentication.logged_out",
+          subjectType: "principal_identity",
+          subjectId: owner.id,
+          actorType: "human",
+        }),
+      ]),
+    );
+  });
+
   it("requires a human organization admin and protects tenant scope and the final admin", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);

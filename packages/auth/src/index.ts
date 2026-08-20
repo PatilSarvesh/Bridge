@@ -56,6 +56,7 @@ export interface WebLoginResult {
 }
 
 export interface WebCallbackResult {
+  readonly principal: Principal;
   readonly redirectUrl: string;
   readonly sessionCookie: string;
   readonly clearTransactionCookie: string;
@@ -468,7 +469,10 @@ export class OidcAuthenticator implements AuthenticationProvider {
     } catch {
       throw new BridgeError("UNAUTHENTICATED", "The identity token is invalid.", 401);
     }
-    await this.authenticateAccessToken(tokens.access_token);
+    const principal = await this.authenticateAccessToken(tokens.access_token);
+    if (principal.type !== "human") {
+      throw new BridgeError("UNAUTHENTICATED", "Web sign-in requires a human organization member.", 401);
+    }
     const accessClaims = decodeJwt(tokens.access_token);
     if (accessClaims.sub !== identitySubject) {
       throw new BridgeError("UNAUTHENTICATED", "The identity and access tokens do not match.", 401);
@@ -477,6 +481,7 @@ export class OidcAuthenticator implements AuthenticationProvider {
       ? accessClaims.exp
       : Math.floor(Date.now() / 1000) + (typeof tokens.expires_in === "number" ? tokens.expires_in : 3600);
     return {
+      principal,
       redirectUrl: transaction.returnTo,
       sessionCookie: serializeCookie(
         sessionCookieName,

@@ -5,7 +5,7 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse REST bearer-capability enforcement, standalone MCP bearer validation, and revocable scoped service identities are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, and durable authentication audit events remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse REST bearer-capability enforcement, standalone MCP bearer validation, revocable scoped service identities, and durable human web sign-in/logout audit events are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, and failed/unknown authentication attribution remain separate work.
 
 ## Security boundary
 
@@ -19,6 +19,8 @@ The access token supplies the verified issuer, subject, audience, expiry, extern
 A disabled organization membership fails the next request. Project roles are evaluated only for the target project; a project administrator in one project does not become an administrator in another.
 
 Browser sign-in uses Authorization Code with PKCE. Bridge keeps the verifier, state, nonce, and bounded same-origin return URL in a short-lived encrypted `HttpOnly`, `SameSite=Lax` cookie. The callback validates state, exchanges the code server-side, verifies the ID-token nonce and signature, re-verifies the access token, and creates an encrypted `HttpOnly` session cookie. The session cannot outlive the access token. Bearer tokens use the same verifier and directory lookup.
+
+After the callback resolves an active human organization member, the API appends `authentication.succeeded` to the tenant-scoped organization audit stream before returning the session redirect. Cookie-backed logout resolves the trusted session principal and appends `authentication.logged_out` before clearing the session. Non-human principals cannot establish a web session. Missing, invalid, expired, or otherwise untrusted credentials are not assigned a durable authentication audit event because the request has no trusted tenant context; they are recorded only through privacy-safe correlation-aware logs.
 
 For non-human bearer principals, Bridge validates the optional scope claim and applies coarse capabilities at the REST boundary:
 
@@ -200,4 +202,4 @@ This is an interactive delegated-human flow. CI and unattended agents must use a
 - Windows Credential Manager is not supported by the current CLI build; the implemented pilot stores are macOS Keychain and Linux Secret Service.
 - Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.
-- A real Auth0 tenant and hosted callback/logout configuration require deployment-owner validation.
+- A real Auth0 tenant and hosted callback/logout configuration require deployment-owner validation. Failed/unknown authentication attribution and provider-specific authentication event coverage remain future work.

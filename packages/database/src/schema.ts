@@ -758,11 +758,11 @@ export const organizationAuditEvents = pgTable(
     index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
     check(
       "bridge_organization_audit_events_action_check",
-      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported')`,
+      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out')`,
     ),
     check(
       "bridge_organization_audit_events_subject_check",
-      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export'))`,
+      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity'))`,
     ),
     tenantPolicy("bridge_organization_audit_events_tenant", table.organizationId),
   ],

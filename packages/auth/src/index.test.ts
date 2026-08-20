@@ -230,10 +230,37 @@ describe("OIDC authentication", () => {
       cookie: login.transactionCookie.split(";")[0]!,
     });
     expect(callback.redirectUrl).toBe("https://bridge.example/app");
+    expect(callback.principal).toEqual(principal);
     expect(callback.sessionCookie).toContain("HttpOnly");
     await expect(authenticator.authenticateRequest({ cookie: callback.sessionCookie.split(";")[0]! }))
       .resolves.toEqual(principal);
     expect(tokenFetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not establish a web session for a non-human principal", async () => {
+    const agent: Principal = {
+      ...principal,
+      id: "agt_web",
+      type: "agent",
+      roles: ["agent"],
+      displayName: "Web Agent",
+    };
+    const { authenticator, configuration, sign } = await fixture(agent);
+    const login = await authenticator.beginWebLogin();
+    const authorizationUrl = new URL(login.authorizationUrl);
+    const token = await sign({ org_id: "auth0-org-acme" });
+    const idToken = await sign({ nonce: authorizationUrl.searchParams.get("nonce") }, configuration.clientId);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      access_token: token,
+      id_token: idToken,
+      expires_in: 300,
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await expect(authenticator.completeWebLogin({
+      code: "authorization-code",
+      state: authorizationUrl.searchParams.get("state")!,
+      cookie: login.transactionCookie.split(";")[0]!,
+    })).rejects.toMatchObject({ code: "UNAUTHENTICATED", statusCode: 401 });
   });
 
   it("rejects a callback whose state does not match before exchanging a code", async () => {
