@@ -310,6 +310,23 @@ export interface QuestionOption {
   readonly tradeoffs: string;
 }
 
+export interface QuestionLink {
+  readonly type: "repository" | "work_item" | "branch" | "artifact" | "run" | "external";
+  readonly label: string;
+  readonly url: string;
+}
+
+export interface QuestionResponseRevision {
+  readonly id: string;
+  readonly answer: string;
+  readonly rationale: string;
+  readonly optionKey?: string;
+  readonly mentionedPrincipalIds: readonly string[];
+  readonly editedById: string;
+  readonly editedByType: PrincipalType;
+  readonly editedAt: string;
+}
+
 export interface QuestionResponse {
   readonly id: string;
   readonly questionId: string;
@@ -318,6 +335,8 @@ export interface QuestionResponse {
   readonly answer: string;
   readonly rationale: string;
   readonly optionKey?: string;
+  readonly mentionedPrincipalIds?: readonly string[];
+  readonly revisionHistory?: readonly QuestionResponseRevision[];
   readonly createdAt: string;
 }
 
@@ -332,6 +351,15 @@ export interface QuestionReview {
   readonly createdAt: string;
 }
 
+export interface QuestionCommentRevision {
+  readonly id: string;
+  readonly body: string;
+  readonly mentionedPrincipalIds: readonly string[];
+  readonly editedById: string;
+  readonly editedByType: PrincipalType;
+  readonly editedAt: string;
+}
+
 export interface QuestionComment {
   readonly id: string;
   readonly questionId: string;
@@ -339,6 +367,8 @@ export interface QuestionComment {
   readonly authorId: string;
   readonly authorType: PrincipalType;
   readonly body: string;
+  readonly mentionedPrincipalIds?: readonly string[];
+  readonly revisionHistory?: readonly QuestionCommentRevision[];
   readonly createdAt: string;
 }
 
@@ -509,6 +539,7 @@ export interface Question {
   readonly routing: QuestionRoutingExplanation;
   readonly assignmentHistory: readonly QuestionAssignmentHistoryEntry[];
   readonly options: readonly QuestionOption[];
+  readonly relatedLinks?: readonly QuestionLink[];
   readonly recommendationKey?: string;
   readonly fallback?: string | null;
   readonly scope: Scope;
@@ -541,6 +572,10 @@ export interface QuestionInboxItem extends Question {
   readonly reviewRoles: readonly string[];
   readonly canReassign: boolean;
   readonly canOverrideApproval: boolean;
+  readonly canRequestClarification: boolean;
+  readonly canReopen: boolean;
+  readonly editableResponseIds: readonly string[];
+  readonly editableCommentIds: readonly string[];
   readonly approvalStatus: QuestionApprovalStatus;
   readonly dueStatus: QuestionDueStatus;
 }
@@ -784,6 +819,30 @@ export function canAcceptQuestion(principal: Principal, question: Question): boo
   return question.risk !== "protected" || hasRequiredQuestionReviews(principal, question);
 }
 
+export function canRequestQuestionClarification(principal: Principal, question: Question): boolean {
+  if (principal.type !== "human" || question.status !== "open") return false;
+  return principalHasRole(principal, "project-admin", question.projectId) || hasQuestionOwnerMatch(principal, question);
+}
+
+export function canReopenQuestion(principal: Principal, question: Question): boolean {
+  if (principal.type !== "human" || !["cancelled", "expired"].includes(question.status)) return false;
+  return principalHasRole(principal, "project-admin", question.projectId) || hasQuestionOwnerMatch(principal, question);
+}
+
+export function editableQuestionResponseIds(principal: Principal, question: Question): readonly string[] {
+  if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
+  return question.responses
+    .filter((response) => response.authorType === "human" && response.authorId === principal.id)
+    .map((response) => response.id);
+}
+
+export function editableQuestionCommentIds(principal: Principal, question: Question): readonly string[] {
+  if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
+  return question.comments
+    .filter((comment) => comment.authorType === "human" && comment.authorId === principal.id)
+    .map((comment) => comment.id);
+}
+
 export function questionReviewRoles(
   principal: Principal,
   question: Question,
@@ -823,6 +882,10 @@ export function questionInboxItem(
       question.risk === "protected" &&
       principalHasRole(principal, "project-admin", question.projectId) &&
       !canAcceptQuestion(principal, question),
+    canRequestClarification: canRequestQuestionClarification(principal, question),
+    canReopen: canReopenQuestion(principal, question),
+    editableResponseIds: editableQuestionResponseIds(principal, question),
+    editableCommentIds: editableQuestionCommentIds(principal, question),
     approvalStatus,
     dueStatus: questionDueStatus(question, now),
   };

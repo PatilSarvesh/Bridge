@@ -124,12 +124,30 @@ interface Option {
   readonly tradeoffs: string;
 }
 
+interface QuestionLink {
+  readonly type: "repository" | "work_item" | "branch" | "artifact" | "run" | "external";
+  readonly label: string;
+  readonly url: string;
+}
+
+interface QuestionResponseRevision {
+  readonly id: string;
+  readonly answer: string;
+  readonly rationale: string;
+  readonly optionKey?: string;
+  readonly mentionedPrincipalIds: readonly string[];
+  readonly editedById: string;
+  readonly editedAt: string;
+}
+
 interface QuestionResponse {
   readonly id: string;
   readonly authorId: string;
   readonly answer: string;
   readonly rationale: string;
   readonly optionKey?: string;
+  readonly mentionedPrincipalIds?: readonly string[];
+  readonly revisionHistory?: readonly QuestionResponseRevision[];
   readonly createdAt: string;
 }
 
@@ -147,7 +165,17 @@ interface QuestionComment {
   readonly parentCommentId?: string;
   readonly authorId: string;
   readonly body: string;
+  readonly mentionedPrincipalIds?: readonly string[];
+  readonly revisionHistory?: readonly QuestionCommentRevision[];
   readonly createdAt: string;
+}
+
+interface QuestionCommentRevision {
+  readonly id: string;
+  readonly body: string;
+  readonly mentionedPrincipalIds: readonly string[];
+  readonly editedById: string;
+  readonly editedAt: string;
 }
 
 interface QuestionApprovalOverride {
@@ -210,6 +238,7 @@ interface Question {
   readonly blocking: boolean;
   readonly dueAt?: string;
   readonly options: readonly Option[];
+  readonly relatedLinks?: readonly QuestionLink[];
   readonly recommendationKey?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
@@ -234,6 +263,10 @@ interface Question {
   readonly reviewRoles: readonly string[];
   readonly canReassign: boolean;
   readonly canOverrideApproval: boolean;
+  readonly canRequestClarification: boolean;
+  readonly canReopen: boolean;
+  readonly editableResponseIds: readonly string[];
+  readonly editableCommentIds: readonly string[];
   readonly approvalStatus: QuestionApprovalStatus;
   readonly dueStatus: "overdue" | "due_soon" | "scheduled" | "none";
 }
@@ -698,8 +731,20 @@ export default function Home() {
   const [responseOption, setResponseOption] = useState<string>();
   const [responseAnswer, setResponseAnswer] = useState("");
   const [responseRationale, setResponseRationale] = useState("");
+  const [responseMentionIds, setResponseMentionIds] = useState("");
   const [commentBody, setCommentBody] = useState("");
+  const [commentMentionIds, setCommentMentionIds] = useState("");
   const [replyToCommentId, setReplyToCommentId] = useState<string>();
+  const [editingResponseId, setEditingResponseId] = useState<string>();
+  const [editResponseOption, setEditResponseOption] = useState<string>();
+  const [editResponseAnswer, setEditResponseAnswer] = useState("");
+  const [editResponseRationale, setEditResponseRationale] = useState("");
+  const [editResponseMentionIds, setEditResponseMentionIds] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string>();
+  const [editCommentBody, setEditCommentBody] = useState("");
+  const [editCommentMentionIds, setEditCommentMentionIds] = useState("");
+  const [clarificationReason, setClarificationReason] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
   const [reviewStatus, setReviewStatus] = useState<"approved" | "rejected">("approved");
   const [reviewRationale, setReviewRationale] = useState("");
   const [overrideRationale, setOverrideRationale] = useState("");
@@ -1724,8 +1769,20 @@ export default function Home() {
       setResponseOption(undefined);
       setResponseAnswer("");
       setResponseRationale("");
+      setResponseMentionIds("");
       setCommentBody("");
+      setCommentMentionIds("");
       setReplyToCommentId(undefined);
+      setEditingResponseId(undefined);
+      setEditResponseOption(undefined);
+      setEditResponseAnswer("");
+      setEditResponseRationale("");
+      setEditResponseMentionIds("");
+      setEditingCommentId(undefined);
+      setEditCommentBody("");
+      setEditCommentMentionIds("");
+      setClarificationReason("");
+      setReopenReason("");
       setReviewStatus("approved");
       setReviewRationale("");
       setOverrideRationale("");
@@ -1777,14 +1834,53 @@ export default function Home() {
           answer: responseAnswer,
           rationale: responseRationale,
           ...(responseOption ? { optionKey: responseOption } : {}),
+          mentionedPrincipalIds: roleList(responseMentionIds),
         }),
       }, activePrincipalId);
       setResponseAnswer("");
       setResponseRationale("");
       setResponseOption(undefined);
+      setResponseMentionIds("");
       await Promise.all([loadQuestions(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to add your response.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const beginResponseEdit = (response: QuestionResponse) => {
+    setEditingResponseId(response.id);
+    setEditResponseOption(response.optionKey);
+    setEditResponseAnswer(response.answer);
+    setEditResponseRationale(response.rationale);
+    setEditResponseMentionIds((response.mentionedPrincipalIds ?? []).join(", "));
+  };
+
+  const saveResponseEdit = async () => {
+    if (
+      !selectedQuestion ||
+      !editingResponseId ||
+      editResponseAnswer.trim().length < 2 ||
+      editResponseRationale.trim().length < 2
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/responses/${editingResponseId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          answer: editResponseAnswer,
+          rationale: editResponseRationale,
+          ...(editResponseOption ? { optionKey: editResponseOption } : {}),
+          mentionedPrincipalIds: roleList(editResponseMentionIds),
+        }),
+      }, activePrincipalId);
+      setEditingResponseId(undefined);
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to edit the proposed answer.");
     } finally {
       setSubmitting(false);
     }
@@ -1882,13 +1978,79 @@ export default function Home() {
           expectedVersion: selectedQuestion.version,
           body: commentBody,
           ...(replyToCommentId ? { parentCommentId: replyToCommentId } : {}),
+          mentionedPrincipalIds: roleList(commentMentionIds),
         }),
       }, activePrincipalId);
       setCommentBody("");
+      setCommentMentionIds("");
       setReplyToCommentId(undefined);
       await Promise.all([loadQuestions(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to add clarification comment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const beginCommentEdit = (comment: QuestionComment) => {
+    setEditingCommentId(comment.id);
+    setEditCommentBody(comment.body);
+    setEditCommentMentionIds((comment.mentionedPrincipalIds ?? []).join(", "));
+  };
+
+  const saveCommentEdit = async () => {
+    if (!selectedQuestion || !editingCommentId || editCommentBody.trim().length < 2) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/comments/${editingCommentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: selectedQuestion.version,
+          body: editCommentBody,
+          mentionedPrincipalIds: roleList(editCommentMentionIds),
+        }),
+      }, activePrincipalId);
+      setEditingCommentId(undefined);
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to edit the clarification comment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const requestQuestionClarification = async () => {
+    if (!selectedQuestion || !selectedQuestion.canRequestClarification || clarificationReason.trim().length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/clarification`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: selectedQuestion.version, reason: clarificationReason }),
+      }, activePrincipalId);
+      setClarificationReason("");
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to request clarification.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reopenQuestion = async () => {
+    if (!selectedQuestion || !selectedQuestion.canReopen || reopenReason.trim().length < 10) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch(`/v1/questions/${selectedQuestion.id}/reopen`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: selectedQuestion.version, reason: reopenReason }),
+      }, activePrincipalId);
+      setReopenReason("");
+      await Promise.all([loadQuestions(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to reopen the question discussion.");
     } finally {
       setSubmitting(false);
     }
@@ -3500,7 +3662,57 @@ export default function Home() {
                             ) : <span className="muted-copy">Run details are outside the current list.</span>}
                           </div>
                         ) : <div className="muted-copy">No agent run was linked to this question.</div>}
+                        {selectedQuestion.relatedLinks && selectedQuestion.relatedLinks.length > 0 ? (
+                          <div className="owner-routing">
+                            <strong>Related work:</strong>
+                            <div className="link-list">
+                              {selectedQuestion.relatedLinks.map((link) => (
+                                <a key={`${link.type}-${link.url}`} href={link.url} target="_blank" rel="noreferrer">
+                                  {link.label} <small>({link.type.replaceAll("_", " ")})</small>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        ) : <div className="muted-copy">No related work links were supplied.</div>}
                       </details>
+
+                      {selectedQuestion.canRequestClarification || selectedQuestion.canReopen ? (
+                        <details className="detail-disclosure">
+                          <summary>Discussion controls</summary>
+                          {selectedQuestion.canRequestClarification ? (
+                            <div className="response-form">
+                              <h3>Request clarification</h3>
+                              <p className="muted-copy">This moves an open question into discussion and records why the owner needs more information.</p>
+                              <label htmlFor="clarification-reason">Reason</label>
+                              <textarea
+                                id="clarification-reason"
+                                value={clarificationReason}
+                                onChange={(event) => setClarificationReason(event.target.value)}
+                                placeholder="Explain what information is still needed."
+                              />
+                              <button className="secondary" type="button" disabled={submitting || clarificationReason.trim().length < 10} onClick={() => void requestQuestionClarification()}>
+                                {submitting ? "Requesting…" : "Request clarification"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {selectedQuestion.canReopen ? (
+                            <div className="response-form">
+                              <h3>Reopen discussion</h3>
+                              <p className="muted-copy">Only cancelled or expired questions can be reopened. An accepted decision remains authoritative until its own lifecycle changes.</p>
+                              <label htmlFor="reopen-reason">Reason</label>
+                              <textarea
+                                id="reopen-reason"
+                                value={reopenReason}
+                                onChange={(event) => setReopenReason(event.target.value)}
+                                placeholder="Explain why this unresolved question needs discussion again."
+                              />
+                              <button className="secondary" type="button" disabled={submitting || reopenReason.trim().length < 10} onClick={() => void reopenQuestion()}>
+                                {submitting ? "Reopening…" : "Reopen discussion"}
+                              </button>
+                            </div>
+                          ) : null}
+                        </details>
+                      ) : null}
 
                       <details className="detail-disclosure">
                         <summary>Assignment routing <span className="section-count">{selectedQuestion.assignmentHistory.length}</span></summary>
@@ -3557,15 +3769,46 @@ export default function Home() {
                               const responseOptionLabel = response.optionKey
                                 ? selectedQuestion.options.find((option) => option.key === response.optionKey)?.label
                                 : undefined;
+                              const responseEditing = editingResponseId === response.id;
                               return (
                                 <article className="response-card" key={response.id}>
                                   <div className="response-heading">
                                     <strong>{response.authorId}</strong>
                                     <small>{new Date(response.createdAt).toLocaleString()}</small>
                                   </div>
-                                  {responseOptionLabel ? <span className="response-option">Selected: {responseOptionLabel}</span> : null}
-                                  <p>{response.answer}</p>
-                                  <div className="response-rationale"><strong>Rationale:</strong> {response.rationale}</div>
+                                  {responseEditing ? (
+                                    <div className="response-form">
+                                      <label>Optional option
+                                        <select value={editResponseOption ?? ""} onChange={(event) => setEditResponseOption(event.target.value || undefined)}>
+                                          <option value="">Free-form answer</option>
+                                          {selectedQuestion.options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+                                        </select>
+                                      </label>
+                                      <label>Answer<textarea value={editResponseAnswer} onChange={(event) => setEditResponseAnswer(event.target.value)} /></label>
+                                      <label>Why<textarea value={editResponseRationale} onChange={(event) => setEditResponseRationale(event.target.value)} /></label>
+                                      <label>Mention human IDs (optional)<input value={editResponseMentionIds} onChange={(event) => setEditResponseMentionIds(event.target.value)} placeholder="usr_qa_lead, usr_architect" /></label>
+                                      <div className="member-form-actions">
+                                        <button className="secondary" type="button" disabled={submitting} onClick={() => void saveResponseEdit()}>Save edit</button>
+                                        <button className="text-button" type="button" onClick={() => setEditingResponseId(undefined)}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {responseOptionLabel ? <span className="response-option">Selected: {responseOptionLabel}</span> : null}
+                                      <p>{response.answer}</p>
+                                      <div className="response-rationale"><strong>Rationale:</strong> {response.rationale}</div>
+                                      {response.mentionedPrincipalIds && response.mentionedPrincipalIds.length > 0 ? <small>Mentioned: {response.mentionedPrincipalIds.join(", ")}</small> : null}
+                                      {response.revisionHistory && response.revisionHistory.length > 0 ? (
+                                        <details className="nested-disclosure">
+                                          <summary>Edit history <span className="section-count">{response.revisionHistory.length}</span></summary>
+                                          {response.revisionHistory.map((revision) => (
+                                            <div className="history-item" key={revision.id}><small>{new Date(revision.editedAt).toLocaleString()} · edited by {revision.editedById}</small><p>{revision.answer}</p><div className="response-rationale"><strong>Previous rationale:</strong> {revision.rationale}</div></div>
+                                          ))}
+                                        </details>
+                                      ) : null}
+                                      {selectedQuestion.editableResponseIds.includes(response.id) ? <button className="text-button" type="button" onClick={() => beginResponseEdit(response)}>Edit response</button> : null}
+                                    </>
+                                  )}
                                 </article>
                               );
                             })}
@@ -3596,6 +3839,13 @@ export default function Home() {
                               onChange={(event) => setResponseRationale(event.target.value)}
                               placeholder="Explain the trade-off or evidence behind your answer."
                             />
+                            <label htmlFor="response-mentions">Mention human IDs (optional)</label>
+                            <input
+                              id="response-mentions"
+                              value={responseMentionIds}
+                              onChange={(event) => setResponseMentionIds(event.target.value)}
+                              placeholder="usr_qa_lead, usr_architect"
+                            />
                             <button
                               className="secondary"
                               type="button"
@@ -3618,6 +3868,7 @@ export default function Home() {
                               const parent = comment.parentCommentId
                                 ? selectedQuestion.comments.find((candidate) => candidate.id === comment.parentCommentId)
                                 : undefined;
+                              const commentEditing = editingCommentId === comment.id;
                               return (
                                 <article className={comment.parentCommentId ? "comment-card comment-reply" : "comment-card"} key={comment.id}>
                                   <div className="response-heading">
@@ -3625,12 +3876,35 @@ export default function Home() {
                                     <small>{new Date(comment.createdAt).toLocaleString()}</small>
                                   </div>
                                   {parent ? <small>Reply to {parent.authorId}</small> : null}
-                                  <p>{comment.body}</p>
-                                  {selectedQuestion.status !== "accepted" ? (
-                                    <button className="text-button" type="button" onClick={() => setReplyToCommentId(comment.id)}>
-                                      Reply
-                                    </button>
-                                  ) : null}
+                                  {commentEditing ? (
+                                    <div className="response-form">
+                                      <label>Comment<textarea value={editCommentBody} onChange={(event) => setEditCommentBody(event.target.value)} /></label>
+                                      <label>Mention human IDs (optional)<input value={editCommentMentionIds} onChange={(event) => setEditCommentMentionIds(event.target.value)} placeholder="usr_qa_lead, usr_architect" /></label>
+                                      <div className="member-form-actions">
+                                        <button className="secondary" type="button" disabled={submitting} onClick={() => void saveCommentEdit()}>Save edit</button>
+                                        <button className="text-button" type="button" onClick={() => setEditingCommentId(undefined)}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <p>{comment.body}</p>
+                                      {comment.mentionedPrincipalIds && comment.mentionedPrincipalIds.length > 0 ? <small>Mentioned: {comment.mentionedPrincipalIds.join(", ")}</small> : null}
+                                      {comment.revisionHistory && comment.revisionHistory.length > 0 ? (
+                                        <details className="nested-disclosure">
+                                          <summary>Edit history <span className="section-count">{comment.revisionHistory.length}</span></summary>
+                                          {comment.revisionHistory.map((revision) => (
+                                            <div className="history-item" key={revision.id}><small>{new Date(revision.editedAt).toLocaleString()} · edited by {revision.editedById}</small><p>{revision.body}</p></div>
+                                          ))}
+                                        </details>
+                                      ) : null}
+                                      {selectedQuestion.editableCommentIds.includes(comment.id) ? <button className="text-button" type="button" onClick={() => beginCommentEdit(comment)}>Edit comment</button> : null}
+                                      {selectedQuestion.status !== "accepted" ? (
+                                        <button className="text-button" type="button" onClick={() => setReplyToCommentId(comment.id)}>
+                                          Reply
+                                        </button>
+                                      ) : null}
+                                    </>
+                                  )}
                                 </article>
                               );
                             })}
@@ -3650,6 +3924,13 @@ export default function Home() {
                               value={commentBody}
                               onChange={(event) => setCommentBody(event.target.value)}
                               placeholder="Ask a focused follow-up or add evidence for the decision owner."
+                            />
+                            <label htmlFor="comment-mentions">Mention human IDs (optional)</label>
+                            <input
+                              id="comment-mentions"
+                              value={commentMentionIds}
+                              onChange={(event) => setCommentMentionIds(event.target.value)}
+                              placeholder="usr_qa_lead, usr_architect"
                             />
                             <button
                               className="secondary"

@@ -9,8 +9,10 @@ import type {
   QuestionApprovalOverride,
   QuestionComment,
   QuestionAssignmentHistoryEntry,
+  QuestionLink,
   QuestionOption,
   QuestionReview,
+  QuestionResponseRevision,
   QuestionRoutingExplanation,
   RepositoryRecord,
 } from "@bridge/domain";
@@ -457,6 +459,7 @@ export const questions = pgTable(
     routing: jsonb("routing").$type<QuestionRoutingExplanation>().notNull(),
     assignmentHistory: jsonb("assignment_history").$type<readonly QuestionAssignmentHistoryEntry[]>().notNull(),
     options: jsonb("options").$type<readonly QuestionOption[]>().notNull(),
+    relatedLinks: jsonb("related_links").$type<readonly QuestionLink[]>().default([]).notNull(),
     reviews: jsonb("reviews").$type<readonly QuestionReview[]>().default([]).notNull(),
     comments: jsonb("comments").$type<readonly QuestionComment[]>().default([]).notNull(),
     approvalOverride: jsonb("approval_override").$type<QuestionApprovalOverride>(),
@@ -479,6 +482,10 @@ export const questions = pgTable(
       "bridge_questions_required_reviewer_quorum_shape_check",
       sql`${table.requiredReviewerQuorum} IS NOT NULL AND jsonb_typeof(${table.requiredReviewerQuorum}) = 'object'`,
     ),
+    check(
+      "bridge_questions_related_links_shape_check",
+      sql`${table.relatedLinks} IS NOT NULL AND jsonb_typeof(${table.relatedLinks}) = 'array'`,
+    ),
     tenantPolicy("bridge_questions_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -495,6 +502,8 @@ export const questionResponses = pgTable(
     answer: text("answer").notNull(),
     rationale: text("rationale").notNull(),
     optionKey: text("option_key"),
+    mentionedPrincipalIds: jsonb("mentioned_principal_ids").$type<readonly string[]>().default([]).notNull(),
+    revisionHistory: jsonb("revision_history").$type<readonly QuestionResponseRevision[]>().default([]).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
@@ -506,6 +515,14 @@ export const questionResponses = pgTable(
         where ${questions.id} = ${table.questionId}
           and ${questions.organizationId} = ${currentOrganizationId}
       )`,
+    ),
+    check(
+      "bridge_question_responses_mentioned_principal_ids_shape_check",
+      sql`${table.mentionedPrincipalIds} IS NOT NULL AND jsonb_typeof(${table.mentionedPrincipalIds}) = 'array'`,
+    ),
+    check(
+      "bridge_question_responses_revision_history_shape_check",
+      sql`${table.revisionHistory} IS NOT NULL AND jsonb_typeof(${table.revisionHistory}) = 'array'`,
     ),
   ],
 ).enableRLS();

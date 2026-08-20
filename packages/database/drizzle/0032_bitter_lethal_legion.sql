@@ -1,0 +1,6 @@
+ALTER TABLE "bridge_question_responses" ADD COLUMN "mentioned_principal_ids" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "bridge_question_responses" ADD COLUMN "revision_history" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "bridge_questions" ADD COLUMN "related_links" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "bridge_question_responses" ADD CONSTRAINT "bridge_question_responses_mentioned_principal_ids_shape_check" CHECK ("bridge_question_responses"."mentioned_principal_ids" IS NOT NULL AND jsonb_typeof("bridge_question_responses"."mentioned_principal_ids") = 'array');--> statement-breakpoint
+ALTER TABLE "bridge_question_responses" ADD CONSTRAINT "bridge_question_responses_revision_history_shape_check" CHECK ("bridge_question_responses"."revision_history" IS NOT NULL AND jsonb_typeof("bridge_question_responses"."revision_history") = 'array');--> statement-breakpoint
+ALTER TABLE "bridge_questions" ADD CONSTRAINT "bridge_questions_related_links_shape_check" CHECK ("bridge_questions"."related_links" IS NOT NULL AND jsonb_typeof("bridge_questions"."related_links") = 'array');

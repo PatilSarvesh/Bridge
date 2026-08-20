@@ -15,11 +15,14 @@ import type {
   CreateServiceIdentityInput,
   DecisionListQuery,
   CreateQuestionInput,
+  EditQuestionCommentInput,
+  EditQuestionResponseInput,
   FindQuestionMatchesInput,
   LinkRepositoryInput,
   PublishArtifactInput,
   ProposeAnswerInput,
   QuestionCommentInput,
+  QuestionClarificationInput,
   RecordAssumptionInput,
   RegisterProjectInput,
   ReportAgentRunInput,
@@ -53,6 +56,8 @@ import {
   assertHuman,
   assertProjectAccess,
   canAcceptQuestion,
+  canReopenQuestion,
+  canRequestQuestionClarification,
   questionInboxItem,
   BridgeError,
   normalizeRoleName,
@@ -74,12 +79,15 @@ import {
   type Question,
   type QuestionAssignmentHistoryEntry,
   type QuestionComment,
+  type QuestionCommentRevision,
   type QuestionApprovalOverride,
   type QuestionInboxItem,
   type QuestionReview,
   type QuestionRouteSource,
   type QuestionRoutingExplanation,
   type QuestionResponse,
+  type QuestionResponseRevision,
+  type QuestionLink,
   type Notification,
   type NotificationQuestionContext,
   type Organization,
@@ -3582,6 +3590,9 @@ export class BridgeService {
       routing: routing.explanation,
       assignmentHistory: [initialAssignment],
       options: input.options.map((option) => ({ ...option })),
+      ...((input.relatedLinks ?? []).length > 0
+        ? { relatedLinks: (input.relatedLinks ?? []).map((link): QuestionLink => ({ ...link })) }
+        : {}),
       ...(input.recommendationKey ? { recommendationKey: input.recommendationKey } : {}),
       ...(input.fallback !== undefined ? { fallback: input.fallback } : {}),
       scope: { ...input.scope },
@@ -3868,6 +3879,142 @@ export class BridgeService {
       questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
   }
 
+  async requestQuestionClarification(
+    principal: Principal,
+    questionId: string,
+    input: QuestionClarificationInput,
+  ): Promise<Question> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const question = await this.requireQuestion(principal, questionId, repository);
+      assertHuman(principal, "Requesting question clarification");
+      if (!canRequestQuestionClarification(principal, question)) {
+        throw new BridgeError(
+          "FORBIDDEN",
+          "Only a question owner or project administrator can request clarification.",
+          403,
+        );
+      }
+      this.assertSecretSafe("question", input);
+      if (question.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: question.version,
+        });
+      }
+      const timestamp = this.now().toISOString();
+      const updated: Question = {
+        ...question,
+        status: "in_discussion",
+        version: question.version + 1,
+      };
+      await repository.saveQuestion(updated);
+      await this.audit(
+        repository,
+        principal,
+        question.projectId,
+        "question.clarification_requested",
+        "question",
+        question.id,
+        timestamp,
+        question.policyVersion,
+        input.reason,
+      );
+      await this.notify(
+        repository,
+        principal,
+        question.projectId,
+        [
+          ...question.ownerIds,
+          question.createdById,
+          ...question.responses.map((response) => response.authorId),
+          ...question.comments.map((comment) => comment.authorId),
+        ],
+        {
+          type: "question_comment",
+          title: "Clarification requested",
+          body: `${principal.displayName} requested clarification for “${question.title}”.`,
+          targetType: "question",
+          targetId: question.id,
+          questionContext: {
+            id: question.id,
+            status: updated.status,
+            risk: question.risk,
+            ownerIds: question.ownerIds,
+          },
+        },
+      );
+      return updated;
+    });
+  }
+
+  async reopenQuestion(
+    principal: Principal,
+    questionId: string,
+    input: QuestionClarificationInput,
+  ): Promise<Question> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const question = await this.requireQuestion(principal, questionId, repository);
+      assertHuman(principal, "Reopening question discussion");
+      if (!canReopenQuestion(principal, question)) {
+        throw new BridgeError(
+          "FORBIDDEN",
+          "Only a question owner or project administrator can reopen this discussion.",
+          403,
+        );
+      }
+      this.assertSecretSafe("question", input);
+      if (question.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: question.version,
+        });
+      }
+      const timestamp = this.now().toISOString();
+      const updated: Question = {
+        ...question,
+        status: "in_discussion",
+        version: question.version + 1,
+      };
+      await repository.saveQuestion(updated);
+      await this.audit(
+        repository,
+        principal,
+        question.projectId,
+        "question.reopened",
+        "question",
+        question.id,
+        timestamp,
+        question.policyVersion,
+        input.reason,
+      );
+      await this.notify(
+        repository,
+        principal,
+        question.projectId,
+        [
+          ...question.ownerIds,
+          question.createdById,
+          ...question.responses.map((response) => response.authorId),
+          ...question.comments.map((comment) => comment.authorId),
+        ],
+        {
+          type: "question_comment",
+          title: "Question discussion reopened",
+          body: `${principal.displayName} reopened “${question.title}” for discussion.`,
+          targetType: "question",
+          targetId: question.id,
+          questionContext: {
+            id: question.id,
+            status: updated.status,
+            risk: question.risk,
+            ownerIds: question.ownerIds,
+          },
+        },
+      );
+      return updated;
+    });
+  }
+
   async reassignQuestion(
     principal: Principal,
     questionId: string,
@@ -4146,6 +4293,11 @@ export class BridgeService {
     if (input.parentCommentId && !question.comments.some((comment) => comment.id === input.parentCommentId)) {
       throw new BridgeError("VALIDATION_FAILED", "parentCommentId does not belong to this question.", 422);
     }
+    const mentionedPrincipalIds = await this.validateQuestionMentions(
+      repository,
+      question,
+      input.mentionedPrincipalIds,
+    );
 
     const timestamp = this.now().toISOString();
     const comment: QuestionComment = {
@@ -4155,6 +4307,7 @@ export class BridgeService {
       authorId: principal.id,
       authorType: principal.type,
       body: input.body,
+      ...(mentionedPrincipalIds.length > 0 ? { mentionedPrincipalIds } : {}),
       createdAt: timestamp,
     };
     await repository.saveQuestion({
@@ -4173,6 +4326,7 @@ export class BridgeService {
       question.projectId,
       [
         ...question.ownerIds,
+        ...mentionedPrincipalIds,
         ...question.responses.map((response) => response.authorId),
         ...question.comments.map((existing) => existing.authorId),
       ],
@@ -4212,6 +4366,34 @@ export class BridgeService {
     return question;
   }
 
+  private async validateQuestionMentions(
+    repository: BridgeRepository,
+    question: Question,
+    mentionedPrincipalIds: readonly string[] | undefined,
+  ): Promise<readonly string[]> {
+    const uniqueIds = [...new Set((mentionedPrincipalIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+    const projectHumans = new Set(
+      (await repository.listOrganizationPrincipals(question.organizationId))
+        .filter((candidate) => candidate.type === "human" && (
+          candidate.allProjects === true ||
+          candidate.projectIds.includes(question.projectId) ||
+          principalHasRole(candidate, "organization-admin")
+        ))
+        .map((candidate) => candidate.id),
+    );
+    const invalidPrincipalId = uniqueIds.find((principalId) => !projectHumans.has(principalId));
+    if (invalidPrincipalId) {
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "Mentions can target only active human members with access to this project.",
+        422,
+        { principalId: invalidPrincipalId },
+      );
+    }
+    return uniqueIds;
+  }
+
   async proposeAnswer(
     principal: Principal,
     questionId: string,
@@ -4237,6 +4419,11 @@ export class BridgeService {
     if (input.optionKey && !question.options.some((option) => option.key === input.optionKey)) {
       throw new BridgeError("VALIDATION_FAILED", "optionKey does not belong to this question.", 422);
     }
+    const mentionedPrincipalIds = await this.validateQuestionMentions(
+      repository,
+      question,
+      input.mentionedPrincipalIds,
+    );
 
     const timestamp = this.now().toISOString();
     const response: QuestionResponse = {
@@ -4247,6 +4434,7 @@ export class BridgeService {
       answer: input.answer,
       rationale: input.rationale,
       ...(input.optionKey ? { optionKey: input.optionKey } : {}),
+      ...(mentionedPrincipalIds.length > 0 ? { mentionedPrincipalIds } : {}),
       createdAt: timestamp,
     };
     await repository.saveQuestion({
@@ -4259,7 +4447,10 @@ export class BridgeService {
       repository, principal, question.projectId, "response.proposed", "response", response.id, timestamp,
       question.policyVersion,
     );
-    await this.notify(repository, principal, question.projectId, question.ownerIds, {
+    await this.notify(repository, principal, question.projectId, [
+      ...question.ownerIds,
+      ...mentionedPrincipalIds,
+    ], {
       type: "question_response",
       title: "New proposed answer",
       body: `${principal.displayName} proposed an answer for “${question.title}”.`,
@@ -4273,6 +4464,232 @@ export class BridgeService {
       },
     });
     return response;
+  }
+
+  async editQuestionResponse(
+    principal: Principal,
+    questionId: string,
+    responseId: string,
+    input: EditQuestionResponseInput,
+  ): Promise<QuestionResponse> {
+    return this.tenantTransaction(principal, (repository) =>
+      this.editQuestionResponseInTransaction(repository, principal, questionId, responseId, input),
+    );
+  }
+
+  private async editQuestionResponseInTransaction(
+    repository: BridgeRepository,
+    principal: Principal,
+    questionId: string,
+    responseId: string,
+    input: EditQuestionResponseInput,
+  ): Promise<QuestionResponse> {
+    assertHuman(principal, "Editing a proposed answer");
+    const question = await this.requireQuestion(principal, questionId, repository);
+    const response = question.responses.find((candidate) => candidate.id === responseId);
+    if (!response) {
+      throw new BridgeError("VALIDATION_FAILED", "responseId does not belong to this question.", 422);
+    }
+    if (!["open", "in_discussion"].includes(question.status)) {
+      throw new BridgeError("CONFLICT", "Resolved questions do not accept response edits.", 409);
+    }
+    if (response.authorType !== "human" || response.authorId !== principal.id) {
+      throw new BridgeError("FORBIDDEN", "Only the original human response author can edit this answer.", 403);
+    }
+    this.assertSecretSafe("question", input);
+    if (question.version !== input.expectedVersion) {
+      throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+        expectedVersion: input.expectedVersion,
+        currentVersion: question.version,
+      });
+    }
+    if (input.optionKey && !question.options.some((option) => option.key === input.optionKey)) {
+      throw new BridgeError("VALIDATION_FAILED", "optionKey does not belong to this question.", 422);
+    }
+    const mentionedPrincipalIds = await this.validateQuestionMentions(
+      repository,
+      question,
+      input.mentionedPrincipalIds ?? response.mentionedPrincipalIds,
+    );
+    const unchanged = response.answer === input.answer &&
+      response.rationale === input.rationale &&
+      response.optionKey === input.optionKey &&
+      JSON.stringify(response.mentionedPrincipalIds ?? []) === JSON.stringify(mentionedPrincipalIds);
+    if (unchanged) {
+      throw new BridgeError("CONFLICT", "The response edit does not change the current answer.", 409);
+    }
+    const timestamp = this.now().toISOString();
+    const revision: QuestionResponseRevision = {
+      id: `rsv_${this.id()}`,
+      answer: response.answer,
+      rationale: response.rationale,
+      ...(response.optionKey ? { optionKey: response.optionKey } : {}),
+      mentionedPrincipalIds: response.mentionedPrincipalIds ?? [],
+      editedById: principal.id,
+      editedByType: principal.type,
+      editedAt: timestamp,
+    };
+    const {
+      optionKey: previousOptionKey,
+      mentionedPrincipalIds: previousMentionedPrincipalIds,
+      ...responseWithoutEditableMetadata
+    } = response;
+    const updatedResponse: QuestionResponse = {
+      ...responseWithoutEditableMetadata,
+      answer: input.answer,
+      rationale: input.rationale,
+      ...(input.optionKey ? { optionKey: input.optionKey } : {}),
+      ...(mentionedPrincipalIds.length > 0 ? { mentionedPrincipalIds } : {}),
+      revisionHistory: [...(response.revisionHistory ?? []), revision],
+    };
+    await repository.saveQuestion({
+      ...question,
+      responses: question.responses.map((candidate) => candidate.id === responseId ? updatedResponse : candidate),
+      version: question.version + 1,
+    });
+    await this.audit(
+      repository,
+      principal,
+      question.projectId,
+      "response.edited",
+      "response",
+      response.id,
+      timestamp,
+      question.policyVersion,
+    );
+    await this.notify(
+      repository,
+      principal,
+      question.projectId,
+      [
+        ...question.ownerIds,
+        ...mentionedPrincipalIds,
+        ...question.responses.map((candidate) => candidate.authorId),
+        ...question.comments.map((comment) => comment.authorId),
+      ],
+      {
+        type: "question_response",
+        title: "Proposed answer edited",
+        body: `${principal.displayName} edited a proposed answer for “${question.title}”.`,
+        targetType: "response",
+        targetId: response.id,
+        questionContext: {
+          id: question.id,
+          status: question.status,
+          risk: question.risk,
+          ownerIds: question.ownerIds,
+        },
+      },
+    );
+    return updatedResponse;
+  }
+
+  async editQuestionComment(
+    principal: Principal,
+    questionId: string,
+    commentId: string,
+    input: EditQuestionCommentInput,
+  ): Promise<QuestionComment> {
+    return this.tenantTransaction(principal, (repository) =>
+      this.editQuestionCommentInTransaction(repository, principal, questionId, commentId, input),
+    );
+  }
+
+  private async editQuestionCommentInTransaction(
+    repository: BridgeRepository,
+    principal: Principal,
+    questionId: string,
+    commentId: string,
+    input: EditQuestionCommentInput,
+  ): Promise<QuestionComment> {
+    assertHuman(principal, "Editing a question comment");
+    const question = await this.requireQuestion(principal, questionId, repository);
+    const comment = question.comments.find((candidate) => candidate.id === commentId);
+    if (!comment) {
+      throw new BridgeError("VALIDATION_FAILED", "commentId does not belong to this question.", 422);
+    }
+    if (!["open", "in_discussion"].includes(question.status)) {
+      throw new BridgeError("CONFLICT", "Resolved questions do not accept comment edits.", 409);
+    }
+    if (comment.authorType !== "human" || comment.authorId !== principal.id) {
+      throw new BridgeError("FORBIDDEN", "Only the original human comment author can edit this comment.", 403);
+    }
+    this.assertSecretSafe("question", input);
+    if (question.version !== input.expectedVersion) {
+      throw new BridgeError("CONFLICT", "The question changed after it was read.", 409, {
+        expectedVersion: input.expectedVersion,
+        currentVersion: question.version,
+      });
+    }
+    const mentionedPrincipalIds = await this.validateQuestionMentions(
+      repository,
+      question,
+      input.mentionedPrincipalIds ?? comment.mentionedPrincipalIds,
+    );
+    const unchanged = comment.body === input.body &&
+      JSON.stringify(comment.mentionedPrincipalIds ?? []) === JSON.stringify(mentionedPrincipalIds);
+    if (unchanged) {
+      throw new BridgeError("CONFLICT", "The comment edit does not change the current comment.", 409);
+    }
+    const timestamp = this.now().toISOString();
+    const revision: QuestionCommentRevision = {
+      id: `csv_${this.id()}`,
+      body: comment.body,
+      mentionedPrincipalIds: comment.mentionedPrincipalIds ?? [],
+      editedById: principal.id,
+      editedByType: principal.type,
+      editedAt: timestamp,
+    };
+    const {
+      mentionedPrincipalIds: previousMentionedPrincipalIds,
+      ...commentWithoutEditableMetadata
+    } = comment;
+    const updatedComment: QuestionComment = {
+      ...commentWithoutEditableMetadata,
+      body: input.body,
+      ...(mentionedPrincipalIds.length > 0 ? { mentionedPrincipalIds } : {}),
+      revisionHistory: [...(comment.revisionHistory ?? []), revision],
+    };
+    await repository.saveQuestion({
+      ...question,
+      comments: question.comments.map((candidate) => candidate.id === commentId ? updatedComment : candidate),
+      version: question.version + 1,
+    });
+    await this.audit(
+      repository,
+      principal,
+      question.projectId,
+      "question.comment_edited",
+      "question",
+      question.id,
+      timestamp,
+      question.policyVersion,
+    );
+    await this.notify(
+      repository,
+      principal,
+      question.projectId,
+      [
+        ...question.ownerIds,
+        ...mentionedPrincipalIds,
+        ...question.responses.map((response) => response.authorId),
+        ...question.comments.map((candidate) => candidate.authorId),
+      ],
+      {
+        type: "question_comment",
+        title: "Question clarification edited",
+        body: `${principal.displayName} edited a clarification on “${question.title}”.`,
+        targetType: "comment",
+        targetId: comment.id,
+        questionContext: {
+          id: question.id,
+          status: question.status,
+          risk: question.risk,
+          ownerIds: question.ownerIds,
+        },
+      },
+    );
+    return updatedComment;
   }
 
   async acceptAnswer(

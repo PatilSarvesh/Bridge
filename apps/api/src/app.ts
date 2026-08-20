@@ -15,9 +15,12 @@ import {
   createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
+  editQuestionCommentInputSchema,
+  editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
+  questionClarificationInputSchema,
   questionCommentInputSchema,
   notificationListQuerySchema,
   notificationReadAllInputSchema,
@@ -708,6 +711,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.patch<{ Params: { questionId: string; responseId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/responses/:responseId",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = editQuestionResponseInputSchema.parse(request.body);
+      return options.service.editQuestionResponse(
+        principal,
+        request.params.questionId,
+        request.params.responseId,
+        input,
+      );
+    },
+  );
+
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/reviews",
     async (request, reply) => {
@@ -734,6 +751,38 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const input = questionCommentInputSchema.parse(request.body);
       const comment = await options.service.addQuestionComment(principal, request.params.questionId, input);
       return reply.status(201).send(comment);
+    },
+  );
+
+  app.patch<{ Params: { questionId: string; commentId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/comments/:commentId",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = editQuestionCommentInputSchema.parse(request.body);
+      return options.service.editQuestionComment(
+        principal,
+        request.params.questionId,
+        request.params.commentId,
+        input,
+      );
+    },
+  );
+
+  app.post<{ Params: { questionId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/clarification",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = questionClarificationInputSchema.parse(request.body);
+      return options.service.requestQuestionClarification(principal, request.params.questionId, input);
+    },
+  );
+
+  app.post<{ Params: { questionId: string }; Body: unknown }>(
+    "/v1/questions/:questionId/reopen",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = questionClarificationInputSchema.parse(request.body);
+      return options.service.reopenQuestion(principal, request.params.questionId, input);
     },
   );
 

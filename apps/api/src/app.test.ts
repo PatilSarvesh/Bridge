@@ -1894,6 +1894,150 @@ describe("Bridge API vertical slice", () => {
     expect(missingParent.statusCode).toBe(422);
   });
 
+  it("supports REST question edit history, mentions, related links, and owner clarification requests", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-question-collaboration-001",
+        title: "Which export retention window should the service use?",
+        type: "decision",
+        category: "privacy",
+        context: "The export service needs a bounded retention policy before deletion.",
+        whyItMatters: "An unclear retention policy can keep sensitive data longer than intended.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "seven-days", label: "Seven days", tradeoffs: "Short retention with more re-exports." },
+          { key: "thirty-days", label: "Thirty days", tradeoffs: "More recovery time with greater exposure." },
+        ],
+        recommendationKey: "seven-days",
+        relatedLinks: [{ type: "work_item", label: "Retention work item", url: "https://tracker.example/BRG-34" }],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const question = created.json<{ id: string; version: number; relatedLinks: readonly unknown[] }>();
+    expect(question.relatedLinks).toEqual([
+      { type: "work_item", label: "Retention work item", url: "https://tracker.example/BRG-34" },
+    ]);
+
+    const comment = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version,
+        body: "Can support-created exports use the same retention policy?",
+        mentionedPrincipalIds: [demoPrincipals.qaLead.id],
+      },
+    });
+    expect(comment.statusCode).toBe(201);
+    const commentRecord = comment.json<{ id: string; mentionedPrincipalIds: readonly string[] }>();
+    expect(commentRecord.mentionedPrincipalIds).toEqual([demoPrincipals.qaLead.id]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/responses`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        answer: "Use seven days.",
+        rationale: "The shortest practical recovery window limits data exposure.",
+        optionKey: "seven-days",
+        mentionedPrincipalIds: [demoPrincipals.architect.id],
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const responseRecord = response.json<{ id: string }>();
+
+    const editedResponse = await app.inject({
+      method: "PATCH",
+      url: `/v1/questions/${question.id}/responses/${responseRecord.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version + 2,
+        answer: "Use seven days with deletion verification.",
+        rationale: "A deletion check prevents retention drift while preserving short recovery time.",
+        optionKey: "seven-days",
+        mentionedPrincipalIds: [demoPrincipals.architect.id],
+      },
+    });
+    expect(editedResponse.statusCode).toBe(200);
+    expect(editedResponse.json<{ revisionHistory: Array<{ answer: string }> }>().revisionHistory).toEqual([
+      expect.objectContaining({ answer: "Use seven days." }),
+    ]);
+
+    const editedComment = await app.inject({
+      method: "PATCH",
+      url: `/v1/questions/${question.id}/comments/${commentRecord.id}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version + 3,
+        body: "Can support-created exports use the same deletion verification?",
+        mentionedPrincipalIds: [demoPrincipals.qaLead.id],
+      },
+    });
+    expect(editedComment.statusCode).toBe(200);
+    expect(editedComment.json<{ revisionHistory: Array<{ body: string }> }>().revisionHistory).toEqual([
+      expect.objectContaining({ body: "Can support-created exports use the same retention policy?" }),
+    ]);
+
+    const invalidMention = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${question.id}/comments`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {
+        expectedVersion: question.version + 4,
+        body: "This mention must be rejected.",
+        mentionedPrincipalIds: [demoPrincipals.agent.id],
+      },
+    });
+    expect(invalidMention.statusCode).toBe(422);
+
+    const clarificationQuestion = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: "api-question-clarification-command-001",
+        title: "Which audit export retention policy should apply?",
+        type: "decision",
+        category: "privacy",
+        context: "The audit export needs a retention boundary.",
+        whyItMatters: "Unbounded audit exports increase exposure and storage cost.",
+        intendedOwnerIds: [demoPrincipals.architect.id],
+        risk: "high",
+        reversible: false,
+        blocking: true,
+        options: [
+          { key: "seven-days", label: "Seven days", tradeoffs: "Short retention." },
+          { key: "thirty-days", label: "Thirty days", tradeoffs: "Longer recovery." },
+        ],
+      },
+    });
+    const clarificationId = clarificationQuestion.json<{ id: string; version: number }>();
+    const deniedClarification = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${clarificationId.id}/clarification`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: { expectedVersion: clarificationId.version, reason: "Only the accountable owner can request more context." },
+    });
+    expect(deniedClarification.statusCode).toBe(403);
+    const requestedClarification = await app.inject({
+      method: "POST",
+      url: `/v1/questions/${clarificationId.id}/clarification`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { expectedVersion: clarificationId.version, reason: "The owner needs more context before comparing the options." },
+    });
+    expect(requestedClarification.statusCode).toBe(200);
+    expect(requestedClarification.json<{ status: string; version: number }>()).toMatchObject({ status: "in_discussion", version: 2 });
+  });
+
   it("finds and reuses an exact project question instead of creating another interruption", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

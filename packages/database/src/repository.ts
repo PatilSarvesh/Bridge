@@ -954,6 +954,16 @@ export class PostgresBridgeRepository implements BridgeRepository {
           status: row.status,
           reviews: row.reviews,
           comments: row.comments,
+          relatedLinks: row.relatedLinks,
+          routing: row.routing,
+          assignmentHistory: row.assignmentHistory,
+          ownerIds: row.ownerIds,
+          ownerRoles: row.ownerRoles,
+          reviewerIds: row.reviewerIds,
+          reviewerRoles: row.reviewerRoles,
+          requiredReviewerRoles: row.requiredReviewerRoles,
+          requiredReviewerQuorum: row.requiredReviewerQuorum,
+          approvalOverride: row.approvalOverride,
           acceptedResponseId: row.acceptedResponseId,
           decisionId: row.decisionId,
           version: row.version,
@@ -964,7 +974,16 @@ export class PostgresBridgeRepository implements BridgeRepository {
       await this.database
         .insert(questionResponses)
         .values(question.responses.map(responseToRow))
-        .onConflictDoNothing({ target: questionResponses.id });
+        .onConflictDoUpdate({
+          target: questionResponses.id,
+          set: {
+            answer: sql.raw(`excluded.${questionResponses.answer.name}`),
+            rationale: sql.raw(`excluded.${questionResponses.rationale.name}`),
+            optionKey: sql.raw(`excluded.${questionResponses.optionKey.name}`),
+            mentionedPrincipalIds: sql.raw(`excluded.${questionResponses.mentionedPrincipalIds.name}`),
+            revisionHistory: sql.raw(`excluded.${questionResponses.revisionHistory.name}`),
+          },
+        });
     }
   }
 

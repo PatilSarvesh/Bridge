@@ -19,6 +19,7 @@ import type {
   ProjectOwnershipConfiguration,
   ProjectPolicyConfiguration,
   QuestionApprovalOverride,
+  QuestionLink,
   RepositoryRecord,
   Question,
   QuestionResponse,
@@ -543,6 +544,7 @@ export function questionToRow(question: Question): typeof questions.$inferInsert
     routing: question.routing,
     assignmentHistory: question.assignmentHistory,
     options: question.options,
+    relatedLinks: question.relatedLinks ?? [],
     reviews: question.reviews,
     comments: question.comments,
     approvalOverride: question.approvalOverride ?? null,
@@ -568,6 +570,8 @@ export function responseToRow(response: QuestionResponse): typeof questionRespon
     answer: response.answer,
     rationale: response.rationale,
     optionKey: response.optionKey ?? null,
+    mentionedPrincipalIds: response.mentionedPrincipalIds ?? [],
+    revisionHistory: response.revisionHistory ?? [],
     createdAt: response.createdAt,
   };
 }
@@ -581,6 +585,8 @@ export function responseFromRow(row: QuestionResponseRow): QuestionResponse {
     answer: row.answer,
     rationale: row.rationale,
     ...(row.optionKey === null ? {} : { optionKey: row.optionKey }),
+    ...(row.mentionedPrincipalIds.length > 0 ? { mentionedPrincipalIds: row.mentionedPrincipalIds } : {}),
+    ...(row.revisionHistory.length > 0 ? { revisionHistory: row.revisionHistory } : {}),
     createdAt: row.createdAt,
   };
 }
@@ -618,6 +624,7 @@ export function questionFromRows(
     routing: row.routing,
     assignmentHistory: row.assignmentHistory,
     options: row.options,
+    ...(row.relatedLinks.length > 0 ? { relatedLinks: row.relatedLinks as readonly QuestionLink[] } : {}),
     reviews: row.reviews,
     comments: row.comments,
     ...(row.approvalOverride === null ? {} : { approvalOverride: row.approvalOverride }),

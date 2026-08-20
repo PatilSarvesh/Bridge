@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-19, Asia/Kolkata |
+| Last updated | 2026-08-20, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, revocable scoped service identities, permission-restricted audit browsing/export, coarse REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; endpoint-specific tool scopes, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, revocable noninteractive credentials, coarse non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until endpoint-specific scopes, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -329,9 +329,10 @@ A question contains:
 - Optional recommendation
 - Optional fallback, prohibited for protected questions
 - Scope: repository, component, branch, environment, and work item
+- Optional typed related links for repositories, work items, branches, artifacts, runs, or external references
 - Creator identity/type
 - Status
-- Responses, threaded clarification comments, and protected reviews
+- Responses, threaded clarification comments, protected reviews, and human mention/revision metadata
 - Accepted response and decision references
 - Optimistic version number
 
@@ -343,6 +344,8 @@ Question statuses:
 - `duplicate`
 - `cancelled`
 - `expired`
+
+Human discussion edits preserve the previous response or comment in append-only revision history. Only the original human author can edit an unresolved discussion record; question owners can request clarification, and owners/project administrators can reopen only cancelled or expired questions. Accepted decisions retain their separate lifecycle and are not reopened by this discussion command.
 
 ### 9.2 Decisions
 
@@ -587,6 +590,10 @@ Questions:
 - `GET /v1/questions/:questionId`
 - `POST /v1/questions/:questionId/responses`
 - `POST /v1/questions/:questionId/comments` (threaded clarification comment)
+- `PATCH /v1/questions/:questionId/responses/:responseId` (original-human correction with revision history)
+- `PATCH /v1/questions/:questionId/comments/:commentId` (original-human correction with revision history)
+- `POST /v1/questions/:questionId/clarification` (owner clarification request)
+- `POST /v1/questions/:questionId/reopen` (owner/admin reopen of cancelled or expired discussion)
 - `POST /v1/questions/:questionId/reviews` (separate protected security review)
 - `POST /v1/questions/:questionId/accept`
 
@@ -763,6 +770,8 @@ The local web application provides:
 - Role-aware assignment labels for questions (for example, QA Lead or Business Analyst).
 - Shared team discussion: proposed answers, rationale, selected option, author, and timestamp.
 - Threaded clarification comments with parent links, author, timestamp, and optimistic version checks.
+- Typed related-work links, human mention displays, original-author edit controls, and expandable response/comment revision history.
+- Server-authorized clarification-request and cancelled/expired discussion-reopen controls; accepted decisions remain authoritative through their separate lifecycle.
 - A response form for human contributors before final owner acceptance.
 - Required human acceptance rationale.
 - Protected-question security review history and review form.
@@ -814,6 +823,7 @@ Current validation result after interactive CLI authentication:
 - MCP exact question-match lookup test: passed.
 - MCP filtered reviewer-inbox routing test: passed; protected review state is visible without exposing human approval commands to ordinary agent principals.
 - REST/application threaded clarification test: passed; human comments are version-checked, parent-linked, and agent-authorship is rejected.
+- REST/application question-collaboration test: passed; human mentions are project-member validated, response/comment edits preserve revision history, related links round-trip, clarification/reopen authority is enforced, and collaboration audits/notifications are emitted.
 - REST/application notification test: passed; assignment and clarification events create durable human notifications, agents are denied the feed, and scoped individual/all read state is enforced.
 - Browser verification: a human posted a root clarification, replied to it, and saw the question move to `in_discussion` with both thread entries visible.
 - CLI repository initialization/question/wait/sync and run lifecycle tests: passed.
@@ -1113,7 +1123,7 @@ Implemented:
 Deliberate boundaries:
 
 - The current prototype UI uses the fixed `usr_architect` browser principal; the REST policy already distinguishes human contributors and decision owners.
-- Responses and comments are append-only in this slice. Editing, deletion, mentions, and notification preferences remain future work.
+- The initial slice intentionally used append-only responses and comments; governed corrections and mentions now live in section 20.59. Deletion and notification preferences remain future work.
 - Agent principals cannot submit human responses; agent recommendations remain separate from human discussion and acceptance.
 
 ### 20.7 Implemented role-aware question routing slice
@@ -1981,8 +1991,27 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - The override is an exceptional human administrative decision, not synthetic reviewer evidence; MCP exposes no approval or override mutation and REST remains canonical.
-- Reviewer assignment still uses the existing role/direct-target coordination model. Reviewer directory UX, notification preferences, comment edit history, mentions, reopen workflow, related work links, and live isolated-PostgreSQL evidence remain follow-up work.
+- Reviewer assignment still uses the existing role/direct-target coordination model. Reviewer directory UX, notification preferences, provider-backed related-link synchronization, and live isolated-PostgreSQL evidence remain follow-up work. Question collaboration edits, mentions, controlled clarification, and cancelled/expired discussion reopening are implemented in section 20.59; accepted-decision reopening remains a separate lifecycle slice.
 - Reasons are operational audit metadata only. Bridge continues to reject and avoid storing secrets, raw transcripts, prompts, answers outside their governed records, or private reasoning.
+
+### 20.59 Implemented governed question collaboration slice
+
+Implemented and locally verified:
+
+1. Questions accept bounded typed related links for repository, work item, branch, artifact, run, or external references. The links remain metadata-only and do not imply provider synchronization or source access.
+2. Human responses and threaded comments can carry mention IDs. The application validates every mention as an active human with access to the question's organization/project, deduplicates IDs, and creates the existing scoped human notification type without exposing a new agent authority path.
+3. The original human author can edit an unresolved response or comment with an expected question version. The previous value is appended to an explicit revision-history array before the current value changes; agents, other humans, resolved questions, stale versions, and no-op edits are rejected.
+4. Question owners can request clarification on an open question. Owners and project administrators can reopen only cancelled or expired questions into `in_discussion`. Accepted questions and accepted decisions are intentionally excluded; decision lifecycle remains a separate governed command.
+5. REST remains canonical through `PATCH /v1/questions/:questionId/responses/:responseId`, `PATCH /v1/questions/:questionId/comments/:commentId`, `POST /v1/questions/:questionId/clarification`, and `POST /v1/questions/:questionId/reopen`. MCP remains optional and exposes no human mutation shortcut.
+6. Question detail reads expose server-derived editable response/comment IDs and clarification/reopen authority. The web renders related links, mentions, edit forms, revision history, and authorized clarification/reopen forms with progressive disclosure.
+7. Forward-only migration `0032_bitter_lethal_legion.sql` adds `related_links` to questions and `mentioned_principal_ids` plus `revision_history` to responses, each with JSON-array shape constraints and mapper/repository coverage. Application, REST, contract, domain, mapper, migration, and web type checks/tests cover the slice. No database command was run; PostgreSQL integration remains gated by an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
+
+Deliberate boundaries:
+
+- Mention validation is project-scoped membership validation, not a directory search or notification-preference system; notification preferences and provider-backed delivery remain separate work.
+- Related links are supplied and displayed as bounded metadata. GitHub/work-item validation and synchronization remain integration work.
+- Reopening a question discussion does not reopen, supersede, or revise an accepted Decision. Any accepted-decision correction must use the separate decision lifecycle/replacement model.
+- REST/application policy is authoritative for all mutation paths. MCP and repository snapshots remain optional alternatives for agent workflows and cannot create human approval.
 
 ## 21. Important implementation files
 
@@ -2037,6 +2066,7 @@ Deliberate boundaries:
 - Explainable question routing and assignment-history migration: `packages/database/drizzle/0029_unknown_madame_hydra.sql`
 - Question due-date and project/due index migration: `packages/database/drizzle/0030_gray_smasher.sql`
 - Protected approval quorum, override metadata, and audit-reason migration: `packages/database/drizzle/0031_deep_vampiro.sql`
+- Governed question collaboration, related links, mentions, and revision-history migration: `packages/database/drizzle/0032_bitter_lethal_legion.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`

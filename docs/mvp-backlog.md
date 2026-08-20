@@ -395,7 +395,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only proposed answers plus version-checked threaded clarification comments are implemented in REST and the project question UI; edit history, mentions, and reopen workflow remain
+- **Status:** Implemented for the controlled MVP slice — human proposed answers and threaded clarification comments support optimistic edits with explicit revision history, validated human mentions/notifications, owner clarification requests, and governed reopening of cancelled or expired discussions; accepted decisions remain outside this reopen path
 - **Dependencies:** BRG-030
 - **PRD references:** QST-04
 
@@ -413,7 +413,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped detail now includes discussion responses, the response form, run/scope provenance, approval summaries, and server-derived personalized authorization states; related work, edit history, mentions, and reopen workflow remain
+- **Status:** Implemented for the controlled MVP slice — project-scoped detail includes discussion responses, related repository/work-item/branch/artifact/run links, revision history, human mentions, run/scope provenance, approval summaries, and server-derived edit/clarification/reopen authority; provider synchronization and decision reopening remain separate work
 - **Dependencies:** BRG-031, BRG-033
 - **PRD references:** QST-02, QST-04
 

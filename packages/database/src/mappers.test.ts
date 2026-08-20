@@ -158,6 +158,11 @@ const question: Question = {
   ],
   recommendationKey: "postgres",
   scope: { repository: "bridge", component: "persistence" },
+  relatedLinks: [{
+    type: "work_item",
+    label: "Persistence decision work item",
+    url: "https://example.test/work/42",
+  }],
   createdById: "agt_codex",
   createdByType: "agent",
   createdAt: "2026-08-07T10:00:00.000Z",
@@ -171,6 +176,17 @@ const question: Question = {
       answer: "Use PostgreSQL.",
       rationale: "Atomic durable state is required.",
       optionKey: "postgres",
+      mentionedPrincipalIds: ["usr_reviewer"],
+      revisionHistory: [{
+        id: "rsv_mapping",
+        answer: "Use a durable PostgreSQL-backed repository.",
+        rationale: "The repository must survive process restarts.",
+        optionKey: "postgres",
+        mentionedPrincipalIds: [],
+        editedById: "usr_owner",
+        editedByType: "human",
+        editedAt: "2026-08-07T10:02:00.000Z",
+      }],
       createdAt: "2026-08-07T10:01:00.000Z",
     },
   ],
@@ -193,6 +209,15 @@ const question: Question = {
       authorId: "usr_owner",
       authorType: "human",
       body: "Please confirm the migration rollback path before accepting this choice.",
+      mentionedPrincipalIds: ["usr_reviewer"],
+      revisionHistory: [{
+        id: "csv_mapping",
+        body: "Please confirm the migration rollback path and observability plan before accepting this choice.",
+        mentionedPrincipalIds: [],
+        editedById: "usr_owner",
+        editedByType: "human",
+        editedAt: "2026-08-07T10:02:15.000Z",
+      }],
       createdAt: "2026-08-07T10:01:45.000Z",
     },
   ],
@@ -775,6 +800,17 @@ describe("PostgreSQL domain mappings", () => {
     expect(approvalMigration).toContain('ADD COLUMN "required_reviewer_quorum" jsonb');
     expect(approvalMigration).toContain('ADD COLUMN "approval_override" jsonb');
     expect(approvalMigration).toContain("bridge_questions_required_reviewer_quorum_shape_check");
+
+    const collaborationMigration = readFileSync(
+      new URL("../drizzle/0032_bitter_lethal_legion.sql", import.meta.url),
+      "utf8",
+    );
+    expect(collaborationMigration).toContain('ADD COLUMN "related_links" jsonb');
+    expect(collaborationMigration).toContain('ADD COLUMN "mentioned_principal_ids" jsonb');
+    expect(collaborationMigration).toContain('ADD COLUMN "revision_history" jsonb');
+    expect(collaborationMigration).toContain("bridge_questions_related_links_shape_check");
+    expect(collaborationMigration).toContain("bridge_question_responses_mentioned_principal_ids_shape_check");
+    expect(collaborationMigration).toContain("bridge_question_responses_revision_history_shape_check");
 
     const correlationMigration = readFileSync(
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),
