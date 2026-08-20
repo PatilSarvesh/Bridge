@@ -441,7 +441,7 @@ export interface Notification {
   readonly type: NotificationType;
   readonly title: string;
   readonly body: string;
-  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "artifact" | "artifact_version";
+  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "assumption" | "artifact" | "artifact_version";
   readonly targetId: string;
   readonly createdAt: string;
   readonly readAt?: string;
@@ -584,13 +584,13 @@ export interface Decision {
   readonly id: string;
   readonly organizationId: string;
   readonly projectId: string;
-  readonly questionId: string;
+  readonly questionId?: string;
   readonly answer: string;
   readonly rationale: string;
   readonly category: string;
   readonly scope: Scope;
   readonly ownerId: string;
-  readonly sourceResponseId: string;
+  readonly sourceResponseId?: string;
   readonly status: DecisionStatus;
   readonly createdAt: string;
   readonly reviewAt: string;

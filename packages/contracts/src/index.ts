@@ -36,6 +36,7 @@ export const notificationTypeSchema = z.enum([
   "question_review",
   "question_accepted",
   "decision_lifecycle",
+  "assumption_expired",
   "artifact_review_requested",
   "artifact_review_feedback",
   "artifact_approved",
@@ -752,6 +753,7 @@ export const resolveAssumptionInputSchema = z
     status: z.enum(["confirmed", "rejected", "expired", "superseded"]),
     rationale: z.string().trim().min(10).max(5_000),
     confirmedDecisionId: z.string().trim().min(1).max(100).optional(),
+    createDecision: z.boolean().optional(),
     supersedingAssumptionId: z.string().trim().min(1).max(100).optional(),
   })
   .superRefine((value, context) => {
@@ -774,6 +776,20 @@ export const resolveAssumptionInputSchema = z
         code: "custom",
         message: "confirmedDecisionId is valid only for a confirmed assumption.",
         path: ["confirmedDecisionId"],
+      });
+    }
+    if (value.status !== "confirmed" && value.createDecision) {
+      context.addIssue({
+        code: "custom",
+        message: "createDecision is valid only for a confirmed assumption.",
+        path: ["createDecision"],
+      });
+    }
+    if (value.confirmedDecisionId && value.createDecision) {
+      context.addIssue({
+        code: "custom",
+        message: "Choose an existing confirmedDecisionId or createDecision, not both.",
+        path: ["createDecision"],
       });
     }
   });

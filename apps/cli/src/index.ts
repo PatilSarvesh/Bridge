@@ -189,7 +189,7 @@ Usage:
   bridge assumption add [project-id] --file <assumption.json|->
   bridge assumption get <assumption-id>
   bridge assumption list [project-id]
-  bridge assumption resolve <assumption-id> --status <status> --version <number> --rationale <text>
+  bridge assumption resolve <assumption-id> --status <status> --version <number> --rationale <text> [--decision-id <id> | --create-decision] [--superseding-id <id>]
   bridge sync [project-id] [--task <description>] [--run-id <id>]
   bridge spec publish [project-id] --file <spec.md> --title <title> --type <prd|adr|api_contract|test_plan> [--run-id <id>]
   bridge spec get <artifact-id>
@@ -3048,6 +3048,7 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
               ...(optionValue(args, "--decision-id")
                 ? { confirmedDecisionId: optionValue(args, "--decision-id") }
                 : {}),
+              ...(args.includes("--create-decision") ? { createDecision: true } : {}),
               ...(optionValue(args, "--superseding-id")
                 ? { supersedingAssumptionId: optionValue(args, "--superseding-id") }
                 : {}),

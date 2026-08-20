@@ -1,3 +1,4 @@
+import { BridgeService } from "@bridge/application";
 import { createPostgresBridgeStore, type PostgresBridgeStore } from "@bridge/database";
 import {
   BridgeMetrics,
@@ -7,6 +8,7 @@ import {
 
 import {
   runOutboxCycle,
+  type AssumptionExpiryCycle,
   type OutboxCycleOptions,
   type OutboxHandler,
   type OutboxStore,
@@ -25,6 +27,7 @@ export interface WorkerConfiguration {
   readonly channel: "slack";
   readonly pollIntervalMs: number;
   readonly batchSize: number;
+  readonly assumptionExpiryIntervalMs: number;
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
 }
@@ -35,6 +38,7 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_CHANNEL?: string;
   readonly BRIDGE_WORKER_POLL_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_BATCH_SIZE?: string;
+  readonly BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_MAX_ATTEMPTS?: string;
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
 }
@@ -43,6 +47,7 @@ export interface ConfiguredWorker {
   readonly configuration: WorkerConfiguration;
   readonly store: PostgresBridgeStore;
   readonly handler: OutboxHandler;
+  readonly assumptionExpiryCycle: AssumptionExpiryCycle;
   readonly close: () => Promise<void>;
 }
 
@@ -55,6 +60,8 @@ export interface OutboxWorkerOptions {
   readonly handler: OutboxHandler;
   readonly pollIntervalMs?: number;
   readonly cycleOptions?: Omit<OutboxCycleOptions, "logger" | "metrics">;
+  readonly assumptionExpiryCycle?: AssumptionExpiryCycle;
+  readonly assumptionExpiryIntervalMs?: number;
   readonly logger?: SafeLogger;
   readonly metrics?: BridgeMetrics;
   readonly signal?: AbortSignal;
@@ -109,6 +116,13 @@ export function loadWorkerConfiguration(
     channel,
     pollIntervalMs: positiveInteger(environment, "BRIDGE_WORKER_POLL_INTERVAL_MS", 1_000, 250, 60_000),
     batchSize: positiveInteger(environment, "BRIDGE_WORKER_BATCH_SIZE", 25, 1, 100),
+    assumptionExpiryIntervalMs: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS",
+      60_000,
+      1_000,
+      86_400_000,
+    ),
     maxAttempts: positiveInteger(environment, "BRIDGE_WORKER_MAX_ATTEMPTS", 5, 1, 20),
     baseBackoffMs: positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000),
   };
@@ -129,10 +143,12 @@ export function createConfiguredWorker(
     publicBaseUrl: configuration.publicWebUrl,
     metrics,
   });
+  const service = new BridgeService(store.repository);
   return {
     configuration,
     store,
     handler,
+    assumptionExpiryCycle: () => service.expireDueAssumptions(),
     close: store.close,
   };
 }
@@ -156,8 +172,29 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 250 || pollIntervalMs > 60_000) {
     throw new Error("Worker poll interval must be between 250 and 60000 milliseconds.");
   }
+  const assumptionExpiryIntervalMs = options.assumptionExpiryIntervalMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(assumptionExpiryIntervalMs) ||
+    assumptionExpiryIntervalMs < 1_000 ||
+    assumptionExpiryIntervalMs > 86_400_000
+  ) {
+    throw new Error("Worker assumption expiry interval must be between 1000 and 86400000 milliseconds.");
+  }
 
+  let nextAssumptionExpiryAt = 0;
   while (!signal?.aborted) {
+    if (options.assumptionExpiryCycle && Date.now() >= nextAssumptionExpiryAt) {
+      try {
+        const result = await options.assumptionExpiryCycle();
+        logger.info("assumption_expiry.cycle_completed", {
+          expiredCount: result.expiredCount,
+          status: "success",
+        });
+      } catch (error) {
+        logger.error("assumption_expiry.cycle_failed", { error, status: "retrying" });
+      }
+      nextAssumptionExpiryAt = Date.now() + assumptionExpiryIntervalMs;
+    }
     try {
       const cycleOptions: OutboxCycleOptions = {
         ...options.cycleOptions,

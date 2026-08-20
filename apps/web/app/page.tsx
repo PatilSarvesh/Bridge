@@ -338,12 +338,13 @@ interface Notification {
     | "question_review"
     | "question_accepted"
     | "decision_lifecycle"
+    | "assumption_expired"
     | "artifact_review_requested"
     | "artifact_review_feedback"
     | "artifact_approved";
   readonly title: string;
   readonly body: string;
-  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "artifact" | "artifact_version";
+  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "assumption" | "artifact" | "artifact_version";
   readonly targetId: string;
   readonly createdAt: string;
   readonly readAt?: string;
@@ -351,7 +352,7 @@ interface Notification {
 
 interface Decision {
   readonly id: string;
-  readonly questionId: string;
+  readonly questionId?: string;
   readonly answer: string;
   readonly rationale: string;
   readonly category: string;
@@ -390,7 +391,9 @@ interface Assumption {
   readonly createdById: string;
   readonly createdAt: string;
   readonly expiresAt: string;
+  readonly resolvedById?: string;
   readonly resolutionRationale?: string;
+  readonly confirmedDecisionId?: string;
   readonly version: number;
 }
 
@@ -693,6 +696,7 @@ export default function Home() {
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
+  const [assumptionStatusFilter, setAssumptionStatusFilter] = useState<Assumption["status"] | "all">("all");
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
   const [repositories, setRepositories] = useState<readonly RepositoryRecord[]>([]);
   const [ownershipConfiguration, setOwnershipConfiguration] = useState<ProjectOwnershipConfiguration>();
@@ -765,6 +769,9 @@ export default function Home() {
   const [replacementDecisionId, setReplacementDecisionId] = useState("");
   const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
   const [decisionLifecycleImpact, setDecisionLifecycleImpact] = useState<DecisionLifecycleImpact>();
+  const [assumptionResolutionStatus, setAssumptionResolutionStatus] = useState<"confirmed" | "rejected" | "expired">("confirmed");
+  const [assumptionResolutionRationale, setAssumptionResolutionRationale] = useState("");
+  const [assumptionCreateDecision, setAssumptionCreateDecision] = useState(false);
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
@@ -1738,9 +1745,19 @@ export default function Home() {
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
   );
+  const visibleAssumptions = useMemo(
+    () => assumptionStatusFilter === "all"
+      ? assumptions
+      : assumptions.filter((assumption) => assumption.status === assumptionStatusFilter),
+    [assumptionStatusFilter, assumptions],
+  );
   const selectedAssumption = useMemo(
-    () => assumptions.find((assumption) => assumption.id === selectedAssumptionId) ?? assumptions[0],
-    [assumptions, selectedAssumptionId],
+    () => visibleAssumptions.find((assumption) => assumption.id === selectedAssumptionId) ?? visibleAssumptions[0],
+    [selectedAssumptionId, visibleAssumptions],
+  );
+  const canResolveSelectedAssumption = Boolean(
+    selectedAssumption &&
+    (selectedProject?.decisionOwnerIds.includes(activePrincipalId) || isProjectAdmin),
   );
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? runs[0],
@@ -2171,6 +2188,37 @@ export default function Home() {
     }
   };
 
+  const resolveAssumption = async () => {
+    if (
+      !selectedAssumption ||
+      selectedAssumption.status !== "active" ||
+      assumptionResolutionRationale.trim().length < 10 ||
+      (assumptionResolutionStatus !== "confirmed" && assumptionCreateDecision)
+    ) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await bridgeFetch<Assumption>(`/v1/assumptions/${selectedAssumption.id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: selectedAssumption.version,
+          status: assumptionResolutionStatus,
+          rationale: assumptionResolutionRationale,
+          ...(assumptionResolutionStatus === "confirmed" && assumptionCreateDecision
+            ? { createDecision: true }
+            : {}),
+        }),
+      }, activePrincipalId);
+      setAssumptionResolutionRationale("");
+      setAssumptionCreateDecision(false);
+      await Promise.all([loadReferenceData(), loadNotifications()]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to resolve the assumption.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const updateInboxFilter = (key: InboxFilterKey, value: string) => {
     setInboxFilters((current) => ({
       ...current,
@@ -2201,6 +2249,10 @@ export default function Home() {
         setDecisionSearchDraft("");
         setDecisionFilters({ includeHistory: true });
         setSelectedDecisionId(notification.targetId);
+      } else if (notification.targetType === "assumption") {
+        setView("assumptions");
+        setAssumptionStatusFilter("all");
+        setSelectedAssumptionId(notification.targetId);
       } else if (notification.targetType === "artifact" || notification.targetType === "artifact_version") {
         setView("specifications");
         const artifact = notification.targetType === "artifact"
@@ -3367,14 +3419,18 @@ export default function Home() {
                           </p>
                         </section>
                       ) : null}
-                      <button
-                        className="secondary"
-                        type="button"
-                        onClick={() => {
-                          setSelectedId(selectedDecision.questionId);
-                          setView("questions");
-                        }}
-                      >Open source question</button>
+                      {selectedDecision.questionId ? (
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => {
+                            setSelectedId(selectedDecision.questionId);
+                            setView("questions");
+                          }}
+                        >Open source question</button>
+                      ) : (
+                        <p className="impact">Created from a human-confirmed assumption.</p>
+                      )}
                     </article>
                   ) : null}
                 </div>
@@ -3384,14 +3440,25 @@ export default function Home() {
             <>
               <div className="title-row">
                 <div><h1>Visible project assumptions</h1><p>Assumptions are temporary premises with explicit risk, expiry, and reversal cost.</p></div>
+                <label>Show
+                  <select value={assumptionStatusFilter} onChange={(event) => setAssumptionStatusFilter(event.target.value as Assumption["status"] | "all")}>
+                    <option value="all">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="expired">Expired</option>
+                    <option value="superseded">Superseded</option>
+                  </select>
+                </label>
                 <button className="secondary" type="button" onClick={() => void loadReferenceData()}>Refresh</button>
               </div>
               {referenceDataLoading ? <div className="empty">Loading assumptions…</div> : null}
               {!referenceDataLoading && assumptions.length === 0 ? <div className="empty">No assumptions have been recorded for this project.</div> : null}
-              {!referenceDataLoading && assumptions.length > 0 ? (
+              {!referenceDataLoading && assumptions.length > 0 && visibleAssumptions.length === 0 ? <div className="empty">No assumptions match this status.</div> : null}
+              {!referenceDataLoading && visibleAssumptions.length > 0 ? (
                 <div className="decision-layout">
                   <div className="question-list" aria-label="Project assumptions">
-                    {assumptions.map((assumption) => (
+                    {visibleAssumptions.map((assumption) => (
                       <button
                         type="button"
                         key={assumption.id}
@@ -3421,8 +3488,57 @@ export default function Home() {
                           <span>Created by {selectedAssumption.createdById}</span>
                         </div>
                       </section>
+                      {selectedAssumption.sourceLinks.length > 0 ? (
+                        <section><h3>Directly linked work</h3><div className="link-list">{selectedAssumption.sourceLinks.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}</div></section>
+                      ) : null}
                       {selectedAssumption.resolutionRationale ? (
-                        <section><h3>Resolution</h3><p>{selectedAssumption.resolutionRationale}</p></section>
+                        <section><h3>Resolution</h3><p>{selectedAssumption.resolutionRationale}</p><div className="spec-meta"><span>Resolved by {selectedAssumption.resolvedById ?? "Bridge worker"}</span>{selectedAssumption.confirmedDecisionId ? <span>Decision {selectedAssumption.confirmedDecisionId}</span> : null}</div></section>
+                      ) : null}
+                      {selectedAssumption.confirmedDecisionId ? (
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => {
+                            setSelectedDecisionId(selectedAssumption.confirmedDecisionId);
+                            setDecisionFilters({ includeHistory: true });
+                            setView("decisions");
+                          }}
+                        >Open confirmed decision</button>
+                      ) : null}
+                      {canResolveSelectedAssumption && selectedAssumption.status === "active" ? (
+                        <section className="response-form">
+                          <h3>Resolve assumption</h3>
+                          <label htmlFor="assumption-resolution-status">Resolution</label>
+                          <select
+                            id="assumption-resolution-status"
+                            value={assumptionResolutionStatus}
+                            onChange={(event) => {
+                              const status = event.target.value as typeof assumptionResolutionStatus;
+                              setAssumptionResolutionStatus(status);
+                              if (status !== "confirmed") setAssumptionCreateDecision(false);
+                            }}
+                          >
+                            <option value="confirmed">Confirm</option>
+                            <option value="rejected">Reject</option>
+                            <option value="expired">Mark expired</option>
+                          </select>
+                          <label htmlFor="assumption-resolution-rationale">Rationale</label>
+                          <textarea
+                            id="assumption-resolution-rationale"
+                            value={assumptionResolutionRationale}
+                            placeholder="Explain the human resolution. Rejection requires actionable rationale."
+                            onChange={(event) => setAssumptionResolutionRationale(event.target.value)}
+                          />
+                          {assumptionResolutionStatus === "confirmed" ? (
+                            <label><input type="checkbox" checked={assumptionCreateDecision} onChange={(event) => setAssumptionCreateDecision(event.target.checked)} /> Create an authoritative decision</label>
+                          ) : null}
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={submitting || assumptionResolutionRationale.trim().length < 10}
+                            onClick={() => void resolveAssumption()}
+                          >Apply resolution</button>
+                        </section>
                       ) : null}
                       {selectedAssumption.runId ? (
                         <button

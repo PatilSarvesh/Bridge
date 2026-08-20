@@ -1634,9 +1634,11 @@ describe("Bridge API vertical slice", () => {
         expectedVersion: assumption.version,
         status: "confirmed",
         rationale: "The namespace is consistent with the project's internal observability conventions.",
+        createDecision: true,
       },
     });
-    expect(confirmed.json<{ status: string }>().status).toBe("confirmed");
+    const confirmedBody = confirmed.json<{ status: string; confirmedDecisionId?: string }>();
+    expect(confirmedBody).toMatchObject({ status: "confirmed", confirmedDecisionId: expect.any(String) });
 
     const context = await app.inject({
       method: "GET",
@@ -1644,6 +1646,7 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
     expect(context.json<{ items: Array<{ id: string; authority: string }> }>().items).toEqual([
+      expect.objectContaining({ id: confirmedBody.confirmedDecisionId, authority: "approved" }),
       expect.objectContaining({ id: assumption.id, authority: "confirmed" }),
     ]);
   });

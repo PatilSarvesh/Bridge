@@ -138,7 +138,7 @@ Responsibilities:
 - Claim and process transactional outbox events with leases, bounded retries, and dead-letter state; `runOutboxCycle` accepts an injected delivery handler and the worker runtime supplies bounded polling, graceful shutdown, and a maintenance-role PostgreSQL composition.
 - Deliver email and team-channel notifications.
 - Maintain full-text search documents and optional derived embeddings later.
-- Perform duplicate suggestions, conflict scans, expiry jobs, and impact analysis.
+- Perform duplicate suggestions, conflict scans, scheduled assumption expiry, and impact analysis.
 - Synchronize external links and integration metadata.
 - Retry transient failures with bounded exponential backoff and dead-letter handling.
 
@@ -394,6 +394,7 @@ Questions keep related work links as bounded typed metadata (`repository`, `work
 - Artifact bodies are content-addressed to prevent accidental duplicate storage.
 - Agent identities cannot appear as human approvers.
 - A response used as an accepted answer must belong to the same organization and question.
+- A Decision is sourced either from an accepted question response or from an explicit human confirmation of an assumption; assumption-sourced decisions have no question/response pointers and remain linked from the confirmed assumption.
 - A protected reviewer requirement is satisfied only by its configured count of distinct approved human reviewers; a rejection blocks ordinary acceptance until the requirement is satisfied or an authorized override is recorded.
 - Administrative override is limited to unresolved protected questions, requires a project administrator, expected version, decision rationale, and non-empty reason, and creates both an override audit event and the ordinary accepted decision event.
 - Every dependency and link must remain within the tenant unless its type explicitly represents an external URL.
@@ -515,8 +516,8 @@ Current prototype behavior adds these conservative rules:
 - Non-human creators must supply a source run.
 - Expiry defaults to seven days and cannot exceed 30 days.
 - Exact normalized duplicates and direct textual negations of active same-category/exact-scope decisions return `CONFLICT` with the decision ID.
-- Human decision owners/project administrators resolve assumptions with an expected version and rationale.
-- Active due assumptions are durably expired during authoritative reads until the scheduled expiry job is connected to the worker runtime.
+- Human decision owners/project administrators resolve assumptions with an expected version and rationale. Confirmation may link an active same-project decision or explicitly create an authoritative decision from the assumption statement.
+- Active due assumptions are durably expired during reads and by the maintenance-role worker. The scheduled cycle is idempotent because only active records transition, and it notifies project decision owners plus the assumption creator through durable in-app records and outbox intents.
 
 ## 12. REST API
 
@@ -577,8 +578,7 @@ POST   /v1/decisions/:decisionId/lifecycle
 
 POST   /v1/projects/:projectId/assumptions
 GET    /v1/projects/:projectId/assumptions
-POST   /v1/assumptions/:assumptionId/confirm
-POST   /v1/assumptions/:assumptionId/reject
+POST   /v1/assumptions/:assumptionId/resolve
 
 POST   /v1/projects/:projectId/artifacts
 GET    /v1/artifacts/:artifactId
@@ -790,7 +790,7 @@ Event envelope:
 
 Avoid placing complete artifact bodies, secrets, or raw tokens in events.
 
-The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, target pointer, and—when the event is question-related—a bounded question context containing only question ID, status, risk, and owner IDs; the full notification body remains in the canonical notification table. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; the additive lifecycle migration extends its type constraint.
+The implemented prototype persists `notification.created` for each durable in-app notification and `decision.lifecycle_changed` for every authoritative supersede, expire, or revoke transition. Notification payloads contain the notification ID, recipient, notification type, target pointer, and—when the event is question-related—a bounded question context containing only question ID, status, risk, and owner IDs; the full notification body remains in the canonical notification table. Automatic assumption expiry uses the `assumption_expired` notification type with an assumption target and no agent transcript content. Decision lifecycle payloads contain only decision/replacement IDs, terminal state, and the human actor ID. `0008_transactional_outbox.sql` adds `pending`, `processing`, `processed`, `failed`, and `dead_letter` state, an availability timestamp, a five-minute lease, attempt count, and the tenant/project boundary; later additive migrations support assumption-sourced decisions and the expiry notification type.
 
 ### 16.2 Initial event types
 
@@ -821,7 +821,7 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. The deployable worker runtime uses `BRIDGE_WORKER_DATABASE_URL` with the maintenance role, validates bounded poll/batch/retry settings, and handles shutdown signals. Jitter, live email provider implementation, time-series telemetry, and deployment validation remain follow-up work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. The deployable worker also runs the scheduled assumption-expiry application cycle at a bounded interval before delivery polling; the cycle uses `BRIDGE_WORKER_DATABASE_URL` with the maintenance role and emits safe completion/failure logs. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. Jitter, live email provider implementation, time-series telemetry, and deployment validation remain follow-up work.
 
 ## 17. Notification architecture
 

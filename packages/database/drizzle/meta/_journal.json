@@ -232,6 +232,27 @@
       "when": 1787206036614,
       "tag": "0032_bitter_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787208201710,
+      "tag": "0033_sparkling_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787208224173,
+      "tag": "0034_mute_energizer",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787208253231,
+      "tag": "0035_odd_gravity",
+      "breakpoints": true
     }
   ]
 }

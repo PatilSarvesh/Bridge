@@ -1156,8 +1156,10 @@ describe("Bridge CLI fallback adapter", () => {
       "1",
       "--rationale",
       "The namespace follows the project observability conventions.",
+      "--create-decision",
     ], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain('"status": "confirmed"');
+    expect(stdout.at(-1)).toContain('"createDecision": true');
 
     expect(await runCli(["sync", "--task", "Implement transfer retry handling"], runtime)).toBe(0);
     const context = await readFile(join(cwd, ".bridge", "context.md"), "utf8");

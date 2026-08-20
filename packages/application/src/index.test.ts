@@ -1390,8 +1390,19 @@ describe("Bridge decision workflow", () => {
       expectedVersion: 1,
       status: "confirmed",
       rationale: "The internal metric namespace is consistent with our observability conventions.",
+      createDecision: true,
     });
-    expect(confirmed).toMatchObject({ status: "confirmed", resolvedById: owner.id, version: 2 });
+    expect(confirmed).toMatchObject({
+      status: "confirmed",
+      resolvedById: owner.id,
+      confirmedDecisionId: expect.any(String),
+      version: 2,
+    });
+    expect(await repository.getDecision(confirmed.confirmedDecisionId!)).toMatchObject({
+      answer: assumption.statement,
+      ownerId: owner.id,
+      status: "active",
+    });
 
     const expiring = await service.recordAssumption(
       agent,
@@ -1411,6 +1422,50 @@ describe("Bridge decision workflow", () => {
       status: "expired",
       version: 2,
     });
+  });
+
+  it("expires overdue assumptions once and notifies project owners through the outbox", async () => {
+    const { repository, service } = await runtime();
+    await repository.saveOrganization({
+      id: project.organizationId,
+      externalIdentityProviderId: "dev_org_one",
+      slug: "one",
+      name: "One",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const registration = await service.startRun(agent, project.id, {
+      idempotencyKey: "assumption-expiry-run-001",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Exercise scheduled assumption expiry",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "assumption-expiry-001",
+      runId: registration.run.id,
+      expiresAt: "2026-01-02T00:00:00.000Z",
+    }));
+    const laterService = new BridgeService(repository, {
+      now: () => new Date("2026-01-03T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `expiry_${++next}`;
+      })(),
+    });
+
+    await expect(laterService.expireDueAssumptions()).resolves.toEqual({ expiredCount: 1 });
+    expect(await repository.getAssumption(assumption.id)).toMatchObject({ status: "expired", version: 2 });
+    expect(await repository.listNotifications(project.organizationId, owner.id, project.id)).toEqual([
+      expect.objectContaining({
+        type: "assumption_expired",
+        targetType: "assumption",
+        targetId: assumption.id,
+      }),
+    ]);
+    expect((await repository.listOutboxEvents(project.id)).filter((event) => event.type === "notification.created")).toHaveLength(2);
+    await expect(laterService.expireDueAssumptions()).resolves.toEqual({ expiredCount: 0 });
+    expect((await repository.listNotifications(project.organizationId, owner.id, project.id))).toHaveLength(1);
   });
 
   it("blocks protected, irreversible, excessive-expiry, and decision-conflicting assumptions", async () => {
