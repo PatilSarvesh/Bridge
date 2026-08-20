@@ -9,6 +9,14 @@ export const questionTypeSchema = z.enum([
   "assumption_challenge",
   "blocker",
 ]);
+export const questionLinkTypeSchema = z.enum([
+  "repository",
+  "work_item",
+  "branch",
+  "artifact",
+  "run",
+  "external",
+]);
 export const riskSchema = z.enum(["low", "medium", "high", "protected"]);
 export const policyActionSchema = z.enum(["assume_and_log", "ask_async", "block", "protected_approval"]);
 export const questionStatusSchema = z.enum([
@@ -403,6 +411,11 @@ export const createQuestionInputSchema = z
     options: z.array(questionOptionInputSchema).max(10).default([]),
     recommendationKey: z.string().trim().min(1).max(80).optional(),
     fallback: z.string().trim().min(1).max(2_000).nullable().optional(),
+    relatedLinks: z.array(z.object({
+      type: questionLinkTypeSchema,
+      label: z.string().trim().min(1).max(200),
+      url: z.string().url().max(2_000),
+    })).max(20).optional(),
     scope: scopeSchema.default({}),
   })
   .superRefine((value, context) => {
@@ -453,6 +466,7 @@ export const proposeAnswerInputSchema = z.object({
   answer: z.string().trim().min(2).max(5_000),
   rationale: z.string().trim().min(2).max(5_000),
   optionKey: z.string().trim().min(1).max(80).optional(),
+  mentionedPrincipalIds: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
 });
 
 export const acceptAnswerInputSchema = z
@@ -526,6 +540,26 @@ export const questionCommentInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
   body: z.string().trim().min(2).max(5_000),
   parentCommentId: z.string().trim().min(1).max(100).optional(),
+  mentionedPrincipalIds: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+});
+
+export const editQuestionResponseInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  answer: z.string().trim().min(2).max(5_000),
+  rationale: z.string().trim().min(2).max(5_000),
+  optionKey: z.string().trim().min(1).max(80).optional(),
+  mentionedPrincipalIds: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+});
+
+export const editQuestionCommentInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  body: z.string().trim().min(2).max(5_000),
+  mentionedPrincipalIds: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+});
+
+export const questionClarificationInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(10).max(2_000),
 });
 
 export const notificationListQuerySchema = z.object({
@@ -789,6 +823,7 @@ export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInp
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type LinkRepositoryInput = z.infer<typeof linkRepositoryInputSchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
+export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;
 export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
@@ -800,6 +835,9 @@ export type ChangeDecisionLifecycleInput = z.infer<typeof changeDecisionLifecycl
 export type QuestionReviewInput = z.infer<typeof questionReviewInputSchema>;
 export type ReassignQuestionInput = z.infer<typeof reassignQuestionInputSchema>;
 export type QuestionCommentInput = z.infer<typeof questionCommentInputSchema>;
+export type EditQuestionResponseInput = z.infer<typeof editQuestionResponseInputSchema>;
+export type EditQuestionCommentInput = z.infer<typeof editQuestionCommentInputSchema>;
+export type QuestionClarificationInput = z.infer<typeof questionClarificationInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
 export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;

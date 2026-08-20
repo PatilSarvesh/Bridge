@@ -225,6 +225,13 @@
       "when": 1787204002662,
       "tag": "0031_deep_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787206036614,
+      "tag": "0032_bitter_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

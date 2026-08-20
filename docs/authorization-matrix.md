@@ -19,6 +19,9 @@ This document records the implemented server-side authorization contract for BRG
 | Read approved project context | Scoped | Allow | Allow | Allow | Allow | Allow | `getContext`; project access plus non-human `bridge:read` at REST/MCP |
 | Create question | Allow | Allow | Allow | Allow | Allow | Allow | `createQuestion`; project access plus non-human `bridge:write` at REST/MCP |
 | Comment or propose answer | Deny | Allow | Allow | Allow | Allow | Allow | `addQuestionComment` and `proposeAnswer` require a human |
+| Edit own response or comment | Deny | Own record | Own record | Own record | Own record | Own record | `editQuestionResponse` and `editQuestionComment`; unresolved question, original human author, expected version, append-only revision history |
+| Request clarification | Deny | Deny | Deny | Allow when owner | Allow | Allow | `requestQuestionClarification`; open question, human owner/project-admin authority, expected version, audit and notification |
+| Reopen discussion | Deny | Deny | Deny | Allow when owner | Allow | Allow | `reopenQuestion`; cancelled/expired question only, human owner/project-admin authority, expected version, audit and notification; accepted decisions remain separate |
 | Reassign question | Deny | Deny | Deny | Deny | Allow | Allow | `reassignQuestion`; unresolved questions only, human project-admin policy, active-human direct targets, optimistic version, append-only assignment history, audit, notification, and outbox event |
 | Accept ordinary decision | Deny | Deny | Deny unless also owner | Allow | Allow | Allow | `acceptAnswer`; human owner/owner-role/project-admin policy |
 | Accept protected approval | Deny | Deny | Policy-based | Policy-based | Policy-based | Policy-based | `reviewQuestion` plus `acceptAnswer`; separate approved security review and atomic acceptance |

@@ -131,6 +131,7 @@ function questionInput(overrides: Partial<CreateQuestionInput> = {}): CreateQues
       { key: "all", label: "Retry every failure", tradeoffs: "Can retry permanent failures." },
     ],
     recommendationKey: "transient",
+    relatedLinks: [],
     scope: { component: "transfers" },
     ...overrides,
   };
@@ -2008,6 +2009,113 @@ describe("Bridge decision workflow", () => {
       expect.objectContaining({ id: root.id, body: root.body }),
       expect.objectContaining({ id: reply.id, parentCommentId: root.id }),
     ]);
+  });
+
+  it("supports audited question edits, human mentions, clarification requests, and governed reopen", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-collaboration-history-001",
+      relatedLinks: [{ type: "work_item", label: "Retry policy work item", url: "https://tracker.example/BRG-33" }],
+    }));
+
+    const comment = await service.addQuestionComment(contributor, question.id, {
+      expectedVersion: question.version,
+      body: "Please confirm the retry budget boundary.",
+      mentionedPrincipalIds: [qaLead.id],
+    });
+    const response = await service.proposeAnswer(qaLead, question.id, {
+      answer: "Retry transient failures only.",
+      rationale: "Permanent failures should remain visible to the caller.",
+      optionKey: "transient",
+      mentionedPrincipalIds: [owner.id],
+    });
+    expect(comment.mentionedPrincipalIds).toEqual([qaLead.id]);
+    expect(response.mentionedPrincipalIds).toEqual([owner.id]);
+
+    const editedResponse = await service.editQuestionResponse(qaLead, question.id, response.id, {
+      expectedVersion: 3,
+      answer: "Retry transient failures with bounded backoff.",
+      rationale: "Classification and idempotency keep retries safe.",
+      optionKey: "transient",
+      mentionedPrincipalIds: [owner.id],
+    });
+    expect(editedResponse.revisionHistory).toEqual([
+      expect.objectContaining({
+        answer: response.answer,
+        rationale: response.rationale,
+        editedById: qaLead.id,
+      }),
+    ]);
+
+    const clearedResponse = await service.editQuestionResponse(qaLead, question.id, response.id, {
+      expectedVersion: 4,
+      answer: "Retry transient failures with bounded backoff and no fixed option.",
+      rationale: "Classification and idempotency keep retries safe without coupling to a single option.",
+      mentionedPrincipalIds: [],
+    });
+    expect(clearedResponse.optionKey).toBeUndefined();
+    expect(clearedResponse.mentionedPrincipalIds).toBeUndefined();
+    expect(clearedResponse.revisionHistory).toHaveLength(2);
+
+    const editedComment = await service.editQuestionComment(contributor, question.id, comment.id, {
+      expectedVersion: 5,
+      body: "Please confirm the retry budget and batch ceiling.",
+      mentionedPrincipalIds: [qaLead.id],
+    });
+    expect(editedComment.revisionHistory).toEqual([
+      expect.objectContaining({ body: comment.body, editedById: contributor.id }),
+    ]);
+    await expect(service.editQuestionResponse(owner, question.id, response.id, {
+      expectedVersion: 6,
+      answer: "Unauthorized edit",
+      rationale: "Only the author can edit the response.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.addQuestionComment(contributor, question.id, {
+      expectedVersion: 6,
+      body: "Invalid agent mention target.",
+      mentionedPrincipalIds: [agent.id],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    const detail = await service.getQuestion(qaLead, question.id);
+    expect(detail.relatedLinks).toEqual([
+      { type: "work_item", label: "Retry policy work item", url: "https://tracker.example/BRG-33" },
+    ]);
+    expect(detail.editableResponseIds).toContain(response.id);
+    expect(detail.editableCommentIds).toEqual([]);
+    expect((await service.listNotifications(qaLead, { projectId: project.id })).some((notification) =>
+      notification.targetId === comment.id && notification.type === "question_comment")).toBe(true);
+
+    const clarificationQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-clarification-command-001",
+      title: "Which retry policy clarification does the owner need?",
+    }));
+    await expect(service.requestQuestionClarification(contributor, clarificationQuestion.id, {
+      expectedVersion: clarificationQuestion.version,
+      reason: "Only the accountable owner can move this question into discussion.",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const clarified = await service.requestQuestionClarification(owner, clarificationQuestion.id, {
+      expectedVersion: clarificationQuestion.version,
+      reason: "The owner needs clarification before comparing the proposed options.",
+    });
+    expect(clarified).toMatchObject({ status: "in_discussion", version: 2 });
+
+    const expiredQuestion = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-reopen-command-001",
+      title: "Which retry policy should reopen after expiry?",
+    }));
+    await repository.saveQuestion({ ...expiredQuestion, status: "expired" });
+    const reopened = await service.reopenQuestion(owner, expiredQuestion.id, {
+      expectedVersion: expiredQuestion.version,
+      reason: "The original deadline passed before the owner could review the evidence.",
+    });
+    expect(reopened).toMatchObject({ status: "in_discussion", version: 2 });
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "question.clarification_requested", subjectId: clarificationQuestion.id }),
+      expect.objectContaining({ action: "question.reopened", subjectId: expiredQuestion.id }),
+      expect.objectContaining({ action: "response.edited", subjectId: response.id }),
+      expect.objectContaining({ action: "question.comment_edited", subjectId: question.id }),
+    ]));
   });
 
   it("delivers human notifications and supports scoped read state", async () => {
