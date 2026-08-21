@@ -2281,6 +2281,122 @@ describe("Bridge decision workflow", () => {
     expect(await service.markAllNotificationsRead(limitedOwner)).toEqual({ markedCount: 0 });
   });
 
+  it("fans out role-routed notifications to active human project members", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    const directoryMembers: readonly Principal[] = [architectureReviewer, {
+      id: "usr_inaccessible_role",
+      type: "human",
+      organizationId: project.organizationId,
+      projectIds: [],
+      allProjects: false,
+      roles: ["qa-lead"],
+      displayName: "Inaccessible QA Lead",
+    }, {
+      id: "agt_role_reviewer",
+      type: "agent",
+      organizationId: project.organizationId,
+      projectIds: [project.id],
+      allProjects: true,
+      roles: ["architecture-reviewer"],
+      displayName: "Agent Reviewer",
+    }];
+    for (const member of directoryMembers) {
+      await repository.savePrincipalIdentity({
+        id: member.id,
+        type: member.type,
+        displayName: member.displayName,
+        oidcIssuer: "https://identity.example/",
+        oidcSubject: `auth0|${member.id}`,
+        createdAt: timestamp,
+      });
+      await repository.saveOrganizationMembership({
+        organizationId: project.organizationId,
+        principalId: member.id,
+        status: "active",
+        roles: member.roles,
+        allProjects: member.allProjects ?? false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      });
+      if (member.projectIds.includes(project.id)) {
+        await repository.saveProjectMembership({
+          organizationId: project.organizationId,
+          projectId: project.id,
+          principalId: member.id,
+          status: "active",
+          roles: member.roles,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          version: 1,
+        });
+      }
+    }
+    await service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      roles: [
+        { name: "QA Lead", description: "Owns quality decisions." },
+        { name: "Architecture Reviewer", description: "Reviews quality decisions." },
+      ],
+      teams: [],
+      rules: [{
+        key: "quality-routing",
+        name: "Quality routing",
+        priority: 10,
+        category: "quality",
+        owners: { principalIds: [], roles: ["qa-lead"], teamKeys: [] },
+        reviewers: { principalIds: [], roles: ["architecture-reviewer"], teamKeys: [] },
+      }],
+    });
+
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-role-notification-001",
+      category: "quality",
+      intendedOwnerIds: [],
+      intendedOwnerRoles: [],
+      risk: "medium",
+      reversible: true,
+      blocking: false,
+    }));
+    expect(question).toMatchObject({
+      ownerIds: [],
+      ownerRoles: ["qa-lead"],
+      reviewerIds: [],
+      reviewerRoles: ["architecture-reviewer"],
+    });
+    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toEqual([
+      expect.objectContaining({ type: "question_assigned", targetId: question.id }),
+    ]);
+    expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id)).toEqual([
+      expect.objectContaining({ type: "question_assigned", targetId: question.id }),
+    ]);
+    expect(await repository.listNotifications(project.organizationId, "usr_inaccessible_role", project.id)).toEqual([]);
+    expect(await repository.listNotifications(project.organizationId, "agt_role_reviewer", project.id)).toEqual([]);
+
+    await service.addQuestionComment(owner, question.id, {
+      expectedVersion: question.version,
+      body: "Please confirm the quality routing evidence.",
+    });
+    expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id))
+      .map((notification) => notification.type)).toEqual(expect.arrayContaining(["question_comment", "question_assigned"]));
+    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toHaveLength(2);
+    expect((await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id))
+      .map((notification) => notification.type)).toEqual(["question_assigned"]);
+
+    await service.reassignQuestion(owner, question.id, {
+      expectedVersion: question.version + 1,
+      ownerIds: [],
+      ownerRoles: ["qa-lead"],
+      reviewerIds: [],
+      reviewerRoles: ["architecture-reviewer", "qa-lead"],
+      reason: "Add the quality owner to the review lane for this question.",
+    });
+    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toHaveLength(3);
+    expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id)).toHaveLength(2);
+  });
+
   it("lets project administrators inspect delivery metrics and safely replay dead letters", async () => {
     const { repository, service } = await runtime();
     await service.createQuestion(agent, project.id, questionInput({

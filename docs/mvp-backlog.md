@@ -891,7 +891,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, and transactional outbox linkage are implemented; role-directory fanout, preferences, external channels, and operator delivery controls remain
+- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, and role-directory fanout for active human project members are implemented; durable preferences, external channels, and operator delivery controls remain
 - **Dependencies:** BRG-031, BRG-090
 - **PRD references:** NTF-01
 
@@ -901,7 +901,7 @@ Acceptance criteria:
 
 1. Notification record is durable and linked to the target record. **Implemented for the core question, response, comment, review, decision, and artifact events.**
 2. Users can mark one or all notifications read. **Implemented with project-scoped REST commands and the web feed.**
-3. Recipient resolution respects current membership and authorization. **Direct fixed-principal recipients and read-time organization/project/recipient checks are implemented; production membership reconciliation remains.**
+3. Recipient resolution respects current membership and authorization. **Role targets resolve at notification creation from the active human organization/project directory, while direct recipients and read-time organization/project/recipient checks remain supported; live deletion/reconciliation evidence remains.**
 4. Protected/blocking events are visually distinguishable. **Protected review notifications carry a distinct event type; richer severity styling remains.**
 5. Deleted access removes the ability to open notification targets. **Read/mark-read rechecks project access; production deletion/membership lifecycle remains.**
 

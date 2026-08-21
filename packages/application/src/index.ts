@@ -725,6 +725,7 @@ interface NotificationDraft {
   readonly body: string;
   readonly targetType: Notification["targetType"];
   readonly targetId: string;
+  readonly recipientRoles?: readonly string[];
   readonly questionContext?: NotificationQuestionContext;
 }
 
@@ -3821,6 +3822,7 @@ export class BridgeService {
       body: `${principal.displayName} routed “${question.title}” to you.`,
       targetType: "question",
       targetId: question.id,
+      recipientRoles: [...question.ownerRoles, ...question.reviewerRoles],
       questionContext: {
         id: question.id,
         status: question.status,
@@ -4129,6 +4131,7 @@ export class BridgeService {
           body: `${principal.displayName} requested clarification for “${question.title}”.`,
           targetType: "question",
           targetId: question.id,
+          recipientRoles: question.ownerRoles,
           questionContext: {
             id: question.id,
             status: updated.status,
@@ -4197,6 +4200,7 @@ export class BridgeService {
           body: `${principal.displayName} reopened “${question.title}” for discussion.`,
           targetType: "question",
           targetId: question.id,
+          recipientRoles: question.ownerRoles,
           questionContext: {
             id: question.id,
             status: updated.status,
@@ -4339,6 +4343,7 @@ export class BridgeService {
         body: `${principal.displayName} reassigned “${question.title}”.`,
         targetType: "question",
         targetId: question.id,
+        recipientRoles: [...updated.ownerRoles, ...updated.reviewerRoles],
         questionContext: {
           id: question.id,
           status: question.status,
@@ -4446,6 +4451,7 @@ export class BridgeService {
       body: `${principal.displayName} marked “${question.title}” ${review.status}.`,
       targetType: "review",
       targetId: review.id,
+      recipientRoles: question.ownerRoles,
       questionContext: {
         id: question.id,
         status: question.status,
@@ -4530,6 +4536,7 @@ export class BridgeService {
         body: `${principal.displayName} added a clarification to “${question.title}”.`,
         targetType: "comment",
         targetId: comment.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: "in_discussion",
@@ -4650,6 +4657,7 @@ export class BridgeService {
       body: `${principal.displayName} proposed an answer for “${question.title}”.`,
       targetType: "response",
       targetId: response.id,
+      recipientRoles: question.ownerRoles,
       questionContext: {
         id: question.id,
         status: "in_discussion",
@@ -4767,6 +4775,7 @@ export class BridgeService {
         body: `${principal.displayName} edited a proposed answer for “${question.title}”.`,
         targetType: "response",
         targetId: response.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: question.status,
@@ -4875,6 +4884,7 @@ export class BridgeService {
         body: `${principal.displayName} edited a clarification on “${question.title}”.`,
         targetType: "comment",
         targetId: comment.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: question.status,
@@ -5029,6 +5039,7 @@ export class BridgeService {
           : `${principal.displayName} accepted the decision for “${question.title}”.`,
         targetType: "decision",
         targetId: decision.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: "accepted",
@@ -5217,6 +5228,7 @@ export class BridgeService {
         body: `The decision “${decision.answer}” was ${input.status}.`,
         targetType: "decision",
         targetId: decision.id,
+        ...(sourceQuestion ? { recipientRoles: sourceQuestion.ownerRoles } : {}),
         ...(sourceQuestion ? {
           questionContext: {
             id: sourceQuestion.id,
@@ -6707,7 +6719,13 @@ export class BridgeService {
     recipientIds: readonly string[],
     draft: NotificationDraft,
   ): Promise<void> {
-    const recipients = [...new Set(recipientIds)].filter((recipientId) => recipientId && recipientId !== principal.id);
+    const recipients = await this.resolveNotificationRecipients(
+      repository,
+      principal,
+      projectId,
+      recipientIds,
+      draft.recipientRoles ?? [],
+    );
     for (const recipientId of recipients) {
       const createdAt = this.now().toISOString();
       const notificationId = `ntf_${this.id()}`;
@@ -6743,5 +6761,35 @@ export class BridgeService {
         createdAt,
       });
     }
+  }
+
+  private async resolveNotificationRecipients(
+    repository: BridgeRepository,
+    principal: Principal,
+    projectId: string,
+    recipientIds: readonly string[],
+    recipientRoles: readonly string[],
+  ): Promise<readonly string[]> {
+    const recipients = new Set(
+      recipientIds.filter((recipientId) => recipientId && recipientId !== principal.id),
+    );
+    const roles = [...new Set(recipientRoles.map(normalizeRoleName).filter(Boolean))];
+    if (roles.length === 0) return [...recipients];
+
+    const project = await repository.getProject(projectId);
+    if (!project) return [...recipients];
+    const directory = await repository.listOrganizationPrincipals(principal.organizationId);
+    for (const candidate of directory) {
+      if (candidate.type !== "human") continue;
+      try {
+        assertProjectAccess(candidate, project);
+      } catch {
+        continue;
+      }
+      if (roles.some((role) => principalHasRole(candidate, role, projectId))) {
+        recipients.add(candidate.id);
+      }
+    }
+    return [...recipients];
   }
 }
