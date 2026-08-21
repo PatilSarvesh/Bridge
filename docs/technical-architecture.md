@@ -1067,6 +1067,10 @@ These are implementation defaults, not product SLAs, and must be tuned from pilo
 - Notification-provider failure is degraded delivery, not core API unavailability while canonical PostgreSQL state remains writable. Queue/provider telemetry belongs to BRG-104.
 - Worker and CLI are command/process surfaces rather than HTTP services; long-running worker health reporting remains deployment/observability work.
 
+### 23.5 Pilot readiness evidence boundary
+
+BRG-112 has a repository-side readiness manifest at `config/pilot-readiness.json`, a read-only `pnpm pilot:readiness` report, and an operator runbook at `docs/runbooks/pilot-readiness.md`. The report validates that all six readiness criteria have named evidence sources and distinguishes repeatable repository/CI evidence from deployment-owned evidence. Strict mode returns exit code `10` while any staging, live tenant/security, backup/restore, provider-failure, onboarding, or ownership evidence remains external. The command never opens a database connection, starts a worker, or mutates canonical state; a repository-green report is not a production or pilot approval.
+
 ## 24. Environment and deployment model
 
 ### 24.1 Environments
@@ -1200,6 +1204,8 @@ The founder-level choices are resolved in the pilot decision record. Implementat
 8. The 256 KiB PostgreSQL artifact-body threshold behaves correctly across API, MCP, diff, and approval workflows.
 9. GitHub metadata access is sufficient for links and direct impact without repository source-content access.
 10. AWS `ap-south-1` satisfies the selected design partners' latency and data-location expectations.
+
+Repository validation now adds a dependency-free baseline around this architecture: `pnpm check` runs the format, package-boundary, REST/MCP transport-surface, and high-confidence secret gates before the workspace checks, while CI runs `pnpm dependency:check` against production dependencies. `config/package-boundaries.json` makes the allowed workspace dependency direction executable, and `config/transport-contract-baseline.json` requires an intentional review update when a REST route or MCP tool is added, removed, or renamed. These gates protect the transport surface and package direction; they do not yet provide a generated OpenAPI/JSON-schema compatibility report or replace a full formatter/linter toolchain.
 
 The fresh-repository portion of gate 2 is now validated twice for the local Codex-first path. The packaged simulation proved registration, transport, and project-aware presentation. A separate ephemeral Codex CLI session then received only `Build a Hospital Management System.`, used the repository-installed CLI without MCP, linked a context snapshot, published all four required specification types, corrected a missing-question failure reported by `bridge conformance`, routed a protected production-boundary question to human roles, and entered `waiting_for_human`. This proves observable adherence for that Codex client/version/environment, not universal vendor instruction compliance or interception of an unexposed native clarification UI; Claude Code remains the second conformance client.
 

@@ -5,5 +5,8 @@ packages:
 allowBuilds:
   esbuild: true
 
+overrides:
+  nanoid: 3.3.18
+
 minimumReleaseAgeExclude:
   - tsx@4.23.11

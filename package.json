@@ -20,11 +20,19 @@
     "db:generate": "pnpm --filter @bridge/database db:generate",
     "db:migrate": "pnpm --filter @bridge/database db:migrate",
     "restore:verify": "pnpm --filter @bridge/database restore:verify",
+    "pilot:readiness": "node scripts/pilot-readiness.mjs",
+    "pilot:readiness:test": "node --test scripts/pilot-readiness.test.mjs",
     "cli:smoke": "node scripts/smoke-cli-package.mjs",
     "distribution:check": "pnpm cli:pack && pnpm cli:smoke",
+    "format:check": "node scripts/repository-gates.mjs format",
+    "lint": "node scripts/repository-gates.mjs architecture",
+    "contracts:check": "node scripts/repository-gates.mjs contracts",
+    "security:check": "node scripts/repository-gates.mjs secrets",
+    "dependency:check": "pnpm audit --prod --audit-level=high",
+    "gates:test": "node --test scripts/repository-gates.test.mjs",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm distribution:check"
+    "check": "pnpm pilot:readiness:test && pnpm gates:test && pnpm format:check && pnpm lint && pnpm contracts:check && pnpm security:check && pnpm typecheck && pnpm test && pnpm build && pnpm distribution:check"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

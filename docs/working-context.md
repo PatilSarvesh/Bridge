@@ -4,11 +4,11 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-20, Asia/Kolkata |
+| Last updated | 2026-08-21, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted audit browsing/export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
-| Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, and secret-safe Slack delivery receipts are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
+| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted audit browsing/export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations, enterprise provisioning, richer connector diagnostics, provider-backed repository validation/synchronization, live Slack workspace/deployment validation, and other live integrations remain pending |
+| Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
 
@@ -804,11 +804,13 @@ pnpm check
 Current validation result after interactive CLI authentication:
 
 - Type-check: passed across all twelve workspace packages.
-- Tests: 180 tests passed across the application, API, CLI, MCP, worker, auth, database, domain, observability, and test-support packages; the three-test opt-in live PostgreSQL integration file was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
+- Tests: 180 workspace tests passed across the application, API, CLI, MCP, worker, auth, database, domain, observability, and test-support packages, plus 3 BRG-112 readiness-manifest tests; the three-test opt-in live PostgreSQL integration file was skipped because `BRIDGE_TEST_DATABASE_URL` is absent.
 - Durable authentication coverage: trusted human web callbacks and cookie-backed logout append organization audit events, while non-human web principals are rejected before a browser session is established.
 - Authorization coverage: coarse scope compatibility and mapped least-privilege REST resource-family/MCP tool-family scopes pass, including service-identity CLI parsing and protected metadata catalog generation.
+- Repository gate tests: 5 passed; format, package-boundary, REST/MCP transport-surface, and high-confidence secret gates passed. CI additionally runs `pnpm dependency:check` against production dependencies.
 - Production builds: passed across all twelve workspace build tasks.
 - Next.js production build and static prerender: passed.
+- BRG-112 readiness manifest validation: passed; strict pilot readiness remains externally gated by design.
 - PostgreSQL schema, repository adapter, and domain mappers compile.
 - Migration structure tests verify the reviewed deferred, tenant-consistency, single-approved-version, run-lifecycle, assumption-policy/lifecycle/scope, decision-lifecycle/replacement-scope/version, artifact-review-array, legacy/correlation backfills, audit-subject (including outbox replay), role-owner, question-review/comment arrays, notification tenancy/types, outbox state/attempts, correlation format/indexes, and email-delivery scope/result/hash constraints.
 - In-memory failure-injection tests verify rollback for run-linked assumption/question creation, decision acceptance, specification publication, and specification approval.
@@ -958,6 +960,8 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Claude Code and later-client independent conformance runs; Codex-first observable conformance now passes.
 - A vendor hook or other enforceable signal for private/native clarification prompts; the current guard can verify Bridge outcomes but cannot observe UI that a vendor does not expose.
 - Automated browser regression tests; the current Hospital acceptance view was verified interactively in the in-app browser.
+- A full formatter/linter toolchain, generated request/response schema compatibility report, and deeper dependency-policy enforcement remain follow-up work; the current gates intentionally provide deterministic repository hygiene, package direction, transport-surface, secret, and production-audit checks without claiming those broader controls.
+- External BRG-112 pilot readiness evidence: staging execution, live tenant/security validation, isolated restore, provider failure-window, onboarding acknowledgement, and named owner/feedback records remain deployment/private-operations work.
 
 ## 18. Git and workspace state
 
@@ -2046,7 +2050,7 @@ Deliberate boundaries:
 - The seven-day window is an operator signal, not a new assumption lifecycle state or a replacement for the scheduled worker expiry cycle.
 - Support rows are bounded metadata and do not grant mutation authority. REST remains canonical, MCP remains optional, and human approval boundaries are unchanged.
 
-### 20.63 Implemented durable human web authentication audit events
+### 20.62 Implemented durable human web authentication audit events
 
 Implemented and locally verified:
 
@@ -2060,7 +2064,7 @@ Deliberate boundaries:
 - Failed, malformed, expired, or otherwise unknown authentication attempts are not durably attributed because no trusted tenant/principal context exists; they remain correlation-aware safe logs.
 - This covers trusted human web sign-in/logout only. CLI token lifecycle, bearer authentication failures, provider-side audit feeds, production retention, and live tenant/deployment evidence remain follow-up work. REST remains canonical, MCP remains optional, and no database command was run against a production target.
 
-### 20.64 Implemented mapped least-privilege REST/MCP capability scopes
+### 20.63 Implemented mapped least-privilege REST/MCP capability scopes
 
 Implemented and locally verified:
 
@@ -2074,12 +2078,43 @@ Deliberate boundaries:
 
 - Existing application authorization remains authoritative: a non-human principal with an admin-labeled scope still cannot execute current human-only organization/project administration or approval commands.
 - Bridge does not issue or dynamically register OAuth scopes. The external authorization server, provider-specific scope configuration, rate limits, and live identity-provider conformance remain deployment work. REST remains canonical and MCP remains optional.
+### 20.64 Added executable repository quality gates
+
+Implemented and locally verified:
+
+1. `pnpm check` now runs five repository gate tests plus deterministic format hygiene, package-boundary, REST/MCP transport-surface, and high-confidence secret checks before typecheck, tests, builds, and distribution smoke validation.
+2. `config/package-boundaries.json` inventories every workspace package, requires build/test/typecheck scripts, and rejects workspace dependencies that violate the `transport/UI -> application -> domain` direction or infrastructure boundary.
+3. `config/transport-contract-baseline.json` records the reviewed REST method/path and MCP tool surface. The gate rejects accidental route/tool removal or rename and requires non-exempt REST writes to parse through a shared contract; bodyless notification acknowledgement is explicitly listed as the only current exception.
+4. `pnpm dependency:check` runs `pnpm audit --prod --audit-level=high`; GitHub Actions executes it after the isolated PostgreSQL-backed check. The audit found `nanoid@3.3.17` below the patched `3.3.18` release, so the workspace override and lockfile now pin `nanoid@3.3.18`. The local `pnpm check` remains reproducible without a live registry by keeping this network-dependent audit as a separate CI command.
+5. The secret gate scans project text for high-confidence credential formats while ignoring bounded placeholders used by local adapter fixtures. It complements, but does not replace, the application content detector or a managed secret/DLP system.
+
+Deliberate boundaries:
+
+- The format gate enforces editorconfig-compatible line endings, final newlines, and non-Markdown trailing-whitespace hygiene. Generated Drizzle migration artifacts are excluded because their exact generated content and metadata pairing are governed separately.
+- The transport baseline protects the observable route/tool surface; it is not a generated OpenAPI or JSON-schema diff and does not claim complete response compatibility.
+- Dependency auditing is CI-enabled and thresholded at high severity; provider advisories, license policy, lockfile provenance, and full formatter/linter integration remain future hardening work.
+
+### 20.65 Added controlled pilot readiness evidence pack
+
+Implemented and locally verified:
+
+1. `config/pilot-readiness.json` maps all six BRG-112 acceptance criteria to bounded repository evidence, named evidence owners, and an explicit external-evidence flag without storing deployment identifiers, credentials, customer data, or incident content.
+2. `pnpm pilot:readiness` validates the manifest and emits a stable human or JSON report. `pnpm pilot:readiness -- --strict` returns exit code `10` while external staging, security, recovery, provider, onboarding, or ownership evidence is missing.
+3. `docs/runbooks/pilot-readiness.md` provides the ordered review, evidence-record template, pilot onboarding briefing, go/no-go boundary, rollback rules, and ownership/response expectations. It keeps REST canonical, MCP optional, and human approval authority unchanged.
+4. The readiness manifest regression runs as part of `pnpm check`; it is read-only and never connects to PostgreSQL or starts a worker. No schema, migration, or production database command was added.
+
+Deliberate boundaries:
+
+- Repository and CI evidence is necessary but does not establish pilot or production readiness. Strict mode intentionally remains pending until the deployment owner records external evidence in the approved private operations system.
+- The readiness command is an evidence index, not a deployment orchestrator or approval command. It cannot mark a pilot ready by itself, and it never bypasses human authority, tenant checks, or the separate maintenance database boundary.
 
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
 - Contributor/agent rules: `AGENTS.md`, `CLAUDE.md`, and `CONTRIBUTING.md`
 - CI workflow: `.github/workflows/ci.yml`
+- Workspace dependency policy and security override: `pnpm-workspace.yaml`
+- Repository quality gates: `scripts/repository-gates.mjs`, `scripts/repository-gates.test.mjs`, `config/package-boundaries.json`, and `config/transport-contract-baseline.json`
 - Founder/pilot decisions: `docs/pilot-decisions.md`
 - Technical architecture: `docs/technical-architecture.md`
 - Authorization evidence matrix: `docs/authorization-matrix.md`
@@ -2149,6 +2184,7 @@ Deliberate boundaries:
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
 - Observability behavior and boundaries: `docs/observability.md`
 - Product analytics definitions and privacy boundary: `docs/product-analytics.md`
+- Pilot readiness manifest and runbook: `config/pilot-readiness.json`, `scripts/pilot-readiness.mjs`, `docs/runbooks/pilot-readiness.md`
 - Pilot service objectives: `docs/service-objectives.md`
 - Portable dashboard and alert definitions: `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`
 - Read-only restore verifier: `packages/database/src/verify-restore.ts`
@@ -2185,4 +2221,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, completed human assumption confirmation and scheduled expiry notification, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, completed human assumption confirmation and scheduled expiry notification, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, enterprise provisioning, provider-backed repository validation/synchronization, live provider/deployment validation, cross-vendor conformance, and recovery evidence remain pending.
