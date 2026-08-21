@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "reviewId": "BRG-112",
+  "lastReviewed": "2026-08-20",
+  "decision": "not_ready_for_external_pilot_evidence",
+  "boundary": "This manifest records repository evidence and names deployment-owner evidence that must be attached outside the repository.",
+  "checks": [
+    {
+      "id": "brg-112-1-mvp-criteria",
+      "criterion": 1,
+      "title": "PRD MVP acceptance criteria are mapped to evidence",
+      "status": "repository_verified",
+      "externalEvidenceRequired": false,
+      "owner": "Bridge maintainers",
+      "evidence": [
+        { "kind": "command", "value": "CI=true pnpm check" },
+        { "kind": "document", "value": "docs/mvp-backlog.md#23-prd-acceptance-criteria-traceability" },
+        { "kind": "document", "value": "docs/authorization-matrix.md#automated-evidence" },
+        { "kind": "document", "value": "README.md#fresh-project-acceptance-test" }
+      ],
+      "notes": "The local and CI evidence is repeatable; this is not a claim that a hosted pilot has passed."
+    },
+    {
+      "id": "brg-112-2-staging-agent-loop",
+      "criterion": 2,
+      "title": "End-to-end agent question, human decision, and context reuse pass in staging",
+      "status": "external_required",
+      "externalEvidenceRequired": true,
+      "owner": "Deployment operator",
+      "evidence": [
+        { "kind": "repository", "value": "README.md#fresh-project-acceptance-test" },
+        { "kind": "repository", "value": "docs/technical-architecture.md#28-technical-validation-gates" },
+        { "kind": "command", "value": "bridge conformance --task <task> --run-id <run-id>" }
+      ],
+      "notes": "Run against the isolated staging deployment and attach the private result, source revision, and environment identifier."
+    },
+    {
+      "id": "brg-112-3-security-tenant-report",
+      "criterion": 3,
+      "title": "Security and tenant-isolation evidence is reviewed",
+      "status": "repository_verified",
+      "externalEvidenceRequired": true,
+      "owner": "Security reviewer",
+      "evidence": [
+        { "kind": "document", "value": "docs/authorization-matrix.md#automated-evidence" },
+        { "kind": "command", "value": "CI=true pnpm check" },
+        { "kind": "command", "value": "BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test" },
+        { "kind": "document", "value": "docs/database-security.md" }
+      ],
+      "notes": "Repository and CI coverage is present; live RLS, identity-provider, and deployment-role evidence remains an external gate."
+    },
+    {
+      "id": "brg-112-4-recovery-notification-exercises",
+      "criterion": 4,
+      "title": "Backup/restore and notification-failure scenarios are exercised",
+      "status": "repository_verified",
+      "externalEvidenceRequired": true,
+      "owner": "Service owner",
+      "evidence": [
+        { "kind": "document", "value": "docs/runbooks/backup-restore.md" },
+        { "kind": "document", "value": "docs/runbooks/incidents.md#notification-provider-outage" },
+        { "kind": "command", "value": "BRIDGE_RESTORE_DATABASE_URL=<isolated-url> pnpm restore:verify" },
+        { "kind": "command", "value": "CI=true pnpm check" }
+      ],
+      "notes": "Injected worker failure and retry tests are repository evidence; a dated isolated restore and provider failure-window exercise are still required."
+    },
+    {
+      "id": "brg-112-5-onboarding-boundary",
+      "criterion": 5,
+      "title": "Pilot onboarding and explicit continuation limitations are ready",
+      "status": "documented_followup",
+      "externalEvidenceRequired": true,
+      "owner": "Product authority owner",
+      "evidence": [
+        { "kind": "document", "value": "README.md#how-agents-use-bridge" },
+        { "kind": "document", "value": "docs/runbooks/pilot-readiness.md#pilot-onboarding" },
+        { "kind": "document", "value": "docs/working-context.md#17-current-limitations" }
+      ],
+      "notes": "The repository documents CLI/MCP-optional onboarding and manual continuation; pilot-specific briefing and acknowledgement belong in the private operations record."
+    },
+    {
+      "id": "brg-112-6-owners-response",
+      "criterion": 6,
+      "title": "Pilot owners and incident/user-feedback response process are assigned",
+      "status": "documented_followup",
+      "externalEvidenceRequired": true,
+      "owner": "Pilot sponsor",
+      "evidence": [
+        { "kind": "document", "value": "docs/runbooks/pilot-readiness.md#ownership-and-response" },
+        { "kind": "document", "value": "docs/runbooks/incidents.md#initial-triage" },
+        { "kind": "document", "value": "docs/service-objectives.md#review-and-ownership" }
+      ],
+      "notes": "The repository provides the response contract and escalation procedure; named people, channels, and acknowledgement dates must be recorded privately."
+    }
+  ]
+}

@@ -1086,7 +1086,7 @@ Implementation note: the support read model returns bounded operator metadata on
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Ready
+- **Status:** Partial — the repository-side readiness manifest, bounded report, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
 - **Dependencies:** All P0 pilot stories
 - **PRD references:** MVP acceptance criteria, pilot plan
 
@@ -1100,6 +1100,8 @@ Acceptance criteria:
 4. Backup restore and notification failure scenarios are exercised.
 5. Pilot users receive onboarding and explicit auto-resume limitations.
 6. Owners and response process exist for incidents and user feedback.
+
+Implementation note: `pnpm pilot:readiness` validates and reports the six-criterion `config/pilot-readiness.json` manifest without network or database access. `--strict` returns exit code `10` until deployment owners attach private evidence for staging, live tenant/security checks, recovery/provider exercises, onboarding acknowledgement, and named response ownership. The repository deliberately does not mark those external controls complete or store their sensitive evidence.
 
 ## 20. E12 — Post-MVP intelligence and integrations
 
