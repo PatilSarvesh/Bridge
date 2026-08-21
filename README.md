@@ -23,6 +23,8 @@ pnpm check
 pnpm dev
 ```
 
+For the repository-side controlled pilot readiness review, run `pnpm pilot:readiness` for a bounded report or `pnpm pilot:readiness -- --strict` as a deployment gate after the private staging, security, recovery, provider, and ownership evidence has been attached. The command is read-only and does not connect to PostgreSQL; strict mode returns exit code `10` while external evidence is missing. See [`docs/runbooks/pilot-readiness.md`](docs/runbooks/pilot-readiness.md).
+
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below plus the worker's explicit maintenance connection.
 
 The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, the CLI can use public-client Authorization Code + PKCE with operating-system credential storage, and standalone MCP can validate bearer tokens against a dedicated OIDC audience. Full MCP authorization-server provisioning and enterprise identity remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).

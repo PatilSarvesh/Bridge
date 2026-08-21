@@ -1049,6 +1049,10 @@ These are implementation defaults, not product SLAs, and must be tuned from pilo
 - Notification-provider failure is degraded delivery, not core API unavailability while canonical PostgreSQL state remains writable. Queue/provider telemetry belongs to BRG-104.
 - Worker and CLI are command/process surfaces rather than HTTP services; long-running worker health reporting remains deployment/observability work.
 
+### 23.5 Pilot readiness evidence boundary
+
+BRG-112 has a repository-side readiness manifest at `config/pilot-readiness.json`, a read-only `pnpm pilot:readiness` report, and an operator runbook at `docs/runbooks/pilot-readiness.md`. The report validates that all six readiness criteria have named evidence sources and distinguishes repeatable repository/CI evidence from deployment-owned evidence. Strict mode returns exit code `10` while any staging, live tenant/security, backup/restore, provider-failure, onboarding, or ownership evidence remains external. The command never opens a database connection, starts a worker, or mutates canonical state; a repository-green report is not a production or pilot approval.
+
 ## 24. Environment and deployment model
 
 ### 24.1 Environments
