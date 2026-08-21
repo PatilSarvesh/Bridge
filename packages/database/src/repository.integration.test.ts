@@ -61,6 +61,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         "bridge_decisions",
         "bridge_idempotency_records",
         "bridge_notifications",
+        "bridge_notification_preferences",
         "bridge_organization_audit_events",
         "bridge_organization_memberships",
         "bridge_outbox_deliveries",

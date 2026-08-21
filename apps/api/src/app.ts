@@ -23,6 +23,7 @@ import {
   questionClarificationInputSchema,
   questionCommentInputSchema,
   notificationListQuerySchema,
+  notificationPreferenceInputSchema,
   notificationReadAllInputSchema,
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
@@ -389,6 +390,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
       const items = await options.service.listNotifications(principal, query);
       return { items, unreadCount: items.filter((notification) => !notification.readAt).length };
+    },
+  );
+
+  app.get("/v1/notifications/preferences", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const items = await options.service.listNotificationPreferences(principal);
+    return { items };
+  });
+
+  app.post<{ Body: unknown }>(
+    "/v1/notifications/preferences",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = notificationPreferenceInputSchema.parse(request.body ?? {});
+      return options.service.setNotificationPreference(principal, input);
     },
   );
 

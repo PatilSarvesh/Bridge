@@ -1,5 +1,6 @@
 import type {
   Notification,
+  NotificationPreference,
   NotificationQuestionContext,
   OutboxDelivery,
   OutboxEvent,
@@ -137,14 +138,29 @@ function notificationEvent(id: string, item: Notification): OutboxEvent {
 
 class TestNotificationEmailStore implements NotificationEmailStore {
   readonly notifications = new Map<string, Notification>();
+  readonly preferences = new Map<string, NotificationPreference>();
   readonly deliveries = new Map<string, OutboxDelivery>();
 
-  constructor(items: readonly Notification[]) {
+  constructor(
+    items: readonly Notification[],
+    preferences: readonly NotificationPreference[] = [],
+  ) {
     for (const item of items) this.notifications.set(item.id, item);
+    for (const preference of preferences) {
+      this.preferences.set(`${preference.organizationId}:${preference.principalId}:${preference.channel}`, preference);
+    }
   }
 
   async getNotification(notificationId: string): Promise<Notification | undefined> {
     return this.notifications.get(notificationId);
+  }
+
+  async getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: "email",
+  ): Promise<NotificationPreference | undefined> {
+    return this.preferences.get(`${organizationId}:${principalId}:${channel}`);
   }
 
   async getOutboxDelivery(eventId: string, channel: "email"): Promise<OutboxDelivery | undefined> {
@@ -350,19 +366,36 @@ describe("notification email delivery", () => {
     const muted = { ...notification("email_muted"), recipientId: "usr_muted" };
     const digest = { ...notification("email_digest", "question_comment"), recipientId: "usr_digest" };
     const protectedReview = { ...notification("email_protected", "question_review"), recipientId: "usr_protected" };
-    const store = new TestNotificationEmailStore([muted, digest, protectedReview]);
-    const requests: EmailSendRequest[] = [];
-    const preferences = new Map([
-      [muted.recipientId, "muted" as const],
-      [digest.recipientId, "digest" as const],
-      [protectedReview.recipientId, "muted" as const],
+    const store = new TestNotificationEmailStore([muted, digest, protectedReview], [
+      {
+        organizationId: muted.organizationId,
+        principalId: muted.recipientId,
+        channel: "email",
+        preference: "muted",
+        updatedAt: "2026-08-08T00:00:00.000Z",
+      },
+      {
+        organizationId: digest.organizationId,
+        principalId: digest.recipientId,
+        channel: "email",
+        preference: "digest",
+        updatedAt: "2026-08-08T00:00:00.000Z",
+      },
+      {
+        organizationId: protectedReview.organizationId,
+        principalId: protectedReview.recipientId,
+        channel: "email",
+        preference: "muted",
+        updatedAt: "2026-08-08T00:00:00.000Z",
+      },
     ]);
+    const requests: EmailSendRequest[] = [];
     const handler = createNotificationEmailHandler({
       store,
       directory: {
         resolveEmailRecipient: async (recipientId) => ({
           address: `${recipientId}@example.test`,
-          preference: preferences.get(recipientId) ?? "immediate",
+          preference: "immediate",
         }),
       },
       sender: {

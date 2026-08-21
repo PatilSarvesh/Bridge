@@ -805,6 +805,38 @@ export const notifications = pgTable(
   ],
 ).enableRLS();
 
+export const notificationPreferences = pgTable(
+  "bridge_notification_preferences",
+  {
+    organizationId: text("organization_id").notNull(),
+    principalId: text("principal_id").notNull(),
+    channel: text("channel").notNull(),
+    preference: text("preference").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.principalId, table.channel] }),
+    index("bridge_notification_preferences_principal_idx").on(
+      table.organizationId,
+      table.principalId,
+    ),
+    foreignKey({
+      name: "bridge_notification_preferences_membership_fk",
+      columns: [table.organizationId, table.principalId],
+      foreignColumns: [organizationMemberships.organizationId, organizationMemberships.principalId],
+    }).onDelete("cascade"),
+    check(
+      "bridge_notification_preferences_channel_check",
+      sql`${table.channel} IN ('email')`,
+    ),
+    check(
+      "bridge_notification_preferences_preference_check",
+      sql`${table.preference} IN ('immediate', 'digest', 'muted')`,
+    ),
+    tenantPolicy("bridge_notification_preferences_tenant", table.organizationId),
+  ],
+).enableRLS();
+
 export const outboxEvents = pgTable(
   "bridge_outbox_events",
   {

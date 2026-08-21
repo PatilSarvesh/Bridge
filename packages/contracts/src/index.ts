@@ -624,6 +624,11 @@ export const notificationReadAllInputSchema = z.object({
   projectId: z.string().trim().min(1).max(100).optional(),
 });
 
+export const notificationPreferenceInputSchema = z.object({
+  channel: z.literal("email"),
+  preference: notificationDeliveryPreferenceSchema,
+});
+
 export const outboxOperationsQuerySchema = z.object({
   status: outboxEventStatusSchema.optional(),
   type: outboxEventTypeSchema.optional(),
@@ -909,6 +914,7 @@ export type EditQuestionCommentInput = z.infer<typeof editQuestionCommentInputSc
 export type QuestionClarificationInput = z.infer<typeof questionClarificationInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
+export type NotificationPreferenceInput = z.infer<typeof notificationPreferenceInputSchema>;
 export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
 export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
 export type AuditListQuery = z.infer<typeof auditListQuerySchema>;

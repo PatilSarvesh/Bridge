@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   Notification,
   NotificationDeliveryPreference,
+  NotificationPreference,
   OutboxDelivery,
   OutboxEvent,
 } from "@bridge/domain";
@@ -49,6 +50,11 @@ export interface EmailSender {
 
 export interface NotificationEmailStore {
   getNotification(notificationId: string): Promise<Notification | undefined>;
+  getNotificationPreference?(
+    organizationId: string,
+    principalId: string,
+    channel: "email",
+  ): Promise<NotificationPreference | undefined>;
   getOutboxDelivery(eventId: string, channel: "email"): Promise<OutboxDelivery | undefined>;
   saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
 }
@@ -192,6 +198,12 @@ export function createNotificationEmailHandler(
       }
       const recipient = await options.directory.resolveEmailRecipient(notification.recipientId);
       if (!recipient) throw new Error("No email destination is configured for this recipient.");
+      const storedPreference = await options.store.getNotificationPreference?.(
+        event.organizationId,
+        notification.recipientId,
+        "email",
+      );
+      const preference = storedPreference?.preference ?? recipient.preference;
       const address = normalizeAddress(recipient.address);
       const hashedDestination = destinationHash(event.organizationId, address);
       if (existing && existing.destinationHash !== hashedDestination) {
@@ -207,12 +219,12 @@ export function createNotificationEmailHandler(
         channel: "email" as const,
         destinationHash: hashedDestination,
         attemptCount: event.attempts,
-        preference: recipient.preference,
+        preference,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
-      if (!mandatory(notification) && recipient.preference !== "immediate") {
-        outcome = recipient.preference === "muted" ? "suppressed" : "deferred";
+      if (!mandatory(notification) && preference !== "immediate") {
+        outcome = preference === "muted" ? "suppressed" : "deferred";
         await options.store.saveOutboxDelivery({ ...baseDelivery, status: outcome });
         return;
       }

@@ -350,6 +350,14 @@ interface Notification {
   readonly readAt?: string;
 }
 
+type NotificationDeliveryPreference = "immediate" | "digest" | "muted";
+
+interface NotificationPreference {
+  readonly channel: "email";
+  readonly preference: NotificationDeliveryPreference;
+  readonly updatedAt: string;
+}
+
 interface Decision {
   readonly id: string;
   readonly questionId?: string;
@@ -717,6 +725,7 @@ export default function Home() {
   const [decisionSearchDraft, setDecisionSearchDraft] = useState("");
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
+  const [notificationPreference, setNotificationPreference] = useState<NotificationDeliveryPreference>("immediate");
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [assumptionStatusFilter, setAssumptionStatusFilter] = useState<Assumption["status"] | "all">("all");
@@ -798,6 +807,8 @@ export default function Home() {
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationPreferenceLoading, setNotificationPreferenceLoading] = useState(false);
+  const [notificationPreferenceSaving, setNotificationPreferenceSaving] = useState(false);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
@@ -1273,6 +1284,45 @@ export default function Home() {
     }
   }, [activePrincipalId, selectedProjectId]);
 
+  const loadNotificationPreference = useCallback(async () => {
+    setNotificationPreferenceLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly NotificationPreference[] }>(
+        "/v1/notifications/preferences",
+        undefined,
+        activePrincipalId,
+      );
+      setNotificationPreference(
+        response.items.find((item) => item.channel === "email")?.preference ?? "immediate",
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load notification preferences.");
+    } finally {
+      setNotificationPreferenceLoading(false);
+    }
+  }, [activePrincipalId]);
+
+  const saveNotificationPreference = useCallback(async (preference: NotificationDeliveryPreference) => {
+    setNotificationPreferenceSaving(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<NotificationPreference>(
+        "/v1/notifications/preferences",
+        {
+          method: "POST",
+          body: JSON.stringify({ channel: "email", preference }),
+        },
+        activePrincipalId,
+      );
+      setNotificationPreference(saved.preference);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save notification preferences.");
+    } finally {
+      setNotificationPreferenceSaving(false);
+    }
+  }, [activePrincipalId]);
+
   const loadReferenceData = useCallback(async () => {
     if (!selectedProjectId) {
       setDecisions([]);
@@ -1648,6 +1698,10 @@ export default function Home() {
     void loadNotifications();
     void loadReferenceData();
   }, [authenticationReady, loadArtifacts, loadNotifications, loadQuestions, loadReferenceData, signedIn]);
+
+  useEffect(() => {
+    if (authenticationReady && signedIn && view === "notifications") void loadNotificationPreference();
+  }, [authenticationReady, loadNotificationPreference, signedIn, view]);
 
   useEffect(() => {
     if (authenticationReady && signedIn && view === "analytics") void loadAnalytics();
@@ -3048,6 +3102,24 @@ export default function Home() {
                   disabled={notificationsLoading || pendingNotifications === 0}
                   onClick={() => void markAllNotificationsRead()}
                 >Mark all read</button>
+              </div>
+              <div className="notification-preference-panel" aria-label="Notification preferences">
+                <div>
+                  <strong>Email delivery</strong>
+                  <p>Protected review email remains immediate.</p>
+                </div>
+                <label>
+                  <span>Default preference</span>
+                  <select
+                    value={notificationPreference}
+                    disabled={notificationPreferenceLoading || notificationPreferenceSaving}
+                    onChange={(event) => void saveNotificationPreference(event.target.value as NotificationDeliveryPreference)}
+                  >
+                    <option value="immediate">Immediate</option>
+                    <option value="digest">Digest</option>
+                    <option value="muted">Muted</option>
+                  </select>
+                </label>
               </div>
               {notificationsLoading ? <div className="empty">Loading notifications…</div> : null}
               {!notificationsLoading && notifications.length === 0 ? (

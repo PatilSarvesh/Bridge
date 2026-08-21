@@ -33,6 +33,7 @@ import type {
   RevokeServiceIdentityInput,
   RotateServiceIdentityInput,
   NotificationListQuery,
+  NotificationPreferenceInput,
   NotificationReadAllInput,
   OutboxOperationsQuery,
   ProjectAnalyticsQuery,
@@ -89,6 +90,7 @@ import {
   type QuestionResponseRevision,
   type QuestionLink,
   type Notification,
+  type NotificationPreference,
   type NotificationQuestionContext,
   type Organization,
   type OrganizationAuditEvent,
@@ -234,6 +236,16 @@ export interface BridgeRepository {
     unreadOnly?: boolean,
   ): Promise<readonly Notification[]>;
   saveNotification(notification: Notification): Promise<void>;
+  getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined>;
+  listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]>;
+  saveNotificationPreference(preference: NotificationPreference): Promise<void>;
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
@@ -961,6 +973,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly auditEvents = new Map<string, AuditEvent>();
   private readonly organizationAuditEvents = new Map<string, OrganizationAuditEvent>();
   private readonly notifications = new Map<string, Notification>();
+  private readonly notificationPreferences = new Map<string, NotificationPreference>();
   private readonly outboxEvents = new Map<string, OutboxEvent>();
   private readonly outboxDeliveries = new Map<string, OutboxDelivery>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
@@ -1012,6 +1025,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       auditEvents: new Map(this.auditEvents),
       organizationAuditEvents: new Map(this.organizationAuditEvents),
       notifications: new Map(this.notifications),
+      notificationPreferences: new Map(this.notificationPreferences),
       outboxEvents: new Map(this.outboxEvents),
       outboxDeliveries: new Map(this.outboxDeliveries),
       idempotency: new Map(this.idempotency),
@@ -1044,6 +1058,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.auditEvents, snapshot.auditEvents);
       this.restoreMap(this.organizationAuditEvents, snapshot.organizationAuditEvents);
       this.restoreMap(this.notifications, snapshot.notifications);
+      this.restoreMap(this.notificationPreferences, snapshot.notificationPreferences);
       this.restoreMap(this.outboxEvents, snapshot.outboxEvents);
       this.restoreMap(this.outboxDeliveries, snapshot.outboxDeliveries);
       this.restoreMap(this.idempotency, snapshot.idempotency);
@@ -1569,6 +1584,31 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveNotification(notification: Notification): Promise<void> {
     this.notifications.set(notification.id, notification);
+  }
+
+  async getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined> {
+    return this.notificationPreferences.get(`${organizationId}:${principalId}:${channel}`);
+  }
+
+  async listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]> {
+    return [...this.notificationPreferences.values()]
+      .filter((preference) =>
+        preference.organizationId === organizationId && preference.principalId === principalId)
+      .sort((left, right) => left.channel.localeCompare(right.channel));
+  }
+
+  async saveNotificationPreference(preference: NotificationPreference): Promise<void> {
+    this.notificationPreferences.set(
+      `${preference.organizationId}:${preference.principalId}:${preference.channel}`,
+      preference,
+    );
   }
 
   async listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]> {
@@ -2540,6 +2580,36 @@ export class BridgeService {
           .map((project) => project.id),
       );
       return notifications.filter((notification) => accessibleProjectIds.has(notification.projectId));
+    });
+  }
+
+  async listNotificationPreferences(
+    principal: Principal,
+  ): Promise<readonly NotificationPreference[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Reading notification preferences");
+      return repository.listNotificationPreferences(principal.organizationId, principal.id);
+    });
+  }
+
+  async setNotificationPreference(
+    principal: Principal,
+    input: NotificationPreferenceInput,
+  ): Promise<NotificationPreference> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Updating notification preferences");
+      if (input.channel !== "email") {
+        throw new BridgeError("VALIDATION_FAILED", "Only email notification preferences are supported.", 422);
+      }
+      const preference: NotificationPreference = {
+        organizationId: principal.organizationId,
+        principalId: principal.id,
+        channel: input.channel,
+        preference: input.preference,
+        updatedAt: this.now().toISOString(),
+      };
+      await repository.saveNotificationPreference(preference);
+      return preference;
     });
   }
 

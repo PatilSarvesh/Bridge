@@ -9,6 +9,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  NotificationPreference,
   Organization,
   OrganizationAuditEvent,
   OrganizationMembership,
@@ -44,6 +45,8 @@ import {
   repositoryRecordFromRow,
   repositoryRecordToRow,
   notificationFromRow,
+  notificationPreferenceFromRow,
+  notificationPreferenceToRow,
   notificationToRow,
   organizationFromRow,
   organizationAuditEventFromRow,
@@ -83,6 +86,7 @@ import {
   type QuestionResponseRow,
   type QuestionRow,
   type NotificationRow,
+  type NotificationPreferenceRow,
   type OutboxEventRow,
   type OutboxDeliveryRow,
   type OrganizationMembershipRow,
@@ -357,6 +361,14 @@ const notification: Notification = {
   createdAt: "2026-08-07T10:02:10.000Z",
 };
 
+const notificationPreference: NotificationPreference = {
+  organizationId: project.organizationId,
+  principalId: "usr_owner",
+  channel: "email",
+  preference: "digest",
+  updatedAt: "2026-08-07T10:02:14.000Z",
+};
+
 const outboxEvent: OutboxEvent = {
   id: "evt_mapping",
   correlationId: "cor_mapping",
@@ -606,6 +618,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(artifactFromRows(artifactRow, versionRows)).toEqual(artifact);
 
     expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
+    expect(notificationPreferenceFromRow(
+      notificationPreferenceToRow(notificationPreference) as NotificationPreferenceRow,
+    )).toEqual(notificationPreference);
     expect(outboxEventFromRow(outboxEventToRow(outboxEvent) as OutboxEventRow)).toEqual(outboxEvent);
     expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow))
       .toEqual(outboxDelivery);
@@ -680,6 +695,14 @@ describe("PostgreSQL domain mappings", () => {
     expect(notificationMigration).toContain("CREATE TABLE \"bridge_notifications\"");
     expect(notificationMigration).toContain("bridge_notifications_recipient_created_idx");
     expect(notificationMigration).toContain("bridge_notifications_organization_project_fk");
+
+    const notificationPreferenceMigration = readFileSync(
+      new URL("../drizzle/0037_aberrant_ezekiel.sql", import.meta.url),
+      "utf8",
+    );
+    expect(notificationPreferenceMigration).toContain("CREATE TABLE \"bridge_notification_preferences\"");
+    expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_membership_fk");
+    expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_tenant");
 
     const outboxMigration = readFileSync(
       new URL("../drizzle/0008_transactional_outbox.sql", import.meta.url),

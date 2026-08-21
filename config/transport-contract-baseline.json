@@ -12,6 +12,8 @@
     "GET /v1/auth/logout",
     "GET /v1/auth/me",
     "GET /v1/notifications",
+    "GET /v1/notifications/preferences",
+    "POST /v1/notifications/preferences",
     "POST /v1/notifications/:notificationId/read",
     "POST /v1/notifications/read-all",
     "GET /v1/admin/projects/:projectId/outbox",

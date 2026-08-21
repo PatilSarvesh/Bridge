@@ -2281,6 +2281,37 @@ describe("Bridge decision workflow", () => {
     expect(await service.markAllNotificationsRead(limitedOwner)).toEqual({ markedCount: 0 });
   });
 
+  it("lets humans persist email notification preferences while agents remain read-only", async () => {
+    const { repository, service } = await runtime();
+
+    await expect(service.listNotificationPreferences(agent)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.setNotificationPreference(agent, {
+      channel: "email",
+      preference: "muted",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const saved = await service.setNotificationPreference(owner, {
+      channel: "email",
+      preference: "digest",
+    });
+    expect(saved).toMatchObject({
+      organizationId: owner.organizationId,
+      principalId: owner.id,
+      channel: "email",
+      preference: "digest",
+    });
+    expect(await service.listNotificationPreferences(owner)).toEqual([saved]);
+    expect(await repository.getNotificationPreference(owner.organizationId, owner.id, "email"))
+      .toEqual(saved);
+
+    const updated = await service.setNotificationPreference(owner, {
+      channel: "email",
+      preference: "muted",
+    });
+    expect(updated.updatedAt).toBeDefined();
+    expect(await service.listNotificationPreferences(owner)).toEqual([updated]);
+  });
+
   it("fans out role-routed notifications to active human project members", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);

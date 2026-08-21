@@ -8,6 +8,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  NotificationPreference,
   Organization,
   OrganizationAuditEvent,
   OrganizationMembership,
@@ -40,6 +41,7 @@ import {
   questionResponses,
   questions,
   notifications,
+  notificationPreferences,
   organizations,
   organizationMemberships,
   organizationAuditEvents,
@@ -73,6 +75,7 @@ export type ArtifactVersionRow = typeof artifactVersions.$inferSelect;
 export type ContextSnapshotRow = typeof contextSnapshots.$inferSelect;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type NotificationPreferenceRow = typeof notificationPreferences.$inferSelect;
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 export type OutboxDeliveryRow = typeof outboxDeliveries.$inferSelect;
 
@@ -272,6 +275,22 @@ export function notificationFromRow(row: NotificationRow): Notification {
     targetId: row.targetId,
     createdAt: row.createdAt,
     ...(row.readAt === null ? {} : { readAt: row.readAt }),
+  };
+}
+
+export function notificationPreferenceToRow(
+  preference: NotificationPreference,
+): typeof notificationPreferences.$inferInsert {
+  return { ...preference };
+}
+
+export function notificationPreferenceFromRow(
+  row: NotificationPreferenceRow,
+): NotificationPreference {
+  return {
+    ...row,
+    channel: "email",
+    preference: row.preference as NotificationPreference["preference"],
   };
 }
 

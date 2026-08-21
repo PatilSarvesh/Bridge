@@ -14,6 +14,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  NotificationPreference,
   Organization,
   OrganizationAuditEvent,
   OrganizationMembership,
@@ -48,6 +49,8 @@ import {
   decisionFromRow,
   decisionToRow,
   notificationFromRow,
+  notificationPreferenceFromRow,
+  notificationPreferenceToRow,
   notificationToRow,
   organizationAuditEventFromRow,
   organizationAuditEventToRow,
@@ -94,6 +97,7 @@ import {
   questions,
   runContinuationLocators,
   notifications,
+  notificationPreferences,
   organizations,
   organizationAuditEvents,
   organizationMemberships,
@@ -1228,6 +1232,56 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .onConflictDoUpdate({
         target: notifications.id,
         set: { readAt: row.readAt },
+      });
+  }
+
+  async getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(notificationPreferences)
+      .where(and(
+        eq(notificationPreferences.organizationId, organizationId),
+        eq(notificationPreferences.principalId, principalId),
+        eq(notificationPreferences.channel, channel),
+      ))
+      .limit(1);
+    return row ? notificationPreferenceFromRow(row) : undefined;
+  }
+
+  async listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]> {
+    const rows = await this.database
+      .select()
+      .from(notificationPreferences)
+      .where(and(
+        eq(notificationPreferences.organizationId, organizationId),
+        eq(notificationPreferences.principalId, principalId),
+      ))
+      .orderBy(asc(notificationPreferences.channel));
+    return rows.map(notificationPreferenceFromRow);
+  }
+
+  async saveNotificationPreference(preference: NotificationPreference): Promise<void> {
+    const row = notificationPreferenceToRow(preference);
+    await this.database
+      .insert(notificationPreferences)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [
+          notificationPreferences.organizationId,
+          notificationPreferences.principalId,
+          notificationPreferences.channel,
+        ],
+        set: {
+          preference: row.preference,
+          updatedAt: row.updatedAt,
+        },
       });
   }
 

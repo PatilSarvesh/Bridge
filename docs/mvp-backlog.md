@@ -891,7 +891,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, and role-directory fanout for active human project members are implemented; durable preferences, external channels, and operator delivery controls remain
+- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, role-directory fanout for active human project members, and the human-owned email preference record are implemented; external channels, deletion reconciliation evidence, and operator delivery controls remain
 - **Dependencies:** BRG-031, BRG-090
 - **PRD references:** NTF-01
 
@@ -909,7 +909,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — provider-neutral safe templates, recipient/preference and sender contracts, idempotent handler behavior, durable privacy-minimized delivery receipts, and retry/dead-letter observability are implemented; a live SES sender/directory, digest scheduler, blocking-escalation producer, and authenticated deployment link remain
+- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, recipient/preference and sender contracts, idempotent handler behavior, durable privacy-minimized delivery receipts, and retry/dead-letter observability are implemented; a live SES sender/directory, digest scheduler, blocking-escalation producer, and authenticated deployment link remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -920,7 +920,7 @@ Acceptance criteria:
 1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
 2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context, an auth-ready review URL, and OIDC web sign-in are implemented; hosted callback/link validation remains deployment work.**
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
-4. Ordinary events honor notification preferences. **Immediate, muted, and digest outcomes are implemented through an injected directory; digest batching/sending remains. Protected review mail bypasses muting.**
+4. Ordinary events honor notification preferences. **Human-owned immediate, muted, and digest email preferences persist through the canonical REST/application path and override the injected directory default; digest batching/sending remains. Protected review mail bypasses muting.**
 5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
 
 ### BRG-093 — Integrate one pilot team channel

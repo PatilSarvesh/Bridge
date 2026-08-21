@@ -455,6 +455,14 @@ export interface Notification {
   readonly readAt?: string;
 }
 
+export interface NotificationPreference {
+  readonly organizationId: string;
+  readonly principalId: string;
+  readonly channel: "email";
+  readonly preference: NotificationDeliveryPreference;
+  readonly updatedAt: string;
+}
+
 export interface NotificationOutboxPayload {
   readonly notificationId: string;
   readonly recipientId: string;

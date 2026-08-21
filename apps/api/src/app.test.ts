@@ -619,6 +619,44 @@ describe("Bridge API vertical slice", () => {
     });
     expect(agentNotifications.statusCode).toBe(403);
 
+    const emptyPreferences = await app.inject({
+      method: "GET",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(emptyPreferences.statusCode).toBe(200);
+    expect(emptyPreferences.json()).toEqual({ items: [] });
+
+    const savedPreference = await app.inject({
+      method: "POST",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: { channel: "email", preference: "digest" },
+    });
+    expect(savedPreference.statusCode).toBe(200);
+    expect(savedPreference.json()).toMatchObject({
+      principalId: demoPrincipals.qaLead.id,
+      channel: "email",
+      preference: "digest",
+    });
+
+    const listedPreferences = await app.inject({
+      method: "GET",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(listedPreferences.json()).toMatchObject({
+      items: [expect.objectContaining({ channel: "email", preference: "digest" })],
+    });
+
+    const agentPreference = await app.inject({
+      method: "POST",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { channel: "email", preference: "muted" },
+    });
+    expect(agentPreference.statusCode).toBe(403);
+
     const marked = await app.inject({
       method: "POST",
       url: `/v1/notifications/${listed.items[0]!.id}/read`,
