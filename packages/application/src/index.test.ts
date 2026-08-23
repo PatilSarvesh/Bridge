@@ -30,6 +30,15 @@ const agent: Principal = {
   displayName: "Agent",
 };
 
+const githubIntegration: Principal = {
+  id: "int_github",
+  type: "integration",
+  organizationId: "org_one",
+  projectIds: [project.id],
+  roles: ["integration"],
+  displayName: "GitHub Integration",
+};
+
 const owner: Principal = {
   id: "usr_owner",
   type: "human",
@@ -916,6 +925,97 @@ describe("Bridge decision workflow", () => {
     await repository.saveProject(otherProject);
     await expect(service.linkRepository(owner, otherProject.id, input)).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(service.listProjectRepositories(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+  });
+
+  it("synchronizes read-only GitHub pull-request metadata with approved guidance", async () => {
+    const { repository, service } = await runtime();
+    const linked = await service.linkRepository(owner, project.id, {
+      idempotencyKey: "github-context-repository-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "github-context-decision-001",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Transient failures are bounded and preserve idempotency.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "github-context-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The specification faithfully captures the accepted decision.",
+    });
+    const input = {
+      repositoryId: linked.repository.id,
+      number: 42,
+      title: "Add bounded transfer retries",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/42",
+      headBranch: "feature/retries",
+      baseBranch: "main",
+      headSha: "a".repeat(40),
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      decisionIds: [decision.id],
+      artifactVersionIds: [publication.version.id],
+    } as const;
+
+    await expect(service.syncGithubPullRequest(agent, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const created = await service.syncGithubPullRequest(githubIntegration, project.id, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      pullRequest: {
+        id: expect.stringMatching(/^gpr_/),
+        organizationId: project.organizationId,
+        projectId: project.id,
+        number: 42,
+        version: 1,
+      },
+    });
+    await expect(service.syncGithubPullRequest(githubIntegration, project.id, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.syncGithubPullRequest(githubIntegration, project.id, {
+      ...input,
+      title: "Conflicting provider event",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const updated = await service.syncGithubPullRequest(githubIntegration, project.id, {
+      ...input,
+      state: "merged",
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+    });
+    expect(updated).toMatchObject({ disposition: "updated", pullRequest: { state: "merged", version: 2 } });
+    await expect(service.listGithubPullRequests(agent, project.id, {
+      limit: 100,
+      repositoryId: linked.repository.id,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({ number: 42, state: "merged" }),
+        decisions: [expect.objectContaining({ id: decision.id, status: "active" })],
+        artifactVersions: [expect.objectContaining({
+          versionId: publication.version.id,
+          status: "approved",
+        })],
+        humanApprovalChanged: false,
+      }),
+    ]);
+    await expect(service.getGithubPullRequestContext(agent, project.id, 42, {
+      repositoryId: linked.repository.id,
+    })).resolves.toMatchObject({ pullRequest: { number: 42 } });
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "integration.pull_request_synced",
+        subjectType: "pull_request_context",
+      }),
+    ]));
   });
 
   it("creates, lists, audits, and version-updates organization members", async () => {

@@ -20,6 +20,8 @@ import {
   editQuestionCommentInputSchema,
   editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
+  githubPullRequestContextQuerySchema,
+  githubPullRequestListQuerySchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
   questionClarificationInputSchema,
@@ -44,6 +46,7 @@ import {
   resolveAssumptionInputSchema,
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
+  syncGithubPullRequestInputSchema,
   updateOrganizationMemberInputSchema,
   revokeServiceIdentityInputSchema,
   rotateServiceIdentityInputSchema,
@@ -149,6 +152,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   },
   {
     match: /^\/v1\/projects\/[^/]+\/repositories$/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/integrations\/github\/pull-requests(?:$|\/)/,
     scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
   },
   {
@@ -616,6 +623,62 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncGithubPullRequestInputSchema.parse(request.body);
+      const registration = await options.service.syncGithubPullRequest(
+        principal,
+        request.params.projectId,
+        input,
+      );
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: unknown }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = githubPullRequestListQuerySchema.parse(request.query);
+      return {
+        items: await options.service.listGithubPullRequests(
+          principal,
+          request.params.projectId,
+          query,
+        ),
+      };
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string; pullRequestNumber: string };
+    Querystring: unknown;
+  }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const pullRequestNumber = Number(request.params.pullRequestNumber);
+      if (
+        !Number.isInteger(pullRequestNumber) ||
+        pullRequestNumber < 1 ||
+        pullRequestNumber > 2_147_483_647
+      ) {
+        throw new BridgeError("VALIDATION_FAILED", "Pull-request number must be a positive integer.", 400);
+      }
+      const query = githubPullRequestContextQuerySchema.parse(request.query);
+      return options.service.getGithubPullRequestContext(
+        principal,
+        request.params.projectId,
+        pullRequestNumber,
+        query,
+      );
     },
   );
 

@@ -47,6 +47,7 @@ export type BridgeErrorCode =
   | "ASSUMPTION_NOT_FOUND"
   | "NOTIFICATION_NOT_FOUND"
   | "OUTBOX_EVENT_NOT_FOUND"
+  | "PULL_REQUEST_NOT_FOUND"
   | "MEMBER_NOT_FOUND"
   | "IDENTITY_NOT_CONFIGURED"
   | "LAST_ORGANIZATION_ADMIN"
@@ -180,6 +181,26 @@ export interface RepositoryRecord {
   readonly name: string;
   readonly canonicalUrl: string;
   readonly createdAt: string;
+}
+
+export interface GithubPullRequestContext {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly repositoryId: string;
+  readonly number: number;
+  readonly title: string;
+  readonly state: "open" | "closed" | "merged";
+  readonly canonicalUrl: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly headSha: string;
+  readonly decisionIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
+  readonly sourceUpdatedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
 }
 
 export interface ProjectRoleDefinition {
@@ -737,7 +758,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
+  readonly subjectType: "project" | "repository" | "pull_request_context" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
   readonly subjectId: string;
   readonly reason?: string;
   readonly policyVersion?: number;

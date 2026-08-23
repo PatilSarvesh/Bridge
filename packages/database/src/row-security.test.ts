@@ -135,3 +135,22 @@ describe("notification preference row security migrations", () => {
     );
   });
 });
+
+describe("GitHub pull-request context row security migration", () => {
+  it("forces tenant isolation for pull-request metadata", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0042_even_wallop.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "bridge_github_pull_requests" ENABLE ROW LEVEL SECURITY',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "bridge_github_pull_requests" FORCE ROW LEVEL SECURITY',
+    );
+    expect(migration).toContain(
+      'CREATE POLICY "bridge_github_pull_requests_tenant" ON "bridge_github_pull_requests"',
+    );
+    expect(migration).toContain("bridge_github_pull_requests_organization_project_fk");
+  });
+});

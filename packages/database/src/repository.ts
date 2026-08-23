@@ -13,6 +13,7 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  GithubPullRequestContext,
   Notification,
   NotificationPreference,
   Organization,
@@ -48,6 +49,8 @@ import {
   contextSnapshotFromRow,
   decisionFromRow,
   decisionToRow,
+  githubPullRequestFromRow,
+  githubPullRequestToRow,
   notificationFromRow,
   notificationPreferenceFromRow,
   notificationPreferenceToRow,
@@ -90,6 +93,7 @@ import {
   auditEvents,
   contextSnapshots,
   decisions,
+  githubPullRequests,
   idempotencyRecords,
   projects,
   projectRepositories,
@@ -691,6 +695,64 @@ export class PostgresBridgeRepository implements BridgeRepository {
           createdAt: row.createdAt,
         },
       });
+  }
+
+  async getGithubPullRequest(
+    pullRequestId: string,
+  ): Promise<GithubPullRequestContext | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(githubPullRequests)
+      .where(eq(githubPullRequests.id, pullRequestId))
+      .limit(1);
+    return row ? githubPullRequestFromRow(row) : undefined;
+  }
+
+  async listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]> {
+    const rows = await this.database
+      .select()
+      .from(githubPullRequests)
+      .where(eq(githubPullRequests.projectId, projectId))
+      .orderBy(desc(githubPullRequests.sourceUpdatedAt), asc(githubPullRequests.id));
+    return rows.map(githubPullRequestFromRow);
+  }
+
+  async saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = githubPullRequestToRow(pullRequest);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(githubPullRequests)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: githubPullRequests.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(githubPullRequests)
+      .set({
+        title: row.title,
+        state: row.state,
+        canonicalUrl: row.canonicalUrl,
+        headBranch: row.headBranch,
+        baseBranch: row.baseBranch,
+        headSha: row.headSha,
+        decisionIds: row.decisionIds,
+        artifactVersionIds: row.artifactVersionIds,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(githubPullRequests.id, pullRequest.id),
+        eq(githubPullRequests.organizationId, pullRequest.organizationId),
+        eq(githubPullRequests.projectId, pullRequest.projectId),
+        eq(githubPullRequests.version, expectedVersion),
+      ))
+      .returning({ id: githubPullRequests.id });
+    return updated.length === 1;
   }
 
   async getProjectOwnershipConfiguration(

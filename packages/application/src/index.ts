@@ -21,6 +21,9 @@ import type {
   EditQuestionResponseInput,
   FindQuestionMatchesInput,
   LinkRepositoryInput,
+  GithubPullRequestListQuery,
+  GithubPullRequestContextQuery,
+  SyncGithubPullRequestInput,
   PublishArtifactInput,
   ProposeAnswerInput,
   QuestionCommentInput,
@@ -80,6 +83,7 @@ import {
   type ContextItem,
   type ContextSnapshot,
   type Decision,
+  type GithubPullRequestContext,
   type Principal,
   type Project,
   type Question,
@@ -180,6 +184,12 @@ export interface BridgeRepository {
   getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined>;
   listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]>;
   saveRepositoryRecord(repository: RepositoryRecord): Promise<void>;
+  getGithubPullRequest(pullRequestId: string): Promise<GithubPullRequestContext | undefined>;
+  listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]>;
+  saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean>;
   getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined>;
   saveProjectOwnershipConfiguration(
     configuration: ProjectOwnershipConfiguration,
@@ -309,6 +319,26 @@ export interface ProjectRegistration {
 export interface RepositoryRegistration {
   readonly repository: RepositoryRecord;
   readonly disposition: "created" | "idempotent_replay";
+}
+
+export interface GithubPullRequestRegistration {
+  readonly pullRequest: GithubPullRequestContext;
+  readonly disposition: "created" | "updated" | "idempotent_replay";
+}
+
+export interface GithubPullRequestContextView {
+  readonly pullRequest: GithubPullRequestContext;
+  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly artifactVersions: readonly {
+    readonly artifactId: string;
+    readonly artifactTitle: string;
+    readonly artifactType: Artifact["type"];
+    readonly versionId: string;
+    readonly version: number;
+    readonly status: ArtifactVersion["status"];
+    readonly summary: string;
+  }[];
+  readonly humanApprovalChanged: false;
 }
 
 export interface OrganizationMember {
@@ -1083,6 +1113,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
+  private readonly githubPullRequests = new Map<string, GithubPullRequestContext>();
   private readonly projectOwnershipConfigurations = new Map<string, ProjectOwnershipConfiguration>();
   private readonly projectPolicyConfigurations = new Map<string, ProjectPolicyConfiguration>();
   private readonly runs = new Map<string, AgentRun>();
@@ -1135,6 +1166,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
+      githubPullRequests: new Map(this.githubPullRequests),
       projectOwnershipConfigurations: new Map(this.projectOwnershipConfigurations),
       projectPolicyConfigurations: new Map(this.projectPolicyConfigurations),
       runs: new Map(this.runs),
@@ -1168,6 +1200,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
+      this.restoreMap(this.githubPullRequests, snapshot.githubPullRequests);
       this.restoreMap(this.projectOwnershipConfigurations, snapshot.projectOwnershipConfigurations);
       this.restoreMap(this.projectPolicyConfigurations, snapshot.projectPolicyConfigurations);
       this.restoreMap(this.runs, snapshot.runs);
@@ -1438,6 +1471,32 @@ export class InMemoryBridgeRepository implements BridgeRepository {
 
   async saveRepositoryRecord(repository: RepositoryRecord): Promise<void> {
     this.repositoryRecords.set(repository.id, repository);
+  }
+
+  async getGithubPullRequest(
+    pullRequestId: string,
+  ): Promise<GithubPullRequestContext | undefined> {
+    return this.githubPullRequests.get(pullRequestId);
+  }
+
+  async listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]> {
+    return [...this.githubPullRequests.values()]
+      .filter((pullRequest) => pullRequest.projectId === projectId)
+      .sort((left, right) =>
+        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+  }
+
+  async saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.githubPullRequests.get(pullRequest.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.githubPullRequests.set(pullRequest.id, pullRequest);
+    return true;
   }
 
   async getProjectOwnershipConfiguration(
@@ -2062,6 +2121,175 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       return repository.listProjectRepositories(projectId);
+    });
+  }
+
+  async syncGithubPullRequest(
+    principal: Principal,
+    projectId: string,
+    input: SyncGithubPullRequestInput,
+  ): Promise<GithubPullRequestRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertIntegrationWriter(principal, "Synchronizing GitHub pull-request context", projectId);
+      this.assertSecretSafe("administration", input);
+      const linkedRepository = await repository.getRepositoryRecord(input.repositoryId);
+      if (
+        !linkedRepository ||
+        linkedRepository.projectId !== projectId ||
+        linkedRepository.organizationId !== principal.organizationId ||
+        linkedRepository.provider !== "github"
+      ) {
+        throw new BridgeError("PROJECT_NOT_FOUND", "Linked GitHub repository not found.", 404);
+      }
+      const expectedUrl = new URL(linkedRepository.canonicalUrl);
+      expectedUrl.pathname = `${expectedUrl.pathname.replace(/\/$/, "")}/pull/${input.number}`;
+      expectedUrl.search = "";
+      expectedUrl.hash = "";
+      const suppliedUrl = new URL(input.canonicalUrl);
+      suppliedUrl.search = "";
+      suppliedUrl.hash = "";
+      if (suppliedUrl.toString() !== expectedUrl.toString()) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The pull-request URL does not match the linked GitHub repository and number.",
+          422,
+        );
+      }
+      for (const decisionId of input.decisionIds) {
+        const decision = await this.requireDecision(principal, decisionId, repository);
+        if (decision.projectId !== projectId || decision.status !== "active") {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Pull-request guidance can cite only active decisions in the same project.",
+            422,
+          );
+        }
+      }
+      for (const versionId of input.artifactVersionIds) {
+        const artifact = await repository.getArtifactByVersionId(versionId);
+        const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+        if (
+          !artifact ||
+          artifact.projectId !== projectId ||
+          !version ||
+          !["approved", "superseded"].includes(version.status)
+        ) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Pull-request guidance can cite only approved specification versions in the same project.",
+            422,
+          );
+        }
+      }
+      const pullRequestId = `gpr_${createHash("sha256")
+        .update(`${principal.organizationId}:${input.repositoryId}:${input.number}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getGithubPullRequest(pullRequestId);
+      const timestamp = this.now().toISOString();
+      const normalized = {
+        repositoryId: input.repositoryId,
+        number: input.number,
+        title: input.title.trim(),
+        state: input.state,
+        canonicalUrl: suppliedUrl.toString(),
+        headBranch: input.headBranch.trim(),
+        baseBranch: input.baseBranch.trim(),
+        headSha: input.headSha,
+        decisionIds: [...input.decisionIds].sort(),
+        artifactVersionIds: [...input.artifactVersionIds].sort(),
+        sourceUpdatedAt: new Date(input.sourceUpdatedAt).toISOString(),
+      } as const;
+      if (existing) {
+        const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
+        const same = this.githubPullRequestMatches(existing, normalized);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The GitHub pull-request update is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
+          );
+        }
+        if (same) return { pullRequest: existing, disposition: "idempotent_replay" };
+        const updated: GithubPullRequestContext = {
+          ...existing,
+          ...normalized,
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        };
+        if (!await repository.saveGithubPullRequest(updated, existing.version)) {
+          throw new BridgeError("CONFLICT", "The pull-request context changed during synchronization.", 409);
+        }
+        await this.audit(
+          repository,
+          principal,
+          projectId,
+          "integration.pull_request_synced",
+          "pull_request_context",
+          updated.id,
+          timestamp,
+        );
+        return { pullRequest: updated, disposition: "updated" };
+      }
+      const created: GithubPullRequestContext = {
+        id: pullRequestId,
+        organizationId: principal.organizationId,
+        projectId,
+        ...normalized,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveGithubPullRequest(created)) {
+        throw new BridgeError("CONFLICT", "The pull-request context was created concurrently.", 409);
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "integration.pull_request_synced",
+        "pull_request_context",
+        created.id,
+        timestamp,
+      );
+      return { pullRequest: created, disposition: "created" };
+    });
+  }
+
+  async listGithubPullRequests(
+    principal: Principal,
+    projectId: string,
+    query: GithubPullRequestListQuery,
+  ): Promise<readonly GithubPullRequestContextView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const items = (await repository.listGithubPullRequests(projectId))
+        .filter((item) => !query.repositoryId || item.repositoryId === query.repositoryId)
+        .filter((item) => !query.state || item.state === query.state)
+        .slice(0, query.limit);
+      return Promise.all(items.map((item) => this.githubPullRequestView(repository, item)));
+    });
+  }
+
+  async getGithubPullRequestContext(
+    principal: Principal,
+    projectId: string,
+    pullRequestNumber: number,
+    query: GithubPullRequestContextQuery,
+  ): Promise<GithubPullRequestContextView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const pullRequestId = `gpr_${createHash("sha256")
+        .update(`${principal.organizationId}:${query.repositoryId}:${pullRequestNumber}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const pullRequest = await repository.getGithubPullRequest(pullRequestId);
+      if (!pullRequest || pullRequest.projectId !== projectId) {
+        throw new BridgeError("PULL_REQUEST_NOT_FOUND", "Pull-request context not found.", 404);
+      }
+      return this.githubPullRequestView(repository, pullRequest);
     });
   }
 
@@ -7694,6 +7922,94 @@ export class BridgeService {
     if (!principalHasRole(principal, "project-admin", projectId)) {
       throw new BridgeError("FORBIDDEN", `${action} requires a project administrator.`, 403);
     }
+  }
+
+  private assertIntegrationWriter(principal: Principal, action: string, projectId: string): void {
+    if (principal.type === "human") {
+      this.assertProjectOperator(principal, action, projectId);
+      return;
+    }
+    if (!["ci", "integration"].includes(principal.type)) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        `${action} requires a project administrator or an integration service identity.`,
+        403,
+      );
+    }
+  }
+
+  private githubPullRequestMatches(
+    existing: GithubPullRequestContext,
+    candidate: Pick<
+      GithubPullRequestContext,
+      | "repositoryId"
+      | "number"
+      | "title"
+      | "state"
+      | "canonicalUrl"
+      | "headBranch"
+      | "baseBranch"
+      | "headSha"
+      | "decisionIds"
+      | "artifactVersionIds"
+      | "sourceUpdatedAt"
+    >,
+  ): boolean {
+    return existing.repositoryId === candidate.repositoryId &&
+      existing.number === candidate.number &&
+      existing.title === candidate.title &&
+      existing.state === candidate.state &&
+      existing.canonicalUrl === candidate.canonicalUrl &&
+      existing.headBranch === candidate.headBranch &&
+      existing.baseBranch === candidate.baseBranch &&
+      existing.headSha === candidate.headSha &&
+      existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
+      JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+  }
+
+  private async githubPullRequestView(
+    repository: BridgeRepository,
+    pullRequest: GithubPullRequestContext,
+  ): Promise<GithubPullRequestContextView> {
+    const decisions = (
+      await Promise.all(pullRequest.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
+    )
+      .filter((decision): decision is Decision =>
+        decision !== undefined &&
+        decision.projectId === pullRequest.projectId &&
+        decision.status === "active")
+      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+    const artifactVersions = (
+      await Promise.all(
+        pullRequest.artifactVersionIds.map(async (versionId) => {
+          const artifact = await repository.getArtifactByVersionId(versionId);
+          const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+          if (
+            !artifact ||
+            artifact.projectId !== pullRequest.projectId ||
+            !version ||
+            !["approved", "superseded"].includes(version.status)
+          ) return undefined;
+          return {
+            artifactId: artifact.id,
+            artifactTitle: artifact.title,
+            artifactType: artifact.type,
+            versionId: version.id,
+            version: version.version,
+            status: version.status,
+            summary: version.summary,
+          };
+        }),
+      )
+    ).filter((version): version is GithubPullRequestContextView["artifactVersions"][number] =>
+      version !== undefined);
+    return {
+      pullRequest,
+      decisions,
+      artifactVersions,
+      humanApprovalChanged: false,
+    };
   }
 
   private async audit(

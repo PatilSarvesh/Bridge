@@ -441,6 +441,47 @@ export const linkRepositoryInputSchema = z.object({
   ),
 });
 
+export const githubPullRequestStateSchema = z.enum(["open", "closed", "merged"]);
+export const syncGithubPullRequestInputSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+  number: z.number().int().positive().max(2_147_483_647),
+  title: z.string().trim().min(1).max(500),
+  state: githubPullRequestStateSchema,
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://github.com/"),
+    "canonicalUrl must be an HTTPS GitHub pull-request URL.",
+  ),
+  headBranch: z.string().trim().min(1).max(300),
+  baseBranch: z.string().trim().min(1).max(300),
+  headSha: z.string().trim().regex(/^[0-9a-f]{40}$/),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["decisionIds", value.decisionIds],
+    ["artifactVersionIds", value.artifactVersionIds],
+  ] as const) {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({
+        code: "custom",
+        message: `${field} values must be unique.`,
+        path: [field],
+      });
+    }
+  }
+});
+
+export const githubPullRequestListQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100).optional(),
+  state: githubPullRequestStateSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
+export const githubPullRequestContextQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+});
+
 export const questionOptionInputSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/),
   label: z.string().trim().min(1).max(500),
@@ -922,6 +963,10 @@ export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInp
 export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type LinkRepositoryInput = z.infer<typeof linkRepositoryInputSchema>;
+export type GithubPullRequestState = z.infer<typeof githubPullRequestStateSchema>;
+export type SyncGithubPullRequestInput = z.infer<typeof syncGithubPullRequestInputSchema>;
+export type GithubPullRequestListQuery = z.infer<typeof githubPullRequestListQuerySchema>;
+export type GithubPullRequestContextQuery = z.infer<typeof githubPullRequestContextQuerySchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;

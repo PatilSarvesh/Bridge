@@ -8,6 +8,7 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  GithubPullRequestContext,
   Notification,
   NotificationPreference,
   Organization,
@@ -38,6 +39,8 @@ import {
   artifactVersionToRow,
   decisionFromRow,
   decisionToRow,
+  githubPullRequestFromRow,
+  githubPullRequestToRow,
   contextSnapshotFromRow,
   contextSnapshotToRow,
   projectFromRow,
@@ -80,6 +83,7 @@ import {
   type ArtifactVersionRow,
   type AuditEventRow,
   type DecisionRow,
+  type GithubPullRequestRow,
   type ContextSnapshotRow,
   type ProjectRow,
   type RepositoryRecordRow,
@@ -536,6 +540,28 @@ describe("PostgreSQL domain mappings", () => {
     };
     expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
       .toEqual(repositoryRecord);
+    const pullRequest: GithubPullRequestContext = {
+      id: "gpr_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      repositoryId: repositoryRecord.id,
+      number: 42,
+      title: "Map pull-request context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/42",
+      headBranch: "feature/context",
+      baseBranch: "main",
+      headSha: "a".repeat(40),
+      decisionIds: ["dec_mapping"],
+      artifactVersionIds: ["avr_mapping"],
+      sourceUpdatedAt: "2026-08-07T11:00:00.000Z",
+      createdAt: "2026-08-07T11:01:00.000Z",
+      updatedAt: "2026-08-07T11:01:00.000Z",
+      version: 1,
+    };
+    expect(githubPullRequestFromRow(
+      githubPullRequestToRow(pullRequest) as GithubPullRequestRow,
+    )).toEqual(pullRequest);
     const ownershipConfiguration: ProjectOwnershipConfiguration = {
       organizationId: project.organizationId,
       projectId: project.id,

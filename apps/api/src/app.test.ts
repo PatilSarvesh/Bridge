@@ -1229,6 +1229,52 @@ describe("Bridge API vertical slice", () => {
     expect(visibleRepositories.statusCode).toBe(200);
     expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items)
       .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
+
+    const pullRequestPayload = {
+      repositoryId: linkedRepository.json<{ repository: { id: string } }>().repository.id,
+      number: 10,
+      title: "Expose read-only Bridge context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/10",
+      headBranch: "feature/context",
+      baseBranch: "main",
+      headSha: "b".repeat(40),
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      decisionIds: [],
+      artifactVersionIds: [],
+    };
+    const deniedPullRequestSync = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: pullRequestPayload,
+    });
+    expect(deniedPullRequestSync.statusCode).toBe(403);
+
+    const syncedPullRequest = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: pullRequestPayload,
+    });
+    expect(syncedPullRequest.statusCode).toBe(201);
+    expect(syncedPullRequest.json()).toMatchObject({
+      disposition: "created",
+      pullRequest: { number: 10, state: "open", version: 1 },
+    });
+
+    const pullRequestContext = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests/10/context?repositoryId=${pullRequestPayload.repositoryId}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(pullRequestContext.statusCode).toBe(200);
+    expect(pullRequestContext.json()).toMatchObject({
+      pullRequest: { number: 10, canonicalUrl: pullRequestPayload.canonicalUrl },
+      decisions: [],
+      artifactVersions: [],
+      humanApprovalChanged: false,
+    });
   });
 
   it("exposes versioned project ownership configuration only to administrators", async () => {

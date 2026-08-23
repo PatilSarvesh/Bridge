@@ -18,11 +18,13 @@ tenant before a tenant transaction can be established:
 - `bridge_principal_identities`
 - `bridge_service_credentials`
 
-The current 22-table protected tenant/project set also includes `bridge_adapter_diagnostics`,
-`bridge_project_repositories`, `bridge_project_ownership_configurations`, and
-`bridge_project_policy_configurations`, added by forward-only migrations
-`0024_amazing_blindfold.sql` through `0027_vengeful_lady_ursula.sql`. These relations use
-the same forced RLS policy boundary as the original tenant relations.
+The current 24-table protected tenant/project set also includes `bridge_adapter_diagnostics`,
+`bridge_project_repositories`, `bridge_project_ownership_configurations`,
+`bridge_project_policy_configurations`, `bridge_notification_preferences`, and
+`bridge_github_pull_requests`. These relations were added or corrected by forward-only migrations
+`0024_amazing_blindfold.sql` through `0027_vengeful_lady_ursula.sql`,
+`0041_force_notification_preferences_rls.sql`, and `0042_even_wallop.sql`; they use the same forced
+RLS policy boundary as the original tenant relations.
 
 OIDC and service-token resolution use the bounded security-definer functions from migration
 `0021_bootstrap_directory_security.sql`. The functions use a fixed `search_path`, return only

@@ -1114,14 +1114,14 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-122 | P1 | L | Detect overlapping contradictory active decisions | DEC-05 |
 | BRG-123 | P1 | L | Produce deeper transitive impact analysis when a decision changes | DEC-06 |
 | BRG-124 | P1 | L | Detect approved specification drift in CI | ART-07 |
-| BRG-125 | P1 | L | Add first source-control pull-request context integration | Integration roadmap |
+| BRG-125 | P1 | L | Add first source-control pull-request context integration — complete | Integration roadmap |
 | BRG-126 | P1 | L | Add first work-item synchronization integration | Integration roadmap |
 | BRG-127 | P1 | M | Add enterprise group provisioning and lifecycle sync | AUTH-05 |
 | BRG-128 | P1 | M | Export project decisions, artifacts, and audit records | ADM-02 |
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
-Implementation status (2026-08-23): BRG-120 through BRG-124 are complete. Role-aware views, low-risk digests, advisory conflict scans, bounded transitive impact graphs, and the CI-safe approved-specification drift manifest/check are implemented while preserving canonical REST reads and human authority. Drift coverage is explicit-file/hash based; source-provider semantic analysis remains future integration work. BRG-125 through BRG-130 remain pending.
+Implementation status (2026-08-23): BRG-120 through BRG-125 are complete. The first GitHub integration stores read-only pull-request metadata plus explicit active-decision and approved-specification links through canonical REST, with stale-event protection and no repository source-content permission. MCP remains optional and provider synchronization cannot change human approval state. BRG-126 through BRG-130 remain pending.
 
 ## 21. Critical path
 
