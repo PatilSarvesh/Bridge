@@ -2142,7 +2142,9 @@ describe("Bridge API vertical slice", () => {
       payload: {
         idempotencyKey: "api-run-test-001",
         client: "codex",
-        capability: "cli",
+        capability: "orchestrated",
+        continuationMode: "automatic",
+        vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
         taskSummary: "Implement transfer retry handling",
         scope: { component: "transfers" },
         externalLinks: [],
@@ -2150,9 +2152,10 @@ describe("Bridge API vertical slice", () => {
     });
     expect(startResponse.statusCode).toBe(201);
     const registration = startResponse.json<{
-      run: { id: string };
+      run: { id: string; continuationMode: string };
       resumeContextKey: string;
     }>();
+    expect(registration.run.continuationMode).toBe("automatic");
 
     const questionResponse = await app.inject({
       method: "POST",
@@ -2207,6 +2210,16 @@ describe("Bridge API vertical slice", () => {
       canContinue: true,
       acceptedDecisionIds: [expect.any(String)],
     });
+    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "run.continuation_ready",
+        payload: expect.objectContaining({
+          runId: registration.run.id,
+          client: "codex",
+          vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
+        }),
+      }),
+    ]));
   });
 
   it("supports shared responses before the owner accepts a question and returns the decision as context", async () => {

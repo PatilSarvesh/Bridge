@@ -1118,10 +1118,10 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-126 | P1 | L | Add first work-item synchronization integration — complete | Integration roadmap |
 | BRG-127 | P1 | M | Add enterprise group provisioning and lifecycle sync — complete (bounded provider-group slice) | AUTH-05 |
 | BRG-128 | P1 | M | Export project decisions, artifacts, and audit records — complete | ADM-02 |
-| BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
-| BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
+| BRG-129 | P2 | XL | Add vendor-specific automatic session continuation — complete (bounded Codex CLI adapter) | RUN-03 |
+| BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset — complete (offline synthetic benchmark) | Context roadmap |
 
-Implementation status (2026-08-24): BRG-120 through BRG-128 are complete. The ADM-02 slice gives human project administrators an audited, bounded JSON export of canonical decisions, full artifact/version aggregates, and project audit events. Independent collection offsets make larger exports resumable, exported files are explicitly sensitive governed project data, and the command cannot change approval state. BRG-129 and BRG-130 remain pending.
+Implementation status (2026-08-24): BRG-120 through BRG-130 are complete. RUN-03 adds explicit per-run Codex CLI automatic-continuation opt-in, queues only after every linked blocker has human acceptance, and invokes the existing vendor session through a bounded worker without bypassing approvals or carrying decision content/Bridge locators. BRG-130 adds an offline synthetic relevance dataset and deterministic Recall@5/MRR/nDCG@5 comparison: both rankers reach 1.0000 Recall@5, so the sparse TF-IDF candidate's zero recall gain is below the predeclared 0.10 threshold and vector infrastructure is not adopted. Live provider/session conformance and privacy-reviewed pilot relevance labels remain external evidence.
 
 ## 21. Critical path
 
@@ -1216,7 +1216,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |
-| Search quality is unclear | BRG-051 begins deterministic; BRG-130 requires evaluation before vector infrastructure |
+| Search quality is unclear | BRG-051 remains deterministic; BRG-130's synthetic benchmark rejects vector adoption at the declared threshold, while labeled pilot queries remain required before reopening it |
 | Slack integration delays core loop | In-app and SES email can support early slices, but Slack remains a P0 pilot gate |
 | Audit added too late | BRG-100 is required in the first human decision slice |
 | Specifications delay central decision loop | E8 begins only after Slice B proves durable decision reuse |

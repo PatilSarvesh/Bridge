@@ -46,6 +46,7 @@ export const outboxEventTypeSchema = z.enum([
   "notification.created",
   "decision.lifecycle_changed",
   "question.reassigned",
+  "run.continuation_ready",
 ]);
 export const outboxEventStatusSchema = z.enum([
   "pending",
@@ -76,6 +77,7 @@ export const agentRunCapabilitySchema = z.enum([
   "hooks",
   "orchestrated",
 ]);
+export const agentRunContinuationModeSchema = z.enum(["manual", "automatic"]);
 export const adapterDiagnosticMcpStatusSchema = z.enum(["ready", "failed", "not_configured"]);
 export const adapterDiagnosticCheckNameSchema = z.enum([
   "api",
@@ -921,6 +923,8 @@ export const startAgentRunInputSchema = z
     idempotencyKey: z.string().trim().min(8).max(200),
     client: agentRunClientSchema,
     capability: agentRunCapabilitySchema,
+    continuationMode: agentRunContinuationModeSchema.optional(),
+    vendorSessionId: z.string().trim().uuid().optional(),
     taskSummary: z.string().trim().min(3).max(2_000),
     scope: scopeSchema.default({}),
     externalLinks: z.array(z.string().url().max(2_000)).max(20).default([]),
@@ -933,6 +937,36 @@ export const startAgentRunInputSchema = z
         code: "custom",
         message: "continuesRunId and resumeContextKey must be supplied together.",
         path: [value.continuesRunId ? "resumeContextKey" : "continuesRunId"],
+      });
+    }
+    const continuationMode = value.continuationMode ?? "manual";
+    if (continuationMode === "automatic") {
+      if (value.client !== "codex") {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation is currently supported only for Codex runs.",
+          path: ["client"],
+        });
+      }
+      if (!value.vendorSessionId) {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation requires a Codex vendorSessionId.",
+          path: ["vendorSessionId"],
+        });
+      }
+      if (!["hooks", "orchestrated"].includes(value.capability)) {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation requires hooks or orchestrated capability.",
+          path: ["capability"],
+        });
+      }
+    } else if (value.vendorSessionId) {
+      context.addIssue({
+        code: "custom",
+        message: "vendorSessionId is allowed only for automatic continuation.",
+        path: ["vendorSessionId"],
       });
     }
   });
@@ -1032,6 +1066,7 @@ export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
 export type ArtifactReviewStatus = z.infer<typeof artifactReviewStatusSchema>;
 export type AgentRunClient = z.infer<typeof agentRunClientSchema>;
 export type AgentRunCapability = z.infer<typeof agentRunCapabilitySchema>;
+export type AgentRunContinuationMode = z.infer<typeof agentRunContinuationModeSchema>;
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
 export type AssumptionConfidence = z.infer<typeof assumptionConfidenceSchema>;
 export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;

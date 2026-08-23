@@ -330,6 +330,42 @@ describe("Bridge CLI fallback adapter", () => {
     expect(await isCliEntrypoint(join(cwd, "unrelated.js"), pathToFileURL(target).href)).toBe(false);
   });
 
+  it("registers an explicitly orchestrated Codex session for automatic continuation", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-codex-continuation-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+
+    expect(await runCli([
+      "run",
+      "start",
+      "--task",
+      "Continue after the transfer retry decision",
+      "--client",
+      "codex",
+      "--capability",
+      "orchestrated",
+      "--continuation-mode",
+      "automatic",
+      "--vendor-session-id",
+      "123e4567-e89b-42d3-a456-426614174000",
+    ], runtime)).toBe(cliExitCodes.success);
+    expect(state.run).toMatchObject({
+      client: "codex",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+      vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
+    });
+    expect(stderr).toEqual([]);
+  });
+
   it("registers a fresh project and safely activates Codex instructions", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-fresh-project-"));
     const stdout: string[] = [];

@@ -230,7 +230,12 @@ export interface BridgeRepository {
   getIdempotentRunRequestHash(key: string): Promise<string | undefined>;
   saveIdempotentRun(key: string, runId: string, requestHash: string): Promise<void>;
   getRunContinuationKey(runId: string): Promise<string | undefined>;
-  saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void>;
+  getRunVendorSessionId(runId: string): Promise<string | undefined>;
+  saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void>;
   getAssumption(assumptionId: string): Promise<Assumption | undefined>;
   listAssumptions(projectId: string): Promise<readonly Assumption[]>;
   saveAssumption(assumption: Assumption): Promise<void>;
@@ -1210,6 +1215,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly runIdempotency = new Map<string, RunIdempotencyRecord>();
   private readonly assumptionIdempotency = new Map<string, AssumptionIdempotencyRecord>();
   private readonly runContinuationKeys = new Map<string, string>();
+  private readonly runVendorSessionIds = new Map<string, string>();
   private transactionTail: Promise<void> = Promise.resolve();
 
   constructor(private readonly metrics?: BridgeMetrics) {}
@@ -1266,6 +1272,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       runIdempotency: new Map(this.runIdempotency),
       assumptionIdempotency: new Map(this.assumptionIdempotency),
       runContinuationKeys: new Map(this.runContinuationKeys),
+      runVendorSessionIds: new Map(this.runVendorSessionIds),
     };
 
     try {
@@ -1303,6 +1310,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.runIdempotency, snapshot.runIdempotency);
       this.restoreMap(this.assumptionIdempotency, snapshot.assumptionIdempotency);
       this.restoreMap(this.runContinuationKeys, snapshot.runContinuationKeys);
+      this.restoreMap(this.runVendorSessionIds, snapshot.runVendorSessionIds);
       throw error;
     } finally {
       release();
@@ -1724,8 +1732,17 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.runContinuationKeys.get(runId);
   }
 
-  async saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void> {
+  async getRunVendorSessionId(runId: string): Promise<string | undefined> {
+    return this.runVendorSessionIds.get(runId);
+  }
+
+  async saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void> {
     this.runContinuationKeys.set(runId, resumeContextKey);
+    if (vendorSessionId) this.runVendorSessionIds.set(runId, vendorSessionId);
   }
 
   async getAssumption(assumptionId: string): Promise<Assumption | undefined> {
@@ -4181,6 +4198,27 @@ export class BridgeService {
       throw new BridgeError("FORBIDDEN", "Only an agent, CI, or integration principal can start an agent run.", 403);
     }
     this.assertSecretSafe("run", input);
+    const continuationMode = input.continuationMode ?? "manual";
+    if (continuationMode === "automatic") {
+      if (
+        input.client !== "codex" ||
+        !["hooks", "orchestrated"].includes(input.capability) ||
+        !input.vendorSessionId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.vendorSessionId)
+      ) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Automatic continuation requires a Codex session UUID and hooks or orchestrated capability.",
+          422,
+        );
+      }
+    } else if (input.vendorSessionId) {
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "A vendor session ID is allowed only for automatic continuation.",
+        422,
+      );
+    }
 
     const idempotencyKey = `run:${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
     const requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
@@ -4226,6 +4264,7 @@ export class BridgeService {
       agentType: principal.type,
       client: input.client,
       capability: input.capability,
+      continuationMode,
       taskSummary: input.taskSummary,
       scope: { ...input.scope },
       status: "running",
@@ -4242,7 +4281,7 @@ export class BridgeService {
     };
     const resumeContextKey = this.resumeKey();
     await repository.saveRun(run);
-    await repository.saveRunContinuationKey(run.id, resumeContextKey);
+    await repository.saveRunContinuationKey(run.id, resumeContextKey, input.vendorSessionId);
     await repository.saveIdempotentRun(idempotencyKey, run.id, requestHash);
     await this.audit(repository, principal, projectId, "run.started", "run", run.id, timestamp);
     return { run, resumeContextKey };
@@ -6397,6 +6436,14 @@ export class BridgeService {
           ownerIds: question.ownerIds,
         },
       },
+    );
+    await this.queueAutomaticRunContinuations(
+      repository,
+      principal,
+      question.projectId,
+      question.id,
+      decision.id,
+      timestamp,
     );
     return decision;
   }
@@ -8882,6 +8929,54 @@ export class BridgeService {
         availableAt: createdAt,
         createdAt,
       });
+    }
+  }
+
+  private async queueAutomaticRunContinuations(
+    repository: BridgeRepository,
+    principal: Principal,
+    projectId: string,
+    resolvedQuestionId: string,
+    triggeringDecisionId: string,
+    createdAt: string,
+  ): Promise<void> {
+    const candidates = (await repository.listRuns(projectId)).filter((run) =>
+      run.status === "waiting_for_human" &&
+      run.continuationMode === "automatic" &&
+      run.client === "codex" &&
+      run.questionIds.includes(resolvedQuestionId));
+    for (const run of candidates) {
+      const vendorSessionId = await repository.getRunVendorSessionId(run.id);
+      if (!vendorSessionId) continue;
+      const blockingQuestions = await this.blockingQuestions(repository, run);
+      if (blockingQuestions.some((question) => ["open", "in_discussion"].includes(question.status))) continue;
+      await repository.saveOutboxEvent({
+        id: `evt_${this.id()}`,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
+        organizationId: principal.organizationId,
+        projectId,
+        type: "run.continuation_ready",
+        payload: {
+          runId: run.id,
+          client: "codex",
+          vendorSessionId,
+          triggeringDecisionId,
+          runVersion: run.version,
+        },
+        status: "pending",
+        attempts: 0,
+        availableAt: createdAt,
+        createdAt,
+      });
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "run.continuation_queued",
+        "run",
+        run.id,
+        createdAt,
+      );
     }
   }
 

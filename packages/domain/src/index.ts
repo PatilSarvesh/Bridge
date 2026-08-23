@@ -5,6 +5,7 @@ import type {
   AdapterDiagnosticMcpStatus,
   AgentRunCapability,
   AgentRunClient,
+  AgentRunContinuationMode,
   AgentRunStatus,
   AssumptionConfidence,
   AssumptionStatus,
@@ -324,6 +325,7 @@ export interface AgentRun {
   readonly agentType: PrincipalType;
   readonly client: AgentRunClient;
   readonly capability: AgentRunCapability;
+  readonly continuationMode: AgentRunContinuationMode;
   readonly taskSummary: string;
   readonly scope: Scope;
   readonly status: AgentRunStatus;
@@ -566,7 +568,19 @@ export interface QuestionReassignedOutboxPayload {
   readonly questionVersion: number;
 }
 
-export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxPayload | QuestionReassignedOutboxPayload;
+export interface RunContinuationReadyOutboxPayload {
+  readonly runId: string;
+  readonly client: "codex";
+  readonly vendorSessionId: string;
+  readonly triggeringDecisionId: string;
+  readonly runVersion: number;
+}
+
+export type OutboxPayload =
+  | NotificationOutboxPayload
+  | DecisionLifecycleOutboxPayload
+  | QuestionReassignedOutboxPayload
+  | RunContinuationReadyOutboxPayload;
 
 export interface OutboxEvent {
   readonly id: string;

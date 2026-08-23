@@ -1093,10 +1093,23 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return row?.resumeContextKey;
   }
 
-  async saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void> {
+  async getRunVendorSessionId(runId: string): Promise<string | undefined> {
+    const [row] = await this.database
+      .select({ vendorSessionId: runContinuationLocators.vendorSessionId })
+      .from(runContinuationLocators)
+      .where(eq(runContinuationLocators.runId, runId))
+      .limit(1);
+    return row?.vendorSessionId ?? undefined;
+  }
+
+  async saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void> {
     await this.database
       .insert(runContinuationLocators)
-      .values({ runId, resumeContextKey })
+      .values({ runId, resumeContextKey, vendorSessionId })
       .onConflictDoNothing({ target: runContinuationLocators.runId });
   }
 

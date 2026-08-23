@@ -25,6 +25,8 @@ pnpm dev
 
 For the repository-side controlled pilot readiness review, run `pnpm pilot:readiness` for a bounded report or `pnpm pilot:readiness -- --strict` as a deployment gate after the private staging, security, recovery, provider, and ownership evidence has been attached. The command is read-only and does not connect to PostgreSQL; strict mode returns exit code `10` while external evidence is missing. See [`docs/runbooks/pilot-readiness.md`](docs/runbooks/pilot-readiness.md).
 
+Run `pnpm retrieval:evaluate` to reproduce the BRG-130 context-quality benchmark. The checked-in synthetic dataset compares the current weighted lexical proxy with a sparse TF-IDF vector candidate using Recall@5, MRR, and nDCG@5. Both reach `1.0000` Recall@5, so the candidate's zero gain is below the predeclared `0.10` material-gain threshold and Bridge does not add vector infrastructure yet. The command is read-only, offline, and part of `pnpm check`; see [`docs/retrieval-evaluation.md`](docs/retrieval-evaluation.md).
+
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below plus the worker's explicit maintenance connection.
 
 The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, mapped least-privilege resource scopes for non-human REST/MCP access, bounded provider-group membership synchronization, the CLI can use public-client Authorization Code + PKCE with operating-system credential storage, and standalone MCP can validate bearer tokens against a dedicated OIDC audience. Successful human web sign-in and logout append tenant-scoped metadata-only organization audit events; failed or untrusted authentication attempts are never attributed to a tenant. Full MCP authorization-server provisioning, external token scope issuance, provider-backed invitations, SCIM protocol hosting, and live identity-provider validation remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
@@ -328,6 +330,8 @@ pnpm --filter @bridge/cli dev -- run report <run-id> \
 
 A blocking question atomically changes its linked run to `waiting_for_human`. Accepting the answer does not silently restart an agent session. `run continue` reports whether work can continue and which decisions were accepted; a later session explicitly creates a new linked run. The resume-context key is an opaque locator, not an authorization credential—project access is still required—and the current unauthenticated prototype must not be exposed as a production service.
 
+Codex CLI sessions can explicitly opt into the first bounded automatic-continuation adapter. Register the run with `--client codex --capability orchestrated --continuation-mode automatic --vendor-session-id <codex-session-uuid>` and configure the worker with a project-to-absolute-workspace mapping such as `BRIDGE_CODEX_PROJECT_WORKSPACES='{"prj_payments":"/srv/bridge/payments"}'`. The vendor session UUID is stored with the tenant-protected continuation locator and is excluded from ordinary run reads. After all linked blockers are accepted by humans, Bridge queues `run.continuation_ready`; the worker invokes `codex exec resume` without approval-bypass flags and records attempts/results in the existing outbox. The prompt contains only the Bridge run ID and instructions to re-check canonical continuation using the locator retained in that Codex session—never the decision body or locator itself. The worker host must already have the matching Codex session/authentication state and repository checkout. Missing configuration, command failures, approvals, and timeouts retry then dead-letter; they are never represented as successful continuation. Other clients remain manual.
+
 The remote HTTP MCP endpoint runs at `http://127.0.0.1:4100/mcp`. It intentionally refuses to start without `DATABASE_URL`; otherwise a separate MCP process would silently write to state that the API/web cannot see.
 
 ```bash
@@ -346,6 +350,7 @@ The MCP server exposes run registration/continuation, assumption recording/retri
 - [Pilot decisions](./docs/pilot-decisions.md)
 - [Technical architecture](./docs/technical-architecture.md)
 - [MVP backlog](./docs/mvp-backlog.md)
+- [Context retrieval evaluation](./docs/retrieval-evaluation.md)
 
 ## License
 

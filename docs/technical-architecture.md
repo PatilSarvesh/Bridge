@@ -808,7 +808,9 @@ Exact policy-equivalent questions are automatically reused. Semantic or merely r
 
 ### 15.5 Later retrieval enhancement
 
-Add PostgreSQL full-text/trigram indexes after corpus and latency measurements justify them. Add vector retrieval only after evaluation shows material recall improvements. Any derived search index must contain tenant scope and be rebuildable from canonical records.
+BRG-130 makes the vector threshold executable without changing production retrieval. `config/context-retrieval-evaluation.json` contains 20 synthetic Bridge-style records and 12 curated relevance queries. `pnpm retrieval:evaluate` compares a proxy of the current weighted lexical ranker with a deterministic hashed sparse TF-IDF vector while preserving the same category eligibility, authority weights, and exact-scope boosts. It reports Recall@5, MRR, nDCG@5, and per-query top-five evidence without network, database, or model access.
+
+The 2026-08-24 result is 1.0000 Recall@5 for both rankers: zero recall gain, below the predeclared 0.10 material-gain threshold. The sparse candidate improves nDCG@5 from 0.9773 to 0.9875 but does not change MRR from 1.0000. The architectural decision therefore remains: do not add a vector database, pgvector, or an embedding provider from this evidence. The synthetic benchmark is a repeatable engineering gate, not production or dense-embedding validation. Re-evaluate with privacy-reviewed labeled pilot queries that expose lexical recall failures. Any later derived search index must contain tenant scope, remain rebuildable from canonical records, and preserve lifecycle, authority, explicit-link, and scope rules.
 
 ## 16. Event and job architecture
 
@@ -929,11 +931,15 @@ Creating a linked blocking question changes the run from `running` to `waiting_f
 
 ### 18.3 Adapter-specific auto-resume
 
-Auto-resume adapters subscribe to accepted-decision events and invoke a vendor-supported continuation mechanism. Bridge records the attempt and result. Unsupported adapters notify the operator and rely on manual continuation.
+The first adapter is an explicit Codex CLI integration. A run may select `continuationMode=automatic` only with `client=codex`, `capability=hooks|orchestrated`, and a validated vendor session UUID. The vendor UUID is stored beside the tenant-protected continuation locator and is excluded from ordinary run reads. When human acceptance resolves the final linked blocking question, the same transaction appends a metadata-only `run.continuation_ready` outbox event and `run.continuation_queued` audit event. The event carries run/session identifiers and the triggering decision ID, never the decision body or Bridge continuation locator.
+
+The maintenance worker resolves an operator-configured absolute workspace for the project and invokes `codex exec resume --json <session-id> <bounded-prompt>` with `shell=false`, ignored process output, a bounded timeout, and no approval- or sandbox-bypass flags. The prompt tells the existing session to use its retained Bridge locator, re-check canonical continuation, retrieve approved context, and continue only when `canContinue=true`. Outbox attempts, processed status, sanitized failures, retry budget, and dead-letter state are the continuation attempt/result record. Process exit success means the vendor turn completed; it does not itself change the Bridge run from `waiting_for_human`, accept a decision, or prove task completion. The resumed principal must still call Bridge through its normal REST/CLI/MCP authorization boundary and explicitly report run state.
+
+Missing project mapping, unavailable local vendor session/authentication state, approval requirements, command failure, or timeout fails closed through ordinary outbox retry/dead-letter handling. Claude Code, Cursor, Copilot, custom clients, and Codex runs without explicit automatic opt-in retain the manual continuation flow. Deployment must colocate the worker with an approved checkout and the matching Codex session store; live provider conformance remains deployment evidence rather than a repository claim.
 
 ### 18.4 Current implementation checkpoint
 
-The prototype implements the manual continuation baseline across the application service, in-memory repository, PostgreSQL repository, REST, MCP, and CLI:
+The prototype implements the manual continuation baseline across the application service, in-memory repository, PostgreSQL repository, REST, MCP, and CLI, plus the explicit Codex CLI adapter described above:
 
 - Run start is idempotent and returns a metadata-only run plus a 32-byte random base64url locator.
 - Context snapshots, questions, and artifact versions are linked to a non-terminal run in the same transaction that creates them.
@@ -943,7 +949,7 @@ The prototype implements the manual continuation baseline across the application
 - The locator is stored separately from the public run record. It is currently stored as a value to allow exact replay of an idempotent start response; hashing or encryption at rest belongs to a future production identity/security slice.
 - The implementation never persists raw prompts, full outputs, transcripts, repository source, or hidden reasoning.
 
-Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; human email preferences, provider-neutral immediate/digest email, scheduled expiry/escalation, Slack delivery, and process-local worker telemetry export are implemented, while live email/provider/collector deployment evidence remains future work.
+The web application provides a read-only run list/detail, continuation-mode visibility, and source-record navigation. Manual continuation remains available for every client; only explicitly configured Codex CLI sessions receive a worker trigger. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; human email preferences, provider-neutral immediate/digest email, scheduled expiry/escalation, Slack delivery, and process-local worker telemetry export are implemented, while live Codex/email/provider/collector deployment evidence remains future work.
 
 ## 19. Audit design
 

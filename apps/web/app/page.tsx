@@ -497,6 +497,7 @@ interface AgentRun {
   readonly agentId: string;
   readonly client: string;
   readonly capability: string;
+  readonly continuationMode: "manual" | "automatic";
   readonly taskSummary: string;
   readonly scope: Readonly<Record<string, string>>;
   readonly status: "running" | "waiting_for_human" | "completed" | "failed" | "cancelled";
@@ -3964,7 +3965,7 @@ export default function Home() {
                         onClick={() => setSelectedRunId(run.id)}
                       >
                         <span className="document-mark" aria-hidden="true">↻</span>
-                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · version {run.version}</small></span>
+                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · {run.continuationMode} continuation · version {run.version}</small></span>
                         <span className={`status status-${run.status}`}>{run.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3980,6 +3981,7 @@ export default function Home() {
                         <div className="spec-meta">
                           <span>Agent: {selectedRun.agentId}</span>
                           <span>Capability: {selectedRun.capability}</span>
+                          <span>Continuation: {selectedRun.continuationMode}</span>
                           <span>Started: {new Date(selectedRun.startedAt).toLocaleString()}</span>
                           <span>Updated: {new Date(selectedRun.updatedAt).toLocaleString()}</span>
                         </div>

@@ -253,6 +253,7 @@ const run: AgentRun = {
   agentType: "agent",
   client: "codex",
   capability: "cli",
+  continuationMode: "manual",
   taskSummary: "Implement durable persistence mappings",
   scope: { repository: "bridge", component: "persistence" },
   status: "running",
@@ -1067,5 +1068,24 @@ describe("PostgreSQL domain mappings", () => {
     expect(authenticationAuditMigration).toContain("'authentication.succeeded'");
     expect(authenticationAuditMigration).toContain("'authentication.logged_out'");
     expect(authenticationAuditMigration).toContain("'principal_identity'");
+
+    const automaticContinuationMigration = readFileSync(
+      new URL("../drizzle/0046_new_thunderball.sql", import.meta.url),
+      "utf8",
+    );
+    expect(automaticContinuationMigration).toContain(
+      "ADD COLUMN \"continuation_mode\" text DEFAULT 'manual' NOT NULL",
+    );
+    expect(automaticContinuationMigration).toContain(
+      "ALTER COLUMN \"continuation_mode\" DROP DEFAULT",
+    );
+    expect(automaticContinuationMigration).toContain("bridge_agent_runs_continuation_mode_check");
+    expect(automaticContinuationMigration).toContain(
+      "ALTER TABLE \"bridge_run_continuation_locators\" ADD COLUMN \"vendor_session_id\" text",
+    );
+    expect(automaticContinuationMigration).not.toContain(
+      "ALTER TABLE \"bridge_agent_runs\" ADD COLUMN \"vendor_session_id\"",
+    );
+    expect(automaticContinuationMigration).toContain("'run.continuation_ready'");
   });
 });

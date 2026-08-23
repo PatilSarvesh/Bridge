@@ -10,6 +10,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   assumptionsDueForExpiry,
+  codexContinuationPrompt,
+  createCodexContinuationHandler,
+  createCodexWorkspaceDirectory,
   createNotificationEmailHandler,
   decisionsDueForReview,
   renderEssentialEmailTemplate,
@@ -30,6 +33,29 @@ import {
   type SlackNotificationStore,
   type SlackSendRequest,
 } from "./index.js";
+
+const codexSessionId = "123e4567-e89b-42d3-a456-426614174000";
+
+function continuationEvent(id = "evt_codex_continuation"): OutboxEvent {
+  return {
+    id,
+    correlationId: `cor_${id}`,
+    organizationId: "org_worker",
+    projectId: "prj_worker",
+    type: "run.continuation_ready",
+    payload: {
+      runId: "run_worker",
+      client: "codex",
+      vendorSessionId: codexSessionId,
+      triggeringDecisionId: "dec_worker",
+      runVersion: 2,
+    },
+    status: "pending",
+    attempts: 0,
+    availableAt: "2026-08-08T00:00:00.000Z",
+    createdAt: "2026-08-08T00:00:00.000Z",
+  };
+}
 
 class TestOutboxStore implements OutboxStore {
   constructor(readonly events: OutboxEvent[]) {}
@@ -273,6 +299,43 @@ describe("decision review reminders", () => {
     );
 
     expect(due.map((assumption) => assumption.id)).toEqual(["due"]);
+  });
+});
+
+describe("Codex automatic continuation adapter", () => {
+  it("resumes only the configured Codex session with a metadata-only authority reminder", async () => {
+    const requests: Array<{ readonly sessionId: string; readonly workspace: string; readonly prompt: string }> = [];
+    const handler = createCodexContinuationHandler({
+      workspaces: createCodexWorkspaceDirectory({ prj_worker: "/workspace/bridge" }),
+      resumer: { resume: async (request) => { requests.push(request); } },
+    });
+
+    await handler(continuationEvent());
+
+    expect(requests).toEqual([{
+      sessionId: codexSessionId,
+      workspace: "/workspace/bridge",
+      prompt: codexContinuationPrompt("run_worker"),
+    }]);
+    expect(requests[0]!.prompt).toContain("canContinue=true");
+    expect(requests[0]!.prompt).toContain("grants no approval authority");
+    expect(requests[0]!.prompt).not.toContain("dec_worker");
+  });
+
+  it("fails closed when a project workspace or event session is invalid", async () => {
+    const handler = createCodexContinuationHandler({
+      workspaces: createCodexWorkspaceDirectory({}),
+      resumer: { resume: async () => undefined },
+    });
+    await expect(handler(continuationEvent())).rejects.toThrow(
+      "No Codex continuation workspace is configured for this project.",
+    );
+    expect(() => createCodexWorkspaceDirectory({ prj_worker: "relative/path" })).toThrow(
+      "Codex continuation workspaces must be absolute paths.",
+    );
+    expect(() => codexContinuationPrompt("unsafe run id")).toThrow(
+      "The Codex continuation run ID is invalid.",
+    );
   });
 });
 

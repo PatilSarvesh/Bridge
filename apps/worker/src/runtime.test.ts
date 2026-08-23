@@ -69,6 +69,8 @@ describe("worker runtime", () => {
       baseBackoffMs: 1_000,
       maxBackoffMs: 900_000,
       retryJitterRatio: 0.25,
+      codexExecutable: "codex",
+      codexContinuationTimeoutMs: 900_000,
       metricsHost: "127.0.0.1",
       metricsPort: 4_200,
     });
@@ -96,6 +98,10 @@ describe("worker runtime", () => {
       BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
       BRIDGE_WORKER_METRICS_HOST: "http://example.test",
     })).toThrow("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS: "999",
+    })).toThrow("BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS must be between 1000 and 3600000.");
   });
 
   it("processes a cycle and stops cleanly when the worker is aborted", async () => {

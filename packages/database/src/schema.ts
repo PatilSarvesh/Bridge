@@ -1,6 +1,7 @@
 import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
+  AgentRun,
   DirectoryGroup,
   DirectoryGroupMember,
   ArtifactReview,
@@ -535,6 +536,7 @@ export const agentRuns = pgTable(
     agentType: principalTypeEnum("agent_type").notNull(),
     client: agentRunClientEnum("client").notNull(),
     capability: agentRunCapabilityEnum("capability").notNull(),
+    continuationMode: text("continuation_mode").$type<AgentRun["continuationMode"]>().notNull(),
     taskSummary: text("task_summary").notNull(),
     scope: jsonb("scope").$type<Scope>().notNull(),
     status: agentRunStatusEnum("status").notNull(),
@@ -554,6 +556,13 @@ export const agentRuns = pgTable(
   (table) => [
     index("bridge_agent_runs_project_started_idx").on(table.projectId, table.startedAt),
     index("bridge_agent_runs_project_status_idx").on(table.projectId, table.status),
+    check(
+      "bridge_agent_runs_continuation_mode_check",
+      sql`(
+        ${table.continuationMode} = 'manual' OR
+        (${table.continuationMode} = 'automatic' AND ${table.client} = 'codex' AND ${table.capability} IN ('hooks', 'orchestrated'))
+      )`,
+    ),
     tenantPolicy("bridge_agent_runs_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -600,16 +609,23 @@ export const runContinuationLocators = pgTable(
       .primaryKey()
       .references(() => agentRuns.id, { onDelete: "cascade" }),
     resumeContextKey: text("resume_context_key").notNull().unique(),
+    vendorSessionId: text("vendor_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
-  (table) => [relatedTenantPolicy(
-    "bridge_run_continuation_locators_tenant",
-    sql`exists (
-      select 1 from ${agentRuns}
-      where ${agentRuns.id} = ${table.runId}
-        and ${agentRuns.organizationId} = ${currentOrganizationId}
-    )`,
-  )],
+  (table) => [
+    check(
+      "bridge_run_continuation_locators_vendor_session_check",
+      sql`${table.vendorSessionId} IS NULL OR ${table.vendorSessionId} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    relatedTenantPolicy(
+      "bridge_run_continuation_locators_tenant",
+      sql`exists (
+        select 1 from ${agentRuns}
+        where ${agentRuns.id} = ${table.runId}
+          and ${agentRuns.organizationId} = ${currentOrganizationId}
+      )`,
+    ),
+  ],
 ).enableRLS();
 
 export const questions = pgTable(

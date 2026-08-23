@@ -1,0 +1,320 @@
+{
+  "schemaVersion": 1,
+  "evaluationId": "BRG-130",
+  "datasetVersion": "2026-08-24",
+  "description": "Synthetic Bridge-style decisions, approved specifications, assumptions, and relevance labels. Contains no customer or production content.",
+  "k": 5,
+  "hashDimensions": 1024,
+  "thresholds": {
+    "minimumCandidateRecallAtK": 0.85,
+    "minimumRecallGain": 0.1
+  },
+  "corpus": [
+    {
+      "id": "dec_payment_retry",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["reliability"],
+      "title": "Retry transient payment failures",
+      "summary": "Use exponential backoff with three attempts for retryable card processor failures; permanent declines are not retried.",
+      "body": "Retries require an idempotency key and emit an operator-visible terminal failure.",
+      "scope": { "repository": "checkout", "component": "payments" },
+      "updatedAt": "2026-08-01T10:00:00.000Z"
+    },
+    {
+      "id": "dec_idempotent_commands",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["api"],
+      "title": "Make command retries idempotent",
+      "summary": "Client command requests carry an idempotency key; reuse with a different request body returns conflict.",
+      "body": "The stored request hash and response reference prevent duplicate writes after a timeout or resend.",
+      "scope": { "repository": "control-plane", "component": "api" },
+      "updatedAt": "2026-08-02T10:00:00.000Z"
+    },
+    {
+      "id": "dec_postgres_rls",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["security", "data"],
+      "title": "Enforce PostgreSQL tenant isolation",
+      "summary": "Every tenant table uses organization-scoped row-level security and application project checks.",
+      "body": "Cross-tenant reads and writes fail closed, including when a caller guesses another project identifier.",
+      "scope": { "repository": "control-plane", "component": "database" },
+      "updatedAt": "2026-08-03T10:00:00.000Z"
+    },
+    {
+      "id": "dec_forward_migrations",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["data"],
+      "title": "Use forward-only schema migrations",
+      "summary": "Drizzle metadata and regression coverage accompany every additive PostgreSQL schema change.",
+      "body": "Existing rows receive a safe backfill before a new non-null constraint is enforced.",
+      "scope": { "repository": "control-plane", "component": "database" },
+      "updatedAt": "2026-08-04T10:00:00.000Z"
+    },
+    {
+      "id": "dec_webhook_security",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["security", "integration"],
+      "title": "Authenticate inbound webhooks",
+      "summary": "Verify provider signatures against the raw request body and reject stale delivery timestamps.",
+      "body": "Persist the provider delivery identifier to prevent replay without storing the signing secret.",
+      "scope": { "repository": "integrations", "component": "webhooks" },
+      "updatedAt": "2026-08-05T10:00:00.000Z"
+    },
+    {
+      "id": "dec_human_authority",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["governance"],
+      "title": "Keep acceptance authority human",
+      "summary": "Agents may recommend options and publish drafts, but only an authorized human accepts consequential decisions or approves specifications.",
+      "body": "Agent confidence and automation never substitute for the existing approval policy boundary.",
+      "scope": { "repository": "control-plane", "component": "governance" },
+      "updatedAt": "2026-08-06T10:00:00.000Z"
+    },
+    {
+      "id": "dec_notification_digest",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["notifications"],
+      "title": "Batch deferred email notifications",
+      "summary": "Deferred receipts due for one recipient and project are grouped into a single bounded digest message.",
+      "body": "A stable batch key makes retries idempotent while immediate protected-review delivery remains separate.",
+      "scope": { "repository": "control-plane", "component": "notifications" },
+      "updatedAt": "2026-08-07T10:00:00.000Z"
+    },
+    {
+      "id": "dec_codex_continuation",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["agent-runs"],
+      "title": "Resume opted-in Codex sessions after human resolution",
+      "summary": "Queue automatic continuation only after every linked blocking question has an accepted human decision.",
+      "body": "The worker resumes the exact vendor session without bypassing approvals and the run remains waiting until it reports state.",
+      "scope": { "repository": "control-plane", "component": "agent-runs" },
+      "updatedAt": "2026-08-08T10:00:00.000Z"
+    },
+    {
+      "id": "dec_context_snapshots",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["context"],
+      "title": "Persist context snapshot provenance",
+      "summary": "Record the exact governed item identifiers returned to an agent for each context retrieval.",
+      "body": "Snapshots explain available evidence without storing prompts, transcripts, outputs, or hidden reasoning.",
+      "scope": { "repository": "control-plane", "component": "context" },
+      "updatedAt": "2026-08-09T10:00:00.000Z"
+    },
+    {
+      "id": "dec_github_issue_sync",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["integration"],
+      "title": "Synchronize bounded GitHub issue context",
+      "summary": "Store issue identity, title, state, labels, canonical URL, and explicit guidance links.",
+      "body": "GitHub remains authoritative; Bridge does not retain issue bodies, comments, assignees, or credentials.",
+      "scope": { "repository": "integrations", "component": "github", "workItem": "github:bridge#130" },
+      "updatedAt": "2026-08-10T10:00:00.000Z"
+    },
+    {
+      "id": "dec_github_pr_sync",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["integration"],
+      "title": "Synchronize pull request context",
+      "summary": "Store pull request identity, title, state, merge status, branches, canonical URL, and explicit guidance links.",
+      "body": "No repository source, diff, review comment, or provider credential enters the canonical record.",
+      "scope": { "repository": "integrations", "component": "github" },
+      "updatedAt": "2026-08-11T10:00:00.000Z"
+    },
+    {
+      "id": "dec_audit_export",
+      "type": "decision",
+      "authority": "approved",
+      "categories": ["audit"],
+      "title": "Export privacy-minimized audit events",
+      "summary": "Organization administrators can export bounded audit metadata without question or specification content.",
+      "body": "The export records its own audit event and never grants decision authority.",
+      "scope": { "repository": "control-plane", "component": "audit" },
+      "updatedAt": "2026-08-12T10:00:00.000Z"
+    },
+    {
+      "id": "art_project_export",
+      "type": "artifact",
+      "authority": "approved",
+      "categories": ["specification", "administration"],
+      "title": "Project portability archive specification",
+      "summary": "A versioned JSON download contains project metadata, decisions, complete artifact aggregates, and project audit events.",
+      "body": "Independent bounded offsets support large exports; the archive is not a backup or restore format.",
+      "scope": { "repository": "control-plane", "component": "administration" },
+      "updatedAt": "2026-08-13T10:00:00.000Z"
+    },
+    {
+      "id": "art_spec_approval",
+      "type": "artifact",
+      "authority": "approved",
+      "categories": ["specification", "governance"],
+      "title": "Protected specification approval workflow",
+      "summary": "Immutable specification versions collect required human reviews before one version becomes approved.",
+      "body": "Publishing a new draft never silently replaces the approved version or bypasses required reviewer roles.",
+      "scope": { "repository": "control-plane", "component": "artifacts" },
+      "updatedAt": "2026-08-14T10:00:00.000Z"
+    },
+    {
+      "id": "art_recovery_runbook",
+      "type": "artifact",
+      "authority": "approved",
+      "categories": ["specification", "operations"],
+      "title": "PostgreSQL recovery verification runbook",
+      "summary": "Restore a backup into a fresh isolated database and verify schema, row counts, tenant policies, and application reads.",
+      "body": "The exercise never targets the production database and records only sanitized evidence.",
+      "scope": { "repository": "operations", "component": "recovery" },
+      "updatedAt": "2026-08-15T10:00:00.000Z"
+    },
+    {
+      "id": "art_oidc_membership",
+      "type": "artifact",
+      "authority": "approved",
+      "categories": ["specification", "authentication"],
+      "title": "OIDC identity and membership specification",
+      "summary": "Validate issuer, audience, signature, expiry, and subject before resolving active organization and project membership.",
+      "body": "External identity claims do not silently grant project roles or human approval capability.",
+      "scope": { "repository": "control-plane", "component": "authentication" },
+      "updatedAt": "2026-08-16T10:00:00.000Z"
+    },
+    {
+      "id": "asm_vector_search",
+      "type": "assumption",
+      "authority": "assumption",
+      "categories": ["context"],
+      "title": "Dense embeddings may improve paraphrase recall",
+      "summary": "A tenant-scoped vector index could retrieve semantically similar guidance with little lexical overlap.",
+      "body": "This remains reversible and unconfirmed until an evaluation shows material quality gain.",
+      "scope": { "repository": "control-plane", "component": "context" },
+      "updatedAt": "2026-08-17T10:00:00.000Z"
+    },
+    {
+      "id": "asm_retention_window",
+      "type": "assumption",
+      "authority": "assumption",
+      "categories": ["data"],
+      "title": "Pilot audit retention can be ninety days",
+      "summary": "A short reversible retention window may satisfy pilot support needs until owners confirm policy.",
+      "body": "No deletion automation is authorized by this assumption.",
+      "scope": { "repository": "control-plane", "component": "audit" },
+      "updatedAt": "2026-08-18T10:00:00.000Z"
+    },
+    {
+      "id": "asm_api_rate_limit",
+      "type": "assumption",
+      "authority": "confirmed",
+      "categories": ["api", "operations"],
+      "title": "Bound agent command request rates",
+      "summary": "Per-project limits reduce accidental question flooding while preserving human workflows.",
+      "body": "The exact deployment threshold remains configurable and observable.",
+      "scope": { "repository": "control-plane", "component": "api" },
+      "updatedAt": "2026-08-19T10:00:00.000Z"
+    },
+    {
+      "id": "asm_branch_context",
+      "type": "assumption",
+      "authority": "assumption",
+      "categories": ["context"],
+      "title": "Feature branch context should receive a ranking boost",
+      "summary": "An exact branch scope match may be useful when several approved records discuss the same component.",
+      "body": "Scope boosts are advisory and cannot change record authority.",
+      "scope": { "repository": "checkout", "component": "payments", "branch": "feature/retry" },
+      "updatedAt": "2026-08-20T10:00:00.000Z"
+    }
+  ],
+  "cases": [
+    {
+      "id": "payment-retries",
+      "task": "Handle transient card processor failures with bounded retries",
+      "scope": { "repository": "checkout", "component": "payments" },
+      "categories": [],
+      "relevantIds": ["dec_payment_retry", "dec_idempotent_commands"]
+    },
+    {
+      "id": "duplicate-command",
+      "task": "Prevent duplicate writes when a client resends a command request after timeout",
+      "scope": { "repository": "control-plane", "component": "api" },
+      "categories": ["api"],
+      "relevantIds": ["dec_idempotent_commands"]
+    },
+    {
+      "id": "tenant-data-isolation",
+      "task": "Stop one organization from reading another tenant's PostgreSQL rows",
+      "scope": { "repository": "control-plane", "component": "database" },
+      "categories": ["security", "data"],
+      "relevantIds": ["dec_postgres_rls"]
+    },
+    {
+      "id": "webhook-replay",
+      "task": "Verify webhook authenticity and reject replayed provider deliveries",
+      "scope": { "repository": "integrations", "component": "webhooks" },
+      "categories": ["security", "integration"],
+      "relevantIds": ["dec_webhook_security"]
+    },
+    {
+      "id": "human-decision-authority",
+      "task": "Who may accept a consequential recommendation produced by an agent?",
+      "scope": { "repository": "control-plane", "component": "governance" },
+      "categories": ["governance"],
+      "relevantIds": ["dec_human_authority"]
+    },
+    {
+      "id": "codex-resume",
+      "task": "Continue the same Codex session after the owner resolves every blocking question",
+      "scope": { "repository": "control-plane", "component": "agent-runs" },
+      "categories": ["agent-runs"],
+      "relevantIds": ["dec_codex_continuation"]
+    },
+    {
+      "id": "context-provenance",
+      "task": "Preserve evidence of the exact governed records shown to an agent",
+      "scope": { "repository": "control-plane", "component": "context" },
+      "categories": ["context"],
+      "relevantIds": ["dec_context_snapshots"]
+    },
+    {
+      "id": "issue-metadata-sync",
+      "task": "Synchronize GitHub issue state labels and guidance links without issue comments",
+      "scope": { "repository": "integrations", "component": "github", "workItem": "github:bridge#130" },
+      "categories": ["integration"],
+      "relevantIds": ["dec_github_issue_sync"]
+    },
+    {
+      "id": "project-portability",
+      "task": "Download project decisions specifications and audit history as a portable archive",
+      "scope": { "repository": "control-plane", "component": "administration" },
+      "categories": [],
+      "relevantIds": ["art_project_export", "dec_audit_export"]
+    },
+    {
+      "id": "specification-approval",
+      "task": "Collect required human reviews before approving an immutable specification version",
+      "scope": { "repository": "control-plane", "component": "artifacts" },
+      "categories": ["specification", "governance"],
+      "relevantIds": ["art_spec_approval"]
+    },
+    {
+      "id": "database-recovery",
+      "task": "Restore a backup into an isolated database and verify tenant policies after failure",
+      "scope": { "repository": "operations", "component": "recovery" },
+      "categories": ["specification", "operations"],
+      "relevantIds": ["art_recovery_runbook"]
+    },
+    {
+      "id": "deferred-email-summary",
+      "task": "Combine delayed notification emails for one recipient into a single summary",
+      "scope": { "repository": "control-plane", "component": "notifications" },
+      "categories": ["notifications"],
+      "relevantIds": ["dec_notification_digest"]
+    }
+  ]
+}

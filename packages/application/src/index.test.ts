@@ -2189,6 +2189,76 @@ describe("Bridge decision workflow", () => {
     expect(completed).toMatchObject({ status: "completed", version: 4 });
   });
 
+  it("queues an explicit Codex session continuation only after every blocker is human-resolved", async () => {
+    const { repository, service } = await runtime();
+    const vendorSessionId = "123e4567-e89b-42d3-a456-426614174000";
+    const registration = await service.startRun(agent, project.id, {
+      idempotencyKey: "automatic-continuation-run-001",
+      client: "codex",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+      vendorSessionId,
+      taskSummary: "Implement transfer retry handling with an orchestrated Codex session",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    expect(registration.run).toMatchObject({
+      client: "codex",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+    });
+    expect(registration.run).not.toHaveProperty("vendorSessionId");
+    expect(await repository.getRunVendorSessionId(registration.run.id)).toBe(vendorSessionId);
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "automatic-continuation-question-001",
+      runId: registration.run.id,
+    }));
+    expect(await repository.listOutboxEvents(project.id)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "run.continuation_ready" }),
+    ]));
+
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "The human owner selected bounded retries before the Codex session may continue.",
+    });
+
+    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "run.continuation_ready",
+        payload: {
+          runId: registration.run.id,
+          client: "codex",
+          vendorSessionId,
+          triggeringDecisionId: decision.id,
+          runVersion: 2,
+        },
+      }),
+    ]));
+    expect(await service.getRun(agent, registration.run.id)).toMatchObject({
+      status: "waiting_for_human",
+      continuationMode: "automatic",
+      version: 2,
+    });
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "run.continuation_queued",
+        subjectType: "run",
+        subjectId: registration.run.id,
+      }),
+    ]));
+
+    await expect(service.startRun(agent, project.id, {
+      idempotencyKey: "unsupported-automatic-continuation",
+      client: "claude_code",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+      vendorSessionId,
+      taskSummary: "Attempt unsupported automatic continuation",
+      scope: {},
+      externalLinks: [],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
   it("rolls back every related write when an atomic workflow fails", async () => {
     const repository = new FailingAuditRepository();
     await repository.saveProject(project);
