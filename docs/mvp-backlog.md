@@ -431,7 +431,7 @@ Acceptance criteria:
 
 - **Priority:** P1
 - **Size:** M
-- **Status:** Partial — deterministic pilot slice complete
+- **Status:** Implemented — exact policy-equivalent reuse plus indexed PostgreSQL full-text/trigram and dependency-free deterministic typo-tolerant related suggestions are available through REST, CLI, and optional MCP
 - **Dependencies:** BRG-030, BRG-041
 - **PRD references:** QST-07
 
@@ -447,9 +447,10 @@ Acceptance criteria:
 Implementation checkpoint:
 
 - Exact normalized, policy-equivalent unresolved questions and active accepted decisions are reused and linked to the new run.
-- Related candidates are ranked with deterministic token overlap and remain advisory.
+- PostgreSQL preselects candidates through project-scoped weighted full-text and title/context trigram expressions under forced tenant RLS; the shared application ranker combines deterministic token and character-trigram similarity with category, type, and scope signals.
+- Related candidates remain advisory and are never automatically merged.
 - REST, optional MCP, CLI, and offline unresolved-question export are implemented.
-- PostgreSQL full-text/trigram indexing and an explicit decision-reopening workflow remain follow-up work.
+- Exact policy-equivalent reuse remains an exhaustive application check so an index cannot convert a fuzzy match into automatic reuse. Intentionally reopening or replacing an accepted decision remains a separate BRG-042 lifecycle workflow.
 
 ## 12. E4 — Decisions and lifecycle
 

@@ -679,6 +679,19 @@ export const questions = pgTable(
     index("bridge_questions_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_questions_project_status_idx").on(table.projectId, table.status),
     index("bridge_questions_project_due_idx").on(table.projectId, table.dueAt),
+    index("bridge_questions_full_text_idx").using("gin", sql`(
+      setweight(to_tsvector('simple', coalesce(${table.projectId}, '')), 'D') ||
+      setweight(to_tsvector('simple', coalesce(${table.title}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${table.context}, '')), 'B')
+    )`),
+    index("bridge_questions_title_trigram_idx").using(
+      "gin",
+      sql`lower(${table.projectId} || ':' || ${table.title}) gin_trgm_ops`,
+    ),
+    index("bridge_questions_context_trigram_idx").using(
+      "gin",
+      sql`lower(${table.projectId} || ':' || ${table.context}) gin_trgm_ops`,
+    ),
     check(
       "bridge_questions_required_reviewer_quorum_shape_check",
       sql`${table.requiredReviewerQuorum} IS NOT NULL AND jsonb_typeof(${table.requiredReviewerQuorum}) = 'object'`,

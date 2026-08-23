@@ -2376,6 +2376,21 @@ describe("Bridge decision workflow", () => {
     expect(matches).toEqual([
       expect.objectContaining({ questionId: first.id, matchKind: "exact", score: 100 }),
     ]);
+    const typoMatches = await service.findQuestionMatches(agent, project.id, {
+      title: "Whcih reetry polciy sholud the wroker use?",
+      type: firstInput.type,
+      category: firstInput.category,
+      context: "The wroker needs a consitent reetry polciy for trasfer failurs.",
+      scope: firstInput.scope,
+      maxItems: 5,
+    });
+    expect(typoMatches).toEqual([
+      expect.objectContaining({
+        questionId: first.id,
+        matchKind: "related",
+        reasons: expect.arrayContaining(["similar title", "similar context"]),
+      }),
+    ]);
 
     const secondRun = await service.startRun(agent, project.id, {
       idempotencyKey: "question-match-run-002",

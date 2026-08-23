@@ -1087,5 +1087,17 @@ describe("PostgreSQL domain mappings", () => {
       "ALTER TABLE \"bridge_agent_runs\" ADD COLUMN \"vendor_session_id\"",
     );
     expect(automaticContinuationMigration).toContain("'run.continuation_ready'");
+
+    const questionSearchMigration = readFileSync(
+      new URL("../drizzle/0047_early_juggernaut.sql", import.meta.url),
+      "utf8",
+    );
+    expect(questionSearchMigration).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+    expect(questionSearchMigration).toContain("bridge_questions_full_text_idx");
+    expect(questionSearchMigration).toContain("bridge_questions_title_trigram_idx");
+    expect(questionSearchMigration).toContain("bridge_questions_context_trigram_idx");
+    expect(questionSearchMigration).toContain("gin_trgm_ops");
+    expect(questionSearchMigration).toContain("coalesce(\"project_id\", '')");
+    expect(questionSearchMigration).toContain("lower(\"project_id\" || ':' || \"title\")");
   });
 });

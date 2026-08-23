@@ -2575,6 +2575,20 @@ describe("Bridge API vertical slice", () => {
       expect.objectContaining({ questionId: firstQuestion.id, matchKind: "exact" }),
     ]);
 
+    const typoMatches = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions/matches`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        ...input,
+        title: "Which trasfer failurs sholud be retried automaticaly?",
+        context: "The trasfer wroker reetries evry faield requset without clasifying the failur.",
+      },
+    });
+    expect(typoMatches.statusCode).toBe(200);
+    expect(typoMatches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items)
+      .toEqual([expect.objectContaining({ questionId: firstQuestion.id, matchKind: "related" })]);
+
     const reused = await app.inject({
       method: "POST",
       url: `/v1/projects/${demoProject.id}/questions`,

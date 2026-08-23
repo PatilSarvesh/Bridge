@@ -519,7 +519,7 @@ Both repository implementations record events for:
 - Assumption resolution is human-only, owner/admin-only, rationale-required, and version-checked. Confirmation can link an existing active same-project decision or explicitly create an authoritative decision whose provenance is the confirmed assumption.
 - Structured question creation is idempotent.
 - Exact normalized, policy-equivalent questions in the same scope reuse an unresolved question or active accepted decision and link it to the submitting run.
-- Related question matches use deterministic token overlap and are advisory only; they are never auto-merged.
+- Related question matches use deterministic token/character-trigram similarity and are advisory only; they are never auto-merged. PostgreSQL uses project-scoped full-text/trigram expressions under forced tenant RLS for candidate selection while dependency-free mode scans the project corpus before the same application score.
 - Specification publication is idempotent.
 - Reusing an idempotency key with different content returns a conflict.
 - Agents cannot propose human answers.
@@ -956,7 +956,6 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - A live recipient directory, SES sender, digest runtime composition, and production Slack workspace/runtime; provider-neutral email/Slack contracts, preference outcomes, and digest cycle are implemented.
 - GitHub integration.
 - Live Slack/SES workspace/provider validation and deployment wiring.
-- PostgreSQL full-text/trigram question search; the current pilot matcher uses deterministic normalized token overlap over project questions.
 - Semantic duplicate detection; related matches are suggestions only and exact policy-equivalent matches are the only automatic reuse path.
 - Privacy-reviewed labeled pilot retrieval queries and a real dense-embedding comparison; the checked-in BRG-130 synthetic sparse-vector benchmark is reproducible but does not establish production recall, latency, cost, or tenant-index operations.
 - Binary attachments or S3 storage.
@@ -1072,7 +1071,7 @@ Implemented:
 
 1. A read-only match query over unresolved questions and accepted questions whose decisions remain active.
 2. Unicode-normalized exact comparison for title, context, category, type, and scope.
-3. Deterministic related ranking from title/context token overlap plus category, type, and exact-scope signals.
+3. Deterministic related ranking from the stronger of title/context token overlap or character-trigram similarity plus category, type, and exact-scope signals.
 4. Conservative 40-point related-candidate threshold and bounded result count.
 5. Automatic reuse only when the normalized question and scope match and risk, reversibility, and blocking policy are also equal.
 6. Exact unresolved reuse links the existing question to the new run and moves that run to `waiting_for_human` when appropriate.
@@ -1081,13 +1080,15 @@ Implemented:
 9. Audited `question.reused` events and atomic idempotency/run linkage inside the existing repository transaction.
 10. REST `questions/matches`, MCP `bridge_find_question_matches`, and CLI `question matches` adapters over the same service behavior.
 11. `.bridge/questions.json` export of unresolved questions plus a pending count in sync metadata for agents without MCP or outbound access.
-12. Application, REST, MCP, and CLI regression coverage, including cross-run pending and accepted reuse.
+12. PostgreSQL candidate preselection through weighted `simple` full text plus `pg_trgm` title/context similarity, backed by rebuildable GIN indexes; dependency-free mode scans the project corpus before the same final application score.
+13. Application, REST, MCP, CLI, migration-shape, and opt-in PostgreSQL regression coverage, including typo-tolerant suggestions and cross-run pending and accepted reuse.
 
 Deliberate boundaries:
 
 - Related results are hints; Bridge never merges them automatically.
-- This is deterministic lexical matching, not a claim of semantic equivalence.
-- The pilot implementation scans project questions in the repository service. PostgreSQL full-text/trigram indexes and scale evaluation remain future work.
+- This is deterministic lexical and typo-tolerant matching, not a claim of semantic equivalence.
+- Exact policy-equivalent reuse still performs the exhaustive application check; PostgreSQL candidate indexes cannot turn a fuzzy match into an automatic merge.
+- Migration `0047_early_juggernaut.sql` enables the trusted `pg_trgm` extension and adds the indexes. Operators must apply it with the explicit migration role before service startup; no application process creates extensions.
 - An exact accepted match is reused only while its Decision is active. Expired, revoked, or superseded decisions do not suppress a new question.
 - Intentionally reopening an unchanged active decision should use a future decision-review/supersession workflow rather than fabricating a duplicate question.
 - That duplicate-prevention slice required no UI change; the later fresh-project slice adds only the functional project selector while broader founder UI feedback remains deferred.
@@ -2396,6 +2397,23 @@ Deliberate boundaries:
 - PostgreSQL/REST remains the canonical context boundary and MCP remains optional. Ranking does not change record lifecycle or approval authority.
 - Reopen vector infrastructure only after a privacy-reviewed labeled pilot dataset demonstrates lexical recall failures and a real candidate clears the declared quality threshold while preserving tenant, lifecycle, authority, explicit-link, and scope rules.
 
+### 20.85 Completed indexed typo-tolerant duplicate-question discovery (BRG-035 / QST-07)
+
+Implemented and locally verified:
+
+1. The repository boundary now has a dedicated question-match candidate query. PostgreSQL filters only the authorized transaction's project rows in `open`, `in_discussion`, or `accepted` state using a weighted `simple` title/context text vector plus title and context trigram similarity.
+2. The application remains authoritative for lifecycle checks, active accepted-decision checks, exact normalized comparison, explainable scoring, and the conservative result threshold. In-memory mode returns the project corpus to that same scorer.
+3. Related scoring uses the stronger of Unicode-normalized token Jaccard similarity and deterministic character-trigram Dice similarity, so bounded typographical errors can produce an advisory candidate without claiming semantic equivalence.
+4. Automatic reuse is unchanged and stricter: it exhaustively checks normalized title/context/category/type/scope plus risk, policy action, reversibility, blocking, due date, routing, and reviewer requirements. A full-text or trigram candidate can never trigger automatic reuse by itself.
+5. Forward-only migration `0047_early_juggernaut.sql` explicitly enables `pg_trgm` and adds one project-scoped weighted full-text and two project-scoped trigram GIN indexes. Matching Drizzle metadata and static migration coverage are included; no database connection or migration command was run.
+6. Application and canonical REST regressions cover typo-tolerant related results. The opt-in PostgreSQL reconnect regression exercises the indexed candidate path only when `BRIDGE_TEST_DATABASE_URL` names an explicitly isolated database.
+
+Deliberate boundaries:
+
+- This completes BRG-035's duplicate-suggestion acceptance criteria, not semantic matching, embeddings, or automatic merging of similar records. BRG-130 continues to reject vector infrastructure on current evidence.
+- An operator's migration role must be allowed to install the trusted `pg_trgm` extension. API, web, worker, CLI, and MCP startup never run migrations or extension commands.
+- Intentionally revisiting an accepted decision uses the existing human lifecycle/supersession boundary rather than fabricating or automatically reopening a question. REST remains canonical and MCP remains optional.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2468,6 +2486,7 @@ Deliberate boundaries:
 - Directory group/provenance migration: `packages/database/drizzle/0044_marvelous_lockjaw.sql`
 - Directory group tenant-composite constraint migration: `packages/database/drizzle/0045_short_mercury.sql`
 - Codex automatic-continuation migration: `packages/database/drizzle/0046_new_thunderball.sql`
+- Indexed question-match migration: `packages/database/drizzle/0047_early_juggernaut.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -2522,4 +2541,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, indexed typo-tolerant duplicate-question suggestions with exact policy-safe reuse, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.

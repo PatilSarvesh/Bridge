@@ -782,21 +782,21 @@ Persist the IDs and versions returned to an agent run. This makes it possible to
 
 - Eligible candidates are unresolved questions and accepted questions whose decisions remain active.
 - Exact comparison uses Unicode normalization, case/punctuation folding, category, type, and exact scope.
-- Related scoring uses deterministic title/context token overlap plus category, type, and scope signals.
+- Related scoring uses the stronger of deterministic title/context token overlap and character-trigram similarity plus category, type, and scope signals.
 - Results include the question ID, lifecycle state, decision ID when present, scope, score, match kind, and explainable reasons.
-- The current repository-service scan is appropriate for the pilot corpus and keeps behavior identical in memory and PostgreSQL.
+- PostgreSQL preselects candidates with a weighted `simple` full-text query and `pg_trgm` title/context similarity over tenant-scoped rows. Matching GIN indexes are rebuildable from canonical question text. Dependency-free mode scans the bounded project corpus, and both paths use the same final application scorer.
 
 ### 15.2 Duplicate suggestion
 
 The read-only match query and question-creation guard perform a bounded pre-check:
 
 1. Compare normalized title and context within category, type, and exact scope.
-2. Rank related lexical candidates above the conservative threshold.
+2. Rank related lexical or typo-tolerant candidates above the conservative threshold.
 3. Return active accepted decisions and unresolved questions.
 4. On creation, require risk, reversibility, and blocking policy to match before exact reuse.
 5. Atomically link a reused question to the new run and preserve the existing human review/decision path.
 
-Exact policy-equivalent questions are automatically reused. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
+Exact policy-equivalent questions are automatically reused through an exhaustive application check rather than the fuzzy candidate index. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
 
 ### 15.3 Role-aware question presentation
 

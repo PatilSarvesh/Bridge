@@ -463,6 +463,16 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         scope: { component: "persistence" },
       });
       questionId = question.id;
+      await expect(service.findQuestionMatches(agent, project.id, {
+        title: "Which durabel reposittory sholud Brigde use for this projet?",
+        type: "decision",
+        category: "architecture",
+        context: "The integratoin test must presrve acepted contex after reconecting.",
+        scope: { component: "persistence" },
+        maxItems: 5,
+      })).resolves.toEqual([
+        expect.objectContaining({ questionId, matchKind: "related" }),
+      ]);
       const decision = await service.acceptAnswer(owner, question.id, {
         optionKey: "postgres",
         rationale: "PostgreSQL provides durable transactions and concurrency controls.",

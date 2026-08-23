@@ -1,4 +1,8 @@
-import type { BridgeRepository, RepositoryTransactionContext } from "@bridge/application";
+import type {
+  BridgeRepository,
+  QuestionMatchCandidateQuery,
+  RepositoryTransactionContext,
+} from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
 import {
   type BridgeMetrics,
@@ -125,6 +129,15 @@ import {
   projectPolicyConfigurations,
   serviceCredentials,
 } from "./schema.js";
+
+function questionSearchTsQuery(value: string): string {
+  const lexemes = value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en")
+    .split(/[^\p{L}\p{N}_]+/gu)
+    .filter((lexeme) => lexeme.length > 0 && lexeme.length <= 100);
+  return [...new Set(lexemes)].slice(0, 128).join(" | ") || "__bridge_no_match__";
+}
 
 type BridgeDatabase = PostgresJsDatabase<typeof schema>;
 type IdempotencyKind = (typeof schema.idempotencyKindEnum.enumValues)[number];
@@ -1188,6 +1201,50 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .from(questions)
       .where(eq(questions.projectId, projectId))
       .orderBy(desc(questions.createdAt));
+    if (rows.length === 0) return [];
+    const responses = await this.database
+      .select()
+      .from(questionResponses)
+      .where(inArray(questionResponses.questionId, rows.map((row) => row.id)))
+      .orderBy(asc(questionResponses.createdAt));
+    return rows.map((row) => questionFromRows(row, responses));
+  }
+
+  async searchQuestionMatchCandidates(
+    projectId: string,
+    candidateQuery: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]> {
+    const searchText = `${candidateQuery.title} ${candidateQuery.context}`;
+    const tsQuery = questionSearchTsQuery(searchText);
+    const document = sql`(
+      setweight(to_tsvector('simple', coalesce(${questions.projectId}, '')), 'D') ||
+      setweight(to_tsvector('simple', coalesce(${questions.title}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${questions.context}, '')), 'B')
+    )`;
+    const query = sql`to_tsquery('simple', ${tsQuery})`;
+    const projectQuery = sql`plainto_tsquery('simple', ${projectId})`;
+    const scopedTitle = `${projectId}:${candidateQuery.title}`;
+    const scopedContext = `${projectId}:${candidateQuery.context}`;
+    const rows = await this.database
+      .select()
+      .from(questions)
+      .where(and(
+        eq(questions.projectId, projectId),
+        inArray(questions.status, ["open", "in_discussion", "accepted"]),
+        or(
+          sql`${document} @@ (${projectQuery} && ${query})`,
+          sql`lower(${questions.projectId} || ':' || ${questions.title}) % lower(${scopedTitle})`,
+          sql`lower(${questions.projectId} || ':' || ${questions.context}) % lower(${scopedContext})`,
+        ),
+      ))
+      .orderBy(
+        desc(sql<number>`greatest(
+          ts_rank_cd(${document}, ${query}),
+          similarity(lower(${questions.title}), lower(${candidateQuery.title})),
+          similarity(lower(${questions.context}), lower(${candidateQuery.context}))
+        )`),
+        desc(questions.createdAt),
+      );
     if (rows.length === 0) return [];
     const responses = await this.database
       .select()

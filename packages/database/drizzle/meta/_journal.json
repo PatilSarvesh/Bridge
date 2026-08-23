@@ -330,6 +330,13 @@
       "when": 1787512293035,
       "tag": "0046_new_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787513324572,
+      "tag": "0047_early_juggernaut",
+      "breakpoints": true
     }
   ]
 }

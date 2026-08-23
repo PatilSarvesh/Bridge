@@ -244,6 +244,10 @@ export interface BridgeRepository {
   saveIdempotentAssumption(key: string, assumptionId: string, requestHash: string): Promise<void>;
   getQuestion(questionId: string): Promise<Question | undefined>;
   listQuestions(projectId: string): Promise<readonly Question[]>;
+  searchQuestionMatchCandidates(
+    projectId: string,
+    query: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]>;
   saveQuestion(question: Question): Promise<void>;
   findIdempotentQuestion(key: string): Promise<Question | undefined>;
   saveIdempotentQuestion(key: string, questionId: string, requestHash: string): Promise<void>;
@@ -912,6 +916,11 @@ export interface QuestionMatch {
   readonly matchKind: "exact" | "related";
   readonly reasons: readonly string[];
   readonly createdAt: string;
+}
+
+export interface QuestionMatchCandidateQuery {
+  readonly title: string;
+  readonly context: string;
 }
 
 export interface QuestionAudienceView {
@@ -1784,6 +1793,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return [...this.questions.values()]
       .filter((question) => question.projectId === projectId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async searchQuestionMatchCandidates(
+    projectId: string,
+    _query: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]> {
+    return this.listQuestions(projectId);
   }
 
   async saveQuestion(question: Question): Promise<void> {
@@ -5069,7 +5085,7 @@ export class BridgeService {
     projectId: string,
     input: FindQuestionMatchesInput,
   ): Promise<readonly QuestionMatch[]> {
-    const questions = await repository.listQuestions(projectId);
+    const questions = await repository.searchQuestionMatchCandidates(projectId, input);
     const matches: QuestionMatch[] = [];
     for (const question of questions) {
       if (!["open", "in_discussion", "accepted"].includes(question.status)) continue;
@@ -5080,8 +5096,14 @@ export class BridgeService {
         if (!decision || decision.status !== "active") continue;
       }
 
-      const titleSimilarity = this.tokenSimilarity(input.title, question.title);
-      const contextSimilarity = this.tokenSimilarity(input.context, question.context);
+      const titleSimilarity = Math.max(
+        this.tokenSimilarity(input.title, question.title),
+        this.trigramSimilarity(input.title, question.title),
+      );
+      const contextSimilarity = Math.max(
+        this.tokenSimilarity(input.context, question.context),
+        this.trigramSimilarity(input.context, question.context),
+      );
       const sameCategory = this.normalizeQuestionText(input.category) ===
         this.normalizeQuestionText(question.category);
       const sameType = input.type === question.type;
@@ -5229,6 +5251,23 @@ export class BridgeService {
     const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
     const union = new Set([...leftTokens, ...rightTokens]).size;
     return intersection / union;
+  }
+
+  private trigramSimilarity(left: string, right: string): number {
+    const trigrams = (value: string): Set<string> => {
+      const normalized = `  ${this.normalizeQuestionText(value)} `;
+      const characters = Array.from(normalized);
+      if (characters.length <= 3) return new Set([normalized]);
+      return new Set(Array.from(
+        { length: characters.length - 2 },
+        (_, index) => characters.slice(index, index + 3).join(""),
+      ));
+    };
+    const leftTrigrams = trigrams(left);
+    const rightTrigrams = trigrams(right);
+    if (leftTrigrams.size === 0 || rightTrigrams.size === 0) return 0;
+    const overlap = [...leftTrigrams].filter((trigram) => rightTrigrams.has(trigram)).length;
+    return (2 * overlap) / (leftTrigrams.size + rightTrigrams.size);
   }
 
   async listQuestions(principal: Principal, projectId: string): Promise<readonly QuestionInboxItem[]> {
