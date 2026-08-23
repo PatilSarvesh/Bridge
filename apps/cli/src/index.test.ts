@@ -10,6 +10,7 @@ import { cliExitCodes, isCliEntrypoint, runCli, type CliRuntime } from "./index.
 interface MockState {
   question: Record<string, unknown>;
   artifacts: Array<Record<string, unknown>>;
+  artifactRequestBodies?: Array<Record<string, unknown>>;
   assumptions: Array<Record<string, unknown>>;
   projects?: Array<Record<string, unknown>>;
   serviceIdentities?: Array<Record<string, unknown>>;
@@ -261,6 +262,7 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
     if (url.pathname === "/v1/assumptions/asm_cli_1") return json(state.assumptions[0]);
     if (url.pathname.endsWith("/artifacts") && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      state.artifactRequestBodies = [...(state.artifactRequestBodies ?? []), body];
       const artifact = {
         id: "art_cli_1",
         projectId: "prj_payments",
@@ -1196,8 +1198,21 @@ describe("Bridge CLI fallback adapter", () => {
       "Transfer retry policy",
       "--type",
       "adr",
+      "--reviewers",
+      "usr_architect",
+      "--reviewer-roles",
+      "qa-lead,architecture-reviewer",
+      "--reviewer-teams",
+      "architecture",
     ], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain("art_cli_1");
+    expect(state.artifactRequestBodies).toEqual([
+      expect.objectContaining({
+        intendedReviewerIds: ["usr_architect"],
+        intendedReviewerRoles: ["qa-lead", "architecture-reviewer"],
+        intendedReviewerTeamKeys: ["architecture"],
+      }),
+    ]);
 
     const current = state.artifacts[0]?.versions as Array<Record<string, unknown>>;
     if (current?.[0]) {

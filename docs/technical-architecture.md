@@ -482,6 +482,8 @@ If any step fails, no partial acceptance is visible.
 
 ### 11.2 Approve artifact version
 
+Artifact publication accepts optional direct reviewer IDs, project roles, and configured team keys through the canonical REST contract. The application resolves these targets from the current active human organization/project directory, expands role and team membership, removes duplicates, and persists concrete reviewer IDs. When publication has no explicit target, an existing artifact retains its active reviewers; a new artifact uses the first matching scoped or project-default ownership reviewer rule and then the project decision owners as a fallback. Unknown teams, inaccessible/non-human direct targets, and target sets that resolve to no active human fail before the artifact is written. The CLI exposes the same contract, and optional MCP publication reuses it without creating a separate authority path.
+
 1. Lock the artifact and proposed current version.
 2. Confirm review and approval requirements, including that no append-only `changes_requested` review exists on this exact version.
 3. Confirm approver authority.

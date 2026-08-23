@@ -255,6 +255,41 @@ async function seedOwnershipMembers(repository: InMemoryBridgeRepository): Promi
   }
 }
 
+async function seedProjectMember(
+  repository: InMemoryBridgeRepository,
+  principal: Principal,
+): Promise<void> {
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  await repository.savePrincipalIdentity({
+    id: principal.id,
+    type: principal.type,
+    displayName: principal.displayName,
+    oidcIssuer: "https://identity.example/",
+    oidcSubject: `auth0|${principal.id}`,
+    createdAt: timestamp,
+  });
+  await repository.saveOrganizationMembership({
+    organizationId: project.organizationId,
+    principalId: principal.id,
+    status: "active",
+    roles: principal.roles,
+    allProjects: principal.allProjects ?? false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+  });
+  await repository.saveProjectMembership({
+    organizationId: project.organizationId,
+    projectId: project.id,
+    principalId: principal.id,
+    status: "active",
+    roles: principal.roles,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+  });
+}
+
 class FailingAuditRepository extends InMemoryBridgeRepository {
   failAction: string | undefined;
 
@@ -3152,6 +3187,85 @@ describe("Bridge decision workflow", () => {
         body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
       }),
     ]);
+  });
+
+  it("resolves specification reviewers from direct users, roles, teams, and scoped ownership", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    await seedProjectMember(repository, architectureReviewer);
+    await service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      roles: [
+        { name: "QA Lead", description: "Reviews quality and test implications." },
+        { name: "Architecture Reviewer", description: "Reviews system architecture." },
+      ],
+      teams: [{
+        key: "Architecture",
+        name: "Architecture",
+        memberIds: [architectureReviewer.id],
+      }],
+      rules: [{
+        key: "transfer-specification-review",
+        name: "Transfer specification review",
+        priority: 10,
+        component: "transfers",
+        owners: { principalIds: [], roles: [], teamKeys: [] },
+        reviewers: { principalIds: [], roles: ["qa-lead"], teamKeys: ["architecture"] },
+      }],
+    });
+
+    const explicit = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-explicit",
+      intendedReviewerIds: [owner.id],
+      intendedReviewerRoles: ["QA Lead"],
+      intendedReviewerTeamKeys: ["Architecture"],
+    }));
+    expect(explicit.artifact.reviewerIds).toEqual([
+      architectureReviewer.id,
+      owner.id,
+      qaLead.id,
+    ].sort((left, right) => left.localeCompare(right)));
+
+    const routed = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-rule",
+      title: "Transfer delivery contract",
+      intendedReviewerIds: [],
+    }));
+    expect(routed.artifact.reviewerIds).toEqual([
+      architectureReviewer.id,
+      qaLead.id,
+    ].sort((left, right) => left.localeCompare(right)));
+    expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id))
+      .toHaveLength(2);
+    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id))
+      .toHaveLength(2);
+  });
+
+  it("rejects specification reviewer targets that cannot resolve to active project humans", async () => {
+    const { repository, service } = await runtime();
+    await seedOwnershipMembers(repository);
+    await service.replaceProjectOwnershipConfiguration(owner, project.id, {
+      expectedVersion: 0,
+      roles: [],
+      teams: [],
+      rules: [],
+    });
+
+    await expect(service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-invalid-user",
+      intendedReviewerIds: [agent.id],
+    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-invalid-team",
+      intendedReviewerIds: [],
+      intendedReviewerTeamKeys: ["missing-team"],
+    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-empty-role",
+      intendedReviewerIds: [],
+      intendedReviewerRoles: ["architecture-reviewer"],
+    }))).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+    expect(await repository.listArtifacts(project.id)).toEqual([]);
   });
 
   it("bounds large specification diffs without changing immutable content", async () => {

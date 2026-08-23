@@ -728,6 +728,8 @@ export const publishArtifactInputSchema = z.object({
   summary: z.string().trim().min(10).max(4_000),
   body: z.string().trim().min(20).max(262_144),
   intendedReviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  intendedReviewerRoles: z.array(ownerRoleSchema).max(20).optional(),
+  intendedReviewerTeamKeys: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
   citedDecisionIds: z.array(z.string().trim().min(1).max(100)).max(100).default([]),
   requestReview: z.boolean().default(true),
   scope: scopeSchema.default({}),

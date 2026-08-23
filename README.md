@@ -293,6 +293,8 @@ pnpm --filter @bridge/cli dev -- spec publish \
   --title "Transfer retry policy" \
   --type adr \
   --run-id <run-id> \
+  --reviewer-roles architecture-reviewer \
+  --reviewer-teams architecture \
   --component transfers
 
 # Pull only human-approved specification versions into the repository

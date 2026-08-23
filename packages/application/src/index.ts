@@ -5377,6 +5377,12 @@ export class BridgeService {
       ? await this.requireLinkableRun(principal, input.runId, repository)
       : undefined;
     const artifactId = existingArtifact?.id ?? `art_${this.id()}`;
+    const reviewerIds = await this.resolveArtifactReviewers(
+      repository,
+      project,
+      input,
+      existingArtifact,
+    );
     const version: ArtifactVersion = {
       id: `av_${this.id()}`,
       artifactId,
@@ -5397,10 +5403,7 @@ export class BridgeService {
           ...existingArtifact,
           title: input.title,
           scope: { ...input.scope },
-          reviewerIds:
-            input.intendedReviewerIds.length > 0
-              ? [...input.intendedReviewerIds]
-              : existingArtifact.reviewerIds,
+          reviewerIds,
           currentVersionId: version.id,
           versions: [...existingArtifact.versions, version],
         }
@@ -5411,10 +5414,7 @@ export class BridgeService {
           title: input.title,
           type: input.type,
           scope: { ...input.scope },
-          reviewerIds:
-            input.intendedReviewerIds.length > 0
-              ? [...input.intendedReviewerIds]
-              : [...project.decisionOwnerIds],
+          reviewerIds,
           createdById: principal.id,
           createdByType: principal.type,
           createdAt: timestamp,
@@ -5454,6 +5454,119 @@ export class BridgeService {
       });
     }
     return { artifact, version };
+  }
+
+  private async resolveArtifactReviewers(
+    repository: BridgeRepository,
+    project: Project,
+    input: PublishArtifactInput,
+    existingArtifact?: Artifact,
+  ): Promise<readonly string[]> {
+    const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: [],
+      teams: [],
+      rules: [],
+      version: 0,
+    };
+    const directory = (await repository.listOrganizationPrincipals(project.organizationId))
+      .filter((candidate) => {
+        if (candidate.type !== "human") return false;
+        try {
+          assertProjectAccess(candidate, project);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    const activeHumans = new Map(directory.map((candidate) => [candidate.id, candidate]));
+    const explicitIds = [...new Set(input.intendedReviewerIds)];
+    const explicitRoles = this.normalizedRoles(input.intendedReviewerRoles ?? []);
+    const explicitTeamKeys = [...new Set(
+      (input.intendedReviewerTeamKeys ?? []).map(normalizeRoleName).filter(Boolean),
+    )];
+    const hasExplicitTargets = explicitIds.length + explicitRoles.length + explicitTeamKeys.length > 0;
+
+    if (activeHumans.size > 0) {
+      for (const reviewerId of explicitIds) {
+        if (!activeHumans.has(reviewerId)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Specification reviewers must be active human members with access to this project.",
+            422,
+            { reviewerId },
+          );
+        }
+      }
+    }
+
+    const teamMembers = new Map(ownership.teams.map((team) => [team.key, team.memberIds]));
+    for (const teamKey of explicitTeamKeys) {
+      if (!teamMembers.has(teamKey)) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Specification reviewer teams must reference a configured project team.",
+          422,
+          { teamKey },
+        );
+      }
+    }
+
+    const resolveTargets = (
+      principalIds: readonly string[],
+      roles: readonly string[],
+      teamKeys: readonly string[],
+    ): readonly string[] => {
+      const resolved = new Set([
+        ...principalIds,
+        ...teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? []),
+      ]);
+      for (const candidate of directory) {
+        if (roles.some((role) => principalHasRole(candidate, role, project.id))) {
+          resolved.add(candidate.id);
+        }
+      }
+      if (activeHumans.size === 0) return [...resolved];
+      return [...resolved].filter((reviewerId) => activeHumans.has(reviewerId));
+    };
+
+    if (hasExplicitTargets) {
+      const resolved = resolveTargets(explicitIds, explicitRoles, explicitTeamKeys);
+      if (resolved.length === 0) {
+        throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
+      }
+      return [...resolved].sort((left, right) => left.localeCompare(right));
+    }
+
+    if (existingArtifact) {
+      const current = activeHumans.size === 0
+        ? existingArtifact.reviewerIds
+        : existingArtifact.reviewerIds.filter((reviewerId) => activeHumans.has(reviewerId));
+      if (current.length > 0) return [...new Set(current)].sort((left, right) => left.localeCompare(right));
+    }
+
+    const matchingRules = ownership.rules
+      .filter((rule) => !rule.category && this.ownershipRuleMatches(rule, "", input.scope))
+      .sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
+    const reviewerRule = matchingRules.find((rule) =>
+      this.ownershipRouteSource(rule) === "scoped_ownership" && this.ownershipTargetCount(rule.reviewers) > 0) ??
+      matchingRules.find((rule) =>
+        this.ownershipRouteSource(rule) === "project_default" && this.ownershipTargetCount(rule.reviewers) > 0);
+    if (reviewerRule) {
+      const resolved = resolveTargets(
+        reviewerRule.reviewers.principalIds,
+        reviewerRule.reviewers.roles,
+        reviewerRule.reviewers.teamKeys,
+      );
+      if (resolved.length > 0) return [...resolved].sort((left, right) => left.localeCompare(right));
+    }
+
+    const fallback = resolveTargets(project.decisionOwnerIds, [], []);
+    if (fallback.length === 0) {
+      throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
+    }
+    return [...fallback].sort((left, right) => left.localeCompare(right));
   }
 
   async listArtifacts(principal: Principal, projectId: string): Promise<readonly Artifact[]> {

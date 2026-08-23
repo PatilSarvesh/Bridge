@@ -2694,6 +2694,8 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
         summary,
         body,
         intendedReviewerIds: (optionValue(args, "--reviewers") ?? "").split(",").filter(Boolean),
+        intendedReviewerRoles: (optionValue(args, "--reviewer-roles") ?? "").split(",").filter(Boolean),
+        intendedReviewerTeamKeys: (optionValue(args, "--reviewer-teams") ?? "").split(",").filter(Boolean),
         citedDecisionIds: (optionValue(args, "--decisions") ?? "").split(",").filter(Boolean),
         requestReview: !args.includes("--draft"),
         scope: Object.fromEntries(
