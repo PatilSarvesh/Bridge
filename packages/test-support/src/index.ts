@@ -270,6 +270,7 @@ The transfer worker needs a bounded, observable retry policy that does not retry
 
 Classify failures before retrying and use bounded exponential backoff with idempotency keys.`,
       intendedReviewerIds: [demoPrincipals.architect.id],
+      requiredApprovals: 1,
       citedDecisionIds: [],
       requestReview: true,
       scope: {

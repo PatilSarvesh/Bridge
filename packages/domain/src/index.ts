@@ -642,10 +642,21 @@ export interface ArtifactVersion {
   readonly createdByType: PrincipalType;
   readonly createdAt: string;
   readonly reviews: readonly ArtifactReview[];
+  readonly requiredApprovals: number;
+  readonly approvalStatus: ArtifactApprovalStatus;
   readonly runId?: string;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+export interface ArtifactApprovalStatus {
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly remainingCount: number;
+  readonly status: "pending" | "blocked" | "satisfied";
+  readonly satisfied: boolean;
+  readonly reviewerIds: readonly string[];
 }
 
 export interface ArtifactReview {
@@ -656,6 +667,36 @@ export interface ArtifactReview {
   readonly status: ArtifactReviewStatus;
   readonly body: string;
   readonly createdAt: string;
+}
+
+export function artifactApprovalStatus(
+  version: Pick<ArtifactVersion, "requiredApprovals" | "reviews" | "status"> &
+    Pick<Partial<ArtifactVersion>, "approvedById">,
+): ArtifactApprovalStatus {
+  const approvedReviewerIds = new Set(
+    version.reviews
+      .filter((review) => review.status === "approved" && review.reviewerType === "human")
+      .map((review) => review.reviewerId),
+  );
+  if (
+    approvedReviewerIds.size === 0 &&
+    version.approvedById &&
+    ["approved", "superseded"].includes(version.status)
+  ) {
+    approvedReviewerIds.add(version.approvedById);
+  }
+  const reviewerIds = [...approvedReviewerIds].sort((left, right) => left.localeCompare(right));
+  const blocked = version.reviews.some((review) => review.status === "changes_requested");
+  const approvedCount = reviewerIds.length;
+  const satisfied = !blocked && approvedCount >= version.requiredApprovals;
+  return {
+    requiredCount: version.requiredApprovals,
+    approvedCount,
+    remainingCount: Math.max(0, version.requiredApprovals - approvedCount),
+    status: blocked ? "blocked" : satisfied ? "satisfied" : "pending",
+    satisfied,
+    reviewerIds,
+  };
 }
 
 export interface Artifact {

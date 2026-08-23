@@ -1,30 +1,31 @@
-import type {
-  AdapterDiagnostic,
-  AgentRun,
-  Assumption,
-  Artifact,
-  ArtifactVersion,
-  AuditEvent,
-  ContextSnapshot,
-  Decision,
-  Notification,
-  NotificationPreference,
-  Organization,
-  OrganizationAuditEvent,
-  OrganizationMembership,
-  OutboxDelivery,
-  OutboxEvent,
-  PrincipalIdentity,
-  Project,
-  ProjectMembership,
-  ProjectOwnershipConfiguration,
-  ProjectPolicyConfiguration,
-  QuestionApprovalOverride,
-  QuestionLink,
-  RepositoryRecord,
-  Question,
-  QuestionResponse,
-  ServiceCredential,
+import {
+  artifactApprovalStatus,
+  type AdapterDiagnostic,
+  type AgentRun,
+  type Assumption,
+  type Artifact,
+  type ArtifactVersion,
+  type AuditEvent,
+  type ContextSnapshot,
+  type Decision,
+  type Notification,
+  type NotificationPreference,
+  type Organization,
+  type OrganizationAuditEvent,
+  type OrganizationMembership,
+  type OutboxDelivery,
+  type OutboxEvent,
+  type PrincipalIdentity,
+  type Project,
+  type ProjectMembership,
+  type ProjectOwnershipConfiguration,
+  type ProjectPolicyConfiguration,
+  type QuestionApprovalOverride,
+  type QuestionLink,
+  type RepositoryRecord,
+  type Question,
+  type QuestionResponse,
+  type ServiceCredential,
 } from "@bridge/domain";
 
 import {
@@ -743,6 +744,7 @@ export function artifactVersionToRow(
     createdByType: version.createdByType,
     createdAt: version.createdAt,
     reviews: version.reviews,
+    requiredApprovals: version.requiredApprovals,
     runId: version.runId ?? null,
     approvedById: version.approvedById ?? null,
     approvalRationale: version.approvalRationale ?? null,
@@ -751,7 +753,7 @@ export function artifactVersionToRow(
 }
 
 export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion {
-  return {
+  const version = {
     id: row.id,
     artifactId: row.artifactId,
     version: row.version,
@@ -764,11 +766,13 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
     createdByType: row.createdByType,
     createdAt: row.createdAt,
     reviews: row.reviews,
+    requiredApprovals: row.requiredApprovals,
     ...(row.runId === null ? {} : { runId: row.runId }),
     ...(row.approvedById === null ? {} : { approvedById: row.approvedById }),
     ...(row.approvalRationale === null ? {} : { approvalRationale: row.approvalRationale }),
     ...(row.approvedAt === null ? {} : { approvedAt: row.approvedAt }),
   };
+  return { ...version, approvalStatus: artifactApprovalStatus(version) };
 }
 
 export function artifactFromRows(

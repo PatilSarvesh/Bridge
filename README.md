@@ -295,6 +295,7 @@ pnpm --filter @bridge/cli dev -- spec publish \
   --run-id <run-id> \
   --reviewer-roles architecture-reviewer \
   --reviewer-teams architecture \
+  --required-approvals 2 \
   --component transfers
 
 # Pull only human-approved specification versions into the repository

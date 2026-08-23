@@ -1204,6 +1204,8 @@ describe("Bridge CLI fallback adapter", () => {
       "qa-lead,architecture-reviewer",
       "--reviewer-teams",
       "architecture",
+      "--required-approvals",
+      "2",
     ], runtime)).toBe(0);
     expect(stdout.at(-1)).toContain("art_cli_1");
     expect(state.artifactRequestBodies).toEqual([
@@ -1211,6 +1213,7 @@ describe("Bridge CLI fallback adapter", () => {
         intendedReviewerIds: ["usr_architect"],
         intendedReviewerRoles: ["qa-lead", "architecture-reviewer"],
         intendedReviewerTeamKeys: ["architecture"],
+        requiredApprovals: 2,
       }),
     ]);
 

@@ -191,7 +191,7 @@ Usage:
   bridge assumption list [project-id]
   bridge assumption resolve <assumption-id> --status <status> --version <number> --rationale <text> [--decision-id <id> | --create-decision] [--superseding-id <id>]
   bridge sync [project-id] [--task <description>] [--run-id <id>]
-  bridge spec publish [project-id] --file <spec.md> --title <title> --type <prd|adr|api_contract|test_plan> [--run-id <id>]
+  bridge spec publish [project-id] --file <spec.md> --title <title> --type <prd|adr|api_contract|test_plan> [--run-id <id>] [--reviewers <ids>] [--reviewer-roles <roles>] [--reviewer-teams <teams>] [--required-approvals <count>]
   bridge spec get <artifact-id>
   bridge spec pull [project-id] [--out <directory>]
 
@@ -2696,6 +2696,7 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
         intendedReviewerIds: (optionValue(args, "--reviewers") ?? "").split(",").filter(Boolean),
         intendedReviewerRoles: (optionValue(args, "--reviewer-roles") ?? "").split(",").filter(Boolean),
         intendedReviewerTeamKeys: (optionValue(args, "--reviewer-teams") ?? "").split(",").filter(Boolean),
+        requiredApprovals: Number(optionValue(args, "--required-approvals") ?? 1),
         citedDecisionIds: (optionValue(args, "--decisions") ?? "").split(",").filter(Boolean),
         requestReview: !args.includes("--draft"),
         scope: Object.fromEntries(

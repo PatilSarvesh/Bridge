@@ -2554,7 +2554,8 @@ describe("Bridge API vertical slice", () => {
         type: "adr",
         summary: "Defines bounded retry behavior for transient transfer failures.",
         body: "# Transfer retry policy\n\nRetry transient failures using bounded exponential backoff and idempotency keys.",
-        intendedReviewerIds: [demoPrincipals.architect.id],
+        intendedReviewerIds: [demoPrincipals.architect.id, demoPrincipals.qaLead.id],
+        requiredApprovals: 2,
         citedDecisionIds: [],
         requestReview: true,
         scope: { component: "transfers" },
@@ -2578,6 +2579,41 @@ describe("Bridge API vertical slice", () => {
       payload: { rationale: "The policy is bounded, observable, and safe for the transfer component." },
     });
     expect(approveResponse.statusCode).toBe(201);
+    expect(approveResponse.json()).toMatchObject({
+      version: {
+        status: "in_review",
+        approvalStatus: { approvedCount: 1, requiredCount: 2, remainingCount: 1, satisfied: false },
+      },
+    });
+
+    const duplicateApproval = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { rationale: "The same human cannot count twice toward the approval requirement." },
+    });
+    expect(duplicateApproval.statusCode).toBe(409);
+
+    const pendingContextResponse = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context?task=implement%20transfer%20retry&categories=specification&component=transfers`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(pendingContextResponse.json<{ items: unknown[] }>().items).toEqual([]);
+
+    const quorumResponse = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: { rationale: "The independent quality review completes the required human approval quorum." },
+    });
+    expect(quorumResponse.statusCode).toBe(201);
+    expect(quorumResponse.json()).toMatchObject({
+      version: {
+        status: "approved",
+        approvalStatus: { approvedCount: 2, requiredCount: 2, remainingCount: 0, satisfied: true },
+      },
+    });
 
     const contextResponse = await app.inject({
       method: "GET",

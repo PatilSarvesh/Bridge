@@ -54,6 +54,7 @@ import {
   assertCanApproveArtifact,
   assertCanReviewArtifact,
   assertCanAccept,
+  artifactApprovalStatus,
   assertHuman,
   assertProjectAccess,
   canAcceptQuestion,
@@ -5383,7 +5384,15 @@ export class BridgeService {
       input,
       existingArtifact,
     );
-    const version: ArtifactVersion = {
+    if (input.requiredApprovals > reviewerIds.length) {
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "The required approval count cannot exceed the resolved specification reviewer count.",
+        422,
+        { requiredApprovals: input.requiredApprovals, resolvedReviewerCount: reviewerIds.length },
+      );
+    }
+    const versionState: Omit<ArtifactVersion, "approvalStatus"> = {
       id: `av_${this.id()}`,
       artifactId,
       version: (existingArtifact?.versions.length ?? 0) + 1,
@@ -5396,7 +5405,12 @@ export class BridgeService {
       createdByType: principal.type,
       createdAt: timestamp,
       reviews: [],
+      requiredApprovals: input.requiredApprovals,
       ...(input.runId ? { runId: input.runId } : {}),
+    };
+    const version: ArtifactVersion = {
+      ...versionState,
+      approvalStatus: artifactApprovalStatus(versionState),
     };
     const artifact: Artifact = existingArtifact
       ? {
@@ -5664,9 +5678,11 @@ export class BridgeService {
       body: input.body,
       createdAt: timestamp,
     };
+    const reviews = [...target.reviews, review];
     const reviewedVersion: ArtifactVersion = {
       ...target,
-      reviews: [...target.reviews, review],
+      reviews,
+      approvalStatus: artifactApprovalStatus({ ...target, reviews }),
     };
     const updatedArtifact: Artifact = {
       ...artifact,
@@ -5742,11 +5758,57 @@ export class BridgeService {
         409,
       );
     }
+    if (target.reviews.some((review) => review.status === "approved" && review.reviewerId === principal.id)) {
+      throw new BridgeError("CONFLICT", "This human reviewer already approved this specification version.", 409);
+    }
 
     const timestamp = this.now().toISOString();
-    const approvedVersion: ArtifactVersion = {
-      ...target,
+    const approval: ArtifactReview = {
+      id: `arv_${this.id()}`,
+      artifactVersionId: versionId,
+      reviewerId: principal.id,
+      reviewerType: principal.type,
       status: "approved",
+      body: input.rationale,
+      createdAt: timestamp,
+    };
+    const reviews = [...target.reviews, approval];
+    const pendingState = {
+      ...target,
+      status: "in_review" as const,
+      reviews,
+    };
+    const approvalStatus = artifactApprovalStatus(pendingState);
+    if (!approvalStatus.satisfied) {
+      const pendingVersion: ArtifactVersion = { ...pendingState, approvalStatus };
+      const pendingArtifact: Artifact = {
+        ...artifact,
+        versions: artifact.versions.map((version) => version.id === versionId ? pendingVersion : version),
+      };
+      await repository.saveArtifact(pendingArtifact);
+      await this.audit(
+        repository,
+        principal,
+        artifact.projectId,
+        "artifact.version_approval_recorded",
+        "artifact_version",
+        versionId,
+        timestamp,
+      );
+      await this.notify(repository, principal, artifact.projectId, [artifact.createdById, ...artifact.reviewerIds], {
+        type: "artifact_review_feedback",
+        title: "Specification approval recorded",
+        body: `${principal.displayName} approved “${artifact.title}”; ${approvalStatus.remainingCount} more approval${approvalStatus.remainingCount === 1 ? " is" : "s are"} required.`,
+        targetType: "artifact_version",
+        targetId: versionId,
+      });
+      return { artifact: pendingArtifact, version: pendingVersion };
+    }
+
+    const approvedVersion: ArtifactVersion = {
+      ...pendingState,
+      status: "approved",
+      approvalStatus,
       approvedById: principal.id,
       approvalRationale: input.rationale,
       approvedAt: timestamp,

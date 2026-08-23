@@ -8,7 +8,7 @@ This document records the implemented server-side authorization contract for BRG
 - An organization administrator has project-administrator authority for every project in the same organization, even when no separate project grant is present. This inheritance never crosses the organization boundary.
 - Project roles apply only to their target project.
 - A human decision owner may be selected by question owner ID/role or by the project's configured decision-owner IDs.
-- A specification approver must be a configured artifact reviewer, configured project decision owner, project administrator, or organization administrator.
+- A specification approver must be a configured artifact reviewer, configured project decision owner, project administrator, or organization administrator. Each human principal counts at most once toward the immutable version's required approval count.
 - A non-human principal can never satisfy `assertHuman`, even if it is assigned a human-looking role or appears in an owner/reviewer list.
 - Protected acceptance requires ordinary owner authority plus every configured reviewer-role quorum. A rejection blocks ordinary acceptance; only a human project administrator may use the versioned override path, which records a bounded reason and does not manufacture reviewer evidence.
 
@@ -28,7 +28,7 @@ This document records the implemented server-side authorization contract for BRG
 | Override protected approval | Deny | Deny | Deny | Deny | Allow | Allow | `overrideQuestionApproval`; unresolved protected question, project-admin role, expected version, rationale, bounded reason, and `question.approval_overridden` audit |
 | Record assumption | Allow within assumption policy | Allow | Allow | Allow | Allow | Allow | `recordAssumption`; agents require linked run provenance and all callers remain subject to low-risk/reversible policy |
 | Publish artifact draft | Allow | Allow | Allow | Allow | Allow | Allow | `publishArtifact`; publishing never creates approval |
-| Approve artifact | Deny | Deny | Policy-based | Allow | Allow | Allow | `approveArtifactVersion`; immutable version, human authority, and configured reviewer/owner/admin policy |
+| Approve artifact | Deny | Deny | Policy-based | Allow | Allow | Allow | `approveArtifactVersion`; immutable version, human authority, configured reviewer/owner/admin policy, append-only rationale, and distinct-human quorum |
 | Supersede decision | Deny | Deny | Deny unless also owner | Allow | Allow | Allow | `changeDecisionLifecycle`; human owner/configured project owner/admin plus optimistic version |
 | Configure project ownership | Deny | Deny | Deny | Deny | Allow | Allow | `replaceProjectOwnershipConfiguration`; human project-admin policy, active-human team/target validation, optimistic aggregate version, and project audit event |
 | Change project policy | Deny | Deny | Deny | Deny | Allow | Allow | `replaceProjectPolicyConfiguration`; human project-admin policy, immutable protected floors, overlap validation, optimistic aggregate version, and project audit event |

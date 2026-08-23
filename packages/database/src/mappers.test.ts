@@ -341,6 +341,15 @@ const artifact: Artifact = {
           createdAt: "2026-08-07T10:02:30.000Z",
         },
       ],
+      requiredApprovals: 1,
+      approvalStatus: {
+        requiredCount: 1,
+        approvedCount: 1,
+        remainingCount: 0,
+        status: "satisfied",
+        satisfied: true,
+        reviewerIds: ["usr_owner"],
+      },
       approvedById: "usr_owner",
       approvalRationale: "This provides the required durability and atomicity.",
       approvedAt: "2026-08-07T10:03:00.000Z",
@@ -736,6 +745,12 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(artifactReviewMigration).toContain("bridge_artifact_versions_reviews_shape_check");
     expect(artifactReviewMigration).toContain("artifact_review_feedback");
+    const artifactApprovalQuorumMigration = readFileSync(
+      new URL("../drizzle/0038_natural_puppet_master.sql", import.meta.url),
+      "utf8",
+    );
+    expect(artifactApprovalQuorumMigration).toContain('ADD COLUMN "required_approvals"');
+    expect(artifactApprovalQuorumMigration).toContain("bridge_artifact_versions_required_approvals_check");
 
     const assumptionDecisionMigration = readFileSync(
       new URL("../drizzle/0033_sparkling_carlie_cooper.sql", import.meta.url),

@@ -671,6 +671,7 @@ export const artifactVersions = pgTable(
     createdByType: principalTypeEnum("created_by_type").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     reviews: jsonb("reviews").$type<readonly ArtifactReview[]>().default([]).notNull(),
+    requiredApprovals: integer("required_approvals").default(1).notNull(),
     runId: text("run_id").references(() => agentRuns.id, { onDelete: "restrict" }),
     approvedById: text("approved_by_id"),
     approvalRationale: text("approval_rationale"),
@@ -679,6 +680,10 @@ export const artifactVersions = pgTable(
   (table) => [
     uniqueIndex("bridge_artifact_versions_number_unique").on(table.artifactId, table.version),
     index("bridge_artifact_versions_artifact_status_idx").on(table.artifactId, table.status),
+    check(
+      "bridge_artifact_versions_required_approvals_check",
+      sql`${table.requiredApprovals} between 1 and 20`,
+    ),
     relatedTenantPolicy(
       "bridge_artifact_versions_tenant",
       sql`exists (

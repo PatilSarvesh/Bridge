@@ -501,6 +501,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         summary: "Uses PostgreSQL behind the Bridge repository contract.",
         body: "# Persistence architecture\n\nUse PostgreSQL behind the Bridge repository contract.",
         intendedReviewerIds: [owner.id],
+        requiredApprovals: 1,
         citedDecisionIds: [decision.id],
         requestReview: true,
         scope: { component: "persistence" },

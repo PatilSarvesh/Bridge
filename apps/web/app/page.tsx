@@ -285,6 +285,8 @@ interface ArtifactVersion {
   readonly createdById: string;
   readonly createdAt: string;
   readonly reviews: readonly ArtifactReview[];
+  readonly requiredApprovals: number;
+  readonly approvalStatus: ArtifactApprovalStatus;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
@@ -293,9 +295,18 @@ interface ArtifactVersion {
 interface ArtifactReview {
   readonly id: string;
   readonly reviewerId: string;
-  readonly status: "commented" | "changes_requested";
+  readonly status: "commented" | "changes_requested" | "approved";
   readonly body: string;
   readonly createdAt: string;
+}
+
+interface ArtifactApprovalStatus {
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly remainingCount: number;
+  readonly status: "pending" | "blocked" | "satisfied";
+  readonly satisfied: boolean;
+  readonly reviewerIds: readonly string[];
 }
 
 interface Artifact {
@@ -1818,6 +1829,9 @@ export default function Home() {
   const selectedArtifactHasChangesRequested = Boolean(
     selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
   );
+  const activePrincipalApprovedSelectedArtifact = Boolean(
+    selectedArtifactVersion?.approvalStatus.reviewerIds.includes(activePrincipalId),
+  );
   const selectedDecision = useMemo(
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
@@ -2176,6 +2190,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ rationale: approvalRationale }),
       }, activePrincipalId);
+      setApprovalRationale("");
       await Promise.all([loadArtifacts(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to approve specification.");
@@ -4363,6 +4378,7 @@ export default function Home() {
                         <div className="spec-meta">
                           <span>Published by {selectedArtifactVersion.createdById}</span>
                           <span>Reviewers: {selectedArtifact.reviewerIds.join(", ")}</span>
+                          <span>Approvals: {selectedArtifactVersion.approvalStatus.approvedCount}/{selectedArtifactVersion.approvalStatus.requiredCount}</span>
                           <span>Scope: {selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "project"}</span>
                         </div>
                       </section>
@@ -4532,6 +4548,10 @@ export default function Home() {
                         <div className="impact">
                           <strong>Changes requested.</strong> This immutable version cannot be approved. Publish a new version that addresses the feedback.
                         </div>
+                      ) : canReviewSelectedArtifact && activePrincipalApprovedSelectedArtifact ? (
+                        <div className="impact">
+                          <strong>Your approval is recorded.</strong> {selectedArtifactVersion.approvalStatus.remainingCount} more distinct human approval{selectedArtifactVersion.approvalStatus.remainingCount === 1 ? " is" : "s are"} required.
+                        </div>
                       ) : canReviewSelectedArtifact ? (
                         <section>
                           <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
@@ -4546,7 +4566,7 @@ export default function Home() {
                             disabled={submitting || approvalRationale.trim().length < 10}
                             onClick={() => void approveSpecification()}
                           >
-                            {submitting ? "Approving version…" : `Approve version ${selectedArtifactVersion.version}`}
+                            {submitting ? "Recording approval…" : `Record approval for version ${selectedArtifactVersion.version}`}
                           </button>
                         </section>
                       ) : (

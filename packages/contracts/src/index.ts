@@ -59,7 +59,7 @@ export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
-export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested"]);
+export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested", "approved"]);
 export const agentRunClientSchema = z.enum([
   "codex",
   "claude_code",
@@ -730,6 +730,7 @@ export const publishArtifactInputSchema = z.object({
   intendedReviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
   intendedReviewerRoles: z.array(ownerRoleSchema).max(20).optional(),
   intendedReviewerTeamKeys: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+  requiredApprovals: z.number().int().min(1).max(20).default(1),
   citedDecisionIds: z.array(z.string().trim().min(1).max(100)).max(100).default([]),
   requestReview: z.boolean().default(true),
   scope: scopeSchema.default({}),
@@ -741,7 +742,7 @@ export const approveArtifactVersionInputSchema = z.object({
 
 export const artifactReviewInputSchema = z
   .object({
-    status: artifactReviewStatusSchema,
+    status: z.enum(["commented", "changes_requested"]),
     body: z.string().trim().min(2).max(5_000),
   })
   .superRefine((value, context) => {

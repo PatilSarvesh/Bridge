@@ -145,6 +145,7 @@ function artifactInput(overrides: Partial<PublishArtifactInput> = {}): PublishAr
     summary: "Defines classification and bounded retries for transfer failures.",
     body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff and idempotency keys.",
     intendedReviewerIds: [owner.id],
+    requiredApprovals: 1,
     citedDecisionIds: [],
     requestReview: true,
     scope: { component: "transfers" },
@@ -3241,6 +3242,78 @@ describe("Bridge decision workflow", () => {
       .toHaveLength(2);
   });
 
+  it("requires a distinct human approval quorum before a specification becomes authoritative", async () => {
+    const { repository, service } = await runtime();
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-approval-quorum-001",
+      intendedReviewerIds: [owner.id, qaLead.id],
+      requiredApprovals: 2,
+    }));
+    expect(publication.version.approvalStatus).toEqual({
+      requiredCount: 2,
+      approvedCount: 0,
+      remainingCount: 2,
+      status: "pending",
+      satisfied: false,
+      reviewerIds: [],
+    });
+
+    const firstApproval = await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The retry behavior is bounded and the first reviewer approves this version.",
+    });
+    expect(firstApproval.version).toMatchObject({
+      status: "in_review",
+      approvalStatus: {
+        requiredCount: 2,
+        approvedCount: 1,
+        remainingCount: 1,
+        status: "pending",
+        satisfied: false,
+        reviewerIds: [owner.id],
+      },
+      reviews: [expect.objectContaining({ reviewerId: owner.id, status: "approved" })],
+    });
+    await expect(service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "A repeated approval from the same human must not satisfy the quorum twice.",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await service.getContext(agent, project.id, {
+      task: "Implement the transfer retry policy",
+      scope: { component: "transfers" },
+      categories: ["specification"],
+      maxItems: 20,
+    })).items).toEqual([]);
+
+    const completed = await service.approveArtifactVersion(qaLead, publication.version.id, {
+      rationale: "The independent quality review confirms the retry policy is testable and observable.",
+    });
+    expect(completed.version).toMatchObject({
+      status: "approved",
+      approvedById: qaLead.id,
+      approvalStatus: {
+        requiredCount: 2,
+        approvedCount: 2,
+        remainingCount: 0,
+        status: "satisfied",
+        satisfied: true,
+        reviewerIds: [owner.id, qaLead.id].sort((left, right) => left.localeCompare(right)),
+      },
+      reviews: [
+        expect.objectContaining({ reviewerId: owner.id, status: "approved" }),
+        expect.objectContaining({ reviewerId: qaLead.id, status: "approved" }),
+      ],
+    });
+    expect((await service.getContext(agent, project.id, {
+      task: "Implement the transfer retry policy",
+      scope: { component: "transfers" },
+      categories: ["specification"],
+      maxItems: 20,
+    })).items).toEqual([expect.objectContaining({ id: publication.version.id, authority: "approved" })]);
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "artifact.version_approval_recorded", actorId: owner.id }),
+      expect.objectContaining({ action: "artifact.version_approved", actorId: qaLead.id }),
+    ]));
+  });
+
   it("rejects specification reviewer targets that cannot resolve to active project humans", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
@@ -3265,6 +3338,11 @@ describe("Bridge decision workflow", () => {
       intendedReviewerIds: [],
       intendedReviewerRoles: ["architecture-reviewer"],
     }))).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+    await expect(service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "artifact-review-routing-impossible-quorum",
+      intendedReviewerIds: [owner.id],
+      requiredApprovals: 2,
+    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
     expect(await repository.listArtifacts(project.id)).toEqual([]);
   });
 
@@ -3351,7 +3429,11 @@ describe("Bridge decision workflow", () => {
           expect.objectContaining({ status: "changes_requested" }),
         ],
       }),
-      expect.objectContaining({ id: replacement.version.id, status: "approved", reviews: [] }),
+      expect.objectContaining({
+        id: replacement.version.id,
+        status: "approved",
+        reviews: [expect.objectContaining({ reviewerId: owner.id, status: "approved" })],
+      }),
     ]);
     expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "artifact.version_commented", subjectId: first.version.id }),

@@ -267,6 +267,13 @@
       "when": 1787321084456,
       "tag": "0037_aberrant_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787503410975,
+      "tag": "0038_natural_puppet_master",
+      "breakpoints": true
     }
   ]
 }

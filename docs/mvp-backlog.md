@@ -816,7 +816,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — publication now resolves configured direct users, roles, teams, scoped ownership rules, and the project decision-owner fallback into active human reviewers; authority-checked append-only review comments, request-changes, immutable versions, single current approval, audit/outbox, and web review/approval are implemented; distinct-human multi-reviewer quorum remains
+- **Status:** Implemented for the Markdown MVP — publication resolves configured direct users, roles, teams, scoped ownership rules, and the project decision-owner fallback into active human reviewers; each immutable version freezes a bounded required approval count, exposes server-derived progress, counts each authorized human once, and becomes authoritative only when quorum is satisfied; append-only comments, approvals, request-changes, single current approval, audit/outbox, and web review/approval are implemented
 - **Dependencies:** BRG-021, BRG-080
 - **PRD references:** ART-03, ART-04
 
@@ -825,8 +825,8 @@ As an artifact owner or reviewer, I need to review and approve a version so that
 Acceptance criteria:
 
 1. Owner can request review from configured users, teams, or roles. **Implemented through the canonical publish contract, project ownership configuration, CLI flags, and the shared optional MCP schema.**
-2. Reviewers can comment, approve, or request changes.
-3. Server verifies approval authority.
+2. Reviewers can comment, approve, or request changes. **Implemented as append-only review records; an approval rationale is retained with each human vote.**
+3. Server verifies approval authority. **Implemented with distinct-principal counting and server-derived pending/blocked/satisfied status.**
 4. One exact-scope version is current and approved at a time.
 5. Agent identities cannot approve versions.
 6. Approval writes audit and outbox events atomically.
