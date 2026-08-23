@@ -9,6 +9,7 @@ import {
 import {
   runOutboxCycle,
   type AssumptionExpiryCycle,
+  type EmailDigestCycleResult,
   type OutboxCycleOptions,
   type OutboxHandler,
   type OutboxStore,
@@ -28,6 +29,7 @@ export interface WorkerConfiguration {
   readonly pollIntervalMs: number;
   readonly batchSize: number;
   readonly assumptionExpiryIntervalMs: number;
+  readonly emailDigestIntervalMs: number;
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
 }
@@ -39,6 +41,7 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_POLL_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_BATCH_SIZE?: string;
   readonly BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS?: string;
+  readonly BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_MAX_ATTEMPTS?: string;
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
 }
@@ -62,6 +65,8 @@ export interface OutboxWorkerOptions {
   readonly cycleOptions?: Omit<OutboxCycleOptions, "logger" | "metrics">;
   readonly assumptionExpiryCycle?: AssumptionExpiryCycle;
   readonly assumptionExpiryIntervalMs?: number;
+  readonly emailDigestCycle?: () => Promise<EmailDigestCycleResult>;
+  readonly emailDigestIntervalMs?: number;
   readonly logger?: SafeLogger;
   readonly metrics?: BridgeMetrics;
   readonly signal?: AbortSignal;
@@ -123,6 +128,13 @@ export function loadWorkerConfiguration(
       1_000,
       86_400_000,
     ),
+    emailDigestIntervalMs: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS",
+      60_000,
+      1_000,
+      86_400_000,
+    ),
     maxAttempts: positiveInteger(environment, "BRIDGE_WORKER_MAX_ATTEMPTS", 5, 1, 20),
     baseBackoffMs: positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000),
   };
@@ -180,8 +192,17 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
   ) {
     throw new Error("Worker assumption expiry interval must be between 1000 and 86400000 milliseconds.");
   }
+  const emailDigestIntervalMs = options.emailDigestIntervalMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(emailDigestIntervalMs) ||
+    emailDigestIntervalMs < 1_000 ||
+    emailDigestIntervalMs > 86_400_000
+  ) {
+    throw new Error("Worker email digest interval must be between 1000 and 86400000 milliseconds.");
+  }
 
   let nextAssumptionExpiryAt = 0;
+  let nextEmailDigestAt = 0;
   while (!signal?.aborted) {
     if (options.assumptionExpiryCycle && Date.now() >= nextAssumptionExpiryAt) {
       try {
@@ -194,6 +215,15 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
         logger.error("assumption_expiry.cycle_failed", { error, status: "retrying" });
       }
       nextAssumptionExpiryAt = Date.now() + assumptionExpiryIntervalMs;
+    }
+    if (options.emailDigestCycle && Date.now() >= nextEmailDigestAt) {
+      try {
+        const result = await options.emailDigestCycle();
+        logger.info("email_digest.cycle_completed", { ...result, status: "success" });
+      } catch (error) {
+        logger.error("email_digest.cycle_failed", { error, status: "retrying" });
+      }
+      nextEmailDigestAt = Date.now() + emailDigestIntervalMs;
     }
     try {
       const cycleOptions: OutboxCycleOptions = {

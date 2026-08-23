@@ -13,6 +13,8 @@ import {
   createNotificationEmailHandler,
   decisionsDueForReview,
   renderEssentialEmailTemplate,
+  renderNotificationDigest,
+  runEmailDigestCycle,
   runOutboxCycle,
   createNotificationSlackHandler,
   createSlackChannelDirectory,
@@ -20,6 +22,7 @@ import {
   createSlackWebhookSender,
   renderSlackNotification,
   type EmailSendRequest,
+  type EmailDigestStore,
   type EssentialEmailTemplateKind,
   type NotificationEmailStore,
   type OutboxStore,
@@ -171,6 +174,49 @@ class TestNotificationEmailStore implements NotificationEmailStore {
 
   async saveOutboxDelivery(delivery: OutboxDelivery): Promise<void> {
     this.deliveries.set(delivery.id, delivery);
+  }
+}
+
+class TestEmailDigestStore extends TestNotificationEmailStore implements EmailDigestStore {
+  readonly events = new Map<string, OutboxEvent>();
+
+  constructor(
+    items: readonly Notification[],
+    events: readonly OutboxEvent[],
+    preferences: readonly NotificationPreference[] = [],
+  ) {
+    super(items, preferences);
+    for (const event of events) this.events.set(event.id, event);
+  }
+
+  async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
+    return this.events.get(eventId);
+  }
+
+  async claimDeferredEmailDeliveries(
+    now: string,
+    limit: number,
+    leaseMs = 5 * 60 * 1_000,
+  ): Promise<readonly OutboxDelivery[]> {
+    const nowTime = Date.parse(now);
+    const candidates = [...this.deliveries.values()]
+      .filter((delivery) =>
+        delivery.channel === "email" &&
+        delivery.status === "deferred" &&
+        Boolean(delivery.digestAvailableAt) &&
+        Date.parse(delivery.digestAvailableAt!) <= nowTime &&
+        (!delivery.digestLeaseUntil || Date.parse(delivery.digestLeaseUntil) <= nowTime))
+      .sort((left, right) =>
+        left.digestAvailableAt!.localeCompare(right.digestAvailableAt!) ||
+        left.createdAt.localeCompare(right.createdAt))
+      .slice(0, limit)
+      .map((delivery): OutboxDelivery => ({
+        ...delivery,
+        attemptCount: delivery.attemptCount + 1,
+        digestLeaseUntil: new Date(nowTime + leaseMs).toISOString(),
+      }));
+    for (const delivery of candidates) this.deliveries.set(delivery.id, delivery);
+    return candidates;
   }
 }
 
@@ -417,6 +463,150 @@ describe("notification email delivery", () => {
       "delivered",
     ]);
     expect(requests).toHaveLength(1);
+  });
+
+  it("schedules due digest receipts and delivers one minimal idempotent batch", async () => {
+    const first = { ...notification("digest_first", "question_comment"), recipientId: "usr_digest" };
+    const second = {
+      ...notification("digest_second", "artifact_review_requested"),
+      recipientId: "usr_digest",
+      createdAt: "2026-08-08T00:00:10.000Z",
+      title: "Architecture specification needs review",
+    };
+    const events = [
+      notificationEvent("evt_digest_first", first),
+      notificationEvent("evt_digest_second", second),
+    ];
+    const store = new TestEmailDigestStore([first, second], events, [{
+      organizationId: first.organizationId,
+      principalId: first.recipientId,
+      channel: "email",
+      preference: "digest",
+      updatedAt: "2026-08-08T00:00:00.000Z",
+    }]);
+    const directory = {
+      resolveEmailRecipient: async () => ({ address: "digest@example.test", preference: "digest" as const }),
+    };
+    const requests: EmailSendRequest[] = [];
+    const sender = {
+      send: async (request: EmailSendRequest) => {
+        requests.push(request);
+        return { providerMessageId: "provider-digest-001" };
+      },
+    };
+    const handler = createNotificationEmailHandler({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+      digestDelayMs: 60_000,
+    });
+    await handler({ ...events[0]!, status: "processing", attempts: 1 });
+    await handler({ ...events[1]!, status: "processing", attempts: 1 });
+
+    expect(await runEmailDigestCycle({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:00:59.000Z"),
+    })).toMatchObject({ claimed: 0, digestsSent: 0 });
+    expect(await runEmailDigestCycle({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:01:00.000Z"),
+    })).toEqual({ claimed: 2, digestsSent: 1, delivered: 2, suppressed: 0, retried: 0, failed: 0 });
+    expect(requests).toEqual([expect.objectContaining({
+      to: "digest@example.test",
+      subject: "[Bridge] Digest: 2 updates",
+      idempotencyKey: expect.stringMatching(/^edg_[a-f0-9]{64}:email$/),
+      text: expect.stringContaining("Architecture specification needs review"),
+    })]);
+    expect(requests[0]?.text).not.toContain(first.body);
+    const deliveries = [...store.deliveries.values()];
+    expect(deliveries.every((delivery) => delivery.status === "delivered")).toBe(true);
+    expect(new Set(deliveries.map((delivery) => delivery.dedupeKey)).size).toBe(1);
+    expect(new Set(deliveries.map((delivery) => delivery.providerMessageId))).toEqual(
+      new Set(["provider-digest-001"]),
+    );
+    expect(await runEmailDigestCycle({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:02:00.000Z"),
+    })).toMatchObject({ claimed: 0, digestsSent: 0 });
+  });
+
+  it("renders bounded digest titles without notification bodies", () => {
+    const item = notification("digest_render");
+    const rendered = renderNotificationDigest([item], "https://bridge.example.test/?view=notifications");
+    expect(rendered.subject).toBe("[Bridge] Digest: 1 update");
+    expect(rendered.text).toContain(item.title);
+    expect(rendered.text).not.toContain(item.body);
+  });
+
+  it("reuses the persisted digest batch key after a provider retry", async () => {
+    const item = { ...notification("digest_retry"), recipientId: "usr_digest_retry" };
+    const event = notificationEvent("evt_digest_retry", item);
+    const store = new TestEmailDigestStore([item], [event], [{
+      organizationId: item.organizationId,
+      principalId: item.recipientId,
+      channel: "email",
+      preference: "digest",
+      updatedAt: item.createdAt,
+    }]);
+    const directory = {
+      resolveEmailRecipient: async () => ({ address: "retry@example.test", preference: "digest" as const }),
+    };
+    const idempotencyKeys: string[] = [];
+    let attempts = 0;
+    const sender = {
+      send: async (request: EmailSendRequest) => {
+        attempts += 1;
+        idempotencyKeys.push(request.idempotencyKey);
+        if (attempts === 1) throw new Error("temporary provider failure");
+        return { providerMessageId: "provider-digest-retry" };
+      },
+    };
+    const handler = createNotificationEmailHandler({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:00:00.000Z"),
+      digestDelayMs: 60_000,
+    });
+    await handler({ ...event, status: "processing", attempts: 1 });
+
+    expect(await runEmailDigestCycle({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:01:00.000Z"),
+      baseBackoffMs: 1_000,
+      maxAttempts: 2,
+    })).toMatchObject({ claimed: 1, retried: 1, failed: 0 });
+    expect(await runEmailDigestCycle({
+      store,
+      directory,
+      sender,
+      publicBaseUrl: "https://bridge.example.test/",
+      now: () => new Date("2026-08-08T00:01:01.000Z"),
+      baseBackoffMs: 1_000,
+      maxAttempts: 2,
+    })).toMatchObject({ claimed: 1, digestsSent: 1, delivered: 1 });
+    expect(idempotencyKeys).toHaveLength(2);
+    expect(new Set(idempotencyKeys).size).toBe(1);
+    expect([...store.deliveries.values()][0]).toMatchObject({
+      status: "delivered",
+      attemptCount: 2,
+      providerMessageId: "provider-digest-retry",
+    });
   });
 
   it("records sanitized failures while the outbox exposes retry and permanent failure state", async () => {

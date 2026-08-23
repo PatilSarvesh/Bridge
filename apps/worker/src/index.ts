@@ -153,7 +153,7 @@ export async function runReviewReminderCycle(): Promise<void> {
   // reminder and expiry policy remains a deployment concern, so this entry point
   // reports the jobs that an operator-provided scheduler should invoke.
   process.stdout.write(
-    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry"], status: "ready" })}\n`,
+    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry", "email-digest"], status: "ready" })}\n`,
   );
 }
 
@@ -189,6 +189,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           },
           assumptionExpiryCycle: runtime.assumptionExpiryCycle,
           assumptionExpiryIntervalMs: configuration.assumptionExpiryIntervalMs,
+          emailDigestIntervalMs: configuration.emailDigestIntervalMs,
           signal: controller.signal,
         });
       } finally {

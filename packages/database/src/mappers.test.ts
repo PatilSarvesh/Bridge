@@ -751,6 +751,14 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(artifactApprovalQuorumMigration).toContain('ADD COLUMN "required_approvals"');
     expect(artifactApprovalQuorumMigration).toContain("bridge_artifact_versions_required_approvals_check");
+    const emailDigestMigration = readFileSync(
+      new URL("../drizzle/0039_concerned_wrecking_crew.sql", import.meta.url),
+      "utf8",
+    );
+    expect(emailDigestMigration).toContain('ADD COLUMN "digest_available_at"');
+    expect(emailDigestMigration).toContain('ADD COLUMN "digest_lease_until"');
+    expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_schedule_check");
+    expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_available_idx");
 
     const assumptionDecisionMigration = readFileSync(
       new URL("../drizzle/0033_sparkling_carlie_cooper.sql", import.meta.url),

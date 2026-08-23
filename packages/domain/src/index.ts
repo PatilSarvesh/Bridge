@@ -524,6 +524,8 @@ export interface OutboxDelivery {
   readonly preference: NotificationDeliveryPreference;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly digestAvailableAt?: string;
+  readonly digestLeaseUntil?: string;
   readonly providerMessageId?: string;
   readonly lastError?: string;
 }

@@ -347,6 +347,8 @@ export function outboxDeliveryToRow(delivery: OutboxDelivery): typeof outboxDeli
     lastError: delivery.lastError ?? null,
     createdAt: delivery.createdAt,
     updatedAt: delivery.updatedAt,
+    digestAvailableAt: delivery.digestAvailableAt ?? null,
+    digestLeaseUntil: delivery.digestLeaseUntil ?? null,
   };
 }
 
@@ -364,6 +366,8 @@ export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
     preference: row.preference as OutboxDelivery["preference"],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...(row.digestAvailableAt === null ? {} : { digestAvailableAt: row.digestAvailableAt }),
+    ...(row.digestLeaseUntil === null ? {} : { digestLeaseUntil: row.digestLeaseUntil }),
     ...(row.providerMessageId === null ? {} : { providerMessageId: row.providerMessageId }),
     ...(row.lastError === null ? {} : { lastError: row.lastError }),
   };

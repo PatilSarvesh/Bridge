@@ -900,11 +900,18 @@ export const outboxDeliveries = pgTable(
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    digestAvailableAt: timestamp("digest_available_at", { withTimezone: true, mode: "string" }),
+    digestLeaseUntil: timestamp("digest_lease_until", { withTimezone: true, mode: "string" }),
   },
   (table) => [
     unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
     index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
     index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
+    index("bridge_outbox_deliveries_digest_available_idx").on(
+      table.status,
+      table.channel,
+      table.digestAvailableAt,
+    ),
     index("bridge_outbox_deliveries_project_channel_dedupe_idx").on(
       table.projectId,
       table.channel,

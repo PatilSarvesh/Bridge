@@ -85,7 +85,7 @@ createPostgresBridgeStore(process.env.BRIDGE_WORKER_DATABASE_URL!, {
 
 The maintenance option enables only explicitly maintenance-gated repository operations. It does not set a bypass parameter; PostgreSQL itself must authenticate the connection as the separately provisioned `BYPASSRLS` role.
 
-The worker package now provides a bounded Slack outbox daemon. It requires `BRIDGE_WORKER_DATABASE_URL`, opens the store with `mode: "maintenance"`, and never falls back to `DATABASE_URL`; the deployment must provision that value from the separate maintenance role's secret.
+The worker package now provides a bounded Slack outbox daemon plus the maintenance-gated deferred-email digest claim cycle. It requires `BRIDGE_WORKER_DATABASE_URL`, opens the store with `mode: "maintenance"`, and never falls back to `DATABASE_URL`; the deployment must provision that value from the separate maintenance role's secret. Digest claims persist only due/lease timestamps and privacy-minimized delivery metadata; live addresses still come from the injected directory.
 
 ## Restore verification
 
