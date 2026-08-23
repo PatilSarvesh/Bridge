@@ -1121,6 +1121,8 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
+Implementation status (2026-08-23): BRG-120 is complete. The canonical read-only REST route returns the untouched source question beside a deterministic `explain` or `rewrite` presentation for a selected role, the web exposes it behind a compact disclosure, tenant checks remain in force, and the derived view cannot accept an answer or mutate authority. BRG-121 through BRG-130 remain pending.
+
 ## 21. Critical path
 
 The shortest path to proving the product is:

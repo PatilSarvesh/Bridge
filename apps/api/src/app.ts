@@ -21,6 +21,7 @@ import {
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
   questionClarificationInputSchema,
+  questionAudienceViewQuerySchema,
   questionCommentInputSchema,
   notificationListQuerySchema,
   notificationPreferenceInputSchema,
@@ -845,6 +846,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{ Params: { questionId: string } }>("/v1/questions/:questionId", async (request) => {
     const principal = await resolvePrincipal(request, options);
     return options.service.getQuestion(principal, request.params.questionId);
+  });
+
+  app.get<{
+    Params: { questionId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/questions/:questionId/audience-view", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const query = questionAudienceViewQuerySchema.parse({
+      role: request.query.role,
+      mode: request.query.mode,
+    });
+    return options.service.getQuestionAudienceView(principal, request.params.questionId, query);
   });
 
   app.post<{ Params: { questionId: string }; Body: unknown }>(

@@ -1961,6 +1961,63 @@ describe("Bridge decision workflow", () => {
     });
   });
 
+  it("derives role-aware question views without changing the authoritative question", async () => {
+    const { service } = await runtime();
+    const input = questionInput({
+      title: "Which release evidence should be required before enabling transfer retries?",
+      context: "The transfer retry change needs a release evidence threshold before it reaches production.",
+      whyItMatters: "Insufficient evidence can ship duplicate-transfer defects while excessive gates delay recovery work.",
+    });
+    const question = await service.createQuestion(agent, project.id, input);
+
+    const rewritten = await service.getQuestionAudienceView(qaLead, question.id, {
+      role: "QA Lead",
+      mode: "rewrite",
+    });
+    expect(rewritten).toMatchObject({
+      questionId: question.id,
+      questionVersion: question.version,
+      role: "QA Lead",
+      mode: "rewrite",
+      source: {
+        title: input.title,
+        context: input.context,
+        whyItMatters: input.whyItMatters,
+        options: input.options,
+        recommendationKey: input.recommendationKey,
+      },
+      presentation: {
+        title: `For QA Lead: ${input.title}`,
+        whyItMatters: input.whyItMatters,
+        focusAreas: ["acceptance criteria", "test evidence", "failure and regression risk"],
+      },
+      guardrails: {
+        derivedOnly: true,
+        sourceFieldsUnchanged: true,
+        humanApprovalRequired: true,
+      },
+    });
+    expect(rewritten.presentation.context).toContain(input.context);
+    expect(rewritten.presentation.reviewPrompt).toContain("test evidence");
+
+    const explanation = await service.getQuestionAudienceView(owner, question.id, {
+      role: "Security reviewer",
+      mode: "explain",
+    });
+    expect(explanation.presentation.focusAreas).toContain("security controls");
+    expect(explanation.source).toEqual(rewritten.source);
+    expect(await service.getQuestion(owner, question.id)).toMatchObject({
+      title: input.title,
+      context: input.context,
+      whyItMatters: input.whyItMatters,
+      version: question.version,
+      status: "open",
+    });
+    await expect(
+      service.getQuestionAudienceView(outsider, question.id, { role: "QA Lead", mode: "explain" }),
+    ).rejects.toMatchObject({ code: "QUESTION_NOT_FOUND", statusCode: 404 });
+  });
+
   it("requires human approval and exposes the accepted decision as later context", async () => {
     const { service } = await runtime();
     const question = await service.createQuestion(agent, project.id, questionInput());

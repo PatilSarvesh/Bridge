@@ -1014,6 +1014,50 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("returns a REST-canonical role-aware question view without changing source content", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA%20Lead&mode=rewrite`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      questionId: runtime.sampleQuestionId,
+      role: "QA Lead",
+      mode: "rewrite",
+      source: {
+        title: "Which transfer failures should trigger an automatic retry?",
+      },
+      presentation: {
+        title: "For QA Lead: Which transfer failures should trigger an automatic retry?",
+        focusAreas: ["acceptance criteria", "test evidence", "failure and regression risk"],
+      },
+      guardrails: {
+        derivedOnly: true,
+        sourceFieldsUnchanged: true,
+        humanApprovalRequired: true,
+      },
+    });
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA&mode=paraphrase`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA%20Lead`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("registers and lists a fresh project for the local prototype", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

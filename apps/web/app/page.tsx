@@ -272,6 +272,30 @@ interface Question {
   readonly dueStatus: "overdue" | "due_soon" | "scheduled" | "none";
 }
 
+interface QuestionAudienceView {
+  readonly questionId: string;
+  readonly questionVersion: number;
+  readonly role: string;
+  readonly mode: "explain" | "rewrite";
+  readonly source: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+  };
+  readonly presentation: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  };
+  readonly guardrails: {
+    readonly derivedOnly: true;
+    readonly sourceFieldsUnchanged: true;
+    readonly humanApprovalRequired: true;
+  };
+}
+
 type InboxFilterKey = "status" | "risk" | "category" | "role" | "due";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
 type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
@@ -777,6 +801,9 @@ export default function Home() {
   const [selectedAssumptionId, setSelectedAssumptionId] = useState<string>();
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [selectedOption, setSelectedOption] = useState<string>();
+  const [questionAudienceRole, setQuestionAudienceRole] = useState("");
+  const [questionAudienceView, setQuestionAudienceView] = useState<QuestionAudienceView>();
+  const [questionAudienceLoading, setQuestionAudienceLoading] = useState(false);
   const [responseOption, setResponseOption] = useState<string>();
   const [responseAnswer, setResponseAnswer] = useState("");
   const [responseRationale, setResponseRationale] = useState("");
@@ -1897,8 +1924,14 @@ export default function Home() {
       setReviewRationale("");
       setOverrideRationale("");
       setOverrideReason("");
+      setQuestionAudienceRole(
+        activeRoles.find((role) => !["organization-member", "organization-admin"].includes(normalizedRole(role))) ??
+          activeRoles[0] ??
+          "project contributor",
+      );
+      setQuestionAudienceView(undefined);
     }
-  }, [selectedQuestion]);
+  }, [activeRoles, selectedQuestion]);
 
   useEffect(() => {
     setDecisionLifecycleStatus("revoked");
@@ -1932,6 +1965,25 @@ export default function Home() {
     setArtifactDiffToVersionId(toVersion?.id ?? "");
     setArtifactDiff(undefined);
   }, [activePrincipalId, selectedArtifact?.currentVersionId, selectedArtifact?.id, selectedArtifact?.versions.length]);
+
+  const loadQuestionAudienceView = async (mode: "explain" | "rewrite") => {
+    if (!selectedQuestion || questionAudienceRole.trim().length < 2) return;
+    setQuestionAudienceLoading(true);
+    setError(undefined);
+    try {
+      const parameters = new URLSearchParams({ role: questionAudienceRole.trim(), mode });
+      setQuestionAudienceView(await bridgeFetch<QuestionAudienceView>(
+        `/v1/questions/${selectedQuestion.id}/audience-view?${parameters.toString()}`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setQuestionAudienceView(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to explain this question for the selected role.");
+    } finally {
+      setQuestionAudienceLoading(false);
+    }
+  };
 
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
@@ -3933,6 +3985,43 @@ export default function Home() {
                           </div>
                         ) : null}
                       </section>
+
+                      <details className="detail-disclosure">
+                        <summary>Explain for my role</summary>
+                        <div className="audience-controls">
+                          <label htmlFor="question-audience-role">Audience role
+                            <select
+                              id="question-audience-role"
+                              value={questionAudienceRole}
+                              onChange={(event) => {
+                                setQuestionAudienceRole(event.target.value);
+                                setQuestionAudienceView(undefined);
+                              }}
+                            >
+                              {activeRoles.length === 0 ? <option value="project contributor">Project contributor</option> : null}
+                              {activeRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+                            </select>
+                          </label>
+                          <div className="audience-actions">
+                            <button className="secondary" type="button" disabled={questionAudienceLoading} onClick={() => void loadQuestionAudienceView("explain")}>
+                              {questionAudienceLoading ? "Loading…" : "Explain"}
+                            </button>
+                            <button className="secondary" type="button" disabled={questionAudienceLoading} onClick={() => void loadQuestionAudienceView("rewrite")}>
+                              Rewrite for role
+                            </button>
+                          </div>
+                        </div>
+                        {questionAudienceView ? (
+                          <div className="audience-view" aria-live="polite">
+                            <small>Derived {questionAudienceView.mode} for {questionAudienceView.role}. The recorded question and human approval authority are unchanged.</small>
+                            <h3>{questionAudienceView.presentation.title}</h3>
+                            <p>{questionAudienceView.presentation.context}</p>
+                            <div className="audience-focus"><strong>Focus on:</strong> {questionAudienceView.presentation.focusAreas.join(" · ")}</div>
+                            <div className="impact"><strong>Why it matters:</strong> {questionAudienceView.presentation.whyItMatters}</div>
+                            <p><strong>Review prompt:</strong> {questionAudienceView.presentation.reviewPrompt}</p>
+                          </div>
+                        ) : null}
+                      </details>
 
                       <details className="detail-disclosure">
                         <summary>Provenance <span className="section-count">{selectedQuestion.runId ? "linked" : "direct"}</span></summary>

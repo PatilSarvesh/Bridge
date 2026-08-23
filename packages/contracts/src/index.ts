@@ -509,6 +509,11 @@ export const questionInboxQuerySchema = z.object({
   due: questionDueFilterSchema.optional(),
 });
 
+export const questionAudienceViewQuerySchema = z.object({
+  role: ownerRoleSchema,
+  mode: z.enum(["explain", "rewrite"]).default("explain"),
+});
+
 export const questionSubmissionDispositionSchema = z.enum([
   "created",
   "idempotent_replay",
@@ -905,6 +910,7 @@ export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;
 export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
+export type QuestionAudienceViewQuery = z.infer<typeof questionAudienceViewQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;

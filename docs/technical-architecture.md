@@ -773,7 +773,11 @@ The read-only match query and question-creation guard perform a bounded pre-chec
 
 Exact policy-equivalent questions are automatically reused. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
 
-### 15.3 Later retrieval enhancement
+### 15.3 Role-aware question presentation
+
+`GET /v1/questions/:questionId/audience-view` is the canonical derived-query boundary for QST-08. It requires normal question-read authorization and returns the selected role, source question version, an exact copy of the recorded title/context/impact/options, and a separate deterministic explanation or rewrite. The role lens can highlight security, quality, product, operations, design, or architecture concerns, but it does not call an external model, persist a paraphrase, edit the question, change options or recommendation, or grant acceptance authority. The response explicitly marks itself derived-only and human-approval-required; the web uses this REST route and MCP is not required.
+
+### 15.4 Later retrieval enhancement
 
 Add PostgreSQL full-text/trigram indexes after corpus and latency measurements justify them. Add vector retrieval only after evaluation shows material recall improvements. Any derived search index must contain tenant scope and be rebuildable from canonical records.
 

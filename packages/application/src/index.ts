@@ -42,6 +42,7 @@ import type {
   OverrideQuestionApprovalInput,
   ReassignQuestionInput,
   QuestionInboxQuery,
+  QuestionAudienceViewQuery,
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
@@ -734,6 +735,32 @@ export interface QuestionMatch {
   readonly matchKind: "exact" | "related";
   readonly reasons: readonly string[];
   readonly createdAt: string;
+}
+
+export interface QuestionAudienceView {
+  readonly questionId: string;
+  readonly questionVersion: number;
+  readonly role: string;
+  readonly mode: QuestionAudienceViewQuery["mode"];
+  readonly source: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly options: Question["options"];
+    readonly recommendationKey?: string;
+  };
+  readonly presentation: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  };
+  readonly guardrails: {
+    readonly derivedOnly: true;
+    readonly sourceFieldsUnchanged: true;
+    readonly humanApprovalRequired: true;
+  };
 }
 
 interface NotificationDraft {
@@ -4231,6 +4258,106 @@ export class BridgeService {
   async getQuestion(principal: Principal, questionId: string): Promise<QuestionInboxItem> {
     return this.tenantTransaction(principal, async (repository) =>
       questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
+  }
+
+  async getQuestionAudienceView(
+    principal: Principal,
+    questionId: string,
+    query: QuestionAudienceViewQuery,
+  ): Promise<QuestionAudienceView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const question = await this.requireQuestion(principal, questionId, repository);
+      const role = query.role.trim();
+      const lens = this.questionAudienceLens(role);
+      return {
+        questionId: question.id,
+        questionVersion: question.version,
+        role,
+        mode: query.mode,
+        source: {
+          title: question.title,
+          context: question.context,
+          whyItMatters: question.whyItMatters,
+          options: question.options.map((option) => ({ ...option })),
+          ...(question.recommendationKey ? { recommendationKey: question.recommendationKey } : {}),
+        },
+        presentation: query.mode === "rewrite"
+          ? {
+              title: `For ${role}: ${question.title}`,
+              context: `${question.context}\n\nRole focus: ${lens.summary}`,
+              whyItMatters: question.whyItMatters,
+              focusAreas: lens.focusAreas,
+              reviewPrompt: lens.reviewPrompt,
+            }
+          : {
+              title: `What ${role} should evaluate`,
+              context: `The recorded question is “${question.title}”. ${lens.summary}`,
+              whyItMatters: `The recorded impact remains: ${question.whyItMatters}`,
+              focusAreas: lens.focusAreas,
+              reviewPrompt: lens.reviewPrompt,
+            },
+        guardrails: {
+          derivedOnly: true,
+          sourceFieldsUnchanged: true,
+          humanApprovalRequired: true,
+        },
+      };
+    });
+  }
+
+  private questionAudienceLens(role: string): {
+    readonly summary: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  } {
+    const normalized = normalizeRoleName(role);
+    if (["security", "privacy", "compliance", "risk"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through confidentiality, access-control, abuse, and compliance consequences.",
+        focusAreas: ["security controls", "data exposure", "threat and compliance evidence"],
+        reviewPrompt: "Which recorded option has acceptable security risk, and what evidence supports that assessment?",
+      };
+    }
+    if (["qa", "quality", "test"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through acceptance criteria, test coverage, and observable failure modes.",
+        focusAreas: ["acceptance criteria", "test evidence", "failure and regression risk"],
+        reviewPrompt: "Which recorded option is best supported by test evidence, and what release risk remains?",
+      };
+    }
+    if (["product", "business", "customer"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through user outcomes, scope, delivery cost, and reversibility.",
+        focusAreas: ["user outcome", "scope and priority", "delivery and reversal cost"],
+        reviewPrompt: "Which recorded option best serves the intended outcome within the accepted scope and risk?",
+      };
+    }
+    if (["operations", "sre", "platform", "devops", "reliability"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through reliability, rollout, observability, and recovery needs.",
+        focusAreas: ["operational reliability", "rollout and rollback", "monitoring and recovery"],
+        reviewPrompt: "Which recorded option can be operated and recovered safely, and what evidence is required?",
+      };
+    }
+    if (["design", "ux", "accessibility"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through comprehension, accessibility, interaction cost, and user trust.",
+        focusAreas: ["user comprehension", "accessibility", "interaction cost and trust"],
+        reviewPrompt: "Which recorded option creates the clearest accessible experience with acceptable user cost?",
+      };
+    }
+    if (["architect", "engineer", "developer", "technical"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through system boundaries, compatibility, delivery complexity, and maintenance.",
+        focusAreas: ["system boundaries", "compatibility", "implementation and maintenance cost"],
+        reviewPrompt: "Which recorded option fits the architecture with acceptable complexity and long-term cost?",
+      };
+    }
+    return {
+      summary: "Evaluate the recorded options through this role's responsibilities, evidence, and accountable trade-offs.",
+      focusAreas: ["role responsibilities", "supporting evidence", "risks and trade-offs"],
+      reviewPrompt: "Which recorded option should this role support, and what evidence or concern should the owner consider?",
+    };
   }
 
   async requestQuestionClarification(
