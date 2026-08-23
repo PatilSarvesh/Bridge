@@ -14,6 +14,7 @@ import {
   decisionsDueForReview,
   renderEssentialEmailTemplate,
   renderNotificationDigest,
+  retryDelayMs,
   runEmailDigestCycle,
   runOutboxCycle,
   createNotificationSlackHandler,
@@ -311,7 +312,10 @@ describe("notification outbox cycle", () => {
       now: () => new Date("2026-08-08T00:00:00.000Z"),
       maxAttempts: 2,
       baseBackoffMs: 1_000,
+      retryJitterRatio: 0.25,
+      random: () => 0.5,
     });
+    expect(store.events[0]?.availableAt).toBe("2026-08-08T00:00:00.875Z");
     const second = await runOutboxCycle(store, handler, {
       now: () => new Date("2026-08-08T00:00:02.000Z"),
       maxAttempts: 2,
@@ -321,6 +325,15 @@ describe("notification outbox cycle", () => {
     expect(first).toEqual({ claimed: 1, processed: 0, retried: 1, deadLettered: 0 });
     expect(second).toEqual({ claimed: 1, processed: 0, retried: 0, deadLettered: 1 });
     expect(store.events[0]).toMatchObject({ status: "dead_letter", attempts: 2, lastError: "downstream unavailable" });
+  });
+
+  it("keeps exponential retry jitter inside its configured cap", () => {
+    expect(retryDelayMs(1, 1_000, 5_000, 0.2, () => 0)).toBe(800);
+    expect(retryDelayMs(6, 1_000, 5_000, 0.2, () => 0)).toBe(4_000);
+    expect(retryDelayMs(6, 1_000, 5_000, 0.2, () => 1)).toBe(5_000);
+    expect(() => retryDelayMs(1, 1_000, 5_000, 1.1)).toThrow(
+      "Outbox retry jitter ratio must be between 0 and 1.",
+    );
   });
 });
 

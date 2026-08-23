@@ -930,7 +930,7 @@ See `README.md` for run, continuation, assumption, question, context, synchroniz
 
 Durable persistence is implemented but opt-in. Without `DATABASE_URL`, the API uses `InMemoryBridgeRepository` and state is lost when it restarts. With `DATABASE_URL`, it uses `PostgresBridgeRepository` after an operator runs the explicit migration.
 
-No local PostgreSQL, Docker, or Podman runtime exists in the current workspace, so the live reconnect integration test has not run here. It runs only when `BRIDGE_TEST_DATABASE_URL` points to an isolated PostgreSQL database.
+Local PostgreSQL tooling is now installed and API readiness was previously verified against a local repository, but the live reconnect integration test still has not run because it requires an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
 
 ### 17.2 Transactions and concurrency
 
@@ -948,7 +948,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 
 ### 17.4 Not yet implemented
 
-- Live email/team provider installations, scheduled worker deployment, jitter, and time-series delivery telemetry/alerts.
+- Live email/team provider installations, scheduled worker deployment, metrics-backend scraping, and alert delivery/evaluation.
 - Automatic vendor-session resume adapters; current continuation is explicit/manual.
 - Agent-run lifecycle mutation controls in the web UI; the corresponding run list/detail view remains read-only in the current prototype.
 - Hosted worker role provisioning and live PostgreSQL verification for scheduled assumption expiry; the application cycle and bounded worker schedule are implemented locally.
@@ -1004,15 +1004,14 @@ Implemented:
 
 Environment facts remain:
 
-- No `psql`, local `postgres`, Docker, or Podman executable is available.
-- Machine architecture is Apple Silicon (`arm64`).
-- Therefore live PostgreSQL migration/reconnect behavior is not yet verified in this workspace; do not claim that gate has passed.
+- Local PostgreSQL tooling is installed on Apple Silicon (`arm64`), and the user previously verified API readiness against a local PostgreSQL repository.
+- No explicitly isolated `BRIDGE_TEST_DATABASE_URL` is currently provided, so the opt-in migration/reconnect integration gate must remain skipped and no database command may be inferred from the local readiness check.
 
 ### 20.1 Remaining persistence follow-up
 
 1. Run `BRIDGE_TEST_DATABASE_URL=<isolated-url> pnpm --filter @bridge/database test` against real PostgreSQL.
 2. Add row-level security only when production identity/tenant context is explicitly brought into scope; do not infer authorization from the current fixed header.
-3. Wire the provider-neutral email and Slack handlers to approved production senders/directories after live PostgreSQL validation; add digest scheduling, jitter, and telemetry export around the implemented receipts/operator controls.
+3. Wire the provider-neutral email and Slack handlers to approved production senders/directories after live PostgreSQL validation; configure scraping/alerts around the implemented digest schedule, capped jittered retries, receipts, and worker metrics endpoint.
 4. Extend explicit expected-version request fields beyond runs and assumptions if pilots demonstrate a need beyond current row locking and state checks.
 
 ### 20.2 Implemented agent-run and continuation slice
@@ -1273,7 +1272,7 @@ Implemented:
 Deliberate boundaries:
 
 - No live email, chat, source-control, or work-item provider is enabled; the email template/handler seam and durable receipts are implemented without credentials.
-- No daemon scheduler, external adapter, time-series telemetry export, notification preferences, or live PostgreSQL runtime is claimed until the pilot selects a deployment and validates it against an isolated database. Project-scoped inspection, point-in-time metrics, and audited replay are implemented through REST.
+- At this checkpoint no daemon scheduler, external adapter, time-series telemetry export, notification preferences, or live PostgreSQL runtime was claimed. Later slices added the Slack worker runtime, process-local Prometheus export, preferences, and scheduled maintenance cycles; hosted provider/database/collector validation still remains.
 
 ### 20.16 Implemented CLI bootstrap safety and diagnostics slice
 
@@ -1490,7 +1489,7 @@ Deliberate boundaries:
 
 - The snapshot is an operational API, not a web administration page or a time-series telemetry backend; dashboards and alerts remain BRG-104/BRG-111 work.
 - Replay resets per-cycle attempts because the immutable audit record preserves who replayed the stable event and when. Email delivery receipts retain each event/channel's current attempt outcome and provider message ID across replay.
-- The worker remains handler-injected. Live provider/directory wiring, team delivery, digest runtime composition, and jitter are still pending; preference administration and the provider-neutral digest schedule/cycle are implemented, and MCP is not required for operator access.
+- The worker remains provider-injected. Live provider/directory wiring and email digest runtime composition are still pending; preference administration, the provider-neutral digest schedule/cycle, capped jittered outbox retries, and worker metrics export are implemented, and MCP is not required for operator access.
 
 ### 20.29 Implemented a privacy-minimized provider-neutral email delivery seam
 
@@ -1510,7 +1509,7 @@ Deliberate boundaries:
 - No message leaves the process until a deployment supplies a real recipient directory and sender. SES credentials, email addresses, and customer data are not stored in repository files or outbox payloads.
 - The link can now enter the OIDC web flow; hosted callback, cookie-domain, and email-link validation remain deployment work, so BRG-092 still does not claim a production delivery path.
 - Digest preference is durably deferred and is now batched/sent by the provider-neutral cycle documented in section 20.70. The blocking-escalation template is fed by the one-time overdue-question producer documented in section 20.71.
-- Only plain text is generated. HTML rendering, unsubscribe semantics, bounce/complaint handling, SES provider implementation, live schedule composition, jitter, and telemetry export remain deployment slices.
+- Only plain text is generated. HTML rendering, unsubscribe semantics, bounce/complaint handling, SES provider implementation, live email schedule composition, hosted metrics collection, and alert delivery remain deployment slices.
 
 ### 20.30 Implemented operational health and restore-verification foundations
 
@@ -1566,7 +1565,7 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - Metrics are process-local and reset on restart. Multi-instance collection, storage, dashboard hosting, rule evaluation, paging routes, and monitoring-network access control belong to the deployment.
-- The worker exposes injection seams rather than a long-running metrics server because its scheduled durable runtime remains incomplete. Queue/provider panels become live only after that deployment host exports the shared registry.
+- The long-running worker exposes the shared registry through a loopback-default `GET /metrics` listener. Queue/provider panels become live only after the deployment scrapes every instance into its metrics backend and evaluates the supplied rules.
 - MCP session initialize outcomes and bounded tool-call success/error/duration are exported without request arguments or identity/content labels. Database pool saturation requires provider/exporter telemetry.
 - The included objectives and thresholds are starting hypotheses. BRG-104 remains partial until representative pilot telemetry validates them and external alert delivery is exercised.
 
@@ -1836,7 +1835,7 @@ Implemented and locally verified:
 
 1. `@bridge/worker` now starts a bounded polling loop instead of only printing a readiness placeholder. It claims through the existing outbox contract, invokes the Slack notification handler, records normal retry/dead-letter outcomes through `runOutboxCycle`, and waits between cycles to avoid a hot loop.
 2. The process requires `BRIDGE_WORKER_DATABASE_URL`, deliberately separate from the API's `DATABASE_URL`, and opens the PostgreSQL store in `maintenance` mode. This preserves the database security boundary: API/MCP use `NOBYPASSRLS`, while only the explicitly provisioned worker connection can claim cross-tenant delivery work.
-3. `BRIDGE_WORKER_CHANNEL` currently accepts `slack`; `BRIDGE_WORKER_POLL_INTERVAL_MS`, `BRIDGE_WORKER_BATCH_SIZE`, `BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS`, `BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS`, `BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS`, `BRIDGE_WORKER_MAX_ATTEMPTS`, and `BRIDGE_WORKER_BASE_BACKOFF_MS` are validated and bounded. `SIGTERM` and `SIGINT` stop polling and close the database client cleanly.
+3. `BRIDGE_WORKER_CHANNEL` currently accepts `slack`; poll/batch/scheduled-cycle settings, `BRIDGE_WORKER_MAX_ATTEMPTS`, base/maximum backoff, proportional jitter percentage, and metrics host/port are validated and bounded. Defaults retain the existing one-second base delay, cap retries at fifteen minutes, jitter within the final 25% of each exponential window, and bind metrics to `127.0.0.1:4200`. `SIGTERM` and `SIGINT` stop polling and close the metrics listener and database client cleanly.
 4. Before delivery polling, the worker invokes the application-owned assumption expiry cycle at the configured interval. The cycle marks only overdue active assumptions, records the automatic expiry audit event, and creates owner/creator notifications and outbox intents once.
 5. The worker passes the shared metrics registry and safe logger through the existing correlation-aware outbox/integration boundaries. It never runs migrations, stores webhook URLs, accepts decisions, or changes the human approval boundary.
 
@@ -1844,7 +1843,7 @@ Deliberate boundaries:
 
 - The runtime currently composes Slack only. Email still requires a live sender/directory and a separate deployment composition; no unsupported email path is silently marked delivered.
 - A worker database connection must be provisioned with the documented maintenance role and an explicit target. No production or shared database command is part of the repository validation.
-- Slack workspace installation, deployment secret provisioning, provider/network failure-window testing, and a worker metrics exporter remain deployment evidence.
+- Slack workspace installation, deployment secret provisioning, provider/network failure-window testing, metrics scraping/network restriction, and alert evaluation remain deployment evidence.
 
 ### 20.49 Implemented persisted bounded adapter diagnostics
 
@@ -1871,7 +1870,7 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - The telemetry remains process-local and optional with MCP; REST remains the canonical business boundary and CLI/repository snapshots remain viable when MCP is not approved.
-- Tool errors are diagnostic outcomes, not automatic approval, policy, or incident decisions. Hosted collection, alert delivery, durable worker export, provider pool saturation, and pilot calibration remain deployment work.
+- Tool errors are diagnostic outcomes, not automatic approval, policy, or incident decisions. Hosted collection, alert delivery, provider pool saturation, and pilot calibration remain deployment work; process-local worker export is implemented.
 
 ### 20.51 Implemented REST-canonical project repository records
 
@@ -2200,6 +2199,21 @@ Deliberate boundaries:
 - Escalation is one notification fanout per logical question, not a repeated paging policy. Reopening a previously escalated question preserves its provenance; a later repeated-escalation/SLA ladder requires an explicit policy design.
 - The cycle only calls attention to an overdue blocker. It never accepts an answer, approves a specification, resumes an agent run, or bypasses existing membership and human authority. REST remains canonical and MCP remains optional.
 
+### 20.72 Implemented capped retry jitter and worker Prometheus export
+
+Implemented and locally verified:
+
+1. Outbox failures retain exponential attempt scaling but now cap the unjittered window at `BRIDGE_WORKER_MAX_BACKOFF_MS` (fifteen minutes by default). `BRIDGE_WORKER_RETRY_JITTER_PERCENT` defaults to 25 and selects a delay between 75% and 100% of that capped window, reducing synchronized retries without allowing zero-delay retry storms.
+2. Retry math accepts an injected random source for deterministic tests, clamps non-finite/out-of-range samples, validates base/cap/ratio relationships before claiming work, and preserves the existing stable event identity, attempt budget, lease, and dead-letter boundaries.
+3. The deployable worker now shares one `BridgeMetrics` instance across its maintenance PostgreSQL repository, outbox cycle, and Slack handler, and serves Prometheus text from `GET /metrics`. The listener defaults to `127.0.0.1:4200`; bounded host and port overrides are explicit deployment configuration.
+4. The metrics HTTP surface supports only `GET`/`HEAD`, returns `404`/`405` for other targets/methods, disables caching and MIME sniffing, and collapses malformed or unknown paths to the existing `unmatched` label. Request URLs, query values, tenant/project/principal IDs, destinations, and content never become metric labels or response text.
+5. Graceful shutdown closes the metrics listener before the database store, including startup/worker failures. Unit coverage exercises retry bounds and deterministic jitter, configuration validation, Prometheus rendering/privacy, safe malformed-path handling, and method behavior.
+
+Deliberate boundaries:
+
+- Metrics remain process-local and reset on restart. Production scraping, storage, dashboard hosting, monitoring-network controls, rule evaluation, paging routes, and PostgreSQL pool saturation telemetry remain deployment responsibilities.
+- Jitter changes only asynchronous delivery timing. It cannot roll back a canonical REST write, alter a notification payload, accept a decision, approve a specification, or widen MCP/human authority.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2274,6 +2288,7 @@ Deliberate boundaries:
 - Web UI: `apps/web/app/page.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker outbox cycle/runtime: `apps/worker/src/index.ts`, `apps/worker/src/runtime.ts`
+- Worker Prometheus HTTP surface: `apps/worker/src/metrics-server.ts`
 - Provider-neutral notification email handler: `apps/worker/src/email.ts`
 - Slack pilot notification handler and Incoming Webhook sender: `apps/worker/src/slack.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
@@ -2317,4 +2332,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, enterprise provisioning, provider-backed repository validation/synchronization, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, enterprise provisioning, provider-backed repository validation/synchronization, cross-vendor conformance, and recovery evidence remain pending.

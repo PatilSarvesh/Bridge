@@ -34,6 +34,10 @@ export interface WorkerConfiguration {
   readonly emailDigestIntervalMs: number;
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
+  readonly maxBackoffMs: number;
+  readonly retryJitterRatio: number;
+  readonly metricsHost: string;
+  readonly metricsPort: number;
 }
 
 export interface WorkerEnvironment {
@@ -47,6 +51,10 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_MAX_ATTEMPTS?: string;
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
+  readonly BRIDGE_WORKER_MAX_BACKOFF_MS?: string;
+  readonly BRIDGE_WORKER_RETRY_JITTER_PERCENT?: string;
+  readonly BRIDGE_WORKER_METRICS_HOST?: string;
+  readonly BRIDGE_WORKER_METRICS_PORT?: string;
 }
 
 export interface ConfiguredWorker {
@@ -55,6 +63,7 @@ export interface ConfiguredWorker {
   readonly handler: OutboxHandler;
   readonly assumptionExpiryCycle: AssumptionExpiryCycle;
   readonly blockingQuestionEscalationCycle: BlockingQuestionEscalationCycle;
+  readonly metrics: BridgeMetrics;
   readonly close: () => Promise<void>;
 }
 
@@ -110,6 +119,14 @@ function validatePublicWebUrl(value: string): string {
   return url.toString();
 }
 
+function validateMetricsHost(value: string): string {
+  const host = value.trim();
+  if (!/^[A-Za-z0-9.:[\]-]{1,255}$/.test(host)) {
+    throw new Error("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
+  }
+  return host;
+}
+
 export function loadWorkerConfiguration(
   environment: WorkerEnvironment = process.env,
 ): WorkerConfiguration {
@@ -120,6 +137,23 @@ export function loadWorkerConfiguration(
   const channel = environment.BRIDGE_WORKER_CHANNEL?.trim() || "slack";
   if (channel !== "slack") {
     throw new Error("BRIDGE_WORKER_CHANNEL currently supports only `slack`.");
+  }
+  const baseBackoffMs = positiveInteger(
+    environment,
+    "BRIDGE_WORKER_BASE_BACKOFF_MS",
+    1_000,
+    100,
+    60_000,
+  );
+  const maxBackoffMs = positiveInteger(
+    environment,
+    "BRIDGE_WORKER_MAX_BACKOFF_MS",
+    15 * 60 * 1_000,
+    1_000,
+    86_400_000,
+  );
+  if (maxBackoffMs < baseBackoffMs) {
+    throw new Error("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
   }
   return {
     databaseUrl,
@@ -149,7 +183,17 @@ export function loadWorkerConfiguration(
       86_400_000,
     ),
     maxAttempts: positiveInteger(environment, "BRIDGE_WORKER_MAX_ATTEMPTS", 5, 1, 20),
-    baseBackoffMs: positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000),
+    baseBackoffMs,
+    maxBackoffMs,
+    retryJitterRatio: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_RETRY_JITTER_PERCENT",
+      25,
+      0,
+      100,
+    ) / 100,
+    metricsHost: validateMetricsHost(environment.BRIDGE_WORKER_METRICS_HOST ?? "127.0.0.1"),
+    metricsPort: positiveInteger(environment, "BRIDGE_WORKER_METRICS_PORT", 4_200, 1, 65_535),
   };
 }
 
@@ -175,6 +219,7 @@ export function createConfiguredWorker(
     handler,
     assumptionExpiryCycle: () => service.expireDueAssumptions(),
     blockingQuestionEscalationCycle: () => service.escalateDueBlockingQuestions(),
+    metrics,
     close: store.close,
   };
 }

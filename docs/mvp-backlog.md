@@ -872,7 +872,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry, and a bounded maintenance-role worker runtime are implemented; live email delivery, jitter, telemetry export, and deployment validation remain
+- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry/blocker escalation, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; live email delivery and deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -883,9 +883,9 @@ Acceptance criteria:
 1. Material commands write outbox events in their domain transaction. **Implemented for core in-app notification events.**
 2. Worker claims and processes events at least once. **Implemented through the injected `runOutboxCycle` handler boundary.**
 3. Handlers are idempotent by event and destination. **Event IDs are stable for handler-side idempotency; destination adapters remain.**
-4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempt and backoff settings.**
+4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempts, base/cap settings, proportional jitter, deterministic coverage, and dead-letter state.**
 5. Operators can inspect and safely replay failed jobs. **Implemented through project-admin REST operations; replay preserves the event ID and requires the last observed attempt count.**
-6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot; time-series export and alerts remain BRG-104 work.**
+6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot and through the worker's safe process-local Prometheus endpoint; hosted collection and alert delivery remain BRG-104 work.**
 
 ### BRG-091 — Provide durable in-app notifications
 
@@ -1024,7 +1024,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, worker export, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 

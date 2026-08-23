@@ -67,6 +67,10 @@ describe("worker runtime", () => {
       emailDigestIntervalMs: 60_000,
       maxAttempts: 5,
       baseBackoffMs: 1_000,
+      maxBackoffMs: 900_000,
+      retryJitterRatio: 0.25,
+      metricsHost: "127.0.0.1",
+      metricsPort: 4_200,
     });
   });
 
@@ -79,6 +83,19 @@ describe("worker runtime", () => {
       BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
       BRIDGE_PUBLIC_WEB_URL: "file:///tmp/bridge",
     })).toThrow("BRIDGE_PUBLIC_WEB_URL must use HTTP or HTTPS.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_RETRY_JITTER_PERCENT: "101",
+    })).toThrow("BRIDGE_WORKER_RETRY_JITTER_PERCENT must be between 0 and 100.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_BASE_BACKOFF_MS: "5000",
+      BRIDGE_WORKER_MAX_BACKOFF_MS: "1000",
+    })).toThrow("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_METRICS_HOST: "http://example.test",
+    })).toThrow("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
   });
 
   it("processes a cycle and stops cleanly when the worker is aborted", async () => {
