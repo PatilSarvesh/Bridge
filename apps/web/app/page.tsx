@@ -237,6 +237,7 @@ interface Question {
   readonly policyRuleKey: string;
   readonly blocking: boolean;
   readonly dueAt?: string;
+  readonly blockingEscalatedAt?: string;
   readonly options: readonly Option[];
   readonly relatedLinks?: readonly QuestionLink[];
   readonly recommendationKey?: string;
@@ -344,6 +345,7 @@ interface Notification {
   readonly recipientId: string;
   readonly type:
     | "question_assigned"
+    | "question_blocking_escalation"
     | "question_response"
     | "question_comment"
     | "question_review"
@@ -3891,7 +3893,7 @@ export default function Home() {
                         onClick={() => setSelectedId(question.id)}
                       >
                         <span className={`risk risk-${question.risk}`} aria-hidden="true" />
-                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}</small></span>
+                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}{question.blockingEscalatedAt ? " · escalated" : ""}</small></span>
                         <span className={`status status-${question.status}`}>{question.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3909,6 +3911,7 @@ export default function Home() {
                         <p>{selectedQuestion.context}</p>
                         <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
                         {selectedQuestion.dueAt ? <div className="owner-routing"><strong>Due:</strong> {new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</div> : null}
+                        {selectedQuestion.blockingEscalatedAt ? <div className="owner-routing"><strong>Escalated:</strong> {new Date(selectedQuestion.blockingEscalatedAt).toLocaleString()}</div> : null}
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}

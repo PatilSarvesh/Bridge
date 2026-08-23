@@ -51,6 +51,12 @@ export interface AssumptionExpiryCycleResult {
 
 export type AssumptionExpiryCycle = () => Promise<AssumptionExpiryCycleResult>;
 
+export interface BlockingQuestionEscalationCycleResult {
+  readonly escalatedCount: number;
+}
+
+export type BlockingQuestionEscalationCycle = () => Promise<BlockingQuestionEscalationCycleResult>;
+
 export interface OutboxCycleResult {
   readonly claimed: number;
   readonly processed: number;
@@ -153,7 +159,7 @@ export async function runReviewReminderCycle(): Promise<void> {
   // reminder and expiry policy remains a deployment concern, so this entry point
   // reports the jobs that an operator-provided scheduler should invoke.
   process.stdout.write(
-    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry", "email-digest"], status: "ready" })}\n`,
+    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry", "blocking-question-escalation", "email-digest"], status: "ready" })}\n`,
   );
 }
 
@@ -189,6 +195,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           },
           assumptionExpiryCycle: runtime.assumptionExpiryCycle,
           assumptionExpiryIntervalMs: configuration.assumptionExpiryIntervalMs,
+          blockingQuestionEscalationCycle: runtime.blockingQuestionEscalationCycle,
+          blockingQuestionEscalationIntervalMs: configuration.blockingQuestionEscalationIntervalMs,
           emailDigestIntervalMs: configuration.emailDigestIntervalMs,
           signal: controller.signal,
         });

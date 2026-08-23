@@ -1241,7 +1241,7 @@ Implemented:
 
 Deliberate boundaries:
 
-- Comments are append-only with no edit/delete window, mentions, owner-requested reopen, or due-date escalation yet. Durable notification records now cover the main assignment/discussion/review events; preferences, mentions, and escalation policies remain future work.
+- At this checkpoint comments were append-only with no edit/delete window, mentions, owner-requested reopen, or due-date escalation. Later slices added governed edits/mentions/reopen, preferences, and the one-time overdue blocking escalation documented in section 20.71.
 - Thread rendering is intentionally a compact parent/reply view; pagination and deeply nested conversation navigation remain future work.
 
 ### 20.14 Implemented durable in-app notifications slice
@@ -1509,7 +1509,7 @@ Deliberate boundaries:
 
 - No message leaves the process until a deployment supplies a real recipient directory and sender. SES credentials, email addresses, and customer data are not stored in repository files or outbox payloads.
 - The link can now enter the OIDC web flow; hosted callback, cookie-domain, and email-link validation remain deployment work, so BRG-092 still does not claim a production delivery path.
-- Digest preference is durably deferred and is now batched/sent by the provider-neutral cycle documented in section 20.70. The blocking-escalation template exists, while producing SLA escalation notifications awaits scheduled policy work.
+- Digest preference is durably deferred and is now batched/sent by the provider-neutral cycle documented in section 20.70. The blocking-escalation template is fed by the one-time overdue-question producer documented in section 20.71.
 - Only plain text is generated. HTML rendering, unsubscribe semantics, bounce/complaint handling, SES provider implementation, live schedule composition, jitter, and telemetry export remain deployment slices.
 
 ### 20.30 Implemented operational health and restore-verification foundations
@@ -1836,7 +1836,7 @@ Implemented and locally verified:
 
 1. `@bridge/worker` now starts a bounded polling loop instead of only printing a readiness placeholder. It claims through the existing outbox contract, invokes the Slack notification handler, records normal retry/dead-letter outcomes through `runOutboxCycle`, and waits between cycles to avoid a hot loop.
 2. The process requires `BRIDGE_WORKER_DATABASE_URL`, deliberately separate from the API's `DATABASE_URL`, and opens the PostgreSQL store in `maintenance` mode. This preserves the database security boundary: API/MCP use `NOBYPASSRLS`, while only the explicitly provisioned worker connection can claim cross-tenant delivery work.
-3. `BRIDGE_WORKER_CHANNEL` currently accepts `slack`; `BRIDGE_WORKER_POLL_INTERVAL_MS`, `BRIDGE_WORKER_BATCH_SIZE`, `BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS`, `BRIDGE_WORKER_MAX_ATTEMPTS`, and `BRIDGE_WORKER_BASE_BACKOFF_MS` are validated and bounded. `SIGTERM` and `SIGINT` stop polling and close the database client cleanly.
+3. `BRIDGE_WORKER_CHANNEL` currently accepts `slack`; `BRIDGE_WORKER_POLL_INTERVAL_MS`, `BRIDGE_WORKER_BATCH_SIZE`, `BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS`, `BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS`, `BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS`, `BRIDGE_WORKER_MAX_ATTEMPTS`, and `BRIDGE_WORKER_BASE_BACKOFF_MS` are validated and bounded. `SIGTERM` and `SIGINT` stop polling and close the database client cleanly.
 4. Before delivery polling, the worker invokes the application-owned assumption expiry cycle at the configured interval. The cycle marks only overdue active assumptions, records the automatic expiry audit event, and creates owner/creator notifications and outbox intents once.
 5. The worker passes the shared metrics registry and safe logger through the existing correlation-aware outbox/integration boundaries. It never runs migrations, stores webhook URLs, accepts decisions, or changes the human approval boundary.
 
@@ -1982,7 +1982,7 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- Due timestamps are optional question metadata supplied through canonical question creation. A separate deadline-change command, reminders/escalations, and notification preferences remain future workflow policy.
+- Due timestamps are optional question metadata supplied through canonical question creation. Notification preferences and one-time overdue blocking escalation are now implemented; a separate deadline-change command and repeated reminder/SLA ladder remain future workflow policy.
 - Multi-role quorum, administrative approval override, and review reassignment are now implemented in BRG-043; this inbox slice exposes their server-derived status and action authority and never grants approval authority locally.
 - URL state makes one project inbox view shareable and restorable without introducing another persisted preference aggregate. Server-stored personal views and a cross-project aggregate remain later product choices.
 - REST remains canonical. MCP uses the same read contract and remains optional; no human mutation path was added to MCP.
@@ -2184,6 +2184,22 @@ Deliberate boundaries:
 - This completes repository-side scheduling and provider-neutral delivery behavior, not a live SES deployment. A real recipient directory, sender credentials, bounce/complaint handling, hosted worker composition, and provider failure-window evidence remain deployment work.
 - Email remains a notification path only. Digest delivery cannot accept decisions, approve specifications, or weaken protected-review immediate delivery. REST remains canonical and MCP remains optional.
 
+### 20.71 Implemented idempotent overdue blocking-question escalation
+
+Implemented and locally verified:
+
+1. The application-owned maintenance cycle selects only blocking questions that have a due timestamp at or before the current time, remain `open` or `in_discussion`, and have no prior escalation timestamp. It locks each candidate again before mutation inside the serializable maintenance transaction.
+2. Forward-only migration `0040_big_black_crow.sql` adds nullable `blocking_escalated_at` provenance and the `question_blocking_escalation` notification type. The timestamp, immutable audit event, in-app notifications, and transactional outbox intents commit atomically.
+3. Recipient fanout deduplicates direct owners, reviewers, project decision owners, project administrators, and active human members matching configured owner/reviewer policy roles. The durable event carries only the existing bounded question context.
+4. A second cycle observes the persisted timestamp and emits nothing. Future-due, non-blocking, accepted, duplicate, cancelled, and expired questions are not escalated; operational provenance does not increment the question's human-edit version or change its status.
+5. The worker invokes the cycle before outbox delivery on a bounded `BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS` schedule. Provider-neutral email maps the notification to the existing blocking-escalation template, and the web surfaces both the notification and escalation timestamp.
+6. Application idempotency/authority, worker scheduling/template, mapper, migration-shape, and web type coverage pass locally. The opt-in PostgreSQL integration remains gated by an explicitly isolated `BRIDGE_TEST_DATABASE_URL`; no migration or database command was run.
+
+Deliberate boundaries:
+
+- Escalation is one notification fanout per logical question, not a repeated paging policy. Reopening a previously escalated question preserves its provenance; a later repeated-escalation/SLA ladder requires an explicit policy design.
+- The cycle only calls attention to an overdue blocker. It never accepts an answer, approves a specification, resumes an agent run, or bypasses existing membership and human authority. REST remains canonical and MCP remains optional.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2247,6 +2263,7 @@ Deliberate boundaries:
 - Human email notification preferences migration: `packages/database/drizzle/0037_aberrant_ezekiel.sql`
 - Artifact approval-quorum migration: `packages/database/drizzle/0038_natural_puppet_master.sql`
 - Deferred email-digest scheduling migration: `packages/database/drizzle/0039_concerned_wrecking_crew.sql`
+- Blocking-question escalation migration: `packages/database/drizzle/0040_big_black_crow.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -2300,4 +2317,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, enterprise provisioning, provider-backed repository validation/synchronization, cross-vendor conformance, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, enterprise provisioning, provider-backed repository validation/synchronization, cross-vendor conformance, and recovery evidence remain pending.

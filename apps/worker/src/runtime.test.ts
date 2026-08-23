@@ -63,6 +63,7 @@ describe("worker runtime", () => {
       pollIntervalMs: 1_000,
       batchSize: 25,
       assumptionExpiryIntervalMs: 60_000,
+      blockingQuestionEscalationIntervalMs: 60_000,
       emailDigestIntervalMs: 60_000,
       maxAttempts: 5,
       baseBackoffMs: 1_000,
@@ -109,6 +110,7 @@ describe("worker runtime", () => {
     const controller = new AbortController();
     const logs: string[] = [];
     let expiryRuns = 0;
+    let escalationRuns = 0;
     let digestRuns = 0;
     await runOutboxWorker({
       store,
@@ -118,6 +120,11 @@ describe("worker runtime", () => {
         return { expiredCount: 2 };
       },
       assumptionExpiryIntervalMs: 1_000,
+      blockingQuestionEscalationCycle: async () => {
+        escalationRuns += 1;
+        return { escalatedCount: 1 };
+      },
+      blockingQuestionEscalationIntervalMs: 1_000,
       emailDigestCycle: async () => {
         digestRuns += 1;
         return { claimed: 2, digestsSent: 1, delivered: 2, suppressed: 0, retried: 0, failed: 0 };
@@ -134,8 +141,10 @@ describe("worker runtime", () => {
     });
 
     expect(expiryRuns).toBe(1);
+    expect(escalationRuns).toBe(1);
     expect(digestRuns).toBe(1);
     expect(logs).toContain("assumption_expiry.cycle_completed");
+    expect(logs).toContain("blocking_question_escalation.cycle_completed");
     expect(logs).toContain("email_digest.cycle_completed");
   });
 

@@ -123,6 +123,7 @@ const question: Question = {
   reversible: false,
   blocking: true,
   dueAt: "2026-08-09T10:00:00.000Z",
+  blockingEscalatedAt: "2026-08-09T10:05:00.000Z",
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
   requiredOwnerRoles: [],
@@ -759,6 +760,13 @@ describe("PostgreSQL domain mappings", () => {
     expect(emailDigestMigration).toContain('ADD COLUMN "digest_lease_until"');
     expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_schedule_check");
     expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_available_idx");
+    const blockingEscalationMigration = readFileSync(
+      new URL("../drizzle/0040_big_black_crow.sql", import.meta.url),
+      "utf8",
+    );
+    expect(blockingEscalationMigration).toContain('ADD COLUMN "blocking_escalated_at"');
+    expect(blockingEscalationMigration).toContain("question_blocking_escalation");
+    expect(blockingEscalationMigration).toContain("bridge_notifications_type_check");
 
     const assumptionDecisionMigration = readFileSync(
       new URL("../drizzle/0033_sparkling_carlie_cooper.sql", import.meta.url),

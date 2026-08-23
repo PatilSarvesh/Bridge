@@ -1530,6 +1530,85 @@ describe("Bridge decision workflow", () => {
     expect((await repository.listNotifications(project.organizationId, owner.id, project.id))).toHaveLength(1);
   });
 
+  it("escalates each overdue blocking question once without changing human authority", async () => {
+    const { repository, service } = await runtime();
+    await repository.saveOrganization({
+      id: project.organizationId,
+      externalIdentityProviderId: "dev_org_one",
+      slug: "one",
+      name: "One",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    await seedProjectMember(repository, owner);
+    await seedProjectMember(repository, qaLead);
+    const overdue = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-blocking-escalation-overdue",
+      title: "Which overdue release blocker needs a human decision?",
+      category: "privacy",
+      dueAt: "2026-01-02T00:00:00.000Z",
+    }));
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-blocking-escalation-future",
+      title: "Which future release blocker needs a human decision?",
+      dueAt: "2026-01-04T00:00:00.000Z",
+    }));
+    await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-blocking-escalation-nonblocking",
+      title: "Which overdue non-blocking follow-up should be reviewed?",
+      category: "observability",
+      risk: "low",
+      reversible: true,
+      blocking: false,
+      dueAt: "2026-01-02T00:00:00.000Z",
+    }));
+    const cancelled = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "question-blocking-escalation-cancelled",
+      title: "Which cancelled blocker must stay closed?",
+      dueAt: "2026-01-02T00:00:00.000Z",
+    }));
+    await repository.saveQuestion({ ...cancelled, status: "cancelled" });
+
+    const laterService = new BridgeService(repository, {
+      now: () => new Date("2026-01-03T00:00:00.000Z"),
+      id: (() => {
+        let next = 0;
+        return () => `escalation_${++next}`;
+      })(),
+    });
+    await expect(laterService.escalateDueBlockingQuestions()).resolves.toEqual({ escalatedCount: 1 });
+    expect(await repository.getQuestion(overdue.id)).toMatchObject({
+      blockingEscalatedAt: "2026-01-03T00:00:00.000Z",
+      status: "open",
+      version: 1,
+    });
+    const escalations = (await repository.listOutboxEvents(project.id)).flatMap((event) => {
+      const payload = event.payload;
+      return event.type === "notification.created" &&
+          "notificationType" in payload &&
+          payload.notificationType === "question_blocking_escalation"
+        ? [payload]
+        : [];
+    });
+    expect(escalations).toHaveLength(2);
+    expect(escalations.map((payload) => payload.recipientId).sort()).toEqual(
+      [owner.id, qaLead.id].sort(),
+    );
+    expect(escalations.every((payload) => payload.targetId === overdue.id)).toBe(true);
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "question.blocking_escalated", subjectId: overdue.id }),
+    ]));
+
+    await expect(laterService.escalateDueBlockingQuestions()).resolves.toEqual({ escalatedCount: 0 });
+    expect((await repository.listOutboxEvents(project.id)).flatMap((event) => {
+      const payload = event.payload;
+      return event.type === "notification.created" &&
+          "notificationType" in payload &&
+          payload.notificationType === "question_blocking_escalation"
+        ? [payload]
+        : [];
+    })).toHaveLength(2);
+  });
+
   it("blocks protected, irreversible, excessive-expiry, and decision-conflicting assumptions", async () => {
     const { service } = await runtime();
     const registration = await service.startRun(agent, project.id, {

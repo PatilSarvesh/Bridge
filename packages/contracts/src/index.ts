@@ -31,6 +31,7 @@ export const questionReviewStatusSchema = z.enum(["approved", "rejected"]);
 export const questionDueFilterSchema = z.enum(["overdue", "next_7_days", "scheduled", "none"]);
 export const notificationTypeSchema = z.enum([
   "question_assigned",
+  "question_blocking_escalation",
   "question_response",
   "question_comment",
   "question_review",

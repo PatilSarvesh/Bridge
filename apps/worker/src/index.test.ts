@@ -408,6 +408,30 @@ describe("notification email delivery", () => {
     ]));
   });
 
+  it("maps overdue blocker notifications to the blocking-escalation email template", async () => {
+    const item = notification("email_blocking", "question_blocking_escalation");
+    const requests: EmailSendRequest[] = [];
+    const handler = createNotificationEmailHandler({
+      store: new TestNotificationEmailStore([item]),
+      directory: {
+        resolveEmailRecipient: async () => ({ address: "owner@example.test", preference: "immediate" }),
+      },
+      sender: {
+        send: async (request) => {
+          requests.push(request);
+          return { providerMessageId: "provider-blocking-001" };
+        },
+      },
+      publicBaseUrl: "https://bridge.example.test/",
+    });
+
+    await handler({ ...notificationEvent("evt_email_blocking", item), status: "processing", attempts: 1 });
+
+    expect(requests).toEqual([
+      expect.objectContaining({ subject: expect.stringContaining("Blocking escalation") }),
+    ]);
+  });
+
   it("honors ordinary muted/digest preferences while protected review email remains immediate", async () => {
     const muted = { ...notification("email_muted"), recipientId: "usr_muted" };
     const digest = { ...notification("email_digest", "question_comment"), recipientId: "usr_digest" };

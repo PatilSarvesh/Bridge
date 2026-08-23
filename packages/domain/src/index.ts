@@ -547,6 +547,7 @@ export interface Question {
   readonly reversible: boolean;
   readonly blocking: boolean;
   readonly dueAt?: string;
+  readonly blockingEscalatedAt?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
   readonly requiredOwnerRoles: readonly string[];

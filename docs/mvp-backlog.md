@@ -891,7 +891,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, role-directory fanout for active human project members, and the human-owned email preference record are implemented; external channels, deletion reconciliation evidence, and operator delivery controls remain
+- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, one-time overdue-blocker escalations, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, role-directory fanout for active human project members, and the human-owned email preference record are implemented; external channels, deletion reconciliation evidence, and operator delivery controls remain
 - **Dependencies:** BRG-031, BRG-090
 - **PRD references:** NTF-01
 
@@ -902,14 +902,14 @@ Acceptance criteria:
 1. Notification record is durable and linked to the target record. **Implemented for the core question, response, comment, review, decision, and artifact events.**
 2. Users can mark one or all notifications read. **Implemented with project-scoped REST commands and the web feed.**
 3. Recipient resolution respects current membership and authorization. **Role targets resolve at notification creation from the active human organization/project directory, while direct recipients and read-time organization/project/recipient checks remain supported; live deletion/reconciliation evidence remains.**
-4. Protected/blocking events are visually distinguishable. **Protected review notifications carry a distinct event type; richer severity styling remains.**
+4. Protected/blocking events are visually distinguishable. **Protected review and overdue blocking escalation notifications carry distinct event types, and escalated questions expose their timestamp; richer severity styling remains.**
 5. Deleted access removes the ability to open notification targets. **Read/mark-read rechecks project access; production deletion/membership lifecycle remains.**
 
 ### BRG-092 — Deliver essential email notifications
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, recipient/preference and sender contracts, idempotent immediate delivery, durable privacy-minimized delivery receipts, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; a live SES sender/directory, blocking-escalation producer, and authenticated deployment link remain
+- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, recipient/preference and sender contracts, idempotent immediate delivery, durable privacy-minimized delivery receipts, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; a live SES sender/directory and authenticated deployment link remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -917,7 +917,7 @@ As a user, I need email notification for important Bridge events so that I do no
 
 Acceptance criteria:
 
-1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
+1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the maintenance worker now produces one escalation per overdue unresolved blocking question.**
 2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context, an auth-ready review URL, and OIDC web sign-in are implemented; hosted callback/link validation remains deployment work.**
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
 4. Ordinary events honor notification preferences. **Human-owned immediate, muted, and digest email preferences persist through the canonical REST/application path and override the injected directory default. Digest receipts receive a durable due time and recoverable lease, group only same-recipient/project titles under a stable batch key, and retry without persisting addresses; protected review mail bypasses muting.**

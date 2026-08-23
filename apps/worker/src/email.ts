@@ -180,6 +180,7 @@ export function sanitizeDeliveryError(error: unknown, fallback = "Notification d
 
 function templateKind(notification: Notification): EssentialEmailTemplateKind {
   if (notification.type === "question_assigned") return "assignment";
+  if (notification.type === "question_blocking_escalation") return "blocking_escalation";
   if (notification.type === "question_comment") return "clarification";
   if (notification.type === "question_accepted") return "accepted_answer";
   if (notification.type.startsWith("artifact_")) return "artifact_review";

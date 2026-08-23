@@ -449,6 +449,7 @@ export const questions = pgTable(
     reversible: boolean("reversible").notNull(),
     blocking: boolean("blocking").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true, mode: "string" }),
+    blockingEscalatedAt: timestamp("blocking_escalated_at", { withTimezone: true, mode: "string" }),
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
     requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
@@ -804,7 +805,7 @@ export const notifications = pgTable(
     }).onDelete("cascade"),
     check(
       "bridge_notifications_type_check",
-      sql`${table.type} IN ('question_assigned', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved')`,
+      sql`${table.type} IN ('question_assigned', 'question_blocking_escalation', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved')`,
     ),
     tenantPolicy("bridge_notifications_tenant", table.organizationId),
   ],

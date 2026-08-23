@@ -9,6 +9,7 @@ import {
 import {
   runOutboxCycle,
   type AssumptionExpiryCycle,
+  type BlockingQuestionEscalationCycle,
   type EmailDigestCycleResult,
   type OutboxCycleOptions,
   type OutboxHandler,
@@ -29,6 +30,7 @@ export interface WorkerConfiguration {
   readonly pollIntervalMs: number;
   readonly batchSize: number;
   readonly assumptionExpiryIntervalMs: number;
+  readonly blockingQuestionEscalationIntervalMs: number;
   readonly emailDigestIntervalMs: number;
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
@@ -41,6 +43,7 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_POLL_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_BATCH_SIZE?: string;
   readonly BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS?: string;
+  readonly BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_MAX_ATTEMPTS?: string;
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
@@ -51,6 +54,7 @@ export interface ConfiguredWorker {
   readonly store: PostgresBridgeStore;
   readonly handler: OutboxHandler;
   readonly assumptionExpiryCycle: AssumptionExpiryCycle;
+  readonly blockingQuestionEscalationCycle: BlockingQuestionEscalationCycle;
   readonly close: () => Promise<void>;
 }
 
@@ -65,6 +69,8 @@ export interface OutboxWorkerOptions {
   readonly cycleOptions?: Omit<OutboxCycleOptions, "logger" | "metrics">;
   readonly assumptionExpiryCycle?: AssumptionExpiryCycle;
   readonly assumptionExpiryIntervalMs?: number;
+  readonly blockingQuestionEscalationCycle?: BlockingQuestionEscalationCycle;
+  readonly blockingQuestionEscalationIntervalMs?: number;
   readonly emailDigestCycle?: () => Promise<EmailDigestCycleResult>;
   readonly emailDigestIntervalMs?: number;
   readonly logger?: SafeLogger;
@@ -128,6 +134,13 @@ export function loadWorkerConfiguration(
       1_000,
       86_400_000,
     ),
+    blockingQuestionEscalationIntervalMs: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS",
+      60_000,
+      1_000,
+      86_400_000,
+    ),
     emailDigestIntervalMs: positiveInteger(
       environment,
       "BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS",
@@ -161,6 +174,7 @@ export function createConfiguredWorker(
     store,
     handler,
     assumptionExpiryCycle: () => service.expireDueAssumptions(),
+    blockingQuestionEscalationCycle: () => service.escalateDueBlockingQuestions(),
     close: store.close,
   };
 }
@@ -200,8 +214,17 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
   ) {
     throw new Error("Worker email digest interval must be between 1000 and 86400000 milliseconds.");
   }
+  const blockingQuestionEscalationIntervalMs = options.blockingQuestionEscalationIntervalMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(blockingQuestionEscalationIntervalMs) ||
+    blockingQuestionEscalationIntervalMs < 1_000 ||
+    blockingQuestionEscalationIntervalMs > 86_400_000
+  ) {
+    throw new Error("Worker blocking-question escalation interval must be between 1000 and 86400000 milliseconds.");
+  }
 
   let nextAssumptionExpiryAt = 0;
+  let nextBlockingQuestionEscalationAt = 0;
   let nextEmailDigestAt = 0;
   while (!signal?.aborted) {
     if (options.assumptionExpiryCycle && Date.now() >= nextAssumptionExpiryAt) {
@@ -215,6 +238,21 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
         logger.error("assumption_expiry.cycle_failed", { error, status: "retrying" });
       }
       nextAssumptionExpiryAt = Date.now() + assumptionExpiryIntervalMs;
+    }
+    if (
+      options.blockingQuestionEscalationCycle &&
+      Date.now() >= nextBlockingQuestionEscalationAt
+    ) {
+      try {
+        const result = await options.blockingQuestionEscalationCycle();
+        logger.info("blocking_question_escalation.cycle_completed", {
+          escalatedCount: result.escalatedCount,
+          status: "success",
+        });
+      } catch (error) {
+        logger.error("blocking_question_escalation.cycle_failed", { error, status: "retrying" });
+      }
+      nextBlockingQuestionEscalationAt = Date.now() + blockingQuestionEscalationIntervalMs;
     }
     if (options.emailDigestCycle && Date.now() >= nextEmailDigestAt) {
       try {

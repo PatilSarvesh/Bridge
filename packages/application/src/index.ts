@@ -371,6 +371,10 @@ export interface AssumptionExpiryCycleResult {
   readonly expiredCount: number;
 }
 
+export interface BlockingQuestionEscalationCycleResult {
+  readonly escalatedCount: number;
+}
+
 export interface OutboxOperationsMetrics {
   readonly total: number;
   readonly statusCounts: Readonly<Record<OutboxEvent["status"], number>>;
@@ -3555,6 +3559,89 @@ export class BridgeService {
         }
       }
       return { expiredCount };
+    }, { maintenance: true });
+  }
+
+  async escalateDueBlockingQuestions(): Promise<BlockingQuestionEscalationCycleResult> {
+    return this.repository.transaction(async (repository) => {
+      let escalatedCount = 0;
+      const now = this.now();
+      const escalatedAt = now.toISOString();
+      for (const organization of await repository.listOrganizations()) {
+        const maintenancePrincipal: Principal = {
+          id: "bridge-worker",
+          type: "integration",
+          organizationId: organization.id,
+          projectIds: [],
+          allProjects: true,
+          roles: ["system-maintenance"],
+          displayName: "Bridge worker",
+        };
+        for (const project of await repository.listProjects(organization.id)) {
+          for (const listedQuestion of await repository.listQuestions(project.id)) {
+            if (
+              !listedQuestion.blocking ||
+              !listedQuestion.dueAt ||
+              listedQuestion.blockingEscalatedAt ||
+              !["open", "in_discussion"].includes(listedQuestion.status) ||
+              Date.parse(listedQuestion.dueAt) > now.getTime()
+            ) {
+              continue;
+            }
+            const question = await repository.getQuestion(listedQuestion.id);
+            if (
+              !question ||
+              !question.blocking ||
+              !question.dueAt ||
+              question.blockingEscalatedAt ||
+              !["open", "in_discussion"].includes(question.status) ||
+              Date.parse(question.dueAt) > now.getTime()
+            ) {
+              continue;
+            }
+
+            await repository.saveQuestion({ ...question, blockingEscalatedAt: escalatedAt });
+            await this.audit(
+              repository,
+              maintenancePrincipal,
+              project.id,
+              "question.blocking_escalated",
+              "question",
+              question.id,
+              escalatedAt,
+              question.policyVersion,
+            );
+            await this.notify(
+              repository,
+              maintenancePrincipal,
+              project.id,
+              [...question.ownerIds, ...question.reviewerIds, ...project.decisionOwnerIds],
+              {
+                type: "question_blocking_escalation",
+                title: "Overdue blocking question needs attention",
+                body: `“${question.title}” is overdue and still blocks progress. Review the authoritative question in Bridge.`,
+                targetType: "question",
+                targetId: question.id,
+                recipientRoles: [
+                  ...question.ownerRoles,
+                  ...question.requiredOwnerRoles,
+                  ...question.reviewerRoles,
+                  ...question.requiredReviewerRoles,
+                  "project-admin",
+                ],
+                questionContext: {
+                  id: question.id,
+                  status: question.status,
+                  risk: question.risk,
+                  ownerIds: question.ownerIds,
+                },
+              },
+            );
+            escalatedCount += 1;
+          }
+        }
+      }
+      return { escalatedCount };
     }, { maintenance: true });
   }
 

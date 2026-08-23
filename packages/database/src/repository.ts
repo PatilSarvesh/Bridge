@@ -965,6 +965,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
         target: questions.id,
         set: {
           status: row.status,
+          blockingEscalatedAt: row.blockingEscalatedAt,
           reviews: row.reviews,
           comments: row.comments,
           relatedLinks: row.relatedLinks,

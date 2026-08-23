@@ -1,0 +1,3 @@
+ALTER TABLE "bridge_notifications" DROP CONSTRAINT "bridge_notifications_type_check";--> statement-breakpoint
+ALTER TABLE "bridge_questions" ADD COLUMN "blocking_escalated_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "bridge_notifications" ADD CONSTRAINT "bridge_notifications_type_check" CHECK ("bridge_notifications"."type" IN ('question_assigned', 'question_blocking_escalation', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved'));
