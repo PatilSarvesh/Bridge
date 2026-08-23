@@ -1,6 +1,6 @@
 # Observability foundation
 
-Bridge provides vendor-neutral correlation, safe structured logging, bounded process-local metrics, Prometheus text export for the HTTP services, a pilot dashboard definition, alert rules, and initial service objectives. It does not require OpenTelemetry, CloudWatch, MCP, or a hosted deployment.
+Bridge provides vendor-neutral correlation, safe structured logging, bounded process-local metrics, Prometheus text export for the API, optional MCP service, and worker, a pilot dashboard definition, alert rules, and initial service objectives. It does not require OpenTelemetry, CloudWatch, MCP, or a hosted deployment.
 
 ## Correlation flow
 
@@ -43,14 +43,15 @@ Errors retain only a bounded error name and safe machine code when present. Logs
 
 ## Metrics and scraping
 
-`@bridge/observability` includes a dependency-free `BridgeMetrics` registry. The API and standalone MCP service each create one registry shared with their application and PostgreSQL repository, then expose it through `GET /metrics` in Prometheus text format. For local inspection:
+`@bridge/observability` includes a dependency-free `BridgeMetrics` registry. The API and standalone MCP service each create one registry shared with their application and PostgreSQL repository; the worker shares one registry across its repository, outbox cycle, and integration handler. Each process exposes that registry through `GET /metrics` in Prometheus text format. For local inspection:
 
 ```bash
 curl --silent http://127.0.0.1:4000/metrics
 curl --silent http://127.0.0.1:4100/metrics
+curl --silent http://127.0.0.1:4200/metrics
 ```
 
-The endpoints intentionally contain no tenant, project, principal, record, prompt, answer, specification, or other content labels. Operations use route templates; unmatched paths collapse to `unmatched`, and the registry collapses operations beyond its 128-label process budget to `overflow`. A deployed reverse proxy must restrict `/metrics` to the monitoring network even though the current fixed-principal prototype does not implement authentication.
+The endpoints intentionally contain no tenant, project, principal, record, prompt, answer, specification, destination, or other content labels. Operations use bounded route names; unmatched paths collapse to `unmatched`, and the registry collapses operations beyond its 128-label process budget to `overflow`. The worker listener defaults to `127.0.0.1:4200`; `BRIDGE_WORKER_METRICS_HOST` and `BRIDGE_WORKER_METRICS_PORT` are validated deployment overrides. A deployed reverse proxy or network policy must restrict every `/metrics` endpoint to the monitoring network because these scrape surfaces do not implement end-user authentication.
 
 The registry records:
 
@@ -62,7 +63,7 @@ The registry records:
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
 - MCP initialize outcomes and tool-call success/error/duration by bounded tool name, without request arguments, session identifiers, tenant, project, principal, record, or content labels.
 
-API and MCP metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. The worker accepts the same registry through `runOutboxCycle`, `createNotificationEmailHandler`, and `createNotificationSlackHandler`; the repository now includes a bounded long-running Slack outbox daemon, while a worker metrics endpoint or collector remains deployment-owned.
+API, MCP, and worker metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. Repository, `runOutboxCycle`, and Slack delivery instrumentation share the exported worker registry; an email-enabled deployment must pass the same registry to its provider-neutral email handler and digest composition.
 
 Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or translate its PromQL into the chosen dashboard system), load `config/observability/bridge-pilot-alerts.yml` into a Prometheus-compatible rule evaluator, and use [`service-objectives.md`](./service-objectives.md) for the initial objectives and threshold rationale.
 
@@ -70,7 +71,7 @@ Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or trans
 
 - OpenTelemetry spans/export and production collector wiring.
 - Stable PostgreSQL pool-utilization telemetry supplied by the selected deployment/provider.
-- A worker metrics endpoint or collector integration and production evaluation of the included alert rules.
+- Production scraping/collector integration and evaluation of the included alert rules for every deployed API, MCP, and worker instance.
 - Validation and tuning of the initial service objectives against representative pilot telemetry.
 - Deployment-owned log access control, retention, and audit evidence.
 

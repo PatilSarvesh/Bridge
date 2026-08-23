@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertCanApproveArtifact,
+  artifactApprovalStatus,
   assertProjectAccess,
+  bridgeScopes,
   principalHasRole,
+  principalHasScope,
   reviewDateFor,
   type Artifact,
   type Principal,
@@ -19,6 +22,25 @@ describe("decision review policy", () => {
 
   it("reviews protected decisions after 90 days", () => {
     expect(reviewDateFor("protected", createdAt)).toBe("2026-04-01T00:00:00.000Z");
+  });
+});
+
+describe("capability scopes", () => {
+  const agent: Principal = {
+    id: "agt_scope_test",
+    type: "agent",
+    organizationId: "org_one",
+    projectIds: ["prj_one"],
+    roles: ["agent"],
+    displayName: "Scoped Agent",
+  };
+
+  it("supports least-privilege resource scopes without widening admin capabilities", () => {
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.questionsRead] }, bridgeScopes.questionsRead)).toBe(true);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.questionsRead] }, bridgeScopes.projectsRead)).toBe(false);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.questionsRead)).toBe(true);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.projectAdmin)).toBe(false);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.admin] }, bridgeScopes.projectAdmin)).toBe(true);
   });
 });
 
@@ -96,5 +118,55 @@ describe("project-scoped roles", () => {
     expect(() => assertCanApproveArtifact(publishingAgent, artifact, [publishingAgent.id])).toThrowError(
       expect.objectContaining({ code: "FORBIDDEN" }),
     );
+  });
+});
+
+describe("artifact approval quorum", () => {
+  it("derives progress from distinct human approvals and blocks a changed version", () => {
+    const version = {
+      requiredApprovals: 2,
+      status: "in_review" as const,
+      reviews: [
+        {
+          id: "arv_one",
+          artifactVersionId: "av_one",
+          reviewerId: "usr_one",
+          reviewerType: "human" as const,
+          status: "approved" as const,
+          body: "The first reviewer approves this immutable version.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "arv_duplicate",
+          artifactVersionId: "av_one",
+          reviewerId: "usr_one",
+          reviewerType: "human" as const,
+          status: "approved" as const,
+          body: "A duplicate record cannot increase the distinct-human count.",
+          createdAt: "2026-01-01T00:01:00.000Z",
+        },
+      ],
+    };
+
+    expect(artifactApprovalStatus(version)).toEqual({
+      requiredCount: 2,
+      approvedCount: 1,
+      remainingCount: 1,
+      status: "pending",
+      satisfied: false,
+      reviewerIds: ["usr_one"],
+    });
+    expect(artifactApprovalStatus({
+      ...version,
+      reviews: [...version.reviews, {
+        id: "arv_blocked",
+        artifactVersionId: "av_one",
+        reviewerId: "usr_two",
+        reviewerType: "human",
+        status: "changes_requested",
+        body: "The failure-mode evidence is incomplete.",
+        createdAt: "2026-01-01T00:02:00.000Z",
+      }],
+    })).toMatchObject({ status: "blocked", satisfied: false });
   });
 });

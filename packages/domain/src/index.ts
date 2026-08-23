@@ -1,3 +1,4 @@
+import { bridgeCapabilityScopes } from "@bridge/contracts";
 import type {
   AdapterDiagnosticCheckName,
   AdapterDiagnosticCheckStatus,
@@ -24,6 +25,7 @@ import type {
   QuestionType,
   Risk,
   Scope,
+  BridgeCapabilityScope,
 } from "@bridge/contracts";
 
 export type {
@@ -150,8 +152,14 @@ export interface OrganizationAuditEvent {
     | "service_identity.created"
     | "service_identity.rotated"
     | "service_identity.revoked"
-    | "audit.exported";
-  readonly subjectType: "organization_membership" | "service_credential" | "audit_export";
+    | "audit.exported"
+    | "authentication.succeeded"
+    | "authentication.logged_out";
+  readonly subjectType:
+    | "organization_membership"
+    | "service_credential"
+    | "audit_export"
+    | "principal_identity";
   readonly subjectId: string;
   readonly createdAt: string;
 }
@@ -447,6 +455,14 @@ export interface Notification {
   readonly readAt?: string;
 }
 
+export interface NotificationPreference {
+  readonly organizationId: string;
+  readonly principalId: string;
+  readonly channel: "email";
+  readonly preference: NotificationDeliveryPreference;
+  readonly updatedAt: string;
+}
+
 export interface NotificationOutboxPayload {
   readonly notificationId: string;
   readonly recipientId: string;
@@ -508,6 +524,8 @@ export interface OutboxDelivery {
   readonly preference: NotificationDeliveryPreference;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly digestAvailableAt?: string;
+  readonly digestLeaseUntil?: string;
   readonly providerMessageId?: string;
   readonly lastError?: string;
 }
@@ -529,6 +547,7 @@ export interface Question {
   readonly reversible: boolean;
   readonly blocking: boolean;
   readonly dueAt?: string;
+  readonly blockingEscalatedAt?: string;
   readonly ownerIds: readonly string[];
   readonly ownerRoles: readonly string[];
   readonly requiredOwnerRoles: readonly string[];
@@ -626,10 +645,21 @@ export interface ArtifactVersion {
   readonly createdByType: PrincipalType;
   readonly createdAt: string;
   readonly reviews: readonly ArtifactReview[];
+  readonly requiredApprovals: number;
+  readonly approvalStatus: ArtifactApprovalStatus;
   readonly runId?: string;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+export interface ArtifactApprovalStatus {
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly remainingCount: number;
+  readonly status: "pending" | "blocked" | "satisfied";
+  readonly satisfied: boolean;
+  readonly reviewerIds: readonly string[];
 }
 
 export interface ArtifactReview {
@@ -640,6 +670,36 @@ export interface ArtifactReview {
   readonly status: ArtifactReviewStatus;
   readonly body: string;
   readonly createdAt: string;
+}
+
+export function artifactApprovalStatus(
+  version: Pick<ArtifactVersion, "requiredApprovals" | "reviews" | "status"> &
+    Pick<Partial<ArtifactVersion>, "approvedById">,
+): ArtifactApprovalStatus {
+  const approvedReviewerIds = new Set(
+    version.reviews
+      .filter((review) => review.status === "approved" && review.reviewerType === "human")
+      .map((review) => review.reviewerId),
+  );
+  if (
+    approvedReviewerIds.size === 0 &&
+    version.approvedById &&
+    ["approved", "superseded"].includes(version.status)
+  ) {
+    approvedReviewerIds.add(version.approvedById);
+  }
+  const reviewerIds = [...approvedReviewerIds].sort((left, right) => left.localeCompare(right));
+  const blocked = version.reviews.some((review) => review.status === "changes_requested");
+  const approvedCount = reviewerIds.length;
+  const satisfied = !blocked && approvedCount >= version.requiredApprovals;
+  return {
+    requiredCount: version.requiredApprovals,
+    approvedCount,
+    remainingCount: Math.max(0, version.requiredApprovals - approvedCount),
+    status: blocked ? "blocked" : satisfied ? "satisfied" : "pending",
+    satisfied,
+    reviewerIds,
+  };
 }
 
 export interface Artifact {
@@ -727,16 +787,41 @@ export function principalHasRole(principal: Principal, role: string, projectId?:
   ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
 }
 
-export const bridgeScopes = {
-  read: "bridge:read",
-  write: "bridge:write",
-} as const;
+export const bridgeScopes = bridgeCapabilityScopes;
 
-export type BridgeScope = (typeof bridgeScopes)[keyof typeof bridgeScopes];
+export type BridgeScope = BridgeCapabilityScope;
+
+const fineGrainedReadScopes = new Set<BridgeScope>([
+  bridgeScopes.projectsRead,
+  bridgeScopes.repositoriesRead,
+  bridgeScopes.contextRead,
+  bridgeScopes.runsRead,
+  bridgeScopes.questionsRead,
+  bridgeScopes.assumptionsRead,
+  bridgeScopes.decisionsRead,
+  bridgeScopes.artifactsRead,
+  bridgeScopes.notificationsRead,
+  bridgeScopes.organizationRead,
+]);
+const fineGrainedWriteScopes = new Set<BridgeScope>([
+  bridgeScopes.projectsWrite,
+  bridgeScopes.repositoriesWrite,
+  bridgeScopes.runsWrite,
+  bridgeScopes.questionsWrite,
+  bridgeScopes.assumptionsWrite,
+  bridgeScopes.decisionsWrite,
+  bridgeScopes.artifactsWrite,
+  bridgeScopes.notificationsWrite,
+  bridgeScopes.diagnosticsWrite,
+]);
 
 export function principalHasScope(principal: Principal, scope: BridgeScope): boolean {
   if (principal.type === "human") return true;
-  return principal.scopes?.includes(scope) === true || principal.scopes?.includes("bridge:admin") === true;
+  const granted = new Set(principal.scopes ?? []);
+  if (granted.has(bridgeScopes.admin) || granted.has(scope)) return true;
+  if (fineGrainedReadScopes.has(scope)) return granted.has(bridgeScopes.read);
+  if (fineGrainedWriteScopes.has(scope)) return granted.has(bridgeScopes.write);
+  return false;
 }
 
 export function assertPrincipalScope(

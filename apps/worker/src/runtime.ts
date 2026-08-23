@@ -9,6 +9,8 @@ import {
 import {
   runOutboxCycle,
   type AssumptionExpiryCycle,
+  type BlockingQuestionEscalationCycle,
+  type EmailDigestCycleResult,
   type OutboxCycleOptions,
   type OutboxHandler,
   type OutboxStore,
@@ -28,8 +30,14 @@ export interface WorkerConfiguration {
   readonly pollIntervalMs: number;
   readonly batchSize: number;
   readonly assumptionExpiryIntervalMs: number;
+  readonly blockingQuestionEscalationIntervalMs: number;
+  readonly emailDigestIntervalMs: number;
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
+  readonly maxBackoffMs: number;
+  readonly retryJitterRatio: number;
+  readonly metricsHost: string;
+  readonly metricsPort: number;
 }
 
 export interface WorkerEnvironment {
@@ -39,8 +47,14 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_POLL_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_BATCH_SIZE?: string;
   readonly BRIDGE_WORKER_ASSUMPTION_EXPIRY_INTERVAL_MS?: string;
+  readonly BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS?: string;
+  readonly BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS?: string;
   readonly BRIDGE_WORKER_MAX_ATTEMPTS?: string;
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
+  readonly BRIDGE_WORKER_MAX_BACKOFF_MS?: string;
+  readonly BRIDGE_WORKER_RETRY_JITTER_PERCENT?: string;
+  readonly BRIDGE_WORKER_METRICS_HOST?: string;
+  readonly BRIDGE_WORKER_METRICS_PORT?: string;
 }
 
 export interface ConfiguredWorker {
@@ -48,6 +62,8 @@ export interface ConfiguredWorker {
   readonly store: PostgresBridgeStore;
   readonly handler: OutboxHandler;
   readonly assumptionExpiryCycle: AssumptionExpiryCycle;
+  readonly blockingQuestionEscalationCycle: BlockingQuestionEscalationCycle;
+  readonly metrics: BridgeMetrics;
   readonly close: () => Promise<void>;
 }
 
@@ -62,6 +78,10 @@ export interface OutboxWorkerOptions {
   readonly cycleOptions?: Omit<OutboxCycleOptions, "logger" | "metrics">;
   readonly assumptionExpiryCycle?: AssumptionExpiryCycle;
   readonly assumptionExpiryIntervalMs?: number;
+  readonly blockingQuestionEscalationCycle?: BlockingQuestionEscalationCycle;
+  readonly blockingQuestionEscalationIntervalMs?: number;
+  readonly emailDigestCycle?: () => Promise<EmailDigestCycleResult>;
+  readonly emailDigestIntervalMs?: number;
   readonly logger?: SafeLogger;
   readonly metrics?: BridgeMetrics;
   readonly signal?: AbortSignal;
@@ -99,6 +119,14 @@ function validatePublicWebUrl(value: string): string {
   return url.toString();
 }
 
+function validateMetricsHost(value: string): string {
+  const host = value.trim();
+  if (!/^[A-Za-z0-9.:[\]-]{1,255}$/.test(host)) {
+    throw new Error("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
+  }
+  return host;
+}
+
 export function loadWorkerConfiguration(
   environment: WorkerEnvironment = process.env,
 ): WorkerConfiguration {
@@ -109,6 +137,23 @@ export function loadWorkerConfiguration(
   const channel = environment.BRIDGE_WORKER_CHANNEL?.trim() || "slack";
   if (channel !== "slack") {
     throw new Error("BRIDGE_WORKER_CHANNEL currently supports only `slack`.");
+  }
+  const baseBackoffMs = positiveInteger(
+    environment,
+    "BRIDGE_WORKER_BASE_BACKOFF_MS",
+    1_000,
+    100,
+    60_000,
+  );
+  const maxBackoffMs = positiveInteger(
+    environment,
+    "BRIDGE_WORKER_MAX_BACKOFF_MS",
+    15 * 60 * 1_000,
+    1_000,
+    86_400_000,
+  );
+  if (maxBackoffMs < baseBackoffMs) {
+    throw new Error("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
   }
   return {
     databaseUrl,
@@ -123,8 +168,32 @@ export function loadWorkerConfiguration(
       1_000,
       86_400_000,
     ),
+    blockingQuestionEscalationIntervalMs: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_BLOCKING_ESCALATION_INTERVAL_MS",
+      60_000,
+      1_000,
+      86_400_000,
+    ),
+    emailDigestIntervalMs: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_EMAIL_DIGEST_INTERVAL_MS",
+      60_000,
+      1_000,
+      86_400_000,
+    ),
     maxAttempts: positiveInteger(environment, "BRIDGE_WORKER_MAX_ATTEMPTS", 5, 1, 20),
-    baseBackoffMs: positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000),
+    baseBackoffMs,
+    maxBackoffMs,
+    retryJitterRatio: positiveInteger(
+      environment,
+      "BRIDGE_WORKER_RETRY_JITTER_PERCENT",
+      25,
+      0,
+      100,
+    ) / 100,
+    metricsHost: validateMetricsHost(environment.BRIDGE_WORKER_METRICS_HOST ?? "127.0.0.1"),
+    metricsPort: positiveInteger(environment, "BRIDGE_WORKER_METRICS_PORT", 4_200, 1, 65_535),
   };
 }
 
@@ -149,6 +218,8 @@ export function createConfiguredWorker(
     store,
     handler,
     assumptionExpiryCycle: () => service.expireDueAssumptions(),
+    blockingQuestionEscalationCycle: () => service.escalateDueBlockingQuestions(),
+    metrics,
     close: store.close,
   };
 }
@@ -180,8 +251,26 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
   ) {
     throw new Error("Worker assumption expiry interval must be between 1000 and 86400000 milliseconds.");
   }
+  const emailDigestIntervalMs = options.emailDigestIntervalMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(emailDigestIntervalMs) ||
+    emailDigestIntervalMs < 1_000 ||
+    emailDigestIntervalMs > 86_400_000
+  ) {
+    throw new Error("Worker email digest interval must be between 1000 and 86400000 milliseconds.");
+  }
+  const blockingQuestionEscalationIntervalMs = options.blockingQuestionEscalationIntervalMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(blockingQuestionEscalationIntervalMs) ||
+    blockingQuestionEscalationIntervalMs < 1_000 ||
+    blockingQuestionEscalationIntervalMs > 86_400_000
+  ) {
+    throw new Error("Worker blocking-question escalation interval must be between 1000 and 86400000 milliseconds.");
+  }
 
   let nextAssumptionExpiryAt = 0;
+  let nextBlockingQuestionEscalationAt = 0;
+  let nextEmailDigestAt = 0;
   while (!signal?.aborted) {
     if (options.assumptionExpiryCycle && Date.now() >= nextAssumptionExpiryAt) {
       try {
@@ -194,6 +283,30 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
         logger.error("assumption_expiry.cycle_failed", { error, status: "retrying" });
       }
       nextAssumptionExpiryAt = Date.now() + assumptionExpiryIntervalMs;
+    }
+    if (
+      options.blockingQuestionEscalationCycle &&
+      Date.now() >= nextBlockingQuestionEscalationAt
+    ) {
+      try {
+        const result = await options.blockingQuestionEscalationCycle();
+        logger.info("blocking_question_escalation.cycle_completed", {
+          escalatedCount: result.escalatedCount,
+          status: "success",
+        });
+      } catch (error) {
+        logger.error("blocking_question_escalation.cycle_failed", { error, status: "retrying" });
+      }
+      nextBlockingQuestionEscalationAt = Date.now() + blockingQuestionEscalationIntervalMs;
+    }
+    if (options.emailDigestCycle && Date.now() >= nextEmailDigestAt) {
+      try {
+        const result = await options.emailDigestCycle();
+        logger.info("email_digest.cycle_completed", { ...result, status: "success" });
+      } catch (error) {
+        logger.error("email_digest.cycle_failed", { error, status: "retrying" });
+      }
+      nextEmailDigestAt = Date.now() + emailDigestIntervalMs;
     }
     try {
       const cycleOptions: OutboxCycleOptions = {

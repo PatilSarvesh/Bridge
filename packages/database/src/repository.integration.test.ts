@@ -61,6 +61,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         "bridge_decisions",
         "bridge_idempotency_records",
         "bridge_notifications",
+        "bridge_notification_preferences",
         "bridge_organization_audit_events",
         "bridge_organization_memberships",
         "bridge_outbox_deliveries",
@@ -404,11 +405,24 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         subjectId: `aex_${suffix}`,
         createdAt: "2026-01-03T00:00:00.000Z",
         }));
+      await inTenant(firstStore.repository, project.organizationId, (repository) =>
+        repository.saveOrganizationAuditEvent({
+        id: `oaud_authentication_${suffix}`,
+        correlationId: `cor_authentication_${suffix}`,
+        organizationId: project.organizationId,
+        actorId: owner.id,
+        actorType: "human",
+        action: "authentication.succeeded",
+        subjectType: "principal_identity",
+        subjectId: owner.id,
+        createdAt: "2026-01-04T00:00:00.000Z",
+        }));
       await expect(inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.listOrganizationAuditEvents(project.organizationId)))
         .resolves.toEqual(expect.arrayContaining([
           expect.objectContaining({ subjectId: owner.id, action: "organization_member.updated" }),
           expect.objectContaining({ subjectId: `aex_${suffix}`, action: "audit.exported" }),
+          expect.objectContaining({ subjectId: owner.id, action: "authentication.succeeded" }),
         ]));
       const service = new BridgeService(firstStore.repository);
       const registration = await service.startRun(agent, project.id, {
@@ -487,6 +501,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         summary: "Uses PostgreSQL behind the Bridge repository contract.",
         body: "# Persistence architecture\n\nUse PostgreSQL behind the Bridge repository contract.",
         intendedReviewerIds: [owner.id],
+        requiredApprovals: 1,
         citedDecisionIds: [decision.id],
         requestReview: true,
         scope: { component: "persistence" },
@@ -617,7 +632,9 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       expect(await service.getArtifact(owner, artifactId)).toMatchObject({
         versions: [expect.objectContaining({
           id: artifactVersionId,
-          reviews: [expect.objectContaining({ status: "commented", reviewerId: owner.id })],
+          reviews: expect.arrayContaining([
+            expect.objectContaining({ status: "commented", reviewerId: owner.id }),
+          ]),
         })],
       });
       const persistedOutbox = await inTenant(secondStore.repository, project.organizationId, (repository) =>

@@ -8,7 +8,7 @@ import {
   runWithCorrelationContext,
 } from "@bridge/observability";
 import { createDemoRuntimeWithRepository, demoPrincipals } from "@bridge/test-support";
-import type { Principal } from "@bridge/domain";
+import { bridgeScopes, type Principal } from "@bridge/domain";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -116,7 +116,7 @@ if (configuredOidcIssuer && configuredMcpAudience) {
   const protectedResourceMetadata = {
     resource: `${publicMcpUrl.replace(/\/$/, "")}/mcp`,
     authorization_servers: [configuredOidcIssuer],
-    scopes_supported: ["bridge:read", "bridge:write", "bridge:admin"],
+    scopes_supported: [...new Set(Object.values(bridgeScopes))],
     bearer_methods_supported: ["header"],
   };
   app.get("/.well-known/oauth-protected-resource/mcp", (_request: Request, response: Response) => {

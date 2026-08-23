@@ -14,6 +14,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  NotificationPreference,
   Organization,
   OrganizationAuditEvent,
   OrganizationMembership,
@@ -48,6 +49,8 @@ import {
   decisionFromRow,
   decisionToRow,
   notificationFromRow,
+  notificationPreferenceFromRow,
+  notificationPreferenceToRow,
   notificationToRow,
   organizationAuditEventFromRow,
   organizationAuditEventToRow,
@@ -94,6 +97,7 @@ import {
   questions,
   runContinuationLocators,
   notifications,
+  notificationPreferences,
   organizations,
   organizationAuditEvents,
   organizationMemberships,
@@ -961,6 +965,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
         target: questions.id,
         set: {
           status: row.status,
+          blockingEscalatedAt: row.blockingEscalatedAt,
           reviews: row.reviews,
           comments: row.comments,
           relatedLinks: row.relatedLinks,
@@ -1231,6 +1236,56 @@ export class PostgresBridgeRepository implements BridgeRepository {
       });
   }
 
+  async getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(notificationPreferences)
+      .where(and(
+        eq(notificationPreferences.organizationId, organizationId),
+        eq(notificationPreferences.principalId, principalId),
+        eq(notificationPreferences.channel, channel),
+      ))
+      .limit(1);
+    return row ? notificationPreferenceFromRow(row) : undefined;
+  }
+
+  async listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]> {
+    const rows = await this.database
+      .select()
+      .from(notificationPreferences)
+      .where(and(
+        eq(notificationPreferences.organizationId, organizationId),
+        eq(notificationPreferences.principalId, principalId),
+      ))
+      .orderBy(asc(notificationPreferences.channel));
+    return rows.map(notificationPreferenceFromRow);
+  }
+
+  async saveNotificationPreference(preference: NotificationPreference): Promise<void> {
+    const row = notificationPreferenceToRow(preference);
+    await this.database
+      .insert(notificationPreferences)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [
+          notificationPreferences.organizationId,
+          notificationPreferences.principalId,
+          notificationPreferences.channel,
+        ],
+        set: {
+          preference: row.preference,
+          updatedAt: row.updatedAt,
+        },
+      });
+  }
+
   async listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]> {
     const query = this.database
       .select()
@@ -1313,8 +1368,77 @@ export class PostgresBridgeRepository implements BridgeRepository {
           providerMessageId: row.providerMessageId,
           lastError: row.lastError,
           updatedAt: row.updatedAt,
+          digestAvailableAt: row.digestAvailableAt,
+          digestLeaseUntil: row.digestLeaseUntil,
         },
       });
+  }
+
+  async claimDeferredEmailDeliveries(
+    now: string,
+    limit: number,
+    leaseMs = 5 * 60 * 1_000,
+  ): Promise<readonly OutboxDelivery[]> {
+    if (limit <= 0) return [];
+    if (!this.allowMaintenance) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Claiming cross-tenant email digest work requires a maintenance database connection.",
+        403,
+      );
+    }
+    if (this.lockAggregateReads) {
+      return this.claimDeferredEmailDeliveriesInTransaction(this.database, now, limit, leaseMs);
+    }
+    return this.database.transaction(
+      async (transaction) =>
+        new PostgresBridgeRepository(
+          transaction as unknown as BridgeDatabase,
+          true,
+          this.metrics,
+          { maintenance: true },
+          true,
+        ).claimDeferredEmailDeliveries(now, limit, leaseMs),
+    );
+  }
+
+  private async claimDeferredEmailDeliveriesInTransaction(
+    database: BridgeDatabase,
+    now: string,
+    limit: number,
+    leaseMs: number,
+  ): Promise<readonly OutboxDelivery[]> {
+    const rows = await database
+      .select()
+      .from(outboxDeliveries)
+      .where(and(
+        eq(outboxDeliveries.channel, "email"),
+        eq(outboxDeliveries.status, "deferred"),
+        lte(outboxDeliveries.digestAvailableAt, now),
+        or(isNull(outboxDeliveries.digestLeaseUntil), lte(outboxDeliveries.digestLeaseUntil, now)),
+      ))
+      .orderBy(asc(outboxDeliveries.digestAvailableAt), asc(outboxDeliveries.createdAt))
+      .limit(limit)
+      .for("update");
+    if (rows.length === 0) return [];
+
+    const digestLeaseUntil = new Date(Date.parse(now) + leaseMs).toISOString();
+    const deliveries = rows.map((row) => ({
+      ...outboxDeliveryFromRow(row),
+      attemptCount: row.attemptCount + 1,
+      digestLeaseUntil,
+    }));
+    for (const delivery of deliveries) {
+      await database
+        .update(outboxDeliveries)
+        .set({
+          attemptCount: delivery.attemptCount,
+          digestLeaseUntil,
+          updatedAt: now,
+        })
+        .where(eq(outboxDeliveries.id, delivery.id));
+    }
+    return deliveries;
   }
 
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {

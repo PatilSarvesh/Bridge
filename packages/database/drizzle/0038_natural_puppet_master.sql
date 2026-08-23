@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_artifact_versions" ADD COLUMN "required_approvals" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "bridge_artifact_versions" ADD CONSTRAINT "bridge_artifact_versions_required_approvals_check" CHECK ("bridge_artifact_versions"."required_approvals" between 1 and 20);

@@ -9,6 +9,7 @@ import type {
   ContextSnapshot,
   Decision,
   Notification,
+  NotificationPreference,
   Organization,
   OrganizationAuditEvent,
   OrganizationMembership,
@@ -44,6 +45,8 @@ import {
   repositoryRecordFromRow,
   repositoryRecordToRow,
   notificationFromRow,
+  notificationPreferenceFromRow,
+  notificationPreferenceToRow,
   notificationToRow,
   organizationFromRow,
   organizationAuditEventFromRow,
@@ -83,6 +86,7 @@ import {
   type QuestionResponseRow,
   type QuestionRow,
   type NotificationRow,
+  type NotificationPreferenceRow,
   type OutboxEventRow,
   type OutboxDeliveryRow,
   type OrganizationMembershipRow,
@@ -119,6 +123,7 @@ const question: Question = {
   reversible: false,
   blocking: true,
   dueAt: "2026-08-09T10:00:00.000Z",
+  blockingEscalatedAt: "2026-08-09T10:05:00.000Z",
   ownerIds: ["usr_owner"],
   ownerRoles: ["architect"],
   requiredOwnerRoles: [],
@@ -337,6 +342,15 @@ const artifact: Artifact = {
           createdAt: "2026-08-07T10:02:30.000Z",
         },
       ],
+      requiredApprovals: 1,
+      approvalStatus: {
+        requiredCount: 1,
+        approvedCount: 1,
+        remainingCount: 0,
+        status: "satisfied",
+        satisfied: true,
+        reviewerIds: ["usr_owner"],
+      },
       approvedById: "usr_owner",
       approvalRationale: "This provides the required durability and atomicity.",
       approvedAt: "2026-08-07T10:03:00.000Z",
@@ -355,6 +369,14 @@ const notification: Notification = {
   targetType: "comment",
   targetId: "qcm_mapping",
   createdAt: "2026-08-07T10:02:10.000Z",
+};
+
+const notificationPreference: NotificationPreference = {
+  organizationId: project.organizationId,
+  principalId: "usr_owner",
+  channel: "email",
+  preference: "digest",
+  updatedAt: "2026-08-07T10:02:14.000Z",
 };
 
 const outboxEvent: OutboxEvent = {
@@ -469,6 +491,17 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: identity.id,
       createdAt: organization.createdAt,
     };
+    const authenticationAuditEvent: OrganizationAuditEvent = {
+      id: "oaud_authentication_mapping",
+      correlationId: "cor_authentication_mapping",
+      organizationId: organization.id,
+      actorId: identity.id,
+      actorType: "human",
+      action: "authentication.succeeded",
+      subjectType: "principal_identity",
+      subjectId: identity.id,
+      createdAt: organization.createdAt,
+    };
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
     expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
@@ -484,6 +517,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(organizationAuditEventFromRow(
       organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
     )).toEqual(organizationAuditEvent);
+    expect(organizationAuditEventFromRow(
+      organizationAuditEventToRow(authenticationAuditEvent) as OrganizationAuditEventRow,
+    )).toEqual(authenticationAuditEvent);
   });
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
@@ -592,6 +628,9 @@ describe("PostgreSQL domain mappings", () => {
     expect(artifactFromRows(artifactRow, versionRows)).toEqual(artifact);
 
     expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
+    expect(notificationPreferenceFromRow(
+      notificationPreferenceToRow(notificationPreference) as NotificationPreferenceRow,
+    )).toEqual(notificationPreference);
     expect(outboxEventFromRow(outboxEventToRow(outboxEvent) as OutboxEventRow)).toEqual(outboxEvent);
     expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow))
       .toEqual(outboxDelivery);
@@ -667,6 +706,14 @@ describe("PostgreSQL domain mappings", () => {
     expect(notificationMigration).toContain("bridge_notifications_recipient_created_idx");
     expect(notificationMigration).toContain("bridge_notifications_organization_project_fk");
 
+    const notificationPreferenceMigration = readFileSync(
+      new URL("../drizzle/0037_aberrant_ezekiel.sql", import.meta.url),
+      "utf8",
+    );
+    expect(notificationPreferenceMigration).toContain("CREATE TABLE \"bridge_notification_preferences\"");
+    expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_membership_fk");
+    expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_tenant");
+
     const outboxMigration = readFileSync(
       new URL("../drizzle/0008_transactional_outbox.sql", import.meta.url),
       "utf8",
@@ -699,6 +746,27 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(artifactReviewMigration).toContain("bridge_artifact_versions_reviews_shape_check");
     expect(artifactReviewMigration).toContain("artifact_review_feedback");
+    const artifactApprovalQuorumMigration = readFileSync(
+      new URL("../drizzle/0038_natural_puppet_master.sql", import.meta.url),
+      "utf8",
+    );
+    expect(artifactApprovalQuorumMigration).toContain('ADD COLUMN "required_approvals"');
+    expect(artifactApprovalQuorumMigration).toContain("bridge_artifact_versions_required_approvals_check");
+    const emailDigestMigration = readFileSync(
+      new URL("../drizzle/0039_concerned_wrecking_crew.sql", import.meta.url),
+      "utf8",
+    );
+    expect(emailDigestMigration).toContain('ADD COLUMN "digest_available_at"');
+    expect(emailDigestMigration).toContain('ADD COLUMN "digest_lease_until"');
+    expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_schedule_check");
+    expect(emailDigestMigration).toContain("bridge_outbox_deliveries_digest_available_idx");
+    const blockingEscalationMigration = readFileSync(
+      new URL("../drizzle/0040_big_black_crow.sql", import.meta.url),
+      "utf8",
+    );
+    expect(blockingEscalationMigration).toContain('ADD COLUMN "blocking_escalated_at"');
+    expect(blockingEscalationMigration).toContain("question_blocking_escalation");
+    expect(blockingEscalationMigration).toContain("bridge_notifications_type_check");
 
     const assumptionDecisionMigration = readFileSync(
       new URL("../drizzle/0033_sparkling_carlie_cooper.sql", import.meta.url),
@@ -903,5 +971,13 @@ describe("PostgreSQL domain mappings", () => {
     expect(auditExportMigration).toContain("DROP CONSTRAINT IF EXISTS \"bridge_organization_audit_events_action_check\"");
     expect(auditExportMigration).toContain("'audit.exported'");
     expect(auditExportMigration).toContain("'audit_export'");
+
+    const authenticationAuditMigration = readFileSync(
+      new URL("../drizzle/0036_clammy_paper_doll.sql", import.meta.url),
+      "utf8",
+    );
+    expect(authenticationAuditMigration).toContain("'authentication.succeeded'");
+    expect(authenticationAuditMigration).toContain("'authentication.logged_out'");
+    expect(authenticationAuditMigration).toContain("'principal_identity'");
   });
 });

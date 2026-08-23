@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. Endpoint-specific tool scopes, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -52,7 +52,7 @@ The founder-delegated pilot decisions select the following stack. A component sh
 | Job queue | Typed PostgreSQL outbox claim/lease/retry cycle now; pg-boss remains an optional scheduler/queue adapter | Durable downstream intents without requiring MCP or a separate broker in the prototype |
 | Artifact storage | Amazon S3 | Durable versioned bodies and attachments |
 | Email | Amazon SES behind a notification adapter | Assignment and decision notifications |
-| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse REST/MCP bearer capabilities | Server-side membership remains authoritative; endpoint-specific tool scopes and MCP-side token issuance remain |
+| Authentication | OIDC web/API plus public-client CLI PKCE, revocable service credentials, and coarse/mapped REST/MCP bearer capabilities | Server-side membership remains authoritative; external scope issuance and MCP-side token issuance remain |
 | Hosting | AWS ECS Fargate, RDS PostgreSQL, S3, and an Application Load Balancer | One credible hosted deployment boundary for the pilot |
 | Observability | OpenTelemetry with CloudWatch | End-to-end MCP/API/job correlation in the selected cloud |
 
@@ -63,9 +63,9 @@ The prototype now ships two implementations of the application-owned `BridgeRepo
 - A seeded in-memory repository used when `DATABASE_URL` is absent.
 - A PostgreSQL repository using Drizzle ORM and Postgres.js when `DATABASE_URL` is present.
 
-The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions and their append-only review feedback, context snapshots, audit events, idempotency records, durable in-app notifications, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, outbox delivery state, versioned decision-lifecycle provenance with same-project replacement links, specification review comments/change requests, and governed question collaboration metadata. Migration `0032_bitter_lethal_legion.sql` adds first-class related links plus mention IDs and append-only revision-history arrays for responses and comments.
+The reviewed migrations normalize projects, agent runs, continuation locators, assumptions, questions, responses, threaded question comments, decisions, artifacts, immutable artifact versions and their append-only review feedback, context snapshots, audit events, idempotency records, durable in-app notifications, notification preferences, and transactional outbox events. Deferred foreign keys preserve aggregate integrity for acceptance and approval flows that create circular references inside one transaction. Organization/project composite constraints prevent stored tenant identifiers from disagreeing with their parent project. The additive run migration backfills pre-existing question run IDs into metadata-only legacy runs before enforcing run foreign keys. The additive assumption migration enforces low-risk/reversible policy, expiry bounds, lifecycle metadata, and same-project provenance links. The additive project-registration audit migration extends the audit subject constraint to project events. The role-aware question migration adds a backward-compatible `owner_roles` JSON array for lightweight role routing; later additive migrations persist protected reviews, clarification comments, notification records, outbox delivery state, versioned decision-lifecycle provenance with same-project replacement links, specification review comments/change requests, and governed question collaboration metadata. Migration `0032_bitter_lethal_legion.sql` adds first-class related links plus mention IDs and append-only revision-history arrays for responses and comments. Migration `0036_clammy_paper_doll.sql` extends the organization audit stream for successful human web authentication and logout without widening the stream to untrusted or non-human session establishment. Migration `0037_aberrant_ezekiel.sql` adds tenant-scoped human email notification preferences with membership ownership and enables their tenant policy; forward-only corrective migration `0041_force_notification_preferences_rls.sql` also forces that policy after isolated-PostgreSQL CI exposed the missing table-owner restriction. Migration `0038_natural_puppet_master.sql` adds the bounded approval count frozen onto each artifact version; legacy versions default safely to one required approval. Migration `0039_concerned_wrecking_crew.sql` adds deferred-email digest due/lease timestamps, backfills existing deferred receipts, and indexes maintenance claims. Migration `0040_big_black_crow.sql` adds the one-time blocking-question escalation timestamp and the matching notification type.
 
-Project registration, repository linking, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal/edit, threaded comment creation/edit, clarification/reopen, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
+Project registration, repository linking, run registration/status/provenance, assumption creation/resolution/expiry, question creation, response proposal/edit, threaded comment creation/edit, clarification/reopen, decision acceptance/lifecycle transition, artifact publication, artifact approval, notification and preference commands plus outbox creation/read updates, and context-snapshot creation execute through a repository transaction boundary. The PostgreSQL implementation uses serializable transactions and locks run, assumption, question, decision, artifact, notification, and claimed outbox rows before concurrency-sensitive updates. API startup never runs migrations automatically; migrations remain an explicit operator/release action.
 
 Forward-only migration `0020_tenant_row_security.sql` enables and forces fail-closed RLS on the initial 18 tenant/project tables; migrations `0024_amazing_blindfold.sql` through `0027_vengeful_lady_ursula.sql` apply the same forced policy boundary to adapter diagnostics, repository metadata, ownership configuration, and policy configuration. Every principal-bearing application operation now runs in a transaction that sets a transaction-local organization context. Idempotency records gained explicit organization ownership and tenant-composite keys; pre-existing rows are backfilled before the column becomes non-null, while orphaned cache-only records are discarded. Cross-tenant outbox operations require a separately opted-in maintenance repository and PostgreSQL `BYPASSRLS` role; normal application readiness rejects superuser or bypass-capable connections. The organization, principal-identity, and service-credential directories remain narrow pre-tenant authentication bootstrap exceptions, but migration `0021_bootstrap_directory_security.sql` removes ambient runtime table reads and exposes only bounded security-definer lookups. The repeatable `scripts/provision-postgres-roles.sql` reconciles the runtime/migrator/maintenance role attributes and grants without handling passwords. The Slack delivery adapter and bounded worker runtime are repository-implemented; live email, identity-provider, workspace, and deployment validation remain future work, so these controls do not establish full production readiness.
 
@@ -138,7 +138,7 @@ Responsibilities:
 - Claim and process transactional outbox events with leases, bounded retries, and dead-letter state; `runOutboxCycle` accepts an injected delivery handler and the worker runtime supplies bounded polling, graceful shutdown, and a maintenance-role PostgreSQL composition.
 - Deliver email and team-channel notifications.
 - Maintain full-text search documents and optional derived embeddings later.
-- Perform duplicate suggestions, conflict scans, scheduled assumption expiry, and impact analysis.
+- Perform duplicate suggestions, conflict scans, scheduled assumption expiry, overdue blocking-question escalation, and impact analysis.
 - Synchronize external links and integration metadata.
 - Retry transient failures with bounded exponential backoff and dead-letter handling.
 
@@ -157,9 +157,11 @@ Responsibilities:
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Interactive `login`, `logout`, and authentication status through public-client Authorization Code + S256 PKCE, a hardened exact loopback callback, and API-side bearer-token/membership validation.
 - API-specific human-token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; organization-admin service-identity create/list/rotate/revoke commands use the REST boundary and do not persist one-time bearer tokens.
+- Noninteractive CI reads can receive a narrowly scoped opaque service token through the runner's masked `BRIDGE_SERVICE_TOKEN`; the CLI sends it only as a bearer header and never falls back to a human credential store.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
 - Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.
+- Approved-specification drift capture/check commands that bind canonical approved version hashes to explicit repository files, reject path/symlink escape, and fail CI deterministically without changing approval state.
 
 ### 5.6 Agent adapters
 
@@ -220,7 +222,7 @@ The domain package must not depend on web frameworks, MCP transports, SQL client
 
 ## 7. Tenant and identity model
 
-The web/API foundation implements the human OIDC portion of this model and a coarse capability gate for non-human bearer principals. Other principal flows and endpoint-specific grants remain the target architecture and are identified below where incomplete.
+The web/API foundation implements the human OIDC portion of this model and a coarse-compatible, mapped capability gate for non-human bearer principals. External authorization-server scope issuance and other principal flows remain the target architecture and are identified below where incomplete.
 
 ### 7.1 Principal types
 
@@ -257,11 +259,11 @@ MCP tokens must use a dedicated audience and should not be reusable as unrestric
 
 The CLI does not use Device Authorization Flow because organization-scoped behavior is required for Bridge tenancy.
 
-The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. CI and unattended agents use a separate REST-administered Bridge service identity; they must not copy a human's keychain credential.
+The implemented CLI flow uses a separate native/public client ID and never receives the confidential web client secret. The API publishes only public CLI configuration. The CLI binds an exact `http://127.0.0.1:<port>/<path>` redirect, validates state, exchanges the code with S256 PKCE, asks Bridge to validate the resulting bearer token and active membership, then stores a bounded versioned session in macOS Keychain or Linux Secret Service. Near-expiry access tokens refresh when an offline refresh token is available; rejected or non-refreshable sessions are removed and require login. Logout attempts provider refresh-token revocation before clearing local storage. Web callback success and cookie-backed logout append organization-scoped metadata audit events only after a trusted human principal is resolved; failed or unknown authentication attempts remain safe logs without tenant attribution. CI and unattended agents use a separate REST-administered Bridge service identity; they must not copy a human's keychain credential.
 
 ### 7.3 Authorization model
 
-Use RBAC for broad capabilities and ABAC/policy checks for record-specific authority.
+Use RBAC for broad capabilities and ABAC/policy checks for record-specific authority. Non-human bearer principals may use coarse compatibility grants or a bounded mapped scope such as `bridge:questions:read`, `bridge:runs:write`, or `bridge:project:admin`; the transport checks the mapped capability before application policy runs. A fine-grained scope never broadens a human-only application command, and human principals continue to rely on membership and role policy rather than provider scopes.
 
 Examples:
 
@@ -482,15 +484,18 @@ If any step fails, no partial acceptance is visible.
 
 ### 11.2 Approve artifact version
 
+Artifact publication accepts optional direct reviewer IDs, project roles, and configured team keys through the canonical REST contract. The application resolves these targets from the current active human organization/project directory, expands role and team membership, removes duplicates, and persists concrete reviewer IDs. When publication has no explicit target, an existing artifact retains its active reviewers; a new artifact uses the first matching scoped or project-default ownership reviewer rule and then the project decision owners as a fallback. Unknown teams, inaccessible/non-human direct targets, and target sets that resolve to no active human fail before the artifact is written. The CLI exposes the same contract, and optional MCP publication reuses it without creating a separate authority path.
+
 1. Lock the artifact and proposed current version.
 2. Confirm review and approval requirements, including that no append-only `changes_requested` review exists on this exact version.
-3. Confirm approver authority.
-4. Mark the previous current approved version superseded when appropriate.
-5. Mark the proposed version approved/current.
-6. Record cited decisions and assumptions.
-7. Write audit and outbox events.
+3. Confirm human approver authority and reject a second vote from the same principal.
+4. Append the human approval and rationale, then derive distinct-human progress against the version's frozen required count.
+5. If quorum remains pending, keep the version in review and write the approval-progress audit/notification atomically.
+6. When quorum is satisfied, mark the previous current approved version superseded when appropriate and mark the proposed version approved/current.
+7. Record cited decisions and assumptions.
+8. Write final approval audit and outbox events.
 
-Formal specification reviewers may first append `commented` or `changes_requested` feedback to the current draft/in-review version. A change request never edits the Markdown body and permanently blocks approval of that exact version; the author publishes a new version with an empty review history, while any previously approved version remains authoritative until a replacement is approved.
+Formal specification reviewers may append `commented` or `changes_requested` feedback to the current draft/in-review version, while the approval command appends an `approved` review carrying that human's rationale. Approval status is server-derived as pending, blocked, or satisfied from distinct human IDs; partial quorum never enters context. A change request never edits the Markdown body and permanently blocks approval of that exact version; the author publishes a new version with an empty review history, while any previously approved version remains authoritative until a replacement is approved.
 
 ### 11.3 Change decision lifecycle
 
@@ -498,9 +503,13 @@ Formal specification reviewers may first append `commented` or `changes_requeste
 2. Require its human owner, a configured project decision owner, or a project administrator.
 3. For supersession, require a different active replacement with the same project, category, and exact scope.
 4. Change only lifecycle metadata; the accepted answer, rationale, source question, and response remain immutable.
-5. Collect directly cited artifacts, decision-confirmed assumptions, source/provenance runs, later runs whose context snapshots consumed the decision, and scoped work-item identifiers as potentially affected records.
+5. Traverse the bounded dependency graph from the decision through its source question, citing artifact versions, decision-confirmed assumptions, context snapshots, producing/consuming/continuing runs, records produced by affected runs, and stored work links. Record shortest paths, typed edges, scope identifiers, and whether depth/node bounds truncated the result.
 6. Persist the transition, audit event, `decision.lifecycle_changed` outbox event, and any recipient notifications plus `notification.created` delivery intents in one transaction.
 7. Exclude the retired decision from subsequent default context while preserving it in history reads.
+
+`GET /v1/projects/:projectId/decision-conflicts` provides the read-only DEC-05 advisory scan. It compares active same-category decisions only when their scopes can overlap: a missing scope field is broader, while unequal values in the same field are disjoint. Pairs are returned when answers differ in exact scope or use a bounded set of explicit opposing terms across broader/narrower scopes. Results include stable pair IDs, confidence, scope relation, overlapping fields, signals, and immutable decision summaries. The scanner deliberately avoids claiming semantic certainty, performs no lifecycle write, and never selects a winner; a human owner must use the separately version-checked lifecycle command to resolve a real conflict.
+
+`GET /v1/decisions/:decisionId/impact` exposes the same DEC-06 graph before mutation. Breadth-first traversal deduplicates cycles, retains each record's shortest discovered path, and defaults to depth five and 200 nodes with bounded overrides. Nodes cover decisions, questions, artifacts/versions, assumptions, context snapshots, and runs; edges explain source, citation, confirmation, context consumption, production, and continuation relationships. Repository/work-item/branch scopes and existing typed question or run result links are summarized without fetching source-provider content. The lifecycle command calculates the graph again inside its transaction after the authorized version-checked state change, so its returned evidence reflects the committed canonical record set.
 
 ### 11.4 Record assumption
 
@@ -614,7 +623,7 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
-Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the coarse REST capability boundary (`bridge:read`, `bridge:write`, or `bridge:admin`); endpoint-specific OAuth admin scopes remain deferred.
+Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the mapped REST capability boundary (`bridge:project:admin`, `bridge:organization:admin`, or the explicit `bridge:admin` wildcard), with coarse `bridge:read`/`bridge:write` compatibility grants retained; application role and human-approval checks remain authoritative.
 
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
 
@@ -624,7 +633,7 @@ Project repository metadata is managed through the canonical REST endpoints, the
 
 Project ownership configuration is managed through canonical administrator REST endpoints and the web **Ownership** view. The application validates active human team membership and direct targets, normalizes role/team/rule keys, detects equal-priority overlap per responsibility lane, performs an optimistic aggregate-version write, and appends the project audit event in one transaction. Question creation resolves each owner lane in this order: explicit owner, repository/component-scoped rule, category rule, project-wide rule or configured project decision owner, then an empty administrator-visible fallback. Required policy roles are always retained. Reviewer targets resolve independently through scoped, category, project-wide, then policy routes so reviewer visibility never becomes owner acceptance authority. The question records the selected source, rule keys, and ownership/policy versions.
 
-Only a human project administrator may replace the owner/reviewer assignment on an unresolved question through canonical `POST /v1/questions/:questionId/assignments`. Direct targets must be active human project members, policy-required roles cannot be removed, and optimistic concurrency prevents stale reassignment. The aggregate update, append-only assignment-history entry, `question.reassigned` audit, typed outbox event, and direct-recipient notifications share one transaction. MCP exposes neither ownership management nor reassignment, remains optional, and gains no separate authority path.
+Only a human project administrator may replace the owner/reviewer assignment on an unresolved question through canonical `POST /v1/questions/:questionId/assignments`. Direct targets must be active human project members, policy-required roles cannot be removed, and optimistic concurrency prevents stale reassignment. The aggregate update, append-only assignment-history entry, `question.reassigned` audit, typed outbox event, and directory-resolved notifications share one transaction. MCP exposes neither ownership management nor reassignment, remains optional, and gains no separate authority path.
 
 Project policy configuration is managed through canonical administrator REST endpoints and the web **Policy** view. The limited matcher supports `assume_and_log`, `ask_async`, `block`, and `protected_approval`; category and each supplied scope dimension are normalized exact matches, with lower priority numbers winning. Policy can raise but cannot lower caller-declared risk or interruption, and the code-owned PILOT-008 matrix remains an immutable floor. Policy-required owner roles join explicit question owners but must be held by the accepting human; reviewer roles remain separate and require a configured quorum of distinct approved human reviews. Question reads expose the approval summary, while only a project administrator can use the versioned REST override command when ordinary acceptance cannot complete; the override's reason is included in the metadata audit stream and exports. Policy provenance remains attached to question lifecycle audits. MCP has no policy-management or human approval-mutation surface.
 
@@ -635,7 +644,7 @@ Project policy configuration is managed through canonical administrator REST end
 - Serve Streamable HTTP at a versioned endpoint such as `/mcp` with protocol negotiation handled by the MCP library.
 - Authenticate before MCP initialization completes.
 - In OIDC mode, validate `Authorization: Bearer` through the shared issuer/JWKS verifier, require the dedicated `BRIDGE_MCP_OIDC_AUDIENCE`, resolve the subject and organization claim through active Bridge membership, and expose protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`.
-- Enforce coarse capabilities per tool: `bridge:read` for reads, `bridge:write` for writes, and `bridge:admin` for both. Human principals remain governed by server-side membership and role policy.
+- Enforce the mapped capability for each tool family, retaining `bridge:read`/`bridge:write` compatibility grants and the explicit `bridge:admin` wildcard. Human principals remain governed by server-side membership and role policy.
 - In local development only, permit the explicit fixed principal fallback when OIDC is not configured. Production startup fails closed without MCP OIDC configuration.
 - Attach a stable agent identity and optional delegated human operator.
 - Keep MCP sessions stateless with respect to domain data; durable state lives in Bridge.
@@ -670,7 +679,7 @@ Human acceptance and approval operations are intentionally absent from ordinary 
 
 Tools should declare accurate read/write behavior so clients can apply approval policies. The server must still enforce authorization even if a client auto-approves a tool call.
 
-The first implemented capability boundary uses these coarse scopes:
+The capability boundary supports these coarse compatibility scopes:
 
 ```text
 bridge:read
@@ -678,17 +687,33 @@ bridge:write
 bridge:admin
 ```
 
-Recommended future endpoint-specific scopes:
+The mapped least-privilege catalog additionally includes:
 
 ```text
+bridge:projects:read
+bridge:projects:write
+bridge:repositories:read
+bridge:repositories:write
 bridge:context:read
-bridge:questions:read
-bridge:questions:create
-bridge:assumptions:create
-bridge:artifacts:read
-bridge:artifacts:publish
+bridge:runs:read
 bridge:runs:write
+bridge:questions:read
+bridge:questions:write
+bridge:assumptions:read
+bridge:assumptions:write
+bridge:decisions:read
+bridge:decisions:write
+bridge:artifacts:read
+bridge:artifacts:write
+bridge:notifications:read
+bridge:notifications:write
+bridge:diagnostics:write
+bridge:organization:read
+bridge:organization:admin
+bridge:project:admin
 ```
+
+REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible, and `bridge:admin` is the explicit wildcard; Bridge does not issue these scopes itself.
 
 ### 13.4 Idempotency
 
@@ -754,7 +779,15 @@ The read-only match query and question-creation guard perform a bounded pre-chec
 
 Exact policy-equivalent questions are automatically reused. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
 
-### 15.3 Later retrieval enhancement
+### 15.3 Role-aware question presentation
+
+`GET /v1/questions/:questionId/audience-view` is the canonical derived-query boundary for QST-08. It requires normal question-read authorization and returns the selected role, source question version, an exact copy of the recorded title/context/impact/options, and a separate deterministic explanation or rewrite. The role lens can highlight security, quality, product, operations, design, or architecture concerns, but it does not call an external model, persist a paraphrase, edit the question, change options or recommendation, or grant acceptance authority. The response explicitly marks itself derived-only and human-approval-required; the web uses this REST route and MCP is not required.
+
+### 15.4 Low-risk decision digests
+
+`GET /v1/projects/:projectId/question-digests` builds a personalized, read-only QST-09 projection from canonical questions. Candidates must already route to the caller's inbox, remain open or in discussion, be non-blocking and low risk, and share normalized category plus exact scope with at least one other candidate. Stable privacy-safe digest IDs derive from project, principal, and grouping key; bounded responses sort scheduled work first and include only question navigation/impact metadata. Digests are not persisted, do not copy question context into another store, and are separate from notification email digests. There is deliberately no batch-accept endpoint: every question still passes through its own existing version, policy, and human-authority checks.
+
+### 15.5 Later retrieval enhancement
 
 Add PostgreSQL full-text/trigram indexes after corpus and latency measurements justify them. Add vector retrieval only after evaluation shows material recall improvements. Any derived search index must contain tenant scope and be rebuildable from canonical records.
 
@@ -821,21 +854,21 @@ policy.updated.v1
 - Operator-visible failure and replay controls.
 - No external notification failure may roll back an accepted decision.
 
-The worker slice claims with leases, records attempts, completes successes, reschedules failures with bounded exponential backoff, and dead-letters events at the configured budget. The deployable worker also runs the scheduled assumption-expiry application cycle at a bounded interval before delivery polling; the cycle uses `BRIDGE_WORKER_DATABASE_URL` with the maintenance role and emits safe completion/failure logs. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. The email and Slack handlers pass stable event/channel idempotency keys to injected providers and skip already delivered receipts; Slack also persists a semantic dedupe key so per-recipient in-app events produce one project-channel message. Jitter, live email provider implementation, time-series telemetry, and deployment validation remain follow-up work.
+The worker slice claims with leases, records attempts, completes successes, reschedules failures with capped exponential backoff and configurable proportional jitter, and dead-letters events at the configured budget. The deployable worker also runs scheduled assumption-expiry and overdue-blocker escalation application cycles at bounded intervals before delivery polling and exposes the same bounded scheduling seam for an injected email-digest cycle; all use the maintenance boundary and emit safe completion/failure logs. Project administrators can inspect a project-scoped queue snapshot with status counts, total attempts, ready work, expired leases, oldest-ready age, and privacy-minimized per-channel delivery receipts. Failed or dead-letter events can be requeued with an optimistic attempt-count check; replay preserves the event ID for downstream idempotency, resets delivery state, and writes an audit event in the same transaction. Immediate email and Slack handlers pass stable event/channel idempotency keys to injected providers. Deferred email receipts are maintenance-claimed by due time with a recoverable lease, grouped by recipient/project, assigned a persisted stable digest batch key before send, and completed from one provider result; Slack persists its separate semantic dedupe key. Live email provider implementation and deployment validation remain follow-up work.
 
 ## 17. Notification architecture
 
 Notification generation is separate from delivery:
 
-1. The application command resolves the current direct owner/reviewer recipients.
+1. The application command resolves direct owner/reviewer targets plus role targets from the active organization directory, retaining only human principals with current project access.
 2. In one repository transaction it creates the durable in-app notification and a `notification.created` outbox intent.
 3. The worker claims the intent, applies retry/dead-letter policy, and invokes an injected channel handler.
-4. The provider-neutral email handler resolves the recipient and immediate/digest/muted preference through an injected directory, renders bounded plain text, and calls an injected sender without persisting the address.
+4. The provider-neutral email handler resolves the recipient through an injected directory, reads the tenant-scoped human email preference from the repository when available, falls back to the directory's default, renders bounded plain text, and calls an injected sender without persisting the address.
 5. The Slack Incoming Webhook handler resolves the project channel through deployment configuration, renders bounded status/risk/owner metadata with a Bridge link, and calls an injected sender without persisting the webhook URL.
 6. `outbox_deliveries` records the destination hash, optional semantic dedupe key, preference outcome, attempt, delivery status, sanitized error, and provider message ID. The in-app notification remains the canonical human read model.
-7. The configured worker runtime wires the Slack sender and project-channel directory from deployment configuration; live email directories/senders and deferred digest receipts remain future scheduler inputs rather than credentials or addresses stored in the outbox.
+7. The worker runtime schedules an injected email-digest cycle at a bounded interval. Digest receipts persist only due/lease times, destination hashes, and batch keys; live email directories/senders remain deployment inputs rather than credentials or addresses stored in the outbox.
 
-Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest deferral. The actual digest scheduler and administrative preference store are not yet connected.
+Protected-review email bypasses muted/digest preferences in the current policy seam. Ordinary notifications support immediate delivery, explicit suppression, or durable digest batching. Human email preferences are managed through `GET/POST /v1/notifications/preferences`; the provider-neutral scheduler/delivery cycle is implemented, while a live provider, recipient directory, and deployment composition remain future work. Slack remains a project-wide channel rather than a per-user preference surface.
 
 Team-channel messages link to Bridge for final acceptance. The Slack pilot adapter uses Slack's supported Incoming Webhooks installation model and treats the webhook URL as deployment secret material. Accepting a consequential decision directly from chat is intentionally unsupported; Slack delivery is idempotent for repeated processed events through the durable outbox receipt, while provider/network failure windows remain subject to the existing at-least-once delivery model.
 
@@ -891,7 +924,7 @@ The prototype implements the manual continuation baseline across the application
 - The locator is stored separately from the public run record. It is currently stored as a value to allow exact replay of an idempotent start response; hashing or encryption at rest belongs to a future production identity/security slice.
 - The implementation never persists raw prompts, full outputs, transcripts, repository source, or hidden reasoning.
 
-Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; external channels, preferences, scheduled delivery, and telemetry export remain future work.
+Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; human email preferences, provider-neutral immediate/digest email, scheduled expiry/escalation, Slack delivery, and process-local worker telemetry export are implemented, while live email/provider/collector deployment evidence remains future work.
 
 ## 19. Audit design
 
@@ -905,6 +938,8 @@ Audit events record:
 - Before/after state identifiers or version numbers
 - Reason supplied for protected actions, including administrative protected-approval overrides and reviewer-lane changes
 - Request source: web, API, MCP, CLI, worker, integration
+
+Successful human web sign-in and logout are represented as `authentication.succeeded` and `authentication.logged_out` organization audit actions with `principal_identity` subjects. The callback rejects non-human principals before establishing a browser session. Failed, malformed, expired, or otherwise untrusted authentication attempts are not durably attributed because no trusted tenant/principal context exists; they remain correlation-aware safe operational logs.
 
 Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Override/reassignment reasons are bounded operational explanations, not prompts, answers, raw transcripts, or private reasoning. Exports are themselves audited.
 
@@ -923,7 +958,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 ### 20.2 Required controls
 
 - TLS for all network communication.
-- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require coarse `bridge:read`/`bridge:write` capabilities (or `bridge:admin`); endpoint-specific tool scopes and MCP-side token issuance remain future work.
+- Strict token audience, issuer, signature, expiry, and scope-claim validation. Non-human REST and MCP requests require a mapped resource/admin scope, a compatible coarse `bridge:read`/`bridge:write` capability, or the explicit `bridge:admin` wildcard; external scope issuance and MCP-side token issuance remain future work.
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.
@@ -986,9 +1021,9 @@ Initial technical metrics:
 - Idempotency hits and conflicts.
 - Cross-tenant test and policy-denial counts.
 
-`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; in-memory test/runtime paths use the same transaction instrumentation. Outbox, email, and Slack handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are route templates, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
+`@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; the worker exposes its injected registry from a separate loopback-default HTTP listener. In-memory test/runtime paths use the same transaction instrumentation. Outbox, email, and Slack handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are bounded route names, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
 
-The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, bounded MCP initialize and tool-call outcome/duration, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email/Slack handling outcomes/duration. Database pool utilization, idempotency/conflict counters, and a durable worker exporter remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
+The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, bounded MCP initialize and tool-call outcome/duration, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email/Slack handling outcomes/duration. Database pool utilization and idempotency/conflict counters remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
 
 Provider-neutral operational assets are `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`, and `docs/service-objectives.md`. They are initial definitions requiring a real metrics backend, rule evaluator, notification route, and pilot calibration; repository presence is not evidence that production monitoring is active.
 
@@ -1191,7 +1226,7 @@ Repository validation now adds a dependency-free baseline around this architectu
 
 The fresh-repository portion of gate 2 is now validated twice for the local Codex-first path. The packaged simulation proved registration, transport, and project-aware presentation. A separate ephemeral Codex CLI session then received only `Build a Hospital Management System.`, used the repository-installed CLI without MCP, linked a context snapshot, published all four required specification types, corrected a missing-question failure reported by `bridge conformance`, routed a protected production-boundary question to human roles, and entered `waiting_for_human`. This proves observable adherence for that Codex client/version/environment, not universal vendor instruction compliance or interception of an unexposed native clarification UI; Claude Code remains the second conformance client.
 
-The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, edit either record with an explicit revision snapshot, mention another active human project member, request clarification as an owner, and reopen a cancelled/expired discussion under the same server authority. The configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox routes direct owners, direct reviewers, assigned owner/reviewer roles, project administrators, and protected-review principals, with status/risk/category/role/due filters and protected, overdue, blocking, then due-soon prioritization. Shared list/detail reads carry the same server-derived action authority, so a filter cannot hide an owner's acceptance capability. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; accepted decisions are not reopened by the discussion command. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
+The shared-response portion of the question loop is also validated locally: a human contributor can add an option-linked answer and rationale, post a version-checked root comment or reply, edit either record with an explicit revision snapshot, mention another active human project member, request clarification as an owner, and reopen a cancelled/expired discussion under the same server authority. The configured owner or matching assigned role sees the complete discussion, and only that authorized principal can create the authoritative decision. The personalized inbox routes direct owners, direct reviewers, assigned owner/reviewer roles, project administrators, and protected-review principals, with status/risk/category/role/due filters and protected, overdue, blocking, then due-soon prioritization. Shared list/detail reads carry the same server-derived action authority, so a filter cannot hide an owner's acceptance capability. Protected questions retain an append-only security-review history and require an approved security review before a non-security owner can finalize acceptance; accepted decisions are not reopened by the discussion command. Durable in-app notifications now record the core assignment/discussion/review/specification events in the same application transaction, resolve role targets through the active human project directory, enqueue typed outbox intents, expose scoped REST/web read state, and pass worker retry/dead-letter tests.
 
 Explainable role-aware routing is validated locally across explicit, scoped, category, project-default, and administrator-fallback paths. A question assigned to `qa-lead` can be accepted by a matching member, separately routed reviewers receive review visibility without acceptance authority, and an ordinary contributor or agent receives a deterministic reassignment denial. OIDC memberships support project-specific role data and administrators can manage project role/team/ownership configuration.
 

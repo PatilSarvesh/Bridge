@@ -49,7 +49,7 @@ describe("Bridge API vertical slice", () => {
     expect(missingRead.statusCode).toBe(403);
     expect(missingRead.json()).toMatchObject({
       code: "FORBIDDEN",
-      details: { requiredScope: "bridge:read" },
+      details: { requiredScope: "bridge:projects:read" },
     });
 
     currentPrincipal = { ...currentPrincipal, scopes: ["bridge:read"] };
@@ -71,6 +71,52 @@ describe("Bridge API vertical slice", () => {
 
     currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
     expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+  });
+
+  it("limits fine-grained bearer scopes to their mapped REST resource family", async () => {
+    const runtime = await createDemoRuntime();
+    let currentPrincipal: Principal = {
+      ...demoPrincipals.agent,
+      scopes: ["bridge:questions:read"],
+    };
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => currentPrincipal,
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, authenticator });
+    apps.push(app);
+
+    expect((await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/questions`,
+    })).statusCode).toBe(200);
+    const projectsDenied = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(projectsDenied.statusCode).toBe(403);
+    expect(projectsDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:projects:read" },
+    });
+    const contextDenied = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context`,
+    });
+    expect(contextDenied.statusCode).toBe(403);
+    expect(contextDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:context:read" },
+    });
+
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:questions:write"] };
+    const writeOnlyQuestion = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/questions`,
+    });
+    expect(writeOnlyQuestion.statusCode).toBe(403);
+    expect(writeOnlyQuestion.json()).toMatchObject({
+      details: { requiredScope: "bridge:questions:read" },
+    });
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
@@ -573,6 +619,44 @@ describe("Bridge API vertical slice", () => {
     });
     expect(agentNotifications.statusCode).toBe(403);
 
+    const emptyPreferences = await app.inject({
+      method: "GET",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(emptyPreferences.statusCode).toBe(200);
+    expect(emptyPreferences.json()).toEqual({ items: [] });
+
+    const savedPreference = await app.inject({
+      method: "POST",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: { channel: "email", preference: "digest" },
+    });
+    expect(savedPreference.statusCode).toBe(200);
+    expect(savedPreference.json()).toMatchObject({
+      principalId: demoPrincipals.qaLead.id,
+      channel: "email",
+      preference: "digest",
+    });
+
+    const listedPreferences = await app.inject({
+      method: "GET",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(listedPreferences.json()).toMatchObject({
+      items: [expect.objectContaining({ channel: "email", preference: "digest" })],
+    });
+
+    const agentPreference = await app.inject({
+      method: "POST",
+      url: "/v1/notifications/preferences",
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: { channel: "email", preference: "muted" },
+    });
+    expect(agentPreference.statusCode).toBe(403);
+
     const marked = await app.inject({
       method: "POST",
       url: `/v1/notifications/${listed.items[0]!.id}/read`,
@@ -928,6 +1012,121 @@ describe("Bridge API vertical slice", () => {
       canAccept: false,
       canReassign: false,
     });
+  });
+
+  it("returns a REST-canonical role-aware question view without changing source content", async () => {
+    const runtime = await createDemoRuntime({ seedQuestion: true });
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA%20Lead&mode=rewrite`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      questionId: runtime.sampleQuestionId,
+      role: "QA Lead",
+      mode: "rewrite",
+      source: {
+        title: "Which transfer failures should trigger an automatic retry?",
+      },
+      presentation: {
+        title: "For QA Lead: Which transfer failures should trigger an automatic retry?",
+        focusAreas: ["acceptance criteria", "test evidence", "failure and regression risk"],
+      },
+      guardrails: {
+        derivedOnly: true,
+        sourceFieldsUnchanged: true,
+        humanApprovalRequired: true,
+      },
+    });
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA&mode=paraphrase`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/questions/${runtime.sampleQuestionId}/audience-view?role=QA%20Lead`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
+  it("returns personalized low-risk decision digests without bulk acceptance authority", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const createQuestion = async (suffix: string) => app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: `api-question-digest-${suffix}`,
+        title: `Which onboarding hint should use the ${suffix} presentation?`,
+        type: "decision",
+        category: "product-experience",
+        context: `The onboarding flow needs a bounded ${suffix} presentation for routine user guidance.`,
+        whyItMatters: `A consistent ${suffix} presentation keeps the low-risk onboarding choice understandable.`,
+        intendedOwnerIds: [demoPrincipals.qaLead.id],
+        intendedOwnerRoles: [],
+        risk: "low",
+        reversible: true,
+        blocking: false,
+        options: [
+          { key: "transient", label: "Use the hint", tradeoffs: "Adds guidance with minor visual weight." },
+          { key: "all", label: "Omit the hint", tradeoffs: "Keeps the view sparse but may reduce comprehension." },
+        ],
+        recommendationKey: "transient",
+        scope: { component: "onboarding" },
+      },
+    });
+    const first = await createQuestion("inline");
+    const second = await createQuestion("popover");
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests?maxQuestionsPerDigest=2`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [{
+        category: "product-experience",
+        scope: { component: "onboarding" },
+        questionCount: 2,
+        remainingQuestionCount: 0,
+        humanApprovalRequired: true,
+        batchAcceptanceAvailable: false,
+      }],
+    });
+
+    const unrouted = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(unrouted.statusCode).toBe(200);
+    expect(unrouted.json()).toEqual({ items: [] });
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests?maxDigests=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
   });
 
   it("registers and lists a fresh project for the local prototype", async () => {
@@ -1400,6 +1599,92 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("reports advisory active-decision conflicts through the canonical REST read path", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const createAcceptedDecision = async (suffix: string, answer: string) => {
+      const created = await app.inject({
+        method: "POST",
+        url: `/v1/projects/${demoProject.id}/questions`,
+        headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+        payload: {
+          idempotencyKey: `api-decision-conflict-${suffix}`,
+          title: `Should automatic settlement retries be ${suffix}?`,
+          type: "decision",
+          category: "architecture",
+          context: `The settlement component needs an explicit ${suffix} retry policy for production processing.`,
+          whyItMatters: "Contradictory active retry policies can produce inconsistent implementation behavior.",
+          intendedOwnerIds: [demoPrincipals.architect.id],
+          intendedOwnerRoles: [],
+          risk: "high",
+          reversible: false,
+          blocking: true,
+          options: [
+            { key: "enable", label: "Enable retries", tradeoffs: "Recovers transient failures with added complexity." },
+            { key: "disable", label: "Disable retries", tradeoffs: "Avoids loops but loses automatic recovery." },
+          ],
+          scope: { component: "settlement" },
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const accepted = await app.inject({
+        method: "POST",
+        url: `/v1/questions/${created.json<{ id: string }>().id}/accept`,
+        headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+        payload: {
+          answer,
+          rationale: `The ${suffix} policy is being recorded as the current human-approved direction.`,
+        },
+      });
+      expect(accepted.statusCode).toBe(201);
+      return accepted.json<{ id: string; status: string }>();
+    };
+    const enabled = await createAcceptedDecision("enabled", "Enable automatic retries");
+    const disabled = await createAcceptedDecision("disabled", "Disable automatic retries");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts?component=settlement`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(response.statusCode).toBe(200);
+    const conflict = response.json<{ items: Array<{
+      confidence: string;
+      scopeRelation: string;
+      overlappingFields: string[];
+      signals: string[];
+      left: { id: string };
+      right: { id: string };
+      advisory: boolean;
+      humanResolutionRequired: boolean;
+    }> }>().items[0]!;
+    expect(conflict).toMatchObject({
+      confidence: "high",
+      scopeRelation: "exact",
+      overlappingFields: ["component"],
+      signals: ["different answers in exact scope", "opposing language"],
+      advisory: true,
+      humanResolutionRequired: true,
+    });
+    expect([conflict.left.id, conflict.right.id]).toEqual(expect.arrayContaining([enabled.id, disabled.id]));
+    expect(enabled.status).toBe("active");
+    expect(disabled.status).toBe("active");
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts?maxItems=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("exposes version-checked decision lifecycle routes and affected-record evidence", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
@@ -1449,6 +1734,40 @@ describe("Bridge API vertical slice", () => {
       answer: "Retry settlement failures once, then dead-letter.",
       rationale: "One retry matches observed recovery while preventing repeated settlement processing.",
     });
+
+    const impactPreview = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact?maxDepth=5&maxNodes=100`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(impactPreview.statusCode).toBe(200);
+    expect(impactPreview.json()).toMatchObject({
+      artifactIds: [],
+      artifactVersionIds: [],
+      assumptionIds: [],
+      questionIds: [originalQuestion.id],
+      runIds: [],
+      workItems: ["PAY-77"],
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: original.id, type: "decision", depth: 0 }),
+        expect.objectContaining({ id: originalQuestion.id, type: "question", depth: 1 }),
+      ]),
+      maxDepthReached: 1,
+      truncated: false,
+    });
+    expect((await runtime.repository.getDecision(original.id))?.version).toBe(1);
+    const invalidImpact = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact?maxDepth=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(invalidImpact.statusCode).toBe(400);
+    const crossTenantImpact = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenantImpact.statusCode).toBe(404);
 
     const denied = await app.inject({
       method: "POST",
@@ -2470,7 +2789,8 @@ describe("Bridge API vertical slice", () => {
         type: "adr",
         summary: "Defines bounded retry behavior for transient transfer failures.",
         body: "# Transfer retry policy\n\nRetry transient failures using bounded exponential backoff and idempotency keys.",
-        intendedReviewerIds: [demoPrincipals.architect.id],
+        intendedReviewerIds: [demoPrincipals.architect.id, demoPrincipals.qaLead.id],
+        requiredApprovals: 2,
         citedDecisionIds: [],
         requestReview: true,
         scope: { component: "transfers" },
@@ -2494,6 +2814,41 @@ describe("Bridge API vertical slice", () => {
       payload: { rationale: "The policy is bounded, observable, and safe for the transfer component." },
     });
     expect(approveResponse.statusCode).toBe(201);
+    expect(approveResponse.json()).toMatchObject({
+      version: {
+        status: "in_review",
+        approvalStatus: { approvedCount: 1, requiredCount: 2, remainingCount: 1, satisfied: false },
+      },
+    });
+
+    const duplicateApproval = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { rationale: "The same human cannot count twice toward the approval requirement." },
+    });
+    expect(duplicateApproval.statusCode).toBe(409);
+
+    const pendingContextResponse = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/context?task=implement%20transfer%20retry&categories=specification&component=transfers`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(pendingContextResponse.json<{ items: unknown[] }>().items).toEqual([]);
+
+    const quorumResponse = await app.inject({
+      method: "POST",
+      url: `/v1/artifact-versions/${publication.version.id}/approve`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+      payload: { rationale: "The independent quality review completes the required human approval quorum." },
+    });
+    expect(quorumResponse.statusCode).toBe(201);
+    expect(quorumResponse.json()).toMatchObject({
+      version: {
+        status: "approved",
+        approvalStatus: { approvedCount: 2, requiredCount: 2, remainingCount: 0, satisfied: true },
+      },
+    });
 
     const contextResponse = await app.inject({
       method: "GET",
@@ -2644,6 +2999,7 @@ describe("Bridge API vertical slice", () => {
         transactionCookie: "bridge_oidc_transaction=encrypted; HttpOnly; SameSite=Lax; Secure",
       }),
       completeWebLogin: async () => ({
+        principal: demoPrincipals.architect,
         redirectUrl: "https://bridge.example/",
         sessionCookie: "bridge_session=encrypted; HttpOnly; SameSite=Lax; Secure",
         clearTransactionCookie: "bridge_oidc_transaction=; Max-Age=0",
@@ -2693,5 +3049,36 @@ describe("Bridge API vertical slice", () => {
     expect(login.statusCode).toBe(302);
     expect(login.headers.location).toContain("identity.example/authorize");
     expect(login.headers["set-cookie"]).toContain("HttpOnly");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: "/v1/auth/callback?code=callback-code&state=callback-state",
+    });
+    expect(callback.statusCode).toBe(302);
+    await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "authentication.succeeded",
+          subjectType: "principal_identity",
+          subjectId: demoPrincipals.architect.id,
+        }),
+      ]),
+    );
+
+    const logout = await app.inject({
+      method: "GET",
+      url: "/v1/auth/logout",
+      headers: { cookie: "bridge_session=valid" },
+    });
+    expect(logout.statusCode).toBe(302);
+    await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "authentication.logged_out",
+          subjectType: "principal_identity",
+          subjectId: demoPrincipals.architect.id,
+        }),
+      ]),
+    );
   });
 });

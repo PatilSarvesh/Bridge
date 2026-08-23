@@ -8,7 +8,7 @@ These are Bridge's initial engineering objectives for a controlled pilot. They a
 - Server errors are HTTP `5xx`. Client errors are excluded from availability, but `401`/`403` are tracked separately as authorization-denial guardrails.
 - `/health`, `/health/live`, and `/metrics` are excluded from user-journey availability. `/health/ready` is a dependency signal rather than user traffic.
 - Context objectives use application-level context metrics, which include authorization, repository transaction, ranking, snapshot, and audit work.
-- Outbox and notification objectives become active only when the deployment runs a durable worker and exports its injected `BridgeMetrics` registry.
+- Outbox and notification objectives become active only when the deployment runs a durable worker and scrapes its process-local `BridgeMetrics` endpoint into the selected metrics backend.
 - Planned maintenance approved before the event may be annotated, but the raw measurement must remain available.
 
 ## Initial objectives

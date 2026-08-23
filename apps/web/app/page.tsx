@@ -237,6 +237,7 @@ interface Question {
   readonly policyRuleKey: string;
   readonly blocking: boolean;
   readonly dueAt?: string;
+  readonly blockingEscalatedAt?: string;
   readonly options: readonly Option[];
   readonly relatedLinks?: readonly QuestionLink[];
   readonly recommendationKey?: string;
@@ -271,6 +272,50 @@ interface Question {
   readonly dueStatus: "overdue" | "due_soon" | "scheduled" | "none";
 }
 
+interface QuestionAudienceView {
+  readonly questionId: string;
+  readonly questionVersion: number;
+  readonly role: string;
+  readonly mode: "explain" | "rewrite";
+  readonly source: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+  };
+  readonly presentation: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  };
+  readonly guardrails: {
+    readonly derivedOnly: true;
+    readonly sourceFieldsUnchanged: true;
+    readonly humanApprovalRequired: true;
+  };
+}
+
+interface QuestionDecisionDigest {
+  readonly id: string;
+  readonly category: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly questionCount: number;
+  readonly remainingQuestionCount: number;
+  readonly earliestDueAt?: string;
+  readonly groupingReasons: readonly string[];
+  readonly questions: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly status: string;
+    readonly dueAt?: string;
+    readonly dueStatus: Question["dueStatus"];
+    readonly canAccept: boolean;
+  }[];
+  readonly humanApprovalRequired: true;
+  readonly batchAcceptanceAvailable: false;
+}
+
 type InboxFilterKey = "status" | "risk" | "category" | "role" | "due";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
 type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
@@ -285,6 +330,8 @@ interface ArtifactVersion {
   readonly createdById: string;
   readonly createdAt: string;
   readonly reviews: readonly ArtifactReview[];
+  readonly requiredApprovals: number;
+  readonly approvalStatus: ArtifactApprovalStatus;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
@@ -293,9 +340,18 @@ interface ArtifactVersion {
 interface ArtifactReview {
   readonly id: string;
   readonly reviewerId: string;
-  readonly status: "commented" | "changes_requested";
+  readonly status: "commented" | "changes_requested" | "approved";
   readonly body: string;
   readonly createdAt: string;
+}
+
+interface ArtifactApprovalStatus {
+  readonly requiredCount: number;
+  readonly approvedCount: number;
+  readonly remainingCount: number;
+  readonly status: "pending" | "blocked" | "satisfied";
+  readonly satisfied: boolean;
+  readonly reviewerIds: readonly string[];
 }
 
 interface Artifact {
@@ -333,6 +389,7 @@ interface Notification {
   readonly recipientId: string;
   readonly type:
     | "question_assigned"
+    | "question_blocking_escalation"
     | "question_response"
     | "question_comment"
     | "question_review"
@@ -348,6 +405,14 @@ interface Notification {
   readonly targetId: string;
   readonly createdAt: string;
   readonly readAt?: string;
+}
+
+type NotificationDeliveryPreference = "immediate" | "digest" | "muted";
+
+interface NotificationPreference {
+  readonly channel: "email";
+  readonly preference: NotificationDeliveryPreference;
+  readonly updatedAt: string;
 }
 
 interface Decision {
@@ -370,9 +435,39 @@ interface Decision {
 
 interface DecisionLifecycleImpact {
   readonly artifactIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
   readonly assumptionIds: readonly string[];
+  readonly questionIds: readonly string[];
+  readonly contextSnapshotIds: readonly string[];
   readonly runIds: readonly string[];
   readonly workItems: readonly string[];
+  readonly branches: readonly string[];
+  readonly repositories: readonly string[];
+  readonly links: readonly { readonly sourceId: string; readonly type: string; readonly url: string; readonly depth: number }[];
+  readonly nodes: readonly {
+    readonly id: string;
+    readonly type: "decision" | "question" | "artifact" | "artifact_version" | "assumption" | "context_snapshot" | "run";
+    readonly label: string;
+    readonly depth: number;
+    readonly path: readonly string[];
+    readonly status?: string;
+  }[];
+  readonly edges: readonly { readonly fromId: string; readonly toId: string; readonly relation: string }[];
+  readonly maxDepthReached: number;
+  readonly truncated: boolean;
+}
+
+interface DecisionConflict {
+  readonly id: string;
+  readonly category: string;
+  readonly confidence: "high" | "medium";
+  readonly scopeRelation: "exact" | "ancestor_descendant" | "partial";
+  readonly overlappingFields: readonly string[];
+  readonly signals: readonly string[];
+  readonly left: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly right: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly advisory: true;
+  readonly humanResolutionRequired: true;
 }
 
 interface Assumption {
@@ -711,13 +806,16 @@ export default function Home() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
+  const [questionDigests, setQuestionDigests] = useState<readonly QuestionDecisionDigest[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
   const [inboxFiltersReady, setInboxFiltersReady] = useState(false);
   const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
   const [decisionSearchDraft, setDecisionSearchDraft] = useState("");
   const [artifacts, setArtifacts] = useState<readonly Artifact[]>([]);
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
+  const [notificationPreference, setNotificationPreference] = useState<NotificationDeliveryPreference>("immediate");
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
+  const [decisionConflicts, setDecisionConflicts] = useState<readonly DecisionConflict[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [assumptionStatusFilter, setAssumptionStatusFilter] = useState<Assumption["status"] | "all">("all");
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
@@ -755,6 +853,9 @@ export default function Home() {
   const [selectedAssumptionId, setSelectedAssumptionId] = useState<string>();
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [selectedOption, setSelectedOption] = useState<string>();
+  const [questionAudienceRole, setQuestionAudienceRole] = useState("");
+  const [questionAudienceView, setQuestionAudienceView] = useState<QuestionAudienceView>();
+  const [questionAudienceLoading, setQuestionAudienceLoading] = useState(false);
   const [responseOption, setResponseOption] = useState<string>();
   const [responseAnswer, setResponseAnswer] = useState("");
   const [responseRationale, setResponseRationale] = useState("");
@@ -792,12 +893,15 @@ export default function Home() {
   const [replacementDecisionId, setReplacementDecisionId] = useState("");
   const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
   const [decisionLifecycleImpact, setDecisionLifecycleImpact] = useState<DecisionLifecycleImpact>();
+  const [decisionImpactLoading, setDecisionImpactLoading] = useState(false);
   const [assumptionResolutionStatus, setAssumptionResolutionStatus] = useState<"confirmed" | "rejected" | "expired">("confirmed");
   const [assumptionResolutionRationale, setAssumptionResolutionRationale] = useState("");
   const [assumptionCreateDecision, setAssumptionCreateDecision] = useState(false);
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationPreferenceLoading, setNotificationPreferenceLoading] = useState(false);
+  const [notificationPreferenceSaving, setNotificationPreferenceSaving] = useState(false);
   const [referenceDataLoading, setReferenceDataLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
@@ -1189,6 +1293,7 @@ export default function Home() {
     if (!selectedProjectId) {
       setQuestions([]);
       setInboxQuestions([]);
+      setQuestionDigests([]);
       setQuestionsLoading(false);
       return;
     }
@@ -1198,7 +1303,7 @@ export default function Home() {
       const inboxQuery = new URLSearchParams(
         Object.entries(inboxFilters).filter((entry): entry is [string, string] => Boolean(entry[1])),
       ).toString();
-      const [questionsResponse, inboxResponse] = await Promise.all([
+      const [questionsResponse, inboxResponse, digestResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Question[] }>(
           `/v1/projects/${selectedProjectId}/questions`,
           undefined,
@@ -1209,9 +1314,15 @@ export default function Home() {
           undefined,
           activePrincipalId,
         ),
+        bridgeFetch<{ items: readonly QuestionDecisionDigest[] }>(
+          `/v1/projects/${selectedProjectId}/question-digests`,
+          undefined,
+          activePrincipalId,
+        ),
       ]);
       setQuestions(questionsResponse.items);
       setInboxQuestions(inboxResponse.items);
+      setQuestionDigests(digestResponse.items);
       setSelectedId((current) =>
         current && questionsResponse.items.some((question) => question.id === current)
           ? current
@@ -1273,9 +1384,49 @@ export default function Home() {
     }
   }, [activePrincipalId, selectedProjectId]);
 
+  const loadNotificationPreference = useCallback(async () => {
+    setNotificationPreferenceLoading(true);
+    setError(undefined);
+    try {
+      const response = await bridgeFetch<{ items: readonly NotificationPreference[] }>(
+        "/v1/notifications/preferences",
+        undefined,
+        activePrincipalId,
+      );
+      setNotificationPreference(
+        response.items.find((item) => item.channel === "email")?.preference ?? "immediate",
+      );
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to load notification preferences.");
+    } finally {
+      setNotificationPreferenceLoading(false);
+    }
+  }, [activePrincipalId]);
+
+  const saveNotificationPreference = useCallback(async (preference: NotificationDeliveryPreference) => {
+    setNotificationPreferenceSaving(true);
+    setError(undefined);
+    try {
+      const saved = await bridgeFetch<NotificationPreference>(
+        "/v1/notifications/preferences",
+        {
+          method: "POST",
+          body: JSON.stringify({ channel: "email", preference }),
+        },
+        activePrincipalId,
+      );
+      setNotificationPreference(saved.preference);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to save notification preferences.");
+    } finally {
+      setNotificationPreferenceSaving(false);
+    }
+  }, [activePrincipalId]);
+
   const loadReferenceData = useCallback(async () => {
     if (!selectedProjectId) {
       setDecisions([]);
+      setDecisionConflicts([]);
       setAssumptions([]);
       setRuns([]);
       setReferenceDataLoading(false);
@@ -1294,9 +1445,14 @@ export default function Home() {
       if (decisionFilters.createdFrom) decisionParameters.set("createdFrom", `${decisionFilters.createdFrom}T00:00:00.000Z`);
       if (decisionFilters.createdTo) decisionParameters.set("createdTo", `${decisionFilters.createdTo}T23:59:59.999Z`);
       const decisionQuery = decisionParameters.toString();
-      const [decisionResponse, assumptionResponse, runResponse] = await Promise.all([
+      const [decisionResponse, conflictResponse, assumptionResponse, runResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Decision[] }>(
           `/v1/projects/${selectedProjectId}/decisions${decisionQuery ? `?${decisionQuery}` : ""}`,
+          undefined,
+          activePrincipalId,
+        ),
+        bridgeFetch<{ items: readonly DecisionConflict[] }>(
+          `/v1/projects/${selectedProjectId}/decision-conflicts`,
           undefined,
           activePrincipalId,
         ),
@@ -1312,6 +1468,7 @@ export default function Home() {
         ),
       ]);
       setDecisions(decisionResponse.items);
+      setDecisionConflicts(conflictResponse.items);
       setAssumptions(assumptionResponse.items);
       setRuns(runResponse.items);
       setSelectedDecisionId((current) => {
@@ -1650,6 +1807,10 @@ export default function Home() {
   }, [authenticationReady, loadArtifacts, loadNotifications, loadQuestions, loadReferenceData, signedIn]);
 
   useEffect(() => {
+    if (authenticationReady && signedIn && view === "notifications") void loadNotificationPreference();
+  }, [authenticationReady, loadNotificationPreference, signedIn, view]);
+
+  useEffect(() => {
     if (authenticationReady && signedIn && view === "analytics") void loadAnalytics();
   }, [authenticationReady, loadAnalytics, signedIn, view]);
 
@@ -1764,9 +1925,19 @@ export default function Home() {
   const selectedArtifactHasChangesRequested = Boolean(
     selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
   );
+  const activePrincipalApprovedSelectedArtifact = Boolean(
+    selectedArtifactVersion?.approvalStatus.reviewerIds.includes(activePrincipalId),
+  );
   const selectedDecision = useMemo(
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
+  );
+  const selectedDecisionConflicts = useMemo(
+    () => selectedDecision
+      ? decisionConflicts.filter((conflict) =>
+          conflict.left.id === selectedDecision.id || conflict.right.id === selectedDecision.id)
+      : [],
+    [decisionConflicts, selectedDecision],
   );
   const visibleAssumptions = useMemo(
     () => assumptionStatusFilter === "all"
@@ -1827,8 +1998,14 @@ export default function Home() {
       setReviewRationale("");
       setOverrideRationale("");
       setOverrideReason("");
+      setQuestionAudienceRole(
+        activeRoles.find((role) => !["organization-member", "organization-admin"].includes(normalizedRole(role))) ??
+          activeRoles[0] ??
+          "project contributor",
+      );
+      setQuestionAudienceView(undefined);
     }
-  }, [selectedQuestion]);
+  }, [activeRoles, selectedQuestion]);
 
   useEffect(() => {
     setDecisionLifecycleStatus("revoked");
@@ -1862,6 +2039,25 @@ export default function Home() {
     setArtifactDiffToVersionId(toVersion?.id ?? "");
     setArtifactDiff(undefined);
   }, [activePrincipalId, selectedArtifact?.currentVersionId, selectedArtifact?.id, selectedArtifact?.versions.length]);
+
+  const loadQuestionAudienceView = async (mode: "explain" | "rewrite") => {
+    if (!selectedQuestion || questionAudienceRole.trim().length < 2) return;
+    setQuestionAudienceLoading(true);
+    setError(undefined);
+    try {
+      const parameters = new URLSearchParams({ role: questionAudienceRole.trim(), mode });
+      setQuestionAudienceView(await bridgeFetch<QuestionAudienceView>(
+        `/v1/questions/${selectedQuestion.id}/audience-view?${parameters.toString()}`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setQuestionAudienceView(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to explain this question for the selected role.");
+    } finally {
+      setQuestionAudienceLoading(false);
+    }
+  };
 
   const proposeAnswer = async () => {
     if (!selectedQuestion || responseAnswer.trim().length < 2 || responseRationale.trim().length < 2) return;
@@ -2122,6 +2318,7 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ rationale: approvalRationale }),
       }, activePrincipalId);
+      setApprovalRationale("");
       await Promise.all([loadArtifacts(), loadNotifications()]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to approve specification.");
@@ -2208,6 +2405,24 @@ export default function Home() {
       setError(requestError instanceof Error ? requestError.message : "Unable to change the decision lifecycle.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const loadDecisionImpact = async () => {
+    if (!selectedDecision) return;
+    setDecisionImpactLoading(true);
+    setError(undefined);
+    try {
+      setDecisionLifecycleImpact(await bridgeFetch<DecisionLifecycleImpact>(
+        `/v1/decisions/${selectedDecision.id}/impact`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setDecisionLifecycleImpact(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to analyze decision impact.");
+    } finally {
+      setDecisionImpactLoading(false);
     }
   };
 
@@ -3049,6 +3264,24 @@ export default function Home() {
                   onClick={() => void markAllNotificationsRead()}
                 >Mark all read</button>
               </div>
+              <div className="notification-preference-panel" aria-label="Notification preferences">
+                <div>
+                  <strong>Email delivery</strong>
+                  <p>Protected review email remains immediate.</p>
+                </div>
+                <label>
+                  <span>Default preference</span>
+                  <select
+                    value={notificationPreference}
+                    disabled={notificationPreferenceLoading || notificationPreferenceSaving}
+                    onChange={(event) => void saveNotificationPreference(event.target.value as NotificationDeliveryPreference)}
+                  >
+                    <option value="immediate">Immediate</option>
+                    <option value="digest">Digest</option>
+                    <option value="muted">Muted</option>
+                  </select>
+                </label>
+              </div>
               {notificationsLoading ? <div className="empty">Loading notifications…</div> : null}
               {!notificationsLoading && notifications.length === 0 ? (
                 <div className="empty">No notifications for this project yet.</div>
@@ -3416,7 +3649,7 @@ export default function Home() {
                         onClick={() => setSelectedDecisionId(decision.id)}
                       >
                         <span className="document-mark" aria-hidden="true">✓</span>
-                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}</small></span>
+                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}{decisionConflicts.some((conflict) => conflict.left.id === decision.id || conflict.right.id === decision.id) ? " · potential conflict" : ""}</small></span>
                         <span className={`status status-${decision.status}`}>{decision.status}</span>
                       </button>
                     ))}
@@ -3428,6 +3661,31 @@ export default function Home() {
                         <span className={`status status-${selectedDecision.status}`}>{selectedDecision.status}</span>
                       </div>
                       <section><h3>Decision rationale</h3><p>{selectedDecision.rationale}</p></section>
+                      {selectedDecisionConflicts.length > 0 ? (
+                        <section>
+                          <h3>Potential active conflicts</h3>
+                          <p className="muted-copy">Advisory signals only. A human owner must inspect the scope and rationale before changing either decision.</p>
+                          <div className="conflict-list">
+                            {selectedDecisionConflicts.map((conflict) => {
+                              const other = conflict.left.id === selectedDecision.id ? conflict.right : conflict.left;
+                              return (
+                                <article className="conflict-card" key={conflict.id}>
+                                  <div><strong>{conflict.confidence} confidence</strong><span>{conflict.scopeRelation.replaceAll("_", " ")} scope · {conflict.signals.join(" · ")}</span></div>
+                                  <p>{other.answer}</p>
+                                  <button
+                                    className="text-button"
+                                    type="button"
+                                    onClick={() => {
+                                      setDecisionFilters({ includeHistory: true });
+                                      setSelectedDecisionId(other.id);
+                                    }}
+                                  >Open other active decision</button>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ) : null}
                       <section>
                         <h3>Authority and review</h3>
                         <div className="spec-meta">
@@ -3447,6 +3705,31 @@ export default function Home() {
                           </div>
                         </section>
                       ) : null}
+                      <section>
+                        <h3>Change impact</h3>
+                        <p className="muted-copy">Preview direct and transitive records that may need review before changing this decision. Analysis does not alter authority.</p>
+                        <button className="secondary" type="button" disabled={decisionImpactLoading} onClick={() => void loadDecisionImpact()}>
+                          {decisionImpactLoading ? "Analyzing…" : "Analyze impact"}
+                        </button>
+                        {decisionLifecycleImpact ? (
+                          <div className="impact-analysis" aria-live="polite">
+                            <p className="impact">
+                              {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.questionIds.length} question(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
+                            </p>
+                            <div className="spec-meta">
+                              <span>Dependency depth {decisionLifecycleImpact.maxDepthReached}</span>
+                              <span>{decisionLifecycleImpact.nodes.length} records</span>
+                              <span>{decisionLifecycleImpact.edges.length} links</span>
+                              {decisionLifecycleImpact.truncated ? <span>Bound reached; narrow or rerun with API limits</span> : <span>Complete within configured bounds</span>}
+                            </div>
+                            <div className="impact-paths">
+                              {decisionLifecycleImpact.nodes.filter((node) => node.depth > 0).slice(0, 8).map((node) => (
+                                <div key={node.id}><strong>Level {node.depth} · {node.type.replaceAll("_", " ")}</strong><span>{node.label}</span></div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </section>
                       {selectedDecision.status === "active" ? (
                         <section className="response-form">
                           <h3>Retire this decision</h3>
@@ -3493,14 +3776,6 @@ export default function Home() {
                             disabled={submitting || decisionLifecycleRationale.trim().length < 10 || (decisionLifecycleStatus === "superseded" && !replacementDecisionId)}
                             onClick={() => void changeDecisionLifecycle()}
                           >Apply lifecycle change</button>
-                        </section>
-                      ) : null}
-                      {decisionLifecycleImpact ? (
-                        <section>
-                          <h3>Potentially affected records</h3>
-                          <p className="impact">
-                            {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
-                          </p>
                         </section>
                       ) : null}
                       {selectedDecision.questionId ? (
@@ -3782,6 +4057,39 @@ export default function Home() {
                 </details>
               ) : null}
 
+              {view === "inbox" && questionDigests.length > 0 ? (
+                <details className="digest-disclosure">
+                  <summary>Low-risk decision digests <span>{questionDigests.length} related {questionDigests.length === 1 ? "group" : "groups"}</span></summary>
+                  <div className="digest-list">
+                    {questionDigests.map((digest) => (
+                      <article className="digest-card" key={digest.id}>
+                        <div className="digest-heading">
+                          <div><strong>{digest.category}</strong><small>{Object.entries(digest.scope).map(([field, value]) => `${field}: ${value}`).join(" · ") || "Project-wide"}</small></div>
+                          <span>{digest.questionCount} questions</span>
+                        </div>
+                        <p>Grouped because these items are low risk, non-blocking, and share the same category and scope. Each still needs an individual human decision.</p>
+                        <div className="digest-questions">
+                          {digest.questions.map((question) => (
+                            <button
+                              className="text-button"
+                              type="button"
+                              key={question.id}
+                              onClick={() => {
+                                setInboxFilters({ risk: "low", category: digest.category });
+                                setSelectedId(question.id);
+                              }}
+                            >
+                              {question.title}{question.dueAt ? ` · ${new Date(question.dueAt).toLocaleDateString()}` : ""}
+                            </button>
+                          ))}
+                        </div>
+                        {digest.remainingQuestionCount > 0 ? <small>+ {digest.remainingQuestionCount} more in this digest</small> : null}
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+
               {questionsLoading ? <div className="empty">Loading Bridge questions…</div> : null}
               {!questionsLoading && visibleQuestions.length === 0 ? (
                 <div className="empty">
@@ -3804,7 +4112,7 @@ export default function Home() {
                         onClick={() => setSelectedId(question.id)}
                       >
                         <span className={`risk risk-${question.risk}`} aria-hidden="true" />
-                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}</small></span>
+                        <span><strong>{question.title}</strong><small>{question.category} · {question.scope.component ?? "project"}{question.dueAt ? ` · ${question.dueStatus.replaceAll("_", " ")} ${new Date(question.dueAt).toLocaleDateString()}` : ""}{question.blockingEscalatedAt ? " · escalated" : ""}</small></span>
                         <span className={`status status-${question.status}`}>{question.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3822,6 +4130,7 @@ export default function Home() {
                         <p>{selectedQuestion.context}</p>
                         <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
                         {selectedQuestion.dueAt ? <div className="owner-routing"><strong>Due:</strong> {new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</div> : null}
+                        {selectedQuestion.blockingEscalatedAt ? <div className="owner-routing"><strong>Escalated:</strong> {new Date(selectedQuestion.blockingEscalatedAt).toLocaleString()}</div> : null}
                         {selectedQuestion.ownerRoles.length > 0 ? (
                           <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
                         ) : null}
@@ -3843,6 +4152,43 @@ export default function Home() {
                           </div>
                         ) : null}
                       </section>
+
+                      <details className="detail-disclosure">
+                        <summary>Explain for my role</summary>
+                        <div className="audience-controls">
+                          <label htmlFor="question-audience-role">Audience role
+                            <select
+                              id="question-audience-role"
+                              value={questionAudienceRole}
+                              onChange={(event) => {
+                                setQuestionAudienceRole(event.target.value);
+                                setQuestionAudienceView(undefined);
+                              }}
+                            >
+                              {activeRoles.length === 0 ? <option value="project contributor">Project contributor</option> : null}
+                              {activeRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+                            </select>
+                          </label>
+                          <div className="audience-actions">
+                            <button className="secondary" type="button" disabled={questionAudienceLoading} onClick={() => void loadQuestionAudienceView("explain")}>
+                              {questionAudienceLoading ? "Loading…" : "Explain"}
+                            </button>
+                            <button className="secondary" type="button" disabled={questionAudienceLoading} onClick={() => void loadQuestionAudienceView("rewrite")}>
+                              Rewrite for role
+                            </button>
+                          </div>
+                        </div>
+                        {questionAudienceView ? (
+                          <div className="audience-view" aria-live="polite">
+                            <small>Derived {questionAudienceView.mode} for {questionAudienceView.role}. The recorded question and human approval authority are unchanged.</small>
+                            <h3>{questionAudienceView.presentation.title}</h3>
+                            <p>{questionAudienceView.presentation.context}</p>
+                            <div className="audience-focus"><strong>Focus on:</strong> {questionAudienceView.presentation.focusAreas.join(" · ")}</div>
+                            <div className="impact"><strong>Why it matters:</strong> {questionAudienceView.presentation.whyItMatters}</div>
+                            <p><strong>Review prompt:</strong> {questionAudienceView.presentation.reviewPrompt}</p>
+                          </div>
+                        ) : null}
+                      </details>
 
                       <details className="detail-disclosure">
                         <summary>Provenance <span className="section-count">{selectedQuestion.runId ? "linked" : "direct"}</span></summary>
@@ -4291,6 +4637,7 @@ export default function Home() {
                         <div className="spec-meta">
                           <span>Published by {selectedArtifactVersion.createdById}</span>
                           <span>Reviewers: {selectedArtifact.reviewerIds.join(", ")}</span>
+                          <span>Approvals: {selectedArtifactVersion.approvalStatus.approvedCount}/{selectedArtifactVersion.approvalStatus.requiredCount}</span>
                           <span>Scope: {selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "project"}</span>
                         </div>
                       </section>
@@ -4460,6 +4807,10 @@ export default function Home() {
                         <div className="impact">
                           <strong>Changes requested.</strong> This immutable version cannot be approved. Publish a new version that addresses the feedback.
                         </div>
+                      ) : canReviewSelectedArtifact && activePrincipalApprovedSelectedArtifact ? (
+                        <div className="impact">
+                          <strong>Your approval is recorded.</strong> {selectedArtifactVersion.approvalStatus.remainingCount} more distinct human approval{selectedArtifactVersion.approvalStatus.remainingCount === 1 ? " is" : "s are"} required.
+                        </div>
                       ) : canReviewSelectedArtifact ? (
                         <section>
                           <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
@@ -4474,7 +4825,7 @@ export default function Home() {
                             disabled={submitting || approvalRationale.trim().length < 10}
                             onClick={() => void approveSpecification()}
                           >
-                            {submitting ? "Approving version…" : `Approve version ${selectedArtifactVersion.version}`}
+                            {submitting ? "Recording approval…" : `Record approval for version ${selectedArtifactVersion.version}`}
                           </button>
                         </section>
                       ) : (

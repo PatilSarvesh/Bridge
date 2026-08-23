@@ -449,6 +449,7 @@ export const questions = pgTable(
     reversible: boolean("reversible").notNull(),
     blocking: boolean("blocking").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true, mode: "string" }),
+    blockingEscalatedAt: timestamp("blocking_escalated_at", { withTimezone: true, mode: "string" }),
     ownerIds: jsonb("owner_ids").$type<readonly string[]>().notNull(),
     ownerRoles: jsonb("owner_roles").$type<readonly string[]>().default([]).notNull(),
     requiredOwnerRoles: jsonb("required_owner_roles").$type<readonly string[]>().default([]).notNull(),
@@ -671,6 +672,7 @@ export const artifactVersions = pgTable(
     createdByType: principalTypeEnum("created_by_type").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     reviews: jsonb("reviews").$type<readonly ArtifactReview[]>().default([]).notNull(),
+    requiredApprovals: integer("required_approvals").default(1).notNull(),
     runId: text("run_id").references(() => agentRuns.id, { onDelete: "restrict" }),
     approvedById: text("approved_by_id"),
     approvalRationale: text("approval_rationale"),
@@ -679,6 +681,10 @@ export const artifactVersions = pgTable(
   (table) => [
     uniqueIndex("bridge_artifact_versions_number_unique").on(table.artifactId, table.version),
     index("bridge_artifact_versions_artifact_status_idx").on(table.artifactId, table.status),
+    check(
+      "bridge_artifact_versions_required_approvals_check",
+      sql`${table.requiredApprovals} between 1 and 20`,
+    ),
     relatedTenantPolicy(
       "bridge_artifact_versions_tenant",
       sql`exists (
@@ -758,11 +764,11 @@ export const organizationAuditEvents = pgTable(
     index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
     check(
       "bridge_organization_audit_events_action_check",
-      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported')`,
+      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out')`,
     ),
     check(
       "bridge_organization_audit_events_subject_check",
-      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export'))`,
+      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity'))`,
     ),
     tenantPolicy("bridge_organization_audit_events_tenant", table.organizationId),
   ],
@@ -799,9 +805,41 @@ export const notifications = pgTable(
     }).onDelete("cascade"),
     check(
       "bridge_notifications_type_check",
-      sql`${table.type} IN ('question_assigned', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved')`,
+      sql`${table.type} IN ('question_assigned', 'question_blocking_escalation', 'question_response', 'question_comment', 'question_review', 'question_accepted', 'decision_lifecycle', 'assumption_expired', 'artifact_review_requested', 'artifact_review_feedback', 'artifact_approved')`,
     ),
     tenantPolicy("bridge_notifications_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const notificationPreferences = pgTable(
+  "bridge_notification_preferences",
+  {
+    organizationId: text("organization_id").notNull(),
+    principalId: text("principal_id").notNull(),
+    channel: text("channel").notNull(),
+    preference: text("preference").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.principalId, table.channel] }),
+    index("bridge_notification_preferences_principal_idx").on(
+      table.organizationId,
+      table.principalId,
+    ),
+    foreignKey({
+      name: "bridge_notification_preferences_membership_fk",
+      columns: [table.organizationId, table.principalId],
+      foreignColumns: [organizationMemberships.organizationId, organizationMemberships.principalId],
+    }).onDelete("cascade"),
+    check(
+      "bridge_notification_preferences_channel_check",
+      sql`${table.channel} IN ('email')`,
+    ),
+    check(
+      "bridge_notification_preferences_preference_check",
+      sql`${table.preference} IN ('immediate', 'digest', 'muted')`,
+    ),
+    tenantPolicy("bridge_notification_preferences_tenant", table.organizationId),
   ],
 ).enableRLS();
 
@@ -863,11 +901,18 @@ export const outboxDeliveries = pgTable(
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    digestAvailableAt: timestamp("digest_available_at", { withTimezone: true, mode: "string" }),
+    digestLeaseUntil: timestamp("digest_lease_until", { withTimezone: true, mode: "string" }),
   },
   (table) => [
     unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
     index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
     index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
+    index("bridge_outbox_deliveries_digest_available_idx").on(
+      table.status,
+      table.channel,
+      table.digestAvailableAt,
+    ),
     index("bridge_outbox_deliveries_project_channel_dedupe_idx").on(
       table.projectId,
       table.channel,

@@ -1,29 +1,31 @@
-import type {
-  AdapterDiagnostic,
-  AgentRun,
-  Assumption,
-  Artifact,
-  ArtifactVersion,
-  AuditEvent,
-  ContextSnapshot,
-  Decision,
-  Notification,
-  Organization,
-  OrganizationAuditEvent,
-  OrganizationMembership,
-  OutboxDelivery,
-  OutboxEvent,
-  PrincipalIdentity,
-  Project,
-  ProjectMembership,
-  ProjectOwnershipConfiguration,
-  ProjectPolicyConfiguration,
-  QuestionApprovalOverride,
-  QuestionLink,
-  RepositoryRecord,
-  Question,
-  QuestionResponse,
-  ServiceCredential,
+import {
+  artifactApprovalStatus,
+  type AdapterDiagnostic,
+  type AgentRun,
+  type Assumption,
+  type Artifact,
+  type ArtifactVersion,
+  type AuditEvent,
+  type ContextSnapshot,
+  type Decision,
+  type Notification,
+  type NotificationPreference,
+  type Organization,
+  type OrganizationAuditEvent,
+  type OrganizationMembership,
+  type OutboxDelivery,
+  type OutboxEvent,
+  type PrincipalIdentity,
+  type Project,
+  type ProjectMembership,
+  type ProjectOwnershipConfiguration,
+  type ProjectPolicyConfiguration,
+  type QuestionApprovalOverride,
+  type QuestionLink,
+  type RepositoryRecord,
+  type Question,
+  type QuestionResponse,
+  type ServiceCredential,
 } from "@bridge/domain";
 
 import {
@@ -40,6 +42,7 @@ import {
   questionResponses,
   questions,
   notifications,
+  notificationPreferences,
   organizations,
   organizationMemberships,
   organizationAuditEvents,
@@ -73,6 +76,7 @@ export type ArtifactVersionRow = typeof artifactVersions.$inferSelect;
 export type ContextSnapshotRow = typeof contextSnapshots.$inferSelect;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type NotificationPreferenceRow = typeof notificationPreferences.$inferSelect;
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 export type OutboxDeliveryRow = typeof outboxDeliveries.$inferSelect;
 
@@ -275,6 +279,22 @@ export function notificationFromRow(row: NotificationRow): Notification {
   };
 }
 
+export function notificationPreferenceToRow(
+  preference: NotificationPreference,
+): typeof notificationPreferences.$inferInsert {
+  return { ...preference };
+}
+
+export function notificationPreferenceFromRow(
+  row: NotificationPreferenceRow,
+): NotificationPreference {
+  return {
+    ...row,
+    channel: "email",
+    preference: row.preference as NotificationPreference["preference"],
+  };
+}
+
 export function outboxEventToRow(event: OutboxEvent): typeof outboxEvents.$inferInsert {
   return {
     id: event.id,
@@ -327,6 +347,8 @@ export function outboxDeliveryToRow(delivery: OutboxDelivery): typeof outboxDeli
     lastError: delivery.lastError ?? null,
     createdAt: delivery.createdAt,
     updatedAt: delivery.updatedAt,
+    digestAvailableAt: delivery.digestAvailableAt ?? null,
+    digestLeaseUntil: delivery.digestLeaseUntil ?? null,
   };
 }
 
@@ -344,6 +366,8 @@ export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
     preference: row.preference as OutboxDelivery["preference"],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...(row.digestAvailableAt === null ? {} : { digestAvailableAt: row.digestAvailableAt }),
+    ...(row.digestLeaseUntil === null ? {} : { digestLeaseUntil: row.digestLeaseUntil }),
     ...(row.providerMessageId === null ? {} : { providerMessageId: row.providerMessageId }),
     ...(row.lastError === null ? {} : { lastError: row.lastError }),
   };
@@ -534,6 +558,7 @@ export function questionToRow(question: Question): typeof questions.$inferInsert
     reversible: question.reversible,
     blocking: question.blocking,
     dueAt: question.dueAt ?? null,
+    blockingEscalatedAt: question.blockingEscalatedAt ?? null,
     ownerIds: question.ownerIds,
     ownerRoles: question.ownerRoles,
     requiredOwnerRoles: question.requiredOwnerRoles,
@@ -612,6 +637,7 @@ export function questionFromRows(
     reversible: row.reversible,
     blocking: row.blocking,
     ...(row.dueAt === null ? {} : { dueAt: row.dueAt }),
+    ...(row.blockingEscalatedAt === null ? {} : { blockingEscalatedAt: row.blockingEscalatedAt }),
     ownerIds: row.ownerIds,
     ownerRoles: row.ownerRoles,
     requiredOwnerRoles: row.requiredOwnerRoles,
@@ -724,6 +750,7 @@ export function artifactVersionToRow(
     createdByType: version.createdByType,
     createdAt: version.createdAt,
     reviews: version.reviews,
+    requiredApprovals: version.requiredApprovals,
     runId: version.runId ?? null,
     approvedById: version.approvedById ?? null,
     approvalRationale: version.approvalRationale ?? null,
@@ -732,7 +759,7 @@ export function artifactVersionToRow(
 }
 
 export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion {
-  return {
+  const version = {
     id: row.id,
     artifactId: row.artifactId,
     version: row.version,
@@ -745,11 +772,13 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
     createdByType: row.createdByType,
     createdAt: row.createdAt,
     reviews: row.reviews,
+    requiredApprovals: row.requiredApprovals,
     ...(row.runId === null ? {} : { runId: row.runId }),
     ...(row.approvedById === null ? {} : { approvedById: row.approvedById }),
     ...(row.approvalRationale === null ? {} : { approvalRationale: row.approvalRationale }),
     ...(row.approvedAt === null ? {} : { approvedAt: row.approvedAt }),
   };
+  return { ...version, approvalStatus: artifactApprovalStatus(version) };
 }
 
 export function artifactFromRows(

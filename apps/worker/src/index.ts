@@ -8,7 +8,10 @@ import {
   type SafeLogger,
 } from "@bridge/observability";
 
+import { startWorkerMetricsServer } from "./metrics-server.js";
+
 export * from "./email.js";
+export * from "./metrics-server.js";
 export * from "./slack.js";
 
 export interface ReviewableDecision {
@@ -38,9 +41,12 @@ export type OutboxHandler = (event: OutboxEvent) => Promise<void>;
 
 export interface OutboxCycleOptions {
   readonly now?: () => Date;
+  readonly random?: () => number;
   readonly batchSize?: number;
   readonly maxAttempts?: number;
   readonly baseBackoffMs?: number;
+  readonly maxBackoffMs?: number;
+  readonly retryJitterRatio?: number;
   readonly logger?: SafeLogger;
   readonly metrics?: BridgeMetrics;
 }
@@ -51,11 +57,43 @@ export interface AssumptionExpiryCycleResult {
 
 export type AssumptionExpiryCycle = () => Promise<AssumptionExpiryCycleResult>;
 
+export interface BlockingQuestionEscalationCycleResult {
+  readonly escalatedCount: number;
+}
+
+export type BlockingQuestionEscalationCycle = () => Promise<BlockingQuestionEscalationCycleResult>;
+
 export interface OutboxCycleResult {
   readonly claimed: number;
   readonly processed: number;
   readonly retried: number;
   readonly deadLettered: number;
+}
+
+export function retryDelayMs(
+  attempt: number,
+  baseBackoffMs: number,
+  maxBackoffMs: number,
+  retryJitterRatio: number,
+  random: () => number = Math.random,
+): number {
+  if (!Number.isSafeInteger(attempt) || attempt < 1) {
+    throw new Error("Outbox retry attempt must be a positive integer.");
+  }
+  if (!Number.isSafeInteger(baseBackoffMs) || baseBackoffMs < 1) {
+    throw new Error("Outbox base backoff must be a positive integer.");
+  }
+  if (!Number.isSafeInteger(maxBackoffMs) || maxBackoffMs < baseBackoffMs) {
+    throw new Error("Outbox maximum backoff must be an integer at least as large as its base backoff.");
+  }
+  if (!Number.isFinite(retryJitterRatio) || retryJitterRatio < 0 || retryJitterRatio > 1) {
+    throw new Error("Outbox retry jitter ratio must be between 0 and 1.");
+  }
+  const exponential = Math.min(maxBackoffMs, baseBackoffMs * 2 ** Math.max(0, attempt - 1));
+  const sample = random();
+  const boundedSample = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0.5;
+  const minimum = exponential * (1 - retryJitterRatio);
+  return Math.round(minimum + (exponential - minimum) * boundedSample);
 }
 
 export async function runOutboxCycle(
@@ -67,6 +105,9 @@ export async function runOutboxCycle(
   const currentTime = now();
   const maxAttempts = options.maxAttempts ?? 5;
   const baseBackoffMs = options.baseBackoffMs ?? 1_000;
+  const maxBackoffMs = options.maxBackoffMs ?? 15 * 60 * 1_000;
+  const retryJitterRatio = options.retryJitterRatio ?? 0.25;
+  retryDelayMs(1, baseBackoffMs, maxBackoffMs, retryJitterRatio, () => 1);
   const events = await store.claimOutboxEvents(currentTime.toISOString(), options.batchSize ?? 25);
   const oldestClaimedAgeMs = events.length === 0
     ? 0
@@ -96,7 +137,15 @@ export async function runOutboxCycle(
         } catch (error) {
           const lastError = error instanceof Error ? error.message : String(error);
           const deadLetter = event.attempts >= maxAttempts;
-          const delay = deadLetter ? 0 : baseBackoffMs * 2 ** Math.max(0, event.attempts - 1);
+          const delay = deadLetter
+            ? 0
+            : retryDelayMs(
+                event.attempts,
+                baseBackoffMs,
+                maxBackoffMs,
+                retryJitterRatio,
+                options.random,
+              );
           await store.failOutboxEvent(
             event.id,
             lastError,
@@ -153,7 +202,7 @@ export async function runReviewReminderCycle(): Promise<void> {
   // reminder and expiry policy remains a deployment concern, so this entry point
   // reports the jobs that an operator-provided scheduler should invoke.
   process.stdout.write(
-    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry"], status: "ready" })}\n`,
+    `${JSON.stringify({ service: "bridge-worker", jobs: ["decision-review-reminders", "assumption-expiry", "blocking-question-escalation", "email-digest"], status: "ready" })}\n`,
   );
 }
 
@@ -170,12 +219,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     .then(async ({ createConfiguredWorker, loadWorkerConfiguration, runOutboxWorker }) => {
       const configuration = loadWorkerConfiguration();
       const runtime = createConfiguredWorker(configuration);
+      let metricsServer: Awaited<ReturnType<typeof startWorkerMetricsServer>> | undefined;
       try {
         await runtime.store.repository.checkHealth();
+        metricsServer = await startWorkerMetricsServer({
+          metrics: runtime.metrics,
+          host: configuration.metricsHost,
+          port: configuration.metricsPort,
+          logger,
+        });
         logger.info("service.started", {
           channel: configuration.channel,
           pollIntervalMs: configuration.pollIntervalMs,
           batchSize: configuration.batchSize,
+          metricsPort: metricsServer.port,
           status: "ready",
         });
         await runOutboxWorker({
@@ -186,13 +243,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
             batchSize: configuration.batchSize,
             maxAttempts: configuration.maxAttempts,
             baseBackoffMs: configuration.baseBackoffMs,
+            maxBackoffMs: configuration.maxBackoffMs,
+            retryJitterRatio: configuration.retryJitterRatio,
           },
           assumptionExpiryCycle: runtime.assumptionExpiryCycle,
           assumptionExpiryIntervalMs: configuration.assumptionExpiryIntervalMs,
+          blockingQuestionEscalationCycle: runtime.blockingQuestionEscalationCycle,
+          blockingQuestionEscalationIntervalMs: configuration.blockingQuestionEscalationIntervalMs,
+          emailDigestIntervalMs: configuration.emailDigestIntervalMs,
+          metrics: runtime.metrics,
           signal: controller.signal,
         });
       } finally {
-        await runtime.close();
+        try {
+          await metricsServer?.close();
+        } finally {
+          await runtime.close();
+        }
       }
     })
     .catch((error: unknown) => {

@@ -14,6 +14,8 @@ import type {
   CreateOrganizationMemberInput,
   CreateServiceIdentityInput,
   DecisionListQuery,
+  DecisionConflictQuery,
+  DecisionImpactQuery,
   CreateQuestionInput,
   EditQuestionCommentInput,
   EditQuestionResponseInput,
@@ -33,6 +35,7 @@ import type {
   RevokeServiceIdentityInput,
   RotateServiceIdentityInput,
   NotificationListQuery,
+  NotificationPreferenceInput,
   NotificationReadAllInput,
   OutboxOperationsQuery,
   ProjectAnalyticsQuery,
@@ -41,6 +44,8 @@ import type {
   OverrideQuestionApprovalInput,
   ReassignQuestionInput,
   QuestionInboxQuery,
+  QuestionAudienceViewQuery,
+  QuestionDecisionDigestQuery,
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
@@ -53,6 +58,7 @@ import {
   assertCanApproveArtifact,
   assertCanReviewArtifact,
   assertCanAccept,
+  artifactApprovalStatus,
   assertHuman,
   assertProjectAccess,
   canAcceptQuestion,
@@ -89,6 +95,7 @@ import {
   type QuestionResponseRevision,
   type QuestionLink,
   type Notification,
+  type NotificationPreference,
   type NotificationQuestionContext,
   type Organization,
   type OrganizationAuditEvent,
@@ -234,6 +241,16 @@ export interface BridgeRepository {
     unreadOnly?: boolean,
   ): Promise<readonly Notification[]>;
   saveNotification(notification: Notification): Promise<void>;
+  getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined>;
+  listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]>;
+  saveNotificationPreference(preference: NotificationPreference): Promise<void>;
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
@@ -344,9 +361,62 @@ export interface ContinuationDescriptor {
 
 export interface DecisionLifecycleImpact {
   readonly artifactIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
   readonly assumptionIds: readonly string[];
+  readonly questionIds: readonly string[];
+  readonly contextSnapshotIds: readonly string[];
   readonly runIds: readonly string[];
   readonly workItems: readonly string[];
+  readonly branches: readonly string[];
+  readonly repositories: readonly string[];
+  readonly links: readonly DecisionImpactLink[];
+  readonly nodes: readonly DecisionImpactNode[];
+  readonly edges: readonly DecisionImpactEdge[];
+  readonly maxDepthReached: number;
+  readonly truncated: boolean;
+}
+
+export type DecisionImpactNodeType =
+  | "decision"
+  | "question"
+  | "artifact"
+  | "artifact_version"
+  | "assumption"
+  | "context_snapshot"
+  | "run";
+
+export interface DecisionImpactNode {
+  readonly id: string;
+  readonly type: DecisionImpactNodeType;
+  readonly label: string;
+  readonly depth: number;
+  readonly path: readonly string[];
+  readonly scope?: Scope;
+  readonly status?: string;
+}
+
+export interface DecisionImpactEdge {
+  readonly fromId: string;
+  readonly toId: string;
+  readonly relation:
+    | "source_question"
+    | "cited_by_artifact"
+    | "contains_citing_version"
+    | "confirmed_assumption"
+    | "consumed_in_context"
+    | "context_used_by_run"
+    | "created_in_run"
+    | "continued_by_run"
+    | "produced_question"
+    | "produced_assumption"
+    | "produced_artifact_version";
+}
+
+export interface DecisionImpactLink {
+  readonly sourceId: string;
+  readonly type: QuestionLink["type"] | "run_external" | "run_result";
+  readonly url: string;
+  readonly depth: number;
 }
 
 export interface DecisionLifecycleChange {
@@ -354,8 +424,25 @@ export interface DecisionLifecycleChange {
   readonly impact: DecisionLifecycleImpact;
 }
 
+export interface DecisionConflict {
+  readonly id: string;
+  readonly category: string;
+  readonly confidence: "high" | "medium";
+  readonly scopeRelation: "exact" | "ancestor_descendant" | "partial";
+  readonly overlappingFields: readonly (keyof Scope)[];
+  readonly signals: readonly ("different answers in exact scope" | "opposing language")[];
+  readonly left: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly right: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly advisory: true;
+  readonly humanResolutionRequired: true;
+}
+
 export interface AssumptionExpiryCycleResult {
   readonly expiredCount: number;
+}
+
+export interface BlockingQuestionEscalationCycleResult {
+  readonly escalatedCount: number;
 }
 
 export interface OutboxOperationsMetrics {
@@ -719,12 +806,60 @@ export interface QuestionMatch {
   readonly createdAt: string;
 }
 
+export interface QuestionAudienceView {
+  readonly questionId: string;
+  readonly questionVersion: number;
+  readonly role: string;
+  readonly mode: QuestionAudienceViewQuery["mode"];
+  readonly source: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly options: Question["options"];
+    readonly recommendationKey?: string;
+  };
+  readonly presentation: {
+    readonly title: string;
+    readonly context: string;
+    readonly whyItMatters: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  };
+  readonly guardrails: {
+    readonly derivedOnly: true;
+    readonly sourceFieldsUnchanged: true;
+    readonly humanApprovalRequired: true;
+  };
+}
+
+export interface QuestionDecisionDigest {
+  readonly id: string;
+  readonly category: string;
+  readonly scope: Scope;
+  readonly questionCount: number;
+  readonly remainingQuestionCount: number;
+  readonly earliestDueAt?: string;
+  readonly groupingReasons: readonly ["low risk and non-blocking", "same category", "same exact scope"];
+  readonly questions: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly whyItMatters: string;
+    readonly status: Question["status"];
+    readonly dueAt?: string;
+    readonly dueStatus: QuestionInboxItem["dueStatus"];
+    readonly canAccept: boolean;
+  }[];
+  readonly humanApprovalRequired: true;
+  readonly batchAcceptanceAvailable: false;
+}
+
 interface NotificationDraft {
   readonly type: Notification["type"];
   readonly title: string;
   readonly body: string;
   readonly targetType: Notification["targetType"];
   readonly targetId: string;
+  readonly recipientRoles?: readonly string[];
   readonly questionContext?: NotificationQuestionContext;
 }
 
@@ -960,6 +1095,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly auditEvents = new Map<string, AuditEvent>();
   private readonly organizationAuditEvents = new Map<string, OrganizationAuditEvent>();
   private readonly notifications = new Map<string, Notification>();
+  private readonly notificationPreferences = new Map<string, NotificationPreference>();
   private readonly outboxEvents = new Map<string, OutboxEvent>();
   private readonly outboxDeliveries = new Map<string, OutboxDelivery>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
@@ -1011,6 +1147,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       auditEvents: new Map(this.auditEvents),
       organizationAuditEvents: new Map(this.organizationAuditEvents),
       notifications: new Map(this.notifications),
+      notificationPreferences: new Map(this.notificationPreferences),
       outboxEvents: new Map(this.outboxEvents),
       outboxDeliveries: new Map(this.outboxDeliveries),
       idempotency: new Map(this.idempotency),
@@ -1043,6 +1180,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.auditEvents, snapshot.auditEvents);
       this.restoreMap(this.organizationAuditEvents, snapshot.organizationAuditEvents);
       this.restoreMap(this.notifications, snapshot.notifications);
+      this.restoreMap(this.notificationPreferences, snapshot.notificationPreferences);
       this.restoreMap(this.outboxEvents, snapshot.outboxEvents);
       this.restoreMap(this.outboxDeliveries, snapshot.outboxDeliveries);
       this.restoreMap(this.idempotency, snapshot.idempotency);
@@ -1570,6 +1708,31 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.notifications.set(notification.id, notification);
   }
 
+  async getNotificationPreference(
+    organizationId: string,
+    principalId: string,
+    channel: NotificationPreference["channel"],
+  ): Promise<NotificationPreference | undefined> {
+    return this.notificationPreferences.get(`${organizationId}:${principalId}:${channel}`);
+  }
+
+  async listNotificationPreferences(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly NotificationPreference[]> {
+    return [...this.notificationPreferences.values()]
+      .filter((preference) =>
+        preference.organizationId === organizationId && preference.principalId === principalId)
+      .sort((left, right) => left.channel.localeCompare(right.channel));
+  }
+
+  async saveNotificationPreference(preference: NotificationPreference): Promise<void> {
+    this.notificationPreferences.set(
+      `${preference.organizationId}:${preference.principalId}:${preference.channel}`,
+      preference,
+    );
+  }
+
   async listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]> {
     return [...this.outboxEvents.values()]
       .filter((event) => !projectId || event.projectId === projectId)
@@ -1746,6 +1909,23 @@ export class BridgeService {
         }],
       };
     }
+  }
+
+  async recordAuthenticationEvent(
+    principal: Principal,
+    action: "authentication.succeeded" | "authentication.logged_out",
+  ): Promise<void> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Recording web authentication");
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        action,
+        principal.id,
+        this.now().toISOString(),
+        "principal_identity",
+      );
+    });
   }
 
   async registerProject(
@@ -2522,6 +2702,36 @@ export class BridgeService {
           .map((project) => project.id),
       );
       return notifications.filter((notification) => accessibleProjectIds.has(notification.projectId));
+    });
+  }
+
+  async listNotificationPreferences(
+    principal: Principal,
+  ): Promise<readonly NotificationPreference[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Reading notification preferences");
+      return repository.listNotificationPreferences(principal.organizationId, principal.id);
+    });
+  }
+
+  async setNotificationPreference(
+    principal: Principal,
+    input: NotificationPreferenceInput,
+  ): Promise<NotificationPreference> {
+    return this.tenantTransaction(principal, async (repository) => {
+      assertHuman(principal, "Updating notification preferences");
+      if (input.channel !== "email") {
+        throw new BridgeError("VALIDATION_FAILED", "Only email notification preferences are supported.", 422);
+      }
+      const preference: NotificationPreference = {
+        organizationId: principal.organizationId,
+        principalId: principal.id,
+        channel: input.channel,
+        preference: input.preference,
+        updatedAt: this.now().toISOString(),
+      };
+      await repository.saveNotificationPreference(preference);
+      return preference;
     });
   }
 
@@ -3469,6 +3679,89 @@ export class BridgeService {
     }, { maintenance: true });
   }
 
+  async escalateDueBlockingQuestions(): Promise<BlockingQuestionEscalationCycleResult> {
+    return this.repository.transaction(async (repository) => {
+      let escalatedCount = 0;
+      const now = this.now();
+      const escalatedAt = now.toISOString();
+      for (const organization of await repository.listOrganizations()) {
+        const maintenancePrincipal: Principal = {
+          id: "bridge-worker",
+          type: "integration",
+          organizationId: organization.id,
+          projectIds: [],
+          allProjects: true,
+          roles: ["system-maintenance"],
+          displayName: "Bridge worker",
+        };
+        for (const project of await repository.listProjects(organization.id)) {
+          for (const listedQuestion of await repository.listQuestions(project.id)) {
+            if (
+              !listedQuestion.blocking ||
+              !listedQuestion.dueAt ||
+              listedQuestion.blockingEscalatedAt ||
+              !["open", "in_discussion"].includes(listedQuestion.status) ||
+              Date.parse(listedQuestion.dueAt) > now.getTime()
+            ) {
+              continue;
+            }
+            const question = await repository.getQuestion(listedQuestion.id);
+            if (
+              !question ||
+              !question.blocking ||
+              !question.dueAt ||
+              question.blockingEscalatedAt ||
+              !["open", "in_discussion"].includes(question.status) ||
+              Date.parse(question.dueAt) > now.getTime()
+            ) {
+              continue;
+            }
+
+            await repository.saveQuestion({ ...question, blockingEscalatedAt: escalatedAt });
+            await this.audit(
+              repository,
+              maintenancePrincipal,
+              project.id,
+              "question.blocking_escalated",
+              "question",
+              question.id,
+              escalatedAt,
+              question.policyVersion,
+            );
+            await this.notify(
+              repository,
+              maintenancePrincipal,
+              project.id,
+              [...question.ownerIds, ...question.reviewerIds, ...project.decisionOwnerIds],
+              {
+                type: "question_blocking_escalation",
+                title: "Overdue blocking question needs attention",
+                body: `“${question.title}” is overdue and still blocks progress. Review the authoritative question in Bridge.`,
+                targetType: "question",
+                targetId: question.id,
+                recipientRoles: [
+                  ...question.ownerRoles,
+                  ...question.requiredOwnerRoles,
+                  ...question.reviewerRoles,
+                  ...question.requiredReviewerRoles,
+                  "project-admin",
+                ],
+                questionContext: {
+                  id: question.id,
+                  status: question.status,
+                  risk: question.risk,
+                  ownerIds: question.ownerIds,
+                },
+              },
+            );
+            escalatedCount += 1;
+          }
+        }
+      }
+      return { escalatedCount };
+    }, { maintenance: true });
+  }
+
   async resolveAssumption(
     principal: Principal,
     assumptionId: string,
@@ -3804,6 +4097,7 @@ export class BridgeService {
       body: `${principal.displayName} routed “${question.title}” to you.`,
       targetType: "question",
       targetId: question.id,
+      recipientRoles: [...question.ownerRoles, ...question.reviewerRoles],
       questionContext: {
         id: question.id,
         status: question.status,
@@ -4051,9 +4345,178 @@ export class BridgeService {
     });
   }
 
+  async listQuestionDecisionDigests(
+    principal: Principal,
+    projectId: string,
+    query: QuestionDecisionDigestQuery,
+  ): Promise<readonly QuestionDecisionDigest[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const now = this.now();
+      const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
+      const candidates = (await repository.listQuestions(projectId))
+        .map((question) => questionInboxItem(principal, question, now))
+        .filter((question) =>
+          question.inboxReasons.length > 0 &&
+          ["open", "in_discussion"].includes(question.status) &&
+          question.risk === "low" &&
+          !question.blocking &&
+          (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory),
+        );
+      const grouped = new Map<string, QuestionInboxItem[]>();
+      for (const question of candidates) {
+        const scopeKey = JSON.stringify(Object.entries(question.scope).sort(([left], [right]) => left.localeCompare(right)));
+        const key = `${question.category.normalize("NFKC").toLocaleLowerCase("en")}\u0000${scopeKey}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), question]);
+      }
+
+      return [...grouped.entries()]
+        .filter(([, questions]) => questions.length >= 2)
+        .map(([key, questions]): QuestionDecisionDigest => {
+          const ordered = [...questions].sort((left, right) => {
+            const leftDue = left.dueAt ? Date.parse(left.dueAt) : Number.POSITIVE_INFINITY;
+            const rightDue = right.dueAt ? Date.parse(right.dueAt) : Number.POSITIVE_INFINITY;
+            return leftDue - rightDue || Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id);
+          });
+          const first = ordered[0]!;
+          const shown = ordered.slice(0, query.maxQuestionsPerDigest);
+          const earliestDueAt = ordered.find((question) => question.dueAt)?.dueAt;
+          return {
+            id: `qdg_${createHash("sha256")
+              .update(`${projectId}\u0000${principal.id}\u0000${key}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            category: first.category,
+            scope: { ...first.scope },
+            questionCount: ordered.length,
+            remainingQuestionCount: ordered.length - shown.length,
+            ...(earliestDueAt ? { earliestDueAt } : {}),
+            groupingReasons: ["low risk and non-blocking", "same category", "same exact scope"],
+            questions: shown.map((question) => ({
+              id: question.id,
+              title: question.title,
+              whyItMatters: question.whyItMatters,
+              status: question.status,
+              ...(question.dueAt ? { dueAt: question.dueAt } : {}),
+              dueStatus: question.dueStatus,
+              canAccept: question.canAccept,
+            })),
+            humanApprovalRequired: true,
+            batchAcceptanceAvailable: false,
+          };
+        })
+        .sort((left, right) => {
+          const leftDue = left.earliestDueAt ? Date.parse(left.earliestDueAt) : Number.POSITIVE_INFINITY;
+          const rightDue = right.earliestDueAt ? Date.parse(right.earliestDueAt) : Number.POSITIVE_INFINITY;
+          return leftDue - rightDue || right.questionCount - left.questionCount || left.id.localeCompare(right.id);
+        })
+        .slice(0, query.maxDigests);
+    });
+  }
+
   async getQuestion(principal: Principal, questionId: string): Promise<QuestionInboxItem> {
     return this.tenantTransaction(principal, async (repository) =>
       questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
+  }
+
+  async getQuestionAudienceView(
+    principal: Principal,
+    questionId: string,
+    query: QuestionAudienceViewQuery,
+  ): Promise<QuestionAudienceView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const question = await this.requireQuestion(principal, questionId, repository);
+      const role = query.role.trim();
+      const lens = this.questionAudienceLens(role);
+      return {
+        questionId: question.id,
+        questionVersion: question.version,
+        role,
+        mode: query.mode,
+        source: {
+          title: question.title,
+          context: question.context,
+          whyItMatters: question.whyItMatters,
+          options: question.options.map((option) => ({ ...option })),
+          ...(question.recommendationKey ? { recommendationKey: question.recommendationKey } : {}),
+        },
+        presentation: query.mode === "rewrite"
+          ? {
+              title: `For ${role}: ${question.title}`,
+              context: `${question.context}\n\nRole focus: ${lens.summary}`,
+              whyItMatters: question.whyItMatters,
+              focusAreas: lens.focusAreas,
+              reviewPrompt: lens.reviewPrompt,
+            }
+          : {
+              title: `What ${role} should evaluate`,
+              context: `The recorded question is “${question.title}”. ${lens.summary}`,
+              whyItMatters: `The recorded impact remains: ${question.whyItMatters}`,
+              focusAreas: lens.focusAreas,
+              reviewPrompt: lens.reviewPrompt,
+            },
+        guardrails: {
+          derivedOnly: true,
+          sourceFieldsUnchanged: true,
+          humanApprovalRequired: true,
+        },
+      };
+    });
+  }
+
+  private questionAudienceLens(role: string): {
+    readonly summary: string;
+    readonly focusAreas: readonly string[];
+    readonly reviewPrompt: string;
+  } {
+    const normalized = normalizeRoleName(role);
+    if (["security", "privacy", "compliance", "risk"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through confidentiality, access-control, abuse, and compliance consequences.",
+        focusAreas: ["security controls", "data exposure", "threat and compliance evidence"],
+        reviewPrompt: "Which recorded option has acceptable security risk, and what evidence supports that assessment?",
+      };
+    }
+    if (["qa", "quality", "test"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through acceptance criteria, test coverage, and observable failure modes.",
+        focusAreas: ["acceptance criteria", "test evidence", "failure and regression risk"],
+        reviewPrompt: "Which recorded option is best supported by test evidence, and what release risk remains?",
+      };
+    }
+    if (["product", "business", "customer"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through user outcomes, scope, delivery cost, and reversibility.",
+        focusAreas: ["user outcome", "scope and priority", "delivery and reversal cost"],
+        reviewPrompt: "Which recorded option best serves the intended outcome within the accepted scope and risk?",
+      };
+    }
+    if (["operations", "sre", "platform", "devops", "reliability"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through reliability, rollout, observability, and recovery needs.",
+        focusAreas: ["operational reliability", "rollout and rollback", "monitoring and recovery"],
+        reviewPrompt: "Which recorded option can be operated and recovered safely, and what evidence is required?",
+      };
+    }
+    if (["design", "ux", "accessibility"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through comprehension, accessibility, interaction cost, and user trust.",
+        focusAreas: ["user comprehension", "accessibility", "interaction cost and trust"],
+        reviewPrompt: "Which recorded option creates the clearest accessible experience with acceptable user cost?",
+      };
+    }
+    if (["architect", "engineer", "developer", "technical"].some((term) => normalized.includes(term))) {
+      return {
+        summary: "Evaluate the same options through system boundaries, compatibility, delivery complexity, and maintenance.",
+        focusAreas: ["system boundaries", "compatibility", "implementation and maintenance cost"],
+        reviewPrompt: "Which recorded option fits the architecture with acceptable complexity and long-term cost?",
+      };
+    }
+    return {
+      summary: "Evaluate the recorded options through this role's responsibilities, evidence, and accountable trade-offs.",
+      focusAreas: ["role responsibilities", "supporting evidence", "risks and trade-offs"],
+      reviewPrompt: "Which recorded option should this role support, and what evidence or concern should the owner consider?",
+    };
   }
 
   async requestQuestionClarification(
@@ -4112,6 +4575,7 @@ export class BridgeService {
           body: `${principal.displayName} requested clarification for “${question.title}”.`,
           targetType: "question",
           targetId: question.id,
+          recipientRoles: question.ownerRoles,
           questionContext: {
             id: question.id,
             status: updated.status,
@@ -4180,6 +4644,7 @@ export class BridgeService {
           body: `${principal.displayName} reopened “${question.title}” for discussion.`,
           targetType: "question",
           targetId: question.id,
+          recipientRoles: question.ownerRoles,
           questionContext: {
             id: question.id,
             status: updated.status,
@@ -4322,6 +4787,7 @@ export class BridgeService {
         body: `${principal.displayName} reassigned “${question.title}”.`,
         targetType: "question",
         targetId: question.id,
+        recipientRoles: [...updated.ownerRoles, ...updated.reviewerRoles],
         questionContext: {
           id: question.id,
           status: question.status,
@@ -4429,6 +4895,7 @@ export class BridgeService {
       body: `${principal.displayName} marked “${question.title}” ${review.status}.`,
       targetType: "review",
       targetId: review.id,
+      recipientRoles: question.ownerRoles,
       questionContext: {
         id: question.id,
         status: question.status,
@@ -4513,6 +4980,7 @@ export class BridgeService {
         body: `${principal.displayName} added a clarification to “${question.title}”.`,
         targetType: "comment",
         targetId: comment.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: "in_discussion",
@@ -4633,6 +5101,7 @@ export class BridgeService {
       body: `${principal.displayName} proposed an answer for “${question.title}”.`,
       targetType: "response",
       targetId: response.id,
+      recipientRoles: question.ownerRoles,
       questionContext: {
         id: question.id,
         status: "in_discussion",
@@ -4750,6 +5219,7 @@ export class BridgeService {
         body: `${principal.displayName} edited a proposed answer for “${question.title}”.`,
         targetType: "response",
         targetId: response.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: question.status,
@@ -4858,6 +5328,7 @@ export class BridgeService {
         body: `${principal.displayName} edited a clarification on “${question.title}”.`,
         targetType: "comment",
         targetId: comment.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: question.status,
@@ -5012,6 +5483,7 @@ export class BridgeService {
           : `${principal.displayName} accepted the decision for “${question.title}”.`,
         targetType: "decision",
         targetId: decision.id,
+        recipientRoles: question.ownerRoles,
         questionContext: {
           id: question.id,
           status: "accepted",
@@ -5048,6 +5520,90 @@ export class BridgeService {
     });
   }
 
+  async listDecisionConflicts(
+    principal: Principal,
+    projectId: string,
+    query: DecisionConflictQuery,
+  ): Promise<readonly DecisionConflict[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
+      const decisions = (await repository.listDecisions(projectId))
+        .filter((decision) =>
+          decision.status === "active" &&
+          (!normalizedCategory || decision.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
+          this.scopesOverlap(decision.scope, query.scope),
+        )
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const conflicts: DecisionConflict[] = [];
+      for (let leftIndex = 0; leftIndex < decisions.length; leftIndex += 1) {
+        const left = decisions[leftIndex]!;
+        for (let rightIndex = leftIndex + 1; rightIndex < decisions.length; rightIndex += 1) {
+          const right = decisions[rightIndex]!;
+          if (
+            left.category.normalize("NFKC").toLocaleLowerCase("en") !==
+              right.category.normalize("NFKC").toLocaleLowerCase("en") ||
+            !this.scopesOverlap(left.scope, right.scope) ||
+            this.normalizeQuestionText(left.answer) === this.normalizeQuestionText(right.answer)
+          ) continue;
+          const opposingLanguage = this.answersUseOpposingLanguage(left.answer, right.answer);
+          const exactScope = this.scopesEqual(left.scope, right.scope);
+          if (!exactScope && !opposingLanguage) continue;
+          const signals: DecisionConflict["signals"] = [
+            ...(exactScope ? ["different answers in exact scope" as const] : []),
+            ...(opposingLanguage ? ["opposing language" as const] : []),
+          ];
+          const leftScopeEntries = Object.entries(left.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+          const rightScopeEntries = Object.entries(right.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+          const leftContainsRight = rightScopeEntries.every(([key, value]) => left.scope[key] === value);
+          const rightContainsLeft = leftScopeEntries.every(([key, value]) => right.scope[key] === value);
+          const pairIds = [left.id, right.id].sort((a, b) => a.localeCompare(b));
+          conflicts.push({
+            id: `dcf_${createHash("sha256").update(`${projectId}\u0000${pairIds.join("\u0000")}`).digest("hex").slice(0, 24)}`,
+            category: left.category,
+            confidence: opposingLanguage && exactScope ? "high" : "medium",
+            scopeRelation: exactScope
+              ? "exact"
+              : leftContainsRight || rightContainsLeft
+                ? "ancestor_descendant"
+                : "partial",
+            overlappingFields: leftScopeEntries
+              .filter(([key, value]) => right.scope[key] === value)
+              .map(([key]) => key),
+            signals,
+            left: {
+              id: left.id,
+              answer: left.answer,
+              rationale: left.rationale,
+              scope: { ...left.scope },
+              ownerId: left.ownerId,
+              createdAt: left.createdAt,
+              version: left.version,
+            },
+            right: {
+              id: right.id,
+              answer: right.answer,
+              rationale: right.rationale,
+              scope: { ...right.scope },
+              ownerId: right.ownerId,
+              createdAt: right.createdAt,
+              version: right.version,
+            },
+            advisory: true,
+            humanResolutionRequired: true,
+          });
+        }
+      }
+      return conflicts
+        .sort((left, right) =>
+          Number(right.confidence === "high") - Number(left.confidence === "high") ||
+          right.signals.length - left.signals.length ||
+          left.id.localeCompare(right.id),
+        )
+        .slice(0, query.maxItems);
+    });
+  }
+
   async changeDecisionLifecycle(
     principal: Principal,
     decisionId: string,
@@ -5056,6 +5612,17 @@ export class BridgeService {
     return this.tenantTransaction(principal, (repository) =>
       this.changeDecisionLifecycleInTransaction(repository, principal, decisionId, input),
     );
+  }
+
+  async analyzeDecisionImpact(
+    principal: Principal,
+    decisionId: string,
+    query: DecisionImpactQuery,
+  ): Promise<DecisionLifecycleImpact> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const decision = await this.requireDecision(principal, decisionId, repository);
+      return this.calculateDecisionImpact(repository, decision, query);
+    });
   }
 
   private async changeDecisionLifecycleInTransaction(
@@ -5120,35 +5687,13 @@ export class BridgeService {
     };
     await repository.saveDecision(changed);
 
-    const [artifacts, assumptions, contextSnapshots] = await Promise.all([
-      repository.listArtifacts(decision.projectId),
-      repository.listAssumptions(decision.projectId),
-      repository.listContextSnapshots(decision.projectId),
-    ]);
     const sourceQuestion = decision.questionId
       ? await repository.getQuestion(decision.questionId)
       : undefined;
-    const affectedArtifacts = artifacts.filter((artifact) =>
-      artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
-    );
-    const affectedAssumptions = assumptions.filter(
-      (assumption) => assumption.confirmedDecisionId === decision.id,
-    );
-    const impact: DecisionLifecycleImpact = {
-      artifactIds: affectedArtifacts.map((artifact) => artifact.id),
-      assumptionIds: affectedAssumptions.map((assumption) => assumption.id),
-      runIds: [...new Set([
-        ...(sourceQuestion?.runId ? [sourceQuestion.runId] : []),
-        ...affectedArtifacts.flatMap((artifact) =>
-          artifact.versions.flatMap((version) => version.runId ? [version.runId] : []),
-        ),
-        ...affectedAssumptions.flatMap((assumption) => assumption.runId ? [assumption.runId] : []),
-        ...contextSnapshots.flatMap((snapshot) =>
-          snapshot.runId && snapshot.itemIds.includes(decision.id) ? [snapshot.runId] : [],
-        ),
-      ])],
-      workItems: decision.scope.workItem ? [decision.scope.workItem] : [],
-    };
+    const impact = await this.calculateDecisionImpact(repository, decision, {
+      maxDepth: 5,
+      maxNodes: 200,
+    });
 
     await this.audit(
       repository,
@@ -5200,6 +5745,7 @@ export class BridgeService {
         body: `The decision “${decision.answer}” was ${input.status}.`,
         targetType: "decision",
         targetId: decision.id,
+        ...(sourceQuestion ? { recipientRoles: sourceQuestion.ownerRoles } : {}),
         ...(sourceQuestion ? {
           questionContext: {
             id: sourceQuestion.id,
@@ -5278,7 +5824,21 @@ export class BridgeService {
       ? await this.requireLinkableRun(principal, input.runId, repository)
       : undefined;
     const artifactId = existingArtifact?.id ?? `art_${this.id()}`;
-    const version: ArtifactVersion = {
+    const reviewerIds = await this.resolveArtifactReviewers(
+      repository,
+      project,
+      input,
+      existingArtifact,
+    );
+    if (input.requiredApprovals > reviewerIds.length) {
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "The required approval count cannot exceed the resolved specification reviewer count.",
+        422,
+        { requiredApprovals: input.requiredApprovals, resolvedReviewerCount: reviewerIds.length },
+      );
+    }
+    const versionState: Omit<ArtifactVersion, "approvalStatus"> = {
       id: `av_${this.id()}`,
       artifactId,
       version: (existingArtifact?.versions.length ?? 0) + 1,
@@ -5291,17 +5851,19 @@ export class BridgeService {
       createdByType: principal.type,
       createdAt: timestamp,
       reviews: [],
+      requiredApprovals: input.requiredApprovals,
       ...(input.runId ? { runId: input.runId } : {}),
+    };
+    const version: ArtifactVersion = {
+      ...versionState,
+      approvalStatus: artifactApprovalStatus(versionState),
     };
     const artifact: Artifact = existingArtifact
       ? {
           ...existingArtifact,
           title: input.title,
           scope: { ...input.scope },
-          reviewerIds:
-            input.intendedReviewerIds.length > 0
-              ? [...input.intendedReviewerIds]
-              : existingArtifact.reviewerIds,
+          reviewerIds,
           currentVersionId: version.id,
           versions: [...existingArtifact.versions, version],
         }
@@ -5312,10 +5874,7 @@ export class BridgeService {
           title: input.title,
           type: input.type,
           scope: { ...input.scope },
-          reviewerIds:
-            input.intendedReviewerIds.length > 0
-              ? [...input.intendedReviewerIds]
-              : [...project.decisionOwnerIds],
+          reviewerIds,
           createdById: principal.id,
           createdByType: principal.type,
           createdAt: timestamp,
@@ -5355,6 +5914,119 @@ export class BridgeService {
       });
     }
     return { artifact, version };
+  }
+
+  private async resolveArtifactReviewers(
+    repository: BridgeRepository,
+    project: Project,
+    input: PublishArtifactInput,
+    existingArtifact?: Artifact,
+  ): Promise<readonly string[]> {
+    const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
+      organizationId: project.organizationId,
+      projectId: project.id,
+      roles: [],
+      teams: [],
+      rules: [],
+      version: 0,
+    };
+    const directory = (await repository.listOrganizationPrincipals(project.organizationId))
+      .filter((candidate) => {
+        if (candidate.type !== "human") return false;
+        try {
+          assertProjectAccess(candidate, project);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    const activeHumans = new Map(directory.map((candidate) => [candidate.id, candidate]));
+    const explicitIds = [...new Set(input.intendedReviewerIds)];
+    const explicitRoles = this.normalizedRoles(input.intendedReviewerRoles ?? []);
+    const explicitTeamKeys = [...new Set(
+      (input.intendedReviewerTeamKeys ?? []).map(normalizeRoleName).filter(Boolean),
+    )];
+    const hasExplicitTargets = explicitIds.length + explicitRoles.length + explicitTeamKeys.length > 0;
+
+    if (activeHumans.size > 0) {
+      for (const reviewerId of explicitIds) {
+        if (!activeHumans.has(reviewerId)) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Specification reviewers must be active human members with access to this project.",
+            422,
+            { reviewerId },
+          );
+        }
+      }
+    }
+
+    const teamMembers = new Map(ownership.teams.map((team) => [team.key, team.memberIds]));
+    for (const teamKey of explicitTeamKeys) {
+      if (!teamMembers.has(teamKey)) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Specification reviewer teams must reference a configured project team.",
+          422,
+          { teamKey },
+        );
+      }
+    }
+
+    const resolveTargets = (
+      principalIds: readonly string[],
+      roles: readonly string[],
+      teamKeys: readonly string[],
+    ): readonly string[] => {
+      const resolved = new Set([
+        ...principalIds,
+        ...teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? []),
+      ]);
+      for (const candidate of directory) {
+        if (roles.some((role) => principalHasRole(candidate, role, project.id))) {
+          resolved.add(candidate.id);
+        }
+      }
+      if (activeHumans.size === 0) return [...resolved];
+      return [...resolved].filter((reviewerId) => activeHumans.has(reviewerId));
+    };
+
+    if (hasExplicitTargets) {
+      const resolved = resolveTargets(explicitIds, explicitRoles, explicitTeamKeys);
+      if (resolved.length === 0) {
+        throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
+      }
+      return [...resolved].sort((left, right) => left.localeCompare(right));
+    }
+
+    if (existingArtifact) {
+      const current = activeHumans.size === 0
+        ? existingArtifact.reviewerIds
+        : existingArtifact.reviewerIds.filter((reviewerId) => activeHumans.has(reviewerId));
+      if (current.length > 0) return [...new Set(current)].sort((left, right) => left.localeCompare(right));
+    }
+
+    const matchingRules = ownership.rules
+      .filter((rule) => !rule.category && this.ownershipRuleMatches(rule, "", input.scope))
+      .sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
+    const reviewerRule = matchingRules.find((rule) =>
+      this.ownershipRouteSource(rule) === "scoped_ownership" && this.ownershipTargetCount(rule.reviewers) > 0) ??
+      matchingRules.find((rule) =>
+        this.ownershipRouteSource(rule) === "project_default" && this.ownershipTargetCount(rule.reviewers) > 0);
+    if (reviewerRule) {
+      const resolved = resolveTargets(
+        reviewerRule.reviewers.principalIds,
+        reviewerRule.reviewers.roles,
+        reviewerRule.reviewers.teamKeys,
+      );
+      if (resolved.length > 0) return [...resolved].sort((left, right) => left.localeCompare(right));
+    }
+
+    const fallback = resolveTargets(project.decisionOwnerIds, [], []);
+    if (fallback.length === 0) {
+      throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
+    }
+    return [...fallback].sort((left, right) => left.localeCompare(right));
   }
 
   async listArtifacts(principal: Principal, projectId: string): Promise<readonly Artifact[]> {
@@ -5452,9 +6124,11 @@ export class BridgeService {
       body: input.body,
       createdAt: timestamp,
     };
+    const reviews = [...target.reviews, review];
     const reviewedVersion: ArtifactVersion = {
       ...target,
-      reviews: [...target.reviews, review],
+      reviews,
+      approvalStatus: artifactApprovalStatus({ ...target, reviews }),
     };
     const updatedArtifact: Artifact = {
       ...artifact,
@@ -5530,11 +6204,57 @@ export class BridgeService {
         409,
       );
     }
+    if (target.reviews.some((review) => review.status === "approved" && review.reviewerId === principal.id)) {
+      throw new BridgeError("CONFLICT", "This human reviewer already approved this specification version.", 409);
+    }
 
     const timestamp = this.now().toISOString();
-    const approvedVersion: ArtifactVersion = {
-      ...target,
+    const approval: ArtifactReview = {
+      id: `arv_${this.id()}`,
+      artifactVersionId: versionId,
+      reviewerId: principal.id,
+      reviewerType: principal.type,
       status: "approved",
+      body: input.rationale,
+      createdAt: timestamp,
+    };
+    const reviews = [...target.reviews, approval];
+    const pendingState = {
+      ...target,
+      status: "in_review" as const,
+      reviews,
+    };
+    const approvalStatus = artifactApprovalStatus(pendingState);
+    if (!approvalStatus.satisfied) {
+      const pendingVersion: ArtifactVersion = { ...pendingState, approvalStatus };
+      const pendingArtifact: Artifact = {
+        ...artifact,
+        versions: artifact.versions.map((version) => version.id === versionId ? pendingVersion : version),
+      };
+      await repository.saveArtifact(pendingArtifact);
+      await this.audit(
+        repository,
+        principal,
+        artifact.projectId,
+        "artifact.version_approval_recorded",
+        "artifact_version",
+        versionId,
+        timestamp,
+      );
+      await this.notify(repository, principal, artifact.projectId, [artifact.createdById, ...artifact.reviewerIds], {
+        type: "artifact_review_feedback",
+        title: "Specification approval recorded",
+        body: `${principal.displayName} approved “${artifact.title}”; ${approvalStatus.remainingCount} more approval${approvalStatus.remainingCount === 1 ? " is" : "s are"} required.`,
+        targetType: "artifact_version",
+        targetId: versionId,
+      });
+      return { artifact: pendingArtifact, version: pendingVersion };
+    }
+
+    const approvedVersion: ArtifactVersion = {
+      ...pendingState,
+      status: "approved",
+      approvalStatus,
       approvedById: principal.id,
       approvalRationale: input.rationale,
       approvedAt: timestamp,
@@ -5846,6 +6566,326 @@ export class BridgeService {
   private scopesEqual(left: Scope, right: Scope): boolean {
     return (["repository", "component", "branch", "environment", "workItem"] as const)
       .every((key) => left[key] === right[key]);
+  }
+
+  private async calculateDecisionImpact(
+    repository: BridgeRepository,
+    decision: Decision,
+    query: DecisionImpactQuery,
+  ): Promise<DecisionLifecycleImpact> {
+    const [artifacts, assumptions, contextSnapshots, runs, questions] = await Promise.all([
+      repository.listArtifacts(decision.projectId),
+      repository.listAssumptions(decision.projectId),
+      repository.listContextSnapshots(decision.projectId),
+      repository.listRuns(decision.projectId),
+      repository.listQuestions(decision.projectId),
+    ]);
+    const nodes = new Map<string, DecisionImpactNode>();
+    const queue: DecisionImpactNode[] = [];
+    const edges: DecisionImpactEdge[] = [];
+    const edgeKeys = new Set<string>();
+    const links = new Map<string, DecisionImpactLink>();
+    let truncated = false;
+
+    const root: DecisionImpactNode = {
+      id: decision.id,
+      type: "decision",
+      label: decision.answer,
+      depth: 0,
+      path: [decision.id],
+      scope: { ...decision.scope },
+      status: decision.status,
+    };
+    nodes.set(root.id, root);
+    queue.push(root);
+
+    const connect = (
+      from: DecisionImpactNode,
+      target: Omit<DecisionImpactNode, "depth" | "path">,
+      relation: DecisionImpactEdge["relation"],
+    ): void => {
+      const depth = from.depth + 1;
+      const existing = nodes.get(target.id);
+      if (!existing) {
+        if (depth > query.maxDepth || nodes.size >= query.maxNodes) {
+          truncated = true;
+          return;
+        }
+        const node: DecisionImpactNode = {
+          ...target,
+          depth,
+          path: [...from.path, target.id],
+        };
+        nodes.set(node.id, node);
+        queue.push(node);
+      }
+      const edgeKey = `${from.id}\u0000${target.id}\u0000${relation}`;
+      if (!edgeKeys.has(edgeKey) && nodes.has(target.id)) {
+        edgeKeys.add(edgeKey);
+        edges.push({ fromId: from.id, toId: target.id, relation });
+      }
+    };
+    const recordLink = (
+      source: DecisionImpactNode,
+      type: DecisionImpactLink["type"],
+      url: string,
+    ): void => {
+      const depth = source.depth + 1;
+      if (depth > query.maxDepth) {
+        truncated = true;
+        return;
+      }
+      const key = `${source.id}\u0000${type}\u0000${url}`;
+      if (!links.has(key)) links.set(key, { sourceId: source.id, type, url, depth });
+    };
+    const addSnapshotConsumers = (source: DecisionImpactNode, itemId: string): void => {
+      for (const snapshot of contextSnapshots.filter((candidate) => candidate.itemIds.includes(itemId))) {
+        connect(source, {
+          id: snapshot.id,
+          type: "context_snapshot",
+          label: "Context snapshot",
+        }, "consumed_in_context");
+      }
+    };
+    const hasDownstream = (node: DecisionImpactNode): boolean => {
+      if (node.type === "decision") {
+        return Boolean(decision.questionId) ||
+          artifacts.some((artifact) => artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id))) ||
+          assumptions.some((assumption) => assumption.confirmedDecisionId === decision.id) ||
+          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(decision.id));
+      }
+      if (node.type === "question") {
+        const question = questions.find((candidate) => candidate.id === node.id);
+        return Boolean(question?.runId || question?.relatedLinks?.length);
+      }
+      if (node.type === "artifact") {
+        return artifacts.some((artifact) => artifact.id === node.id &&
+          artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)));
+      }
+      if (node.type === "artifact_version") {
+        return artifacts.some((artifact) => artifact.versions.some((version) =>
+          version.id === node.id && Boolean(version.runId))) ||
+          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id));
+      }
+      if (node.type === "assumption") {
+        const assumption = assumptions.find((candidate) => candidate.id === node.id);
+        return Boolean(assumption?.runId) || contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id));
+      }
+      if (node.type === "context_snapshot") {
+        return contextSnapshots.some((snapshot) => snapshot.id === node.id && Boolean(snapshot.runId));
+      }
+      const run = runs.find((candidate) => candidate.id === node.id);
+      return Boolean(run && (
+        runs.some((candidate) => candidate.continuesRunId === run.id) ||
+        questions.some((question) => question.runId === run.id) ||
+        assumptions.some((assumption) => assumption.runId === run.id) ||
+        artifacts.some((artifact) => artifact.versions.some((version) => version.runId === run.id)) ||
+        run.externalLinks.length > 0 ||
+        run.resultLinks.length > 0
+      ));
+    };
+
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      if (node.depth >= query.maxDepth) {
+        if (hasDownstream(node)) truncated = true;
+        continue;
+      }
+      if (node.type === "decision") {
+        const sourceQuestion = decision.questionId
+          ? questions.find((question) => question.id === decision.questionId)
+          : undefined;
+        if (sourceQuestion) {
+          connect(node, {
+            id: sourceQuestion.id,
+            type: "question",
+            label: sourceQuestion.title,
+            scope: { ...sourceQuestion.scope },
+            status: sourceQuestion.status,
+          }, "source_question");
+        }
+        for (const artifact of artifacts.filter((candidate) =>
+          candidate.versions.some((version) => version.citedDecisionIds.includes(decision.id)))) {
+          const currentStatus = artifact.versions.find((version) => version.id === artifact.currentVersionId)?.status;
+          connect(node, {
+            id: artifact.id,
+            type: "artifact",
+            label: artifact.title,
+            scope: { ...artifact.scope },
+            ...(currentStatus ? { status: currentStatus } : {}),
+          }, "cited_by_artifact");
+        }
+        for (const assumption of assumptions.filter((candidate) => candidate.confirmedDecisionId === decision.id)) {
+          connect(node, {
+            id: assumption.id,
+            type: "assumption",
+            label: assumption.statement,
+            scope: { ...assumption.scope },
+            status: assumption.status,
+          }, "confirmed_assumption");
+        }
+        addSnapshotConsumers(node, decision.id);
+      } else if (node.type === "question") {
+        const question = questions.find((candidate) => candidate.id === node.id);
+        if (!question) continue;
+        const sourceRun = question.runId ? runs.find((run) => run.id === question.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        for (const link of question.relatedLinks ?? []) recordLink(node, link.type, link.url);
+      } else if (node.type === "artifact") {
+        const artifact = artifacts.find((candidate) => candidate.id === node.id);
+        if (!artifact) continue;
+        for (const version of artifact.versions.filter((candidate) => candidate.citedDecisionIds.includes(decision.id))) {
+          connect(node, {
+            id: version.id,
+            type: "artifact_version",
+            label: version.summary,
+            scope: { ...artifact.scope },
+            status: version.status,
+          }, "contains_citing_version");
+        }
+      } else if (node.type === "artifact_version") {
+        const artifact = artifacts.find((candidate) => candidate.versions.some((version) => version.id === node.id));
+        const version = artifact?.versions.find((candidate) => candidate.id === node.id);
+        const sourceRun = version?.runId ? runs.find((run) => run.id === version.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        addSnapshotConsumers(node, node.id);
+      } else if (node.type === "assumption") {
+        const assumption = assumptions.find((candidate) => candidate.id === node.id);
+        const sourceRun = assumption?.runId ? runs.find((run) => run.id === assumption.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        addSnapshotConsumers(node, node.id);
+      } else if (node.type === "context_snapshot") {
+        const snapshot = contextSnapshots.find((candidate) => candidate.id === node.id);
+        const consumerRun = snapshot?.runId ? runs.find((run) => run.id === snapshot.runId) : undefined;
+        if (consumerRun) {
+          connect(node, {
+            id: consumerRun.id,
+            type: "run",
+            label: consumerRun.taskSummary,
+            scope: { ...consumerRun.scope },
+            status: consumerRun.status,
+          }, "context_used_by_run");
+        }
+      } else if (node.type === "run") {
+        const run = runs.find((candidate) => candidate.id === node.id);
+        if (!run) continue;
+        for (const continuation of runs.filter((candidate) => candidate.continuesRunId === run.id)) {
+          connect(node, {
+            id: continuation.id,
+            type: "run",
+            label: continuation.taskSummary,
+            scope: { ...continuation.scope },
+            status: continuation.status,
+          }, "continued_by_run");
+        }
+        for (const question of questions.filter((candidate) => candidate.runId === run.id)) {
+          connect(node, {
+            id: question.id,
+            type: "question",
+            label: question.title,
+            scope: { ...question.scope },
+            status: question.status,
+          }, "produced_question");
+        }
+        for (const assumption of assumptions.filter((candidate) => candidate.runId === run.id)) {
+          connect(node, {
+            id: assumption.id,
+            type: "assumption",
+            label: assumption.statement,
+            scope: { ...assumption.scope },
+            status: assumption.status,
+          }, "produced_assumption");
+        }
+        for (const artifact of artifacts) {
+          for (const version of artifact.versions.filter((candidate) => candidate.runId === run.id)) {
+            connect(node, {
+              id: version.id,
+              type: "artifact_version",
+              label: version.summary,
+              scope: { ...artifact.scope },
+              status: version.status,
+            }, "produced_artifact_version");
+          }
+        }
+        for (const url of run.externalLinks) recordLink(node, "run_external", url);
+        for (const url of run.resultLinks) recordLink(node, "run_result", url);
+      }
+    }
+
+    const impactNodes = [...nodes.values()];
+    const valuesFor = (type: DecisionImpactNodeType): readonly string[] =>
+      impactNodes.filter((node) => node.type === type).map((node) => node.id);
+    const scopedValues = (key: keyof Scope): readonly string[] => [...new Set(
+      impactNodes.flatMap((node) => node.scope?.[key] ? [node.scope[key]!] : []),
+    )];
+    return {
+      artifactIds: valuesFor("artifact"),
+      artifactVersionIds: valuesFor("artifact_version"),
+      assumptionIds: valuesFor("assumption"),
+      questionIds: valuesFor("question"),
+      contextSnapshotIds: valuesFor("context_snapshot"),
+      runIds: valuesFor("run"),
+      workItems: scopedValues("workItem"),
+      branches: scopedValues("branch"),
+      repositories: scopedValues("repository"),
+      links: [...links.values()],
+      nodes: impactNodes,
+      edges,
+      maxDepthReached: Math.max(...impactNodes.map((node) => node.depth)),
+      truncated,
+    };
+  }
+
+  private scopesOverlap(left: Scope, right: Scope): boolean {
+    return (["repository", "component", "branch", "environment", "workItem"] as const)
+      .every((key) => !left[key] || !right[key] || left[key] === right[key]);
+  }
+
+  private answersUseOpposingLanguage(left: string, right: string): boolean {
+    const normalize = (value: string) => ` ${this.normalizeQuestionText(value)} `;
+    const leftText = normalize(left);
+    const rightText = normalize(right);
+    const opposingPairs = [
+      ["enable", "disable"],
+      ["enabled", "disabled"],
+      ["allow", "deny"],
+      ["allowed", "denied"],
+      ["required", "optional"],
+      ["always", "never"],
+      ["retain", "delete"],
+      ["include", "exclude"],
+      ["synchronous", "asynchronous"],
+      ["sync", "async"],
+    ] as const;
+    const has = (text: string, phrase: string) => text.includes(` ${phrase} `);
+    return opposingPairs.some(([affirmative, negative]) =>
+      (has(leftText, affirmative) && has(rightText, negative)) ||
+      (has(leftText, negative) && has(rightText, affirmative)),
+    );
   }
 
   private normalizePremise(value: string): string {
@@ -6690,7 +7730,13 @@ export class BridgeService {
     recipientIds: readonly string[],
     draft: NotificationDraft,
   ): Promise<void> {
-    const recipients = [...new Set(recipientIds)].filter((recipientId) => recipientId && recipientId !== principal.id);
+    const recipients = await this.resolveNotificationRecipients(
+      repository,
+      principal,
+      projectId,
+      recipientIds,
+      draft.recipientRoles ?? [],
+    );
     for (const recipientId of recipients) {
       const createdAt = this.now().toISOString();
       const notificationId = `ntf_${this.id()}`;
@@ -6726,5 +7772,35 @@ export class BridgeService {
         createdAt,
       });
     }
+  }
+
+  private async resolveNotificationRecipients(
+    repository: BridgeRepository,
+    principal: Principal,
+    projectId: string,
+    recipientIds: readonly string[],
+    recipientRoles: readonly string[],
+  ): Promise<readonly string[]> {
+    const recipients = new Set(
+      recipientIds.filter((recipientId) => recipientId && recipientId !== principal.id),
+    );
+    const roles = [...new Set(recipientRoles.map(normalizeRoleName).filter(Boolean))];
+    if (roles.length === 0) return [...recipients];
+
+    const project = await repository.getProject(projectId);
+    if (!project) return [...recipients];
+    const directory = await repository.listOrganizationPrincipals(principal.organizationId);
+    for (const candidate of directory) {
+      if (candidate.type !== "human") continue;
+      try {
+        assertProjectAccess(candidate, project);
+      } catch {
+        continue;
+      }
+      if (roles.some((role) => principalHasRole(candidate, role, projectId))) {
+        recipients.add(candidate.id);
+      }
+    }
+    return [...recipients];
   }
 }

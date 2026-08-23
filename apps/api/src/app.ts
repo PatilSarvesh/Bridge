@@ -15,14 +15,19 @@ import {
   createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
+  decisionConflictQuerySchema,
+  decisionImpactQuerySchema,
   editQuestionCommentInputSchema,
   editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
   questionClarificationInputSchema,
+  questionAudienceViewQuerySchema,
   questionCommentInputSchema,
+  questionDecisionDigestQuerySchema,
   notificationListQuerySchema,
+  notificationPreferenceInputSchema,
   notificationReadAllInputSchema,
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
@@ -103,10 +108,141 @@ async function resolvePrincipal(
   return principal;
 }
 
+type ScopedHttpMethod = "GET" | "HEAD" | "POST" | "PATCH";
+type EndpointScopeRule = {
+  readonly match: RegExp;
+  readonly scopes: Partial<Record<ScopedHttpMethod, BridgeScope>>;
+};
+
+function readWriteScopes(read: BridgeScope, write: BridgeScope): EndpointScopeRule["scopes"] {
+  return { GET: read, HEAD: read, POST: write, PATCH: write };
+}
+
+function allMutationMethods(scope: BridgeScope): EndpointScopeRule["scopes"] {
+  return { GET: scope, HEAD: scope, POST: scope, PATCH: scope };
+}
+
+const endpointScopeRules: readonly EndpointScopeRule[] = [
+  {
+    match: /^\/v1\/notifications(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.notificationsRead, bridgeScopes.notificationsWrite),
+  },
+  {
+    match: /^\/v1\/admin\/organization\//,
+    scopes: allMutationMethods(bridgeScopes.organizationAdmin),
+  },
+  {
+    match: /^\/v1\/admin\/projects\/[^/]+\//,
+    scopes: allMutationMethods(bridgeScopes.projectAdmin),
+  },
+  {
+    match: /^\/v1\/admin\/outbox\//,
+    scopes: { POST: bridgeScopes.projectAdmin },
+  },
+  {
+    match: /^\/v1\/principals$/,
+    scopes: { GET: bridgeScopes.organizationRead, HEAD: bridgeScopes.organizationRead },
+  },
+  {
+    match: /^\/v1\/projects(?:$|\/[^/]+$)/,
+    scopes: { GET: bridgeScopes.projectsRead, HEAD: bridgeScopes.projectsRead, POST: bridgeScopes.projectsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/repositories$/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/adapter-diagnostics$/,
+    scopes: { POST: bridgeScopes.diagnosticsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/context$/,
+    scopes: { GET: bridgeScopes.contextRead, HEAD: bridgeScopes.contextRead },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/runs$/,
+    scopes: readWriteScopes(bridgeScopes.runsRead, bridgeScopes.runsWrite),
+  },
+  {
+    match: /^\/v1\/runs\/[^/]+\/continuation$/,
+    scopes: { POST: bridgeScopes.runsRead },
+  },
+  {
+    match: /^\/v1\/runs\/[^/]+$/,
+    scopes: { GET: bridgeScopes.runsRead, HEAD: bridgeScopes.runsRead, PATCH: bridgeScopes.runsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/(?:decisions|decision-conflicts)$/,
+    scopes: { GET: bridgeScopes.decisionsRead, HEAD: bridgeScopes.decisionsRead },
+  },
+  {
+    match: /^\/v1\/decisions\/[^/]+\/(?:lifecycle|supersede|expire|revoke)$/,
+    scopes: { POST: bridgeScopes.decisionsWrite },
+  },
+  {
+    match: /^\/v1\/decisions\/[^/]+\/impact$/,
+    scopes: { GET: bridgeScopes.decisionsRead, HEAD: bridgeScopes.decisionsRead },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/questions\/matches$/,
+    scopes: { POST: bridgeScopes.questionsRead },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/(?:questions|inbox|question-digests)(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.questionsRead, bridgeScopes.questionsWrite),
+  },
+  {
+    match: /^\/v1\/questions\/[^/]+(?:\/|$)/,
+    scopes: readWriteScopes(bridgeScopes.questionsRead, bridgeScopes.questionsWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/assumptions$/,
+    scopes: readWriteScopes(bridgeScopes.assumptionsRead, bridgeScopes.assumptionsWrite),
+  },
+  {
+    match: /^\/v1\/assumptions\/[^/]+$/,
+    scopes: { GET: bridgeScopes.assumptionsRead, HEAD: bridgeScopes.assumptionsRead },
+  },
+  {
+    match: /^\/v1\/assumptions\/[^/]+\/resolve$/,
+    scopes: { POST: bridgeScopes.assumptionsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/artifacts$/,
+    scopes: readWriteScopes(bridgeScopes.artifactsRead, bridgeScopes.artifactsWrite),
+  },
+  {
+    match: /^\/v1\/artifacts\/[^/]+(?:\/diff)?$/,
+    scopes: { GET: bridgeScopes.artifactsRead, HEAD: bridgeScopes.artifactsRead },
+  },
+  {
+    match: /^\/v1\/artifact-versions\/[^/]+\/(?:reviews|approve)$/,
+    scopes: { POST: bridgeScopes.artifactsWrite },
+  },
+];
+
+async function resolveOptionalWebPrincipal(
+  request: FastifyRequest,
+  options: BuildAppOptions,
+): Promise<Principal | undefined> {
+  if (!options.authenticator) return undefined;
+  const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
+  if (!cookie) return undefined;
+  try {
+    return await options.authenticator.authenticateRequest({ cookie });
+  } catch (error) {
+    if (error instanceof BridgeError && error.code === "UNAUTHENTICATED") return undefined;
+    throw error;
+  }
+}
+
 function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
   const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
   if (!route.startsWith("/v1/") || route.startsWith("/v1/auth/")) return undefined;
-  return request.method === "GET" || request.method === "HEAD"
+  const method = request.method as ScopedHttpMethod;
+  const rule = endpointScopeRules.find((candidate) => candidate.match.test(route));
+  if (rule?.scopes[method]) return rule.scopes[method];
+  return method === "GET" || method === "HEAD"
     ? bridgeScopes.read
     : bridgeScopes.write;
 }
@@ -222,12 +358,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         ...(request.query.state ? { state: request.query.state } : {}),
         ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
       });
+      await options.service.recordAuthenticationEvent(callback.principal, "authentication.succeeded");
       return reply
         .header("set-cookie", [callback.sessionCookie, callback.clearTransactionCookie])
         .redirect(callback.redirectUrl);
     });
     app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/logout", async (request, reply) => {
+      const principal = await resolveOptionalWebPrincipal(request, options);
       const logout = options.authenticator!.endWebSession(request.query.returnTo);
+      if (principal) await options.service.recordAuthenticationEvent(principal, "authentication.logged_out");
       return reply
         .header("set-cookie", logout.clearSessionCookie)
         .redirect(logout.redirectUrl);
@@ -259,6 +398,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
       const items = await options.service.listNotifications(principal, query);
       return { items, unreadCount: items.filter((notification) => !notification.readAt).length };
+    },
+  );
+
+  app.get("/v1/notifications/preferences", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const items = await options.service.listNotificationPreferences(principal);
+    return { items };
+  });
+
+  app.post<{ Body: unknown }>(
+    "/v1/notifications/preferences",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = notificationPreferenceInputSchema.parse(request.body ?? {});
+      return options.service.setNotificationPreference(principal, input);
     },
   );
 
@@ -591,6 +745,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.get<{ Params: { decisionId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/decisions/:decisionId/impact",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = decisionImpactQuerySchema.parse({
+        maxDepth: request.query.maxDepth,
+        maxNodes: request.query.maxNodes,
+      });
+      return options.service.analyzeDecisionImpact(principal, request.params.decisionId, query);
+    },
+  );
+
   for (const status of ["superseded", "expired", "revoked"] as const) {
     const action = status === "superseded" ? "supersede" : status === "expired" ? "expire" : "revoke";
     app.post<{ Params: { decisionId: string }; Body: unknown }>(
@@ -696,9 +862,40 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/projects/:projectId/question-digests",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = questionDecisionDigestQuerySchema.parse({
+        category: request.query.category,
+        maxDigests: request.query.maxDigests,
+        maxQuestionsPerDigest: request.query.maxQuestionsPerDigest,
+      });
+      return {
+        items: await options.service.listQuestionDecisionDigests(
+          principal,
+          request.params.projectId,
+          query,
+        ),
+      };
+    },
+  );
+
   app.get<{ Params: { questionId: string } }>("/v1/questions/:questionId", async (request) => {
     const principal = await resolvePrincipal(request, options);
     return options.service.getQuestion(principal, request.params.questionId);
+  });
+
+  app.get<{
+    Params: { questionId: string };
+    Querystring: Record<string, string | undefined>;
+  }>("/v1/questions/:questionId/audience-view", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const query = questionAudienceViewQuerySchema.parse({
+      role: request.query.role,
+      mode: request.query.mode,
+    });
+    return options.service.getQuestionAudienceView(principal, request.params.questionId, query);
   });
 
   app.post<{ Params: { questionId: string }; Body: unknown }>(
@@ -833,6 +1030,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         },
       });
       return { items: await options.service.listDecisions(principal, request.params.projectId, query) };
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/projects/:projectId/decision-conflicts",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = decisionConflictQuerySchema.parse({
+        category: request.query.category,
+        scope: {
+          ...(request.query.repository ? { repository: request.query.repository } : {}),
+          ...(request.query.component ? { component: request.query.component } : {}),
+          ...(request.query.branch ? { branch: request.query.branch } : {}),
+          ...(request.query.environment ? { environment: request.query.environment } : {}),
+          ...(request.query.workItem ? { workItem: request.query.workItem } : {}),
+        },
+        maxItems: request.query.maxItems,
+      });
+      return {
+        items: await options.service.listDecisionConflicts(principal, request.params.projectId, query),
+      };
     },
   );
 

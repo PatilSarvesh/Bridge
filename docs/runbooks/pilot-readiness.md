@@ -49,7 +49,7 @@ The pilot may proceed only when all six BRG-112 criteria are marked `complete` i
 - RLS, PostgreSQL role separation, and cross-tenant behavior still need live deployment evidence;
 - PITR retention and an isolated restore exercise are deployment responsibilities;
 - SES/Slack installation, provider secrets, worker scheduling, and failure-window behavior are deployment responsibilities;
-- service objectives require a real metrics backend, worker export, alert routes, and pilot calibration.
+- service objectives require a real metrics backend scraping every worker instance, alert routes, and pilot calibration.
 
 ## Rollback and incident response
 

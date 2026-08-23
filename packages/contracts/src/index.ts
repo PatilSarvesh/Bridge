@@ -31,6 +31,7 @@ export const questionReviewStatusSchema = z.enum(["approved", "rejected"]);
 export const questionDueFilterSchema = z.enum(["overdue", "next_7_days", "scheduled", "none"]);
 export const notificationTypeSchema = z.enum([
   "question_assigned",
+  "question_blocking_escalation",
   "question_response",
   "question_comment",
   "question_review",
@@ -59,7 +60,7 @@ export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
-export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested"]);
+export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested", "approved"]);
 export const agentRunClientSchema = z.enum([
   "codex",
   "claude_code",
@@ -301,7 +302,59 @@ export const replaceProjectPolicyInputSchema = z.object({
 
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
 export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
-export const serviceCapabilityScopeSchema = z.enum(["bridge:read", "bridge:write", "bridge:admin"]);
+export const bridgeCapabilityScopeSchema = z.enum([
+  "bridge:read",
+  "bridge:write",
+  "bridge:admin",
+  "bridge:projects:read",
+  "bridge:projects:write",
+  "bridge:repositories:read",
+  "bridge:repositories:write",
+  "bridge:context:read",
+  "bridge:runs:read",
+  "bridge:runs:write",
+  "bridge:questions:read",
+  "bridge:questions:write",
+  "bridge:assumptions:read",
+  "bridge:assumptions:write",
+  "bridge:decisions:read",
+  "bridge:decisions:write",
+  "bridge:artifacts:read",
+  "bridge:artifacts:write",
+  "bridge:notifications:read",
+  "bridge:notifications:write",
+  "bridge:diagnostics:write",
+  "bridge:organization:read",
+  "bridge:organization:admin",
+  "bridge:project:admin",
+]);
+export const bridgeCapabilityScopes = {
+  read: "bridge:read",
+  write: "bridge:write",
+  admin: "bridge:admin",
+  projectsRead: "bridge:projects:read",
+  projectsWrite: "bridge:projects:write",
+  repositoriesRead: "bridge:repositories:read",
+  repositoriesWrite: "bridge:repositories:write",
+  contextRead: "bridge:context:read",
+  runsRead: "bridge:runs:read",
+  runsWrite: "bridge:runs:write",
+  questionsRead: "bridge:questions:read",
+  questionsWrite: "bridge:questions:write",
+  assumptionsRead: "bridge:assumptions:read",
+  assumptionsWrite: "bridge:assumptions:write",
+  decisionsRead: "bridge:decisions:read",
+  decisionsWrite: "bridge:decisions:write",
+  artifactsRead: "bridge:artifacts:read",
+  artifactsWrite: "bridge:artifacts:write",
+  notificationsRead: "bridge:notifications:read",
+  notificationsWrite: "bridge:notifications:write",
+  diagnosticsWrite: "bridge:diagnostics:write",
+  organizationRead: "bridge:organization:read",
+  organizationAdmin: "bridge:organization:admin",
+  projectAdmin: "bridge:project:admin",
+} as const satisfies Record<string, z.infer<typeof bridgeCapabilityScopeSchema>>;
+export const serviceCapabilityScopeSchema = bridgeCapabilityScopeSchema;
 
 export const projectMembershipConfigurationSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -342,7 +395,7 @@ const serviceIdentityConfigurationSchema = z.object({
   roles: z.array(ownerRoleSchema).max(30).default([]),
   allProjects: z.boolean().default(false),
   projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
-  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(3),
+  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(30),
   expiresAt: z.string().datetime({ offset: true }).optional(),
 }).superRefine((value, context) => {
   const projectIds = new Set<string>();
@@ -454,6 +507,17 @@ export const questionInboxQuerySchema = z.object({
   category: z.string().trim().min(2).max(100).optional(),
   role: ownerRoleSchema.optional(),
   due: questionDueFilterSchema.optional(),
+});
+
+export const questionAudienceViewQuerySchema = z.object({
+  role: ownerRoleSchema,
+  mode: z.enum(["explain", "rewrite"]).default("explain"),
+});
+
+export const questionDecisionDigestQuerySchema = z.object({
+  category: z.string().trim().min(2).max(100).optional(),
+  maxDigests: z.coerce.number().int().min(1).max(20).default(10),
+  maxQuestionsPerDigest: z.coerce.number().int().min(2).max(20).default(10),
 });
 
 export const questionSubmissionDispositionSchema = z.enum([
@@ -572,6 +636,11 @@ export const notificationReadAllInputSchema = z.object({
   projectId: z.string().trim().min(1).max(100).optional(),
 });
 
+export const notificationPreferenceInputSchema = z.object({
+  channel: z.literal("email"),
+  preference: notificationDeliveryPreferenceSchema,
+});
+
 export const outboxOperationsQuerySchema = z.object({
   status: outboxEventStatusSchema.optional(),
   type: outboxEventTypeSchema.optional(),
@@ -662,6 +731,17 @@ export const decisionListQuerySchema = z
     }
   });
 
+export const decisionConflictQuerySchema = z.object({
+  category: z.string().trim().min(2).max(100).optional(),
+  scope: scopeSchema.default({}),
+  maxItems: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export const decisionImpactQuerySchema = z.object({
+  maxDepth: z.coerce.number().int().min(1).max(8).default(5),
+  maxNodes: z.coerce.number().int().min(10).max(500).default(200),
+});
+
 export const publishArtifactInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   artifactId: z.string().trim().min(1).max(100).optional(),
@@ -671,6 +751,9 @@ export const publishArtifactInputSchema = z.object({
   summary: z.string().trim().min(10).max(4_000),
   body: z.string().trim().min(20).max(262_144),
   intendedReviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  intendedReviewerRoles: z.array(ownerRoleSchema).max(20).optional(),
+  intendedReviewerTeamKeys: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
+  requiredApprovals: z.number().int().min(1).max(20).default(1),
   citedDecisionIds: z.array(z.string().trim().min(1).max(100)).max(100).default([]),
   requestReview: z.boolean().default(true),
   scope: scopeSchema.default({}),
@@ -682,7 +765,7 @@ export const approveArtifactVersionInputSchema = z.object({
 
 export const artifactReviewInputSchema = z
   .object({
-    status: artifactReviewStatusSchema,
+    status: z.enum(["commented", "changes_requested"]),
     body: z.string().trim().min(2).max(5_000),
   })
   .superRefine((value, context) => {
@@ -822,6 +905,7 @@ export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 export type ServiceIdentityType = z.infer<typeof serviceIdentityTypeSchema>;
+export type BridgeCapabilityScope = z.infer<typeof bridgeCapabilityScopeSchema>;
 export type ServiceCapabilityScope = z.infer<typeof serviceCapabilityScopeSchema>;
 export type ProjectMembershipConfiguration = z.infer<typeof projectMembershipConfigurationSchema>;
 export type ProjectRoleDefinitionInput = z.infer<typeof projectRoleDefinitionSchema>;
@@ -843,6 +927,8 @@ export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;
 export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
+export type QuestionAudienceViewQuery = z.infer<typeof questionAudienceViewQuerySchema>;
+export type QuestionDecisionDigestQuery = z.infer<typeof questionDecisionDigestQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;
@@ -856,6 +942,7 @@ export type EditQuestionCommentInput = z.infer<typeof editQuestionCommentInputSc
 export type QuestionClarificationInput = z.infer<typeof questionClarificationInputSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type NotificationReadAllInput = z.infer<typeof notificationReadAllInputSchema>;
+export type NotificationPreferenceInput = z.infer<typeof notificationPreferenceInputSchema>;
 export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
 export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
 export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
@@ -863,6 +950,8 @@ export type AuditExportInput = z.infer<typeof auditExportInputSchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
+export type DecisionConflictQuery = z.infer<typeof decisionConflictQuerySchema>;
+export type DecisionImpactQuery = z.infer<typeof decisionImpactQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
 export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;

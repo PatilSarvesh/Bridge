@@ -23,7 +23,7 @@ agent retrieves context
 
 The backlog intentionally defers broad integrations, semantic retrieval, complex workflows, and universal automatic session continuation until the central loop is validated.
 
-**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals are development-only, and unfinished endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and live validation prevent a production-security claim.
+**Identity scope update (2026-08-10):** The founder explicitly reopened authentication and organization work. Web/API OIDC, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse and mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals are development-only, and unfinished external token issuance, MCP-side authorization-server/token issuance, and live validation prevent a production-security claim.
 
 ## 2. Planning conventions
 
@@ -62,7 +62,7 @@ Sizes are relative and must be re-estimated by the implementation team after tec
 - Hosted MVP in AWS `ap-south-1` using the modular-monolith architecture.
 - TypeScript pnpm/Turborepo monorepo with Next.js, Fastify, PostgreSQL, and Drizzle; the worker can adopt pg-boss or a scheduler when deployment is selected.
 - Codex is the first remote MCP client and Claude Code is the second conformance client.
-- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, REST-administered/CLI-managed revocable service identities, coarse REST/MCP bearer capabilities, and MCP protected-resource metadata are implemented, while endpoint-specific tool scopes, MCP-side authorization-server/token issuance, and enterprise provisioning remain.
+- Fixed principals remain available only in development; OIDC web/API, interactive CLI PKCE, durable organization-member administration, REST-administered/CLI-managed revocable service identities, coarse plus mapped least-privilege REST/MCP bearer capabilities, and MCP protected-resource metadata are implemented, while external token issuance, MCP-side authorization-server/token issuance, and enterprise provisioning remain.
 - In-app, Amazon SES email, and Slack notifications are P0.
 - GitHub is the first source-control and work-item integration.
 - Human approval occurs in the Bridge web application.
@@ -207,7 +207,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — Auth0-compatible Authorization Code + PKCE web sign-in/sign-out, encrypted bounded sessions, issuer/audience/signature/expiry/state/nonce validation, active organization membership resolution, disabled-member denial, and safe correlation-aware request logging are implemented; live-tenant validation and durable authentication audit events remain
+- **Status:** Partial — Auth0-compatible Authorization Code + PKCE web sign-in/sign-out, encrypted bounded sessions, issuer/audience/signature/expiry/state/nonce validation, active organization membership resolution, disabled-member denial, safe correlation-aware request logging, and durable human web sign-in/logout audit events are implemented; failed/unknown authentication attribution and live-tenant validation remain
 - **Dependencies:** BRG-001, BRG-002
 - **PRD references:** AUTH-01, AUTH-04
 
@@ -225,7 +225,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, project roles are target-project scoped, non-human REST bearer principals require coarse `bridge:read`/`bridge:write` (or `bridge:admin`) capabilities, and organization admins can provision versioned scoped service identities; endpoint-specific scopes remain
+- **Status:** Partial — fixed and OIDC-derived principals use the same policy, durable membership supplies organization/project access, project roles are target-project scoped, non-human REST/MCP principals support coarse `bridge:read`/`bridge:write`/`bridge:admin` compatibility plus mapped least-privilege resource/admin scopes, and organization admins can provision versioned scoped service identities; external token issuance and live authorization evidence remain
 - **Dependencies:** BRG-002
 - **PRD references:** AUTH-03, AUTH-04, QST-05, ADM-01
 
@@ -262,7 +262,7 @@ Acceptance criteria:
 
 - **Priority:** P2
 - **Size:** L
-- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces coarse REST capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, and revoking logout are implemented; standalone MCP bearer validation, dedicated audience checks, protected-resource metadata, coarse per-tool capabilities, and a REST-administered revocable scoped service-identity path are also implemented, while MCP-side token issuance, fine-grained tool scopes, and workload-identity federation remain
+- **Status:** Partial — the API accepts audience-validated bearer tokens, validates scope claims, enforces mapped REST resource-family capabilities for non-human principals, and distinguishes server-side principal types; CLI public-client PKCE, loopback callback hardening, macOS/Linux OS credential storage, refresh, status, revoking logout, and fine-grained service-identity scope selection are implemented; standalone MCP bearer validation, dedicated audience checks, protected-resource metadata, mapped per-tool capabilities, and a REST-administered revocable scoped service-identity path are also implemented, while MCP-side token issuance, external workload-identity federation, and live-provider validation remain
 - **Dependencies:** BRG-001, BRG-010, BRG-011
 - **PRD references:** AUTH-02, AUTH-03
 
@@ -494,7 +494,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, report directly linked impact, and write audit plus notification/outbox records; deeper transitive impact analysis remains BRG-123
+- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, return a bounded transitive dependency graph with paths/links/truncation evidence, and write audit plus notification/outbox records
 - **Dependencies:** BRG-040, BRG-041
 - **PRD references:** DEC-03, DEC-06
 
@@ -569,7 +569,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Streamable HTTP initialization and versioned tools run through shared PostgreSQL state; standalone MCP now validates external OIDC bearer tokens against a dedicated audience, resolves active membership through the shared directory, publishes protected-resource metadata, and enforces coarse per-tool capabilities, while MCP-side authorization-server/token issuance, fine-grained tool scopes, and live-provider validation remain
+- **Status:** Partial — Streamable HTTP initialization and versioned tools run through shared PostgreSQL state; standalone MCP now validates external OIDC bearer tokens against a dedicated audience, resolves active membership through the shared directory, publishes protected-resource metadata, and enforces mapped per-tool capabilities with coarse-scope compatibility, while MCP-side authorization-server/token issuance and live-provider validation remain
 - **Dependencies:** BRG-013, BRG-051
 - **PRD references:** AUTH-02, CTX-01, MCP contract
 
@@ -816,7 +816,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — authority-checked append-only review comments, request-changes, immutable versions, single current approval, audit/outbox, and web review/approval are implemented; configurable team workflow and multi-reviewer quorum remain
+- **Status:** Implemented for the Markdown MVP — publication resolves configured direct users, roles, teams, scoped ownership rules, and the project decision-owner fallback into active human reviewers; each immutable version freezes a bounded required approval count, exposes server-derived progress, counts each authorized human once, and becomes authoritative only when quorum is satisfied; append-only comments, approvals, request-changes, single current approval, audit/outbox, and web review/approval are implemented
 - **Dependencies:** BRG-021, BRG-080
 - **PRD references:** ART-03, ART-04
 
@@ -824,9 +824,9 @@ As an artifact owner or reviewer, I need to review and approve a version so that
 
 Acceptance criteria:
 
-1. Owner can request review from configured users, teams, or roles.
-2. Reviewers can comment, approve, or request changes.
-3. Server verifies approval authority.
+1. Owner can request review from configured users, teams, or roles. **Implemented through the canonical publish contract, project ownership configuration, CLI flags, and the shared optional MCP schema.**
+2. Reviewers can comment, approve, or request changes. **Implemented as append-only review records; an approval rationale is retained with each human vote.**
+3. Server verifies approval authority. **Implemented with distinct-principal counting and server-derived pending/blocked/satisfied status.**
 4. One exact-scope version is current and approved at a time.
 5. Agent identities cannot approve versions.
 6. Approval writes audit and outbox events atomically.
@@ -872,7 +872,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, bounded retry/dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry, and a bounded maintenance-role worker runtime are implemented; live email delivery, jitter, telemetry export, and deployment validation remain
+- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry/blocker escalation, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; live email delivery and deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -883,15 +883,15 @@ Acceptance criteria:
 1. Material commands write outbox events in their domain transaction. **Implemented for core in-app notification events.**
 2. Worker claims and processes events at least once. **Implemented through the injected `runOutboxCycle` handler boundary.**
 3. Handlers are idempotent by event and destination. **Event IDs are stable for handler-side idempotency; destination adapters remain.**
-4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempt and backoff settings.**
+4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempts, base/cap settings, proportional jitter, deterministic coverage, and dead-letter state.**
 5. Operators can inspect and safely replay failed jobs. **Implemented through project-admin REST operations; replay preserves the event ID and requires the last observed attempt count.**
-6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot; time-series export and alerts remain BRG-104 work.**
+6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot and through the worker's safe process-local Prometheus endpoint; hosted collection and alert delivery remain BRG-104 work.**
 
 ### BRG-091 — Provide durable in-app notifications
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, human-only REST reads, scoped mark-read commands, web feed, and transactional outbox linkage are implemented; role-directory fanout, preferences, external channels, and operator delivery controls remain
+- **Status:** Partial — core durable in-app notification records, assumption-expiry owner alerts, one-time overdue-blocker escalations, human-only REST reads, scoped mark-read commands, web feed, transactional outbox linkage, role-directory fanout for active human project members, and the human-owned email preference record are implemented; external channels, deletion reconciliation evidence, and operator delivery controls remain
 - **Dependencies:** BRG-031, BRG-090
 - **PRD references:** NTF-01
 
@@ -901,15 +901,15 @@ Acceptance criteria:
 
 1. Notification record is durable and linked to the target record. **Implemented for the core question, response, comment, review, decision, and artifact events.**
 2. Users can mark one or all notifications read. **Implemented with project-scoped REST commands and the web feed.**
-3. Recipient resolution respects current membership and authorization. **Direct fixed-principal recipients and read-time organization/project/recipient checks are implemented; production membership reconciliation remains.**
-4. Protected/blocking events are visually distinguishable. **Protected review notifications carry a distinct event type; richer severity styling remains.**
+3. Recipient resolution respects current membership and authorization. **Role targets resolve at notification creation from the active human organization/project directory, while direct recipients and read-time organization/project/recipient checks remain supported; live deletion/reconciliation evidence remains.**
+4. Protected/blocking events are visually distinguishable. **Protected review and overdue blocking escalation notifications carry distinct event types, and escalated questions expose their timestamp; richer severity styling remains.**
 5. Deleted access removes the ability to open notification targets. **Read/mark-read rechecks project access; production deletion/membership lifecycle remains.**
 
 ### BRG-092 — Deliver essential email notifications
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — provider-neutral safe templates, recipient/preference and sender contracts, idempotent handler behavior, durable privacy-minimized delivery receipts, and retry/dead-letter observability are implemented; a live SES sender/directory, digest scheduler, blocking-escalation producer, and authenticated deployment link remain
+- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, recipient/preference and sender contracts, idempotent immediate delivery, durable privacy-minimized delivery receipts, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; a live SES sender/directory and authenticated deployment link remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -917,10 +917,10 @@ As a user, I need email notification for important Bridge events so that I do no
 
 Acceptance criteria:
 
-1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the blocking-escalation producer remains scheduled-policy work.**
+1. Assignment, clarification, blocking escalation, accepted answer, and artifact review templates exist. **Implemented as bounded plain-text templates; the maintenance worker now produces one escalation per overdue unresolved blocking question.**
 2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context, an auth-ready review URL, and OIDC web sign-in are implemented; hosted callback/link validation remains deployment work.**
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
-4. Ordinary events honor notification preferences. **Immediate, muted, and digest outcomes are implemented through an injected directory; digest batching/sending remains. Protected review mail bypasses muting.**
+4. Ordinary events honor notification preferences. **Human-owned immediate, muted, and digest email preferences persist through the canonical REST/application path and override the injected directory default. Digest receipts receive a durable due time and recoverable lease, group only same-recipient/project titles under a stable batch key, and retry without persisting addresses; protected review mail bypasses muting.**
 5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
 
 ### BRG-093 — Integrate one pilot team channel
@@ -949,7 +949,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, and self-auditing exports are implemented; broader policy/assignment/authentication event coverage and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, and durable human web sign-in/logout events are implemented; broader policy/assignment coverage, failed/unknown authentication attribution, and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
@@ -986,7 +986,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, administrator-only versioned reassignment, project ownership/policy administration, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, forced RLS, and bootstrap-directory function boundaries; endpoint-specific scopes and live-provider/database evidence remain
+- **Status:** Partial — the implemented PRD matrix is documented and covered across domain/application/REST/MCP/database, including org-admin inheritance, configured decision-owner approval, administrator-only versioned reassignment, project ownership/policy administration, stable cross-tenant/cross-project ID masking, agent self-approval denials, protected-review sequencing, concurrent REST acceptance, mapped non-human resource scopes, forced RLS, and bootstrap-directory function boundaries; live-provider/database evidence remains
 - **Dependencies:** BRG-012, BRG-040, BRG-043, BRG-081
 - **PRD references:** MVP acceptance criteria 11 and 14
 
@@ -1024,7 +1024,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, worker export, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
@@ -1121,6 +1121,8 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
+Implementation status (2026-08-23): BRG-120 through BRG-124 are complete. Role-aware views, low-risk digests, advisory conflict scans, bounded transitive impact graphs, and the CI-safe approved-specification drift manifest/check are implemented while preserving canonical REST reads and human authority. Drift coverage is explicit-file/hash based; source-provider semantic analysis remains future integration work. BRG-125 through BRG-130 remain pending.
+
 ## 21. Critical path
 
 The shortest path to proving the product is:
@@ -1210,7 +1212,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 
 | Risk | Backlog response |
 |---|---|
-| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track MCP/CLI scopes, MCP-side token issuance, RLS bootstrap exceptions, role reconciliation, administration, and deployment validation explicitly |
+| Partial identity scope is mistaken for complete production security | Keep fixed principals development-only and track external token issuance, MCP-side authorization-server/token issuance, RLS bootstrap exceptions, role reconciliation, administration, and deployment validation explicitly |
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |

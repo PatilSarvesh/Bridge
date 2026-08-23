@@ -63,8 +63,14 @@ describe("worker runtime", () => {
       pollIntervalMs: 1_000,
       batchSize: 25,
       assumptionExpiryIntervalMs: 60_000,
+      blockingQuestionEscalationIntervalMs: 60_000,
+      emailDigestIntervalMs: 60_000,
       maxAttempts: 5,
       baseBackoffMs: 1_000,
+      maxBackoffMs: 900_000,
+      retryJitterRatio: 0.25,
+      metricsHost: "127.0.0.1",
+      metricsPort: 4_200,
     });
   });
 
@@ -77,6 +83,19 @@ describe("worker runtime", () => {
       BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
       BRIDGE_PUBLIC_WEB_URL: "file:///tmp/bridge",
     })).toThrow("BRIDGE_PUBLIC_WEB_URL must use HTTP or HTTPS.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_RETRY_JITTER_PERCENT: "101",
+    })).toThrow("BRIDGE_WORKER_RETRY_JITTER_PERCENT must be between 0 and 100.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_BASE_BACKOFF_MS: "5000",
+      BRIDGE_WORKER_MAX_BACKOFF_MS: "1000",
+    })).toThrow("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
+    expect(() => loadWorkerConfiguration({
+      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+      BRIDGE_WORKER_METRICS_HOST: "http://example.test",
+    })).toThrow("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
   });
 
   it("processes a cycle and stops cleanly when the worker is aborted", async () => {
@@ -108,6 +127,8 @@ describe("worker runtime", () => {
     const controller = new AbortController();
     const logs: string[] = [];
     let expiryRuns = 0;
+    let escalationRuns = 0;
+    let digestRuns = 0;
     await runOutboxWorker({
       store,
       handler: async () => controller.abort(),
@@ -116,6 +137,16 @@ describe("worker runtime", () => {
         return { expiredCount: 2 };
       },
       assumptionExpiryIntervalMs: 1_000,
+      blockingQuestionEscalationCycle: async () => {
+        escalationRuns += 1;
+        return { escalatedCount: 1 };
+      },
+      blockingQuestionEscalationIntervalMs: 1_000,
+      emailDigestCycle: async () => {
+        digestRuns += 1;
+        return { claimed: 2, digestsSent: 1, delivered: 2, suppressed: 0, retried: 0, failed: 0 };
+      },
+      emailDigestIntervalMs: 1_000,
       pollIntervalMs: 250,
       signal: controller.signal,
       logger: {
@@ -127,7 +158,11 @@ describe("worker runtime", () => {
     });
 
     expect(expiryRuns).toBe(1);
+    expect(escalationRuns).toBe(1);
+    expect(digestRuns).toBe(1);
     expect(logs).toContain("assumption_expiry.cycle_completed");
+    expect(logs).toContain("blocking_question_escalation.cycle_completed");
+    expect(logs).toContain("email_digest.cycle_completed");
   });
 
   it("validates the polling interval before opening a worker loop", async () => {

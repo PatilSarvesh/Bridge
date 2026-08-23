@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   Notification,
   NotificationDeliveryPreference,
+  NotificationPreference,
   OutboxDelivery,
   OutboxEvent,
 } from "@bridge/domain";
@@ -49,8 +50,22 @@ export interface EmailSender {
 
 export interface NotificationEmailStore {
   getNotification(notificationId: string): Promise<Notification | undefined>;
+  getNotificationPreference?(
+    organizationId: string,
+    principalId: string,
+    channel: "email",
+  ): Promise<NotificationPreference | undefined>;
   getOutboxDelivery(eventId: string, channel: "email"): Promise<OutboxDelivery | undefined>;
   saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
+}
+
+export interface EmailDigestStore extends NotificationEmailStore {
+  getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
+  claimDeferredEmailDeliveries(
+    now: string,
+    limit: number,
+    leaseMs?: number,
+  ): Promise<readonly OutboxDelivery[]>;
 }
 
 export interface NotificationEmailHandlerOptions {
@@ -60,7 +75,30 @@ export interface NotificationEmailHandlerOptions {
   readonly publicBaseUrl: string;
   readonly now?: () => Date;
   readonly mandatory?: (notification: Notification) => boolean;
+  readonly digestDelayMs?: number;
   readonly metrics?: BridgeMetrics;
+}
+
+export interface EmailDigestCycleOptions {
+  readonly store: EmailDigestStore;
+  readonly directory: EmailRecipientDirectory;
+  readonly sender: EmailSender;
+  readonly publicBaseUrl: string;
+  readonly now?: () => Date;
+  readonly batchSize?: number;
+  readonly maxAttempts?: number;
+  readonly baseBackoffMs?: number;
+  readonly leaseMs?: number;
+  readonly metrics?: BridgeMetrics;
+}
+
+export interface EmailDigestCycleResult {
+  readonly claimed: number;
+  readonly digestsSent: number;
+  readonly delivered: number;
+  readonly suppressed: number;
+  readonly retried: number;
+  readonly failed: number;
 }
 
 const TEMPLATE_LABELS: Readonly<Record<EssentialEmailTemplateKind, string>> = {
@@ -102,6 +140,32 @@ export function renderEssentialEmailTemplate(input: EssentialEmailTemplateInput)
   };
 }
 
+export function renderNotificationDigest(
+  notifications: readonly Notification[],
+  actionUrl: string,
+): RenderedEmailTemplate {
+  if (notifications.length === 0) throw new Error("A Bridge email digest requires at least one notification.");
+  const url = new URL(actionUrl);
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Bridge email links must use HTTP or HTTPS.");
+  }
+  const listed = notifications.slice(0, 20);
+  const remaining = Math.max(0, notifications.length - listed.length);
+  return {
+    subject: `[Bridge] Digest: ${notifications.length} update${notifications.length === 1 ? "" : "s"}`,
+    text: [
+      "Bridge notification digest",
+      "",
+      ...listed.map((notification) => `- ${safeLine(notification.title, 160) || "Bridge update"}`),
+      ...(remaining > 0 ? [`- ${remaining} more update${remaining === 1 ? "" : "s"}`] : []),
+      "",
+      `Open Bridge: ${url.toString()}`,
+      "",
+      "This digest contains only notification titles. Review authoritative records in Bridge.",
+    ].join("\n"),
+  };
+}
+
 export function sanitizeDeliveryError(error: unknown, fallback = "Notification delivery failed."): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
@@ -116,6 +180,7 @@ export function sanitizeDeliveryError(error: unknown, fallback = "Notification d
 
 function templateKind(notification: Notification): EssentialEmailTemplateKind {
   if (notification.type === "question_assigned") return "assignment";
+  if (notification.type === "question_blocking_escalation") return "blocking_escalation";
   if (notification.type === "question_comment") return "clarification";
   if (notification.type === "question_accepted") return "accepted_answer";
   if (notification.type.startsWith("artifact_")) return "artifact_review";
@@ -165,6 +230,10 @@ export function createNotificationEmailHandler(
 ): (event: OutboxEvent) => Promise<void> {
   const now = options.now ?? (() => new Date());
   const mandatory = options.mandatory ?? ((notification) => notification.type === "question_review");
+  const digestDelayMs = options.digestDelayMs ?? 24 * 60 * 60 * 1_000;
+  if (!Number.isSafeInteger(digestDelayMs) || digestDelayMs < 60_000 || digestDelayMs > 7 * 24 * 60 * 60 * 1_000) {
+    throw new Error("Email digest delay must be between one minute and seven days.");
+  }
 
   return async (event) => {
     if (event.type !== "notification.created") return;
@@ -192,6 +261,12 @@ export function createNotificationEmailHandler(
       }
       const recipient = await options.directory.resolveEmailRecipient(notification.recipientId);
       if (!recipient) throw new Error("No email destination is configured for this recipient.");
+      const storedPreference = await options.store.getNotificationPreference?.(
+        event.organizationId,
+        notification.recipientId,
+        "email",
+      );
+      const preference = storedPreference?.preference ?? recipient.preference;
       const address = normalizeAddress(recipient.address);
       const hashedDestination = destinationHash(event.organizationId, address);
       if (existing && existing.destinationHash !== hashedDestination) {
@@ -207,13 +282,20 @@ export function createNotificationEmailHandler(
         channel: "email" as const,
         destinationHash: hashedDestination,
         attemptCount: event.attempts,
-        preference: recipient.preference,
+        preference,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
-      if (!mandatory(notification) && recipient.preference !== "immediate") {
-        outcome = recipient.preference === "muted" ? "suppressed" : "deferred";
-        await options.store.saveOutboxDelivery({ ...baseDelivery, status: outcome });
+      if (!mandatory(notification) && preference !== "immediate") {
+        outcome = preference === "muted" ? "suppressed" : "deferred";
+        await options.store.saveOutboxDelivery({
+          ...baseDelivery,
+          status: outcome,
+          ...(preference === "digest" ? {
+            attemptCount: existing?.attemptCount ?? 0,
+            digestAvailableAt: new Date(Date.parse(timestamp) + digestDelayMs).toISOString(),
+          } : {}),
+        });
         return;
       }
 
@@ -254,4 +336,185 @@ export function createNotificationEmailHandler(
       });
     }
   };
+}
+
+interface DigestCandidate {
+  readonly delivery: OutboxDelivery;
+  readonly event: OutboxEvent;
+  readonly notification: Notification;
+  readonly address: string;
+}
+
+function withoutDeliveryResult(delivery: OutboxDelivery): Omit<OutboxDelivery, "providerMessageId" | "lastError" | "digestLeaseUntil"> {
+  const {
+    providerMessageId: _providerMessageId,
+    lastError: _lastError,
+    digestLeaseUntil: _digestLeaseUntil,
+    ...base
+  } = delivery;
+  return base;
+}
+
+export async function runEmailDigestCycle(
+  options: EmailDigestCycleOptions,
+): Promise<EmailDigestCycleResult> {
+  const now = options.now ?? (() => new Date());
+  const currentTime = now();
+  const batchSize = options.batchSize ?? 100;
+  const maxAttempts = options.maxAttempts ?? 5;
+  const baseBackoffMs = options.baseBackoffMs ?? 60_000;
+  const leaseMs = options.leaseMs ?? 5 * 60 * 1_000;
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 500) {
+    throw new Error("Email digest batch size must be between 1 and 500.");
+  }
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) {
+    throw new Error("Email digest max attempts must be between 1 and 20.");
+  }
+  if (!Number.isSafeInteger(baseBackoffMs) || baseBackoffMs < 1_000 || baseBackoffMs > 24 * 60 * 60 * 1_000) {
+    throw new Error("Email digest base backoff must be between one second and one day.");
+  }
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 60 * 60 * 1_000) {
+    throw new Error("Email digest lease must be between one second and one hour.");
+  }
+
+  const claimed = await options.store.claimDeferredEmailDeliveries(
+    currentTime.toISOString(),
+    batchSize,
+    leaseMs,
+  );
+  let digestsSent = 0;
+  let delivered = 0;
+  let suppressed = 0;
+  let retried = 0;
+  let failed = 0;
+
+  const failDelivery = async (delivery: OutboxDelivery, error: unknown): Promise<void> => {
+    const exhausted = delivery.attemptCount >= maxAttempts;
+    const delay = baseBackoffMs * 2 ** Math.max(0, delivery.attemptCount - 1);
+    await options.store.saveOutboxDelivery({
+      ...withoutDeliveryResult(delivery),
+      status: exhausted ? "failed" : "deferred",
+      updatedAt: currentTime.toISOString(),
+      digestAvailableAt: new Date(currentTime.getTime() + delay).toISOString(),
+      ...(exhausted ? { lastError: sanitizeDeliveryError(error, "Email digest delivery failed.") } : {}),
+    });
+    if (exhausted) failed += 1;
+    else retried += 1;
+  };
+
+  const groups = new Map<string, DigestCandidate[]>();
+  for (const delivery of claimed) {
+    try {
+      const event = await options.store.getOutboxEvent(delivery.outboxEventId);
+      if (!event || event.type !== "notification.created" || !("notificationId" in event.payload)) {
+        throw new Error("Deferred email digest source event is missing or invalid.");
+      }
+      const notification = await options.store.getNotification(event.payload.notificationId);
+      if (
+        !notification ||
+        notification.organizationId !== delivery.organizationId ||
+        notification.projectId !== delivery.projectId ||
+        notification.recipientId !== event.payload.recipientId
+      ) {
+        throw new Error("Deferred email digest notification is missing or inconsistent.");
+      }
+      const recipient = await options.directory.resolveEmailRecipient(notification.recipientId);
+      if (!recipient) throw new Error("No email destination is configured for this digest recipient.");
+      const storedPreference = await options.store.getNotificationPreference?.(
+        delivery.organizationId,
+        notification.recipientId,
+        "email",
+      );
+      const preference = storedPreference?.preference ?? recipient.preference;
+      if (preference === "muted") {
+        await options.store.saveOutboxDelivery({
+          ...withoutDeliveryResult(delivery),
+          status: "suppressed",
+          preference,
+          updatedAt: currentTime.toISOString(),
+        });
+        suppressed += 1;
+        continue;
+      }
+      const address = normalizeAddress(recipient.address);
+      if (destinationHash(delivery.organizationId, address) !== delivery.destinationHash) {
+        throw new Error("The email destination changed after digest deferral; operator review is required.");
+      }
+      const recipientGroup = [
+        delivery.organizationId,
+        delivery.projectId,
+        notification.recipientId,
+      ].join(":");
+      const key = delivery.dedupeKey ? `batch:${delivery.dedupeKey}` : `recipient:${recipientGroup}`;
+      groups.set(key, [...(groups.get(key) ?? []), { delivery, event, notification, address }]);
+    } catch (error) {
+      await failDelivery(delivery, error);
+    }
+  }
+
+  for (const candidates of groups.values()) {
+    const startedAt = performance.now();
+    let outcome: BridgeNotificationOutcome = "failed";
+    const ordered = [...candidates].sort((left, right) =>
+      left.notification.createdAt.localeCompare(right.notification.createdAt) ||
+      left.delivery.id.localeCompare(right.delivery.id));
+    const existingBatchKey = ordered[0]?.delivery.dedupeKey;
+    const batchKey = existingBatchKey ?? `edg_${createHash("sha256")
+      .update(ordered.map((candidate) => candidate.delivery.id).sort().join(":"))
+      .digest("hex")}`;
+    const batched = ordered.map((candidate): DigestCandidate => ({
+      ...candidate,
+      delivery: { ...candidate.delivery, dedupeKey: batchKey },
+    }));
+    try {
+      for (const candidate of batched) {
+        if (
+          candidate.address !== batched[0]!.address ||
+          (candidate.delivery.dedupeKey && candidate.delivery.dedupeKey !== batchKey)
+        ) {
+          throw new Error("Deferred email digest batch recipients are inconsistent.");
+        }
+        if (!ordered.find((original) => original.delivery.id === candidate.delivery.id)?.delivery.dedupeKey) {
+          await options.store.saveOutboxDelivery({
+            ...candidate.delivery,
+            updatedAt: currentTime.toISOString(),
+          });
+        }
+      }
+      const first = batched[0]!;
+      const template = renderNotificationDigest(
+        batched.map((candidate) => candidate.notification),
+        notificationUrl(options.publicBaseUrl, first.notification),
+      );
+      const result = await options.sender.send({
+        to: first.address,
+        ...template,
+        idempotencyKey: `${batchKey}:email`,
+        correlationId: first.event.correlationId,
+      });
+      const providerMessageId = safeProviderMessageId(result.providerMessageId);
+      for (const candidate of batched) {
+        await options.store.saveOutboxDelivery({
+          ...withoutDeliveryResult(candidate.delivery),
+          dedupeKey: batchKey,
+          status: "delivered",
+          updatedAt: currentTime.toISOString(),
+          providerMessageId,
+        });
+      }
+      digestsSent += 1;
+      delivered += batched.length;
+      outcome = "delivered";
+    } catch (error) {
+      for (const candidate of batched) await failDelivery(candidate.delivery, error);
+    } finally {
+      options.metrics?.recordNotificationDelivery({
+        channel: "email",
+        outcome,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+    }
+  }
+
+  return { claimed: claimed.length, digestsSent, delivered, suppressed, retried, failed };
 }

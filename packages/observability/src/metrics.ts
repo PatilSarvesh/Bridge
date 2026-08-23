@@ -1,4 +1,4 @@
-export type BridgeServiceName = "api" | "mcp";
+export type BridgeServiceName = "api" | "mcp" | "worker";
 export type BridgeRequestOutcome = "success" | "client_error" | "server_error";
 export type BridgeDatabaseBackend = "memory" | "postgresql";
 export type BridgeOperationOutcome = "success" | "error";
