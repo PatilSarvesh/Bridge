@@ -16,6 +16,7 @@ import {
   createQuestionInputSchema,
   decisionListQuerySchema,
   decisionConflictQuerySchema,
+  decisionImpactQuerySchema,
   editQuestionCommentInputSchema,
   editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
@@ -177,6 +178,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   {
     match: /^\/v1\/decisions\/[^/]+\/(?:lifecycle|supersede|expire|revoke)$/,
     scopes: { POST: bridgeScopes.decisionsWrite },
+  },
+  {
+    match: /^\/v1\/decisions\/[^/]+\/impact$/,
+    scopes: { GET: bridgeScopes.decisionsRead, HEAD: bridgeScopes.decisionsRead },
   },
   {
     match: /^\/v1\/projects\/[^/]+\/questions\/matches$/,
@@ -737,6 +742,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = changeDecisionLifecycleInputSchema.parse(request.body);
       return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
+    },
+  );
+
+  app.get<{ Params: { decisionId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/decisions/:decisionId/impact",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = decisionImpactQuerySchema.parse({
+        maxDepth: request.query.maxDepth,
+        maxNodes: request.query.maxNodes,
+      });
+      return options.service.analyzeDecisionImpact(principal, request.params.decisionId, query);
     },
   );
 

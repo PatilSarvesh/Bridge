@@ -2249,6 +2249,87 @@ describe("Bridge decision workflow", () => {
       citedDecisionIds: [original.id],
       scope,
     }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The specification accurately records the accepted transfer retry decision.",
+    });
+    const artifactConsumerRun = await service.startRun(agent, project.id, {
+      idempotencyKey: "decision-lifecycle-artifact-consumer-run",
+      client: "codex",
+      capability: "cli",
+      taskSummary: "Implement the approved transfer retry specification",
+      scope,
+      externalLinks: ["https://github.com/bridge/example/pull/42"],
+    });
+    const artifactContext = await service.getContext(agent, project.id, {
+      runId: artifactConsumerRun.run.id,
+      task: "Implement the approved transfer retry specification",
+      scope,
+      categories: ["specification"],
+      maxItems: 20,
+    });
+    expect(artifactContext.items.map((item) => item.id)).toContain(publication.version.id);
+    const downstreamAssumption = await service.recordAssumption(agent, project.id, assumptionInput({
+      idempotencyKey: "decision-impact-downstream-assumption",
+      runId: artifactConsumerRun.run.id,
+      statement: "The approved retry specification can use the existing transfer telemetry namespace.",
+      rationale: "The implementation run consumed the approved specification and needs a reversible telemetry choice.",
+      scope,
+    }));
+
+    const preview = await service.analyzeDecisionImpact(owner, original.id, {
+      maxDepth: 8,
+      maxNodes: 200,
+    });
+    expect(preview).toMatchObject({
+      artifactIds: [publication.artifact.id],
+      artifactVersionIds: [publication.version.id],
+      assumptionIds: [downstreamAssumption.id],
+      questionIds: [originalQuestion.id],
+      runIds: expect.arrayContaining([run.run.id, consumerRun.run.id, artifactConsumerRun.run.id]),
+      workItems: ["PAY-42"],
+      repositories: [],
+      links: [expect.objectContaining({
+        sourceId: artifactConsumerRun.run.id,
+        type: "run_external",
+        url: "https://github.com/bridge/example/pull/42",
+      })],
+      truncated: false,
+    });
+    expect(preview.nodes.find((node) => node.id === downstreamAssumption.id)).toMatchObject({
+      type: "assumption",
+      depth: 5,
+      path: [
+        original.id,
+        publication.artifact.id,
+        publication.version.id,
+        artifactContext.contextSnapshotId,
+        artifactConsumerRun.run.id,
+        downstreamAssumption.id,
+      ],
+    });
+    expect(preview.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fromId: publication.version.id,
+        toId: artifactContext.contextSnapshotId,
+        relation: "consumed_in_context",
+      }),
+      expect.objectContaining({
+        fromId: artifactConsumerRun.run.id,
+        toId: downstreamAssumption.id,
+        relation: "produced_assumption",
+      }),
+    ]));
+    expect((await repository.getDecision(original.id))?.version).toBe(original.version);
+    const boundedPreview = await service.analyzeDecisionImpact(owner, original.id, {
+      maxDepth: 2,
+      maxNodes: 200,
+    });
+    expect(boundedPreview.truncated).toBe(true);
+    expect(boundedPreview.maxDepthReached).toBe(2);
+    await expect(service.analyzeDecisionImpact(outsider, original.id, {
+      maxDepth: 5,
+      maxNodes: 200,
+    })).rejects.toMatchObject({ code: "DECISION_NOT_FOUND", statusCode: 404 });
 
     await expect(service.changeDecisionLifecycle(contributor, original.id, {
       expectedVersion: original.version,
@@ -2280,8 +2361,10 @@ describe("Bridge decision workflow", () => {
       },
       impact: {
         artifactIds: [publication.artifact.id],
-        assumptionIds: [],
-        runIds: [run.run.id, consumerRun.run.id],
+        artifactVersionIds: [publication.version.id],
+        assumptionIds: [downstreamAssumption.id],
+        questionIds: [originalQuestion.id],
+        runIds: expect.arrayContaining([run.run.id, consumerRun.run.id, artifactConsumerRun.run.id]),
         workItems: ["PAY-42"],
       },
     });

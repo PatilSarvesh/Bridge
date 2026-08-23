@@ -49,6 +49,7 @@
     "PATCH /v1/runs/:runId",
     "POST /v1/runs/:runId/continuation",
     "POST /v1/decisions/:decisionId/lifecycle",
+    "GET /v1/decisions/:decisionId/impact",
     "POST /v1/projects/:projectId/questions",
     "POST /v1/projects/:projectId/questions/matches",
     "POST /v1/projects/:projectId/assumptions",

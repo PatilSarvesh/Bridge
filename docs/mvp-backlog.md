@@ -494,7 +494,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, report directly linked impact, and write audit plus notification/outbox records; deeper transitive impact analysis remains BRG-123
+- **Status:** Implemented for the MVP — owner/admin-authorized, version-checked supersede/expire/revoke transitions preserve immutable content and lifecycle provenance, remove retired decisions from context, return a bounded transitive dependency graph with paths/links/truncation evidence, and write audit plus notification/outbox records
 - **Dependencies:** BRG-040, BRG-041
 - **PRD references:** DEC-03, DEC-06
 
@@ -1121,7 +1121,7 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
-Implementation status (2026-08-23): BRG-120 through BRG-122 are complete. Role-aware presentations preserve an exact source envelope; personalized low-risk digests retain individual acceptance; and active-decision conflict scans flag exact-scope divergent answers or explicit opposing language across overlapping same-category scopes. All three are advisory/read-only and preserve human authority. BRG-123 through BRG-130 remain pending.
+Implementation status (2026-08-23): BRG-120 through BRG-123 are complete. Role-aware presentations preserve an exact source envelope; personalized low-risk digests retain individual acceptance; conflict scans remain advisory; and bounded transitive impact analysis traces source questions, citing specification versions, confirmed assumptions, context consumption, producing/continuing runs, downstream records, and external work links. BRG-124 through BRG-130 remain pending.
 
 ## 21. Critical path
 

@@ -15,6 +15,7 @@ import type {
   CreateServiceIdentityInput,
   DecisionListQuery,
   DecisionConflictQuery,
+  DecisionImpactQuery,
   CreateQuestionInput,
   EditQuestionCommentInput,
   EditQuestionResponseInput,
@@ -360,9 +361,62 @@ export interface ContinuationDescriptor {
 
 export interface DecisionLifecycleImpact {
   readonly artifactIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
   readonly assumptionIds: readonly string[];
+  readonly questionIds: readonly string[];
+  readonly contextSnapshotIds: readonly string[];
   readonly runIds: readonly string[];
   readonly workItems: readonly string[];
+  readonly branches: readonly string[];
+  readonly repositories: readonly string[];
+  readonly links: readonly DecisionImpactLink[];
+  readonly nodes: readonly DecisionImpactNode[];
+  readonly edges: readonly DecisionImpactEdge[];
+  readonly maxDepthReached: number;
+  readonly truncated: boolean;
+}
+
+export type DecisionImpactNodeType =
+  | "decision"
+  | "question"
+  | "artifact"
+  | "artifact_version"
+  | "assumption"
+  | "context_snapshot"
+  | "run";
+
+export interface DecisionImpactNode {
+  readonly id: string;
+  readonly type: DecisionImpactNodeType;
+  readonly label: string;
+  readonly depth: number;
+  readonly path: readonly string[];
+  readonly scope?: Scope;
+  readonly status?: string;
+}
+
+export interface DecisionImpactEdge {
+  readonly fromId: string;
+  readonly toId: string;
+  readonly relation:
+    | "source_question"
+    | "cited_by_artifact"
+    | "contains_citing_version"
+    | "confirmed_assumption"
+    | "consumed_in_context"
+    | "context_used_by_run"
+    | "created_in_run"
+    | "continued_by_run"
+    | "produced_question"
+    | "produced_assumption"
+    | "produced_artifact_version";
+}
+
+export interface DecisionImpactLink {
+  readonly sourceId: string;
+  readonly type: QuestionLink["type"] | "run_external" | "run_result";
+  readonly url: string;
+  readonly depth: number;
 }
 
 export interface DecisionLifecycleChange {
@@ -5560,6 +5614,17 @@ export class BridgeService {
     );
   }
 
+  async analyzeDecisionImpact(
+    principal: Principal,
+    decisionId: string,
+    query: DecisionImpactQuery,
+  ): Promise<DecisionLifecycleImpact> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const decision = await this.requireDecision(principal, decisionId, repository);
+      return this.calculateDecisionImpact(repository, decision, query);
+    });
+  }
+
   private async changeDecisionLifecycleInTransaction(
     repository: BridgeRepository,
     principal: Principal,
@@ -5622,35 +5687,13 @@ export class BridgeService {
     };
     await repository.saveDecision(changed);
 
-    const [artifacts, assumptions, contextSnapshots] = await Promise.all([
-      repository.listArtifacts(decision.projectId),
-      repository.listAssumptions(decision.projectId),
-      repository.listContextSnapshots(decision.projectId),
-    ]);
     const sourceQuestion = decision.questionId
       ? await repository.getQuestion(decision.questionId)
       : undefined;
-    const affectedArtifacts = artifacts.filter((artifact) =>
-      artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
-    );
-    const affectedAssumptions = assumptions.filter(
-      (assumption) => assumption.confirmedDecisionId === decision.id,
-    );
-    const impact: DecisionLifecycleImpact = {
-      artifactIds: affectedArtifacts.map((artifact) => artifact.id),
-      assumptionIds: affectedAssumptions.map((assumption) => assumption.id),
-      runIds: [...new Set([
-        ...(sourceQuestion?.runId ? [sourceQuestion.runId] : []),
-        ...affectedArtifacts.flatMap((artifact) =>
-          artifact.versions.flatMap((version) => version.runId ? [version.runId] : []),
-        ),
-        ...affectedAssumptions.flatMap((assumption) => assumption.runId ? [assumption.runId] : []),
-        ...contextSnapshots.flatMap((snapshot) =>
-          snapshot.runId && snapshot.itemIds.includes(decision.id) ? [snapshot.runId] : [],
-        ),
-      ])],
-      workItems: decision.scope.workItem ? [decision.scope.workItem] : [],
-    };
+    const impact = await this.calculateDecisionImpact(repository, decision, {
+      maxDepth: 5,
+      maxNodes: 200,
+    });
 
     await this.audit(
       repository,
@@ -6523,6 +6566,298 @@ export class BridgeService {
   private scopesEqual(left: Scope, right: Scope): boolean {
     return (["repository", "component", "branch", "environment", "workItem"] as const)
       .every((key) => left[key] === right[key]);
+  }
+
+  private async calculateDecisionImpact(
+    repository: BridgeRepository,
+    decision: Decision,
+    query: DecisionImpactQuery,
+  ): Promise<DecisionLifecycleImpact> {
+    const [artifacts, assumptions, contextSnapshots, runs, questions] = await Promise.all([
+      repository.listArtifacts(decision.projectId),
+      repository.listAssumptions(decision.projectId),
+      repository.listContextSnapshots(decision.projectId),
+      repository.listRuns(decision.projectId),
+      repository.listQuestions(decision.projectId),
+    ]);
+    const nodes = new Map<string, DecisionImpactNode>();
+    const queue: DecisionImpactNode[] = [];
+    const edges: DecisionImpactEdge[] = [];
+    const edgeKeys = new Set<string>();
+    const links = new Map<string, DecisionImpactLink>();
+    let truncated = false;
+
+    const root: DecisionImpactNode = {
+      id: decision.id,
+      type: "decision",
+      label: decision.answer,
+      depth: 0,
+      path: [decision.id],
+      scope: { ...decision.scope },
+      status: decision.status,
+    };
+    nodes.set(root.id, root);
+    queue.push(root);
+
+    const connect = (
+      from: DecisionImpactNode,
+      target: Omit<DecisionImpactNode, "depth" | "path">,
+      relation: DecisionImpactEdge["relation"],
+    ): void => {
+      const depth = from.depth + 1;
+      const existing = nodes.get(target.id);
+      if (!existing) {
+        if (depth > query.maxDepth || nodes.size >= query.maxNodes) {
+          truncated = true;
+          return;
+        }
+        const node: DecisionImpactNode = {
+          ...target,
+          depth,
+          path: [...from.path, target.id],
+        };
+        nodes.set(node.id, node);
+        queue.push(node);
+      }
+      const edgeKey = `${from.id}\u0000${target.id}\u0000${relation}`;
+      if (!edgeKeys.has(edgeKey) && nodes.has(target.id)) {
+        edgeKeys.add(edgeKey);
+        edges.push({ fromId: from.id, toId: target.id, relation });
+      }
+    };
+    const recordLink = (
+      source: DecisionImpactNode,
+      type: DecisionImpactLink["type"],
+      url: string,
+    ): void => {
+      const depth = source.depth + 1;
+      if (depth > query.maxDepth) {
+        truncated = true;
+        return;
+      }
+      const key = `${source.id}\u0000${type}\u0000${url}`;
+      if (!links.has(key)) links.set(key, { sourceId: source.id, type, url, depth });
+    };
+    const addSnapshotConsumers = (source: DecisionImpactNode, itemId: string): void => {
+      for (const snapshot of contextSnapshots.filter((candidate) => candidate.itemIds.includes(itemId))) {
+        connect(source, {
+          id: snapshot.id,
+          type: "context_snapshot",
+          label: "Context snapshot",
+        }, "consumed_in_context");
+      }
+    };
+    const hasDownstream = (node: DecisionImpactNode): boolean => {
+      if (node.type === "decision") {
+        return Boolean(decision.questionId) ||
+          artifacts.some((artifact) => artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id))) ||
+          assumptions.some((assumption) => assumption.confirmedDecisionId === decision.id) ||
+          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(decision.id));
+      }
+      if (node.type === "question") {
+        const question = questions.find((candidate) => candidate.id === node.id);
+        return Boolean(question?.runId || question?.relatedLinks?.length);
+      }
+      if (node.type === "artifact") {
+        return artifacts.some((artifact) => artifact.id === node.id &&
+          artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)));
+      }
+      if (node.type === "artifact_version") {
+        return artifacts.some((artifact) => artifact.versions.some((version) =>
+          version.id === node.id && Boolean(version.runId))) ||
+          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id));
+      }
+      if (node.type === "assumption") {
+        const assumption = assumptions.find((candidate) => candidate.id === node.id);
+        return Boolean(assumption?.runId) || contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id));
+      }
+      if (node.type === "context_snapshot") {
+        return contextSnapshots.some((snapshot) => snapshot.id === node.id && Boolean(snapshot.runId));
+      }
+      const run = runs.find((candidate) => candidate.id === node.id);
+      return Boolean(run && (
+        runs.some((candidate) => candidate.continuesRunId === run.id) ||
+        questions.some((question) => question.runId === run.id) ||
+        assumptions.some((assumption) => assumption.runId === run.id) ||
+        artifacts.some((artifact) => artifact.versions.some((version) => version.runId === run.id)) ||
+        run.externalLinks.length > 0 ||
+        run.resultLinks.length > 0
+      ));
+    };
+
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      if (node.depth >= query.maxDepth) {
+        if (hasDownstream(node)) truncated = true;
+        continue;
+      }
+      if (node.type === "decision") {
+        const sourceQuestion = decision.questionId
+          ? questions.find((question) => question.id === decision.questionId)
+          : undefined;
+        if (sourceQuestion) {
+          connect(node, {
+            id: sourceQuestion.id,
+            type: "question",
+            label: sourceQuestion.title,
+            scope: { ...sourceQuestion.scope },
+            status: sourceQuestion.status,
+          }, "source_question");
+        }
+        for (const artifact of artifacts.filter((candidate) =>
+          candidate.versions.some((version) => version.citedDecisionIds.includes(decision.id)))) {
+          const currentStatus = artifact.versions.find((version) => version.id === artifact.currentVersionId)?.status;
+          connect(node, {
+            id: artifact.id,
+            type: "artifact",
+            label: artifact.title,
+            scope: { ...artifact.scope },
+            ...(currentStatus ? { status: currentStatus } : {}),
+          }, "cited_by_artifact");
+        }
+        for (const assumption of assumptions.filter((candidate) => candidate.confirmedDecisionId === decision.id)) {
+          connect(node, {
+            id: assumption.id,
+            type: "assumption",
+            label: assumption.statement,
+            scope: { ...assumption.scope },
+            status: assumption.status,
+          }, "confirmed_assumption");
+        }
+        addSnapshotConsumers(node, decision.id);
+      } else if (node.type === "question") {
+        const question = questions.find((candidate) => candidate.id === node.id);
+        if (!question) continue;
+        const sourceRun = question.runId ? runs.find((run) => run.id === question.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        for (const link of question.relatedLinks ?? []) recordLink(node, link.type, link.url);
+      } else if (node.type === "artifact") {
+        const artifact = artifacts.find((candidate) => candidate.id === node.id);
+        if (!artifact) continue;
+        for (const version of artifact.versions.filter((candidate) => candidate.citedDecisionIds.includes(decision.id))) {
+          connect(node, {
+            id: version.id,
+            type: "artifact_version",
+            label: version.summary,
+            scope: { ...artifact.scope },
+            status: version.status,
+          }, "contains_citing_version");
+        }
+      } else if (node.type === "artifact_version") {
+        const artifact = artifacts.find((candidate) => candidate.versions.some((version) => version.id === node.id));
+        const version = artifact?.versions.find((candidate) => candidate.id === node.id);
+        const sourceRun = version?.runId ? runs.find((run) => run.id === version.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        addSnapshotConsumers(node, node.id);
+      } else if (node.type === "assumption") {
+        const assumption = assumptions.find((candidate) => candidate.id === node.id);
+        const sourceRun = assumption?.runId ? runs.find((run) => run.id === assumption.runId) : undefined;
+        if (sourceRun) {
+          connect(node, {
+            id: sourceRun.id,
+            type: "run",
+            label: sourceRun.taskSummary,
+            scope: { ...sourceRun.scope },
+            status: sourceRun.status,
+          }, "created_in_run");
+        }
+        addSnapshotConsumers(node, node.id);
+      } else if (node.type === "context_snapshot") {
+        const snapshot = contextSnapshots.find((candidate) => candidate.id === node.id);
+        const consumerRun = snapshot?.runId ? runs.find((run) => run.id === snapshot.runId) : undefined;
+        if (consumerRun) {
+          connect(node, {
+            id: consumerRun.id,
+            type: "run",
+            label: consumerRun.taskSummary,
+            scope: { ...consumerRun.scope },
+            status: consumerRun.status,
+          }, "context_used_by_run");
+        }
+      } else if (node.type === "run") {
+        const run = runs.find((candidate) => candidate.id === node.id);
+        if (!run) continue;
+        for (const continuation of runs.filter((candidate) => candidate.continuesRunId === run.id)) {
+          connect(node, {
+            id: continuation.id,
+            type: "run",
+            label: continuation.taskSummary,
+            scope: { ...continuation.scope },
+            status: continuation.status,
+          }, "continued_by_run");
+        }
+        for (const question of questions.filter((candidate) => candidate.runId === run.id)) {
+          connect(node, {
+            id: question.id,
+            type: "question",
+            label: question.title,
+            scope: { ...question.scope },
+            status: question.status,
+          }, "produced_question");
+        }
+        for (const assumption of assumptions.filter((candidate) => candidate.runId === run.id)) {
+          connect(node, {
+            id: assumption.id,
+            type: "assumption",
+            label: assumption.statement,
+            scope: { ...assumption.scope },
+            status: assumption.status,
+          }, "produced_assumption");
+        }
+        for (const artifact of artifacts) {
+          for (const version of artifact.versions.filter((candidate) => candidate.runId === run.id)) {
+            connect(node, {
+              id: version.id,
+              type: "artifact_version",
+              label: version.summary,
+              scope: { ...artifact.scope },
+              status: version.status,
+            }, "produced_artifact_version");
+          }
+        }
+        for (const url of run.externalLinks) recordLink(node, "run_external", url);
+        for (const url of run.resultLinks) recordLink(node, "run_result", url);
+      }
+    }
+
+    const impactNodes = [...nodes.values()];
+    const valuesFor = (type: DecisionImpactNodeType): readonly string[] =>
+      impactNodes.filter((node) => node.type === type).map((node) => node.id);
+    const scopedValues = (key: keyof Scope): readonly string[] => [...new Set(
+      impactNodes.flatMap((node) => node.scope?.[key] ? [node.scope[key]!] : []),
+    )];
+    return {
+      artifactIds: valuesFor("artifact"),
+      artifactVersionIds: valuesFor("artifact_version"),
+      assumptionIds: valuesFor("assumption"),
+      questionIds: valuesFor("question"),
+      contextSnapshotIds: valuesFor("context_snapshot"),
+      runIds: valuesFor("run"),
+      workItems: scopedValues("workItem"),
+      branches: scopedValues("branch"),
+      repositories: scopedValues("repository"),
+      links: [...links.values()],
+      nodes: impactNodes,
+      edges,
+      maxDepthReached: Math.max(...impactNodes.map((node) => node.depth)),
+      truncated,
+    };
   }
 
   private scopesOverlap(left: Scope, right: Scope): boolean {

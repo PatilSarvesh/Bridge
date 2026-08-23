@@ -501,11 +501,13 @@ Formal specification reviewers may append `commented` or `changes_requested` fee
 2. Require its human owner, a configured project decision owner, or a project administrator.
 3. For supersession, require a different active replacement with the same project, category, and exact scope.
 4. Change only lifecycle metadata; the accepted answer, rationale, source question, and response remain immutable.
-5. Collect directly cited artifacts, decision-confirmed assumptions, source/provenance runs, later runs whose context snapshots consumed the decision, and scoped work-item identifiers as potentially affected records.
+5. Traverse the bounded dependency graph from the decision through its source question, citing artifact versions, decision-confirmed assumptions, context snapshots, producing/consuming/continuing runs, records produced by affected runs, and stored work links. Record shortest paths, typed edges, scope identifiers, and whether depth/node bounds truncated the result.
 6. Persist the transition, audit event, `decision.lifecycle_changed` outbox event, and any recipient notifications plus `notification.created` delivery intents in one transaction.
 7. Exclude the retired decision from subsequent default context while preserving it in history reads.
 
 `GET /v1/projects/:projectId/decision-conflicts` provides the read-only DEC-05 advisory scan. It compares active same-category decisions only when their scopes can overlap: a missing scope field is broader, while unequal values in the same field are disjoint. Pairs are returned when answers differ in exact scope or use a bounded set of explicit opposing terms across broader/narrower scopes. Results include stable pair IDs, confidence, scope relation, overlapping fields, signals, and immutable decision summaries. The scanner deliberately avoids claiming semantic certainty, performs no lifecycle write, and never selects a winner; a human owner must use the separately version-checked lifecycle command to resolve a real conflict.
+
+`GET /v1/decisions/:decisionId/impact` exposes the same DEC-06 graph before mutation. Breadth-first traversal deduplicates cycles, retains each record's shortest discovered path, and defaults to depth five and 200 nodes with bounded overrides. Nodes cover decisions, questions, artifacts/versions, assumptions, context snapshots, and runs; edges explain source, citation, confirmation, context consumption, production, and continuation relationships. Repository/work-item/branch scopes and existing typed question or run result links are summarized without fetching source-provider content. The lifecycle command calculates the graph again inside its transaction after the authorized version-checked state change, so its returned evidence reflects the committed canonical record set.
 
 ### 11.4 Record assumption
 

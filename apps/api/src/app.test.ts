@@ -1735,6 +1735,40 @@ describe("Bridge API vertical slice", () => {
       rationale: "One retry matches observed recovery while preventing repeated settlement processing.",
     });
 
+    const impactPreview = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact?maxDepth=5&maxNodes=100`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(impactPreview.statusCode).toBe(200);
+    expect(impactPreview.json()).toMatchObject({
+      artifactIds: [],
+      artifactVersionIds: [],
+      assumptionIds: [],
+      questionIds: [originalQuestion.id],
+      runIds: [],
+      workItems: ["PAY-77"],
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: original.id, type: "decision", depth: 0 }),
+        expect.objectContaining({ id: originalQuestion.id, type: "question", depth: 1 }),
+      ]),
+      maxDepthReached: 1,
+      truncated: false,
+    });
+    expect((await runtime.repository.getDecision(original.id))?.version).toBe(1);
+    const invalidImpact = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact?maxDepth=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(invalidImpact.statusCode).toBe(400);
+    const crossTenantImpact = await app.inject({
+      method: "GET",
+      url: `/v1/decisions/${original.id}/impact`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenantImpact.statusCode).toBe(404);
+
     const denied = await app.inject({
       method: "POST",
       url: `/v1/decisions/${original.id}/supersede`,

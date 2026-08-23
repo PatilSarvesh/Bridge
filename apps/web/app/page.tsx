@@ -435,9 +435,26 @@ interface Decision {
 
 interface DecisionLifecycleImpact {
   readonly artifactIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
   readonly assumptionIds: readonly string[];
+  readonly questionIds: readonly string[];
+  readonly contextSnapshotIds: readonly string[];
   readonly runIds: readonly string[];
   readonly workItems: readonly string[];
+  readonly branches: readonly string[];
+  readonly repositories: readonly string[];
+  readonly links: readonly { readonly sourceId: string; readonly type: string; readonly url: string; readonly depth: number }[];
+  readonly nodes: readonly {
+    readonly id: string;
+    readonly type: "decision" | "question" | "artifact" | "artifact_version" | "assumption" | "context_snapshot" | "run";
+    readonly label: string;
+    readonly depth: number;
+    readonly path: readonly string[];
+    readonly status?: string;
+  }[];
+  readonly edges: readonly { readonly fromId: string; readonly toId: string; readonly relation: string }[];
+  readonly maxDepthReached: number;
+  readonly truncated: boolean;
 }
 
 interface DecisionConflict {
@@ -876,6 +893,7 @@ export default function Home() {
   const [replacementDecisionId, setReplacementDecisionId] = useState("");
   const [decisionLifecycleRationale, setDecisionLifecycleRationale] = useState("");
   const [decisionLifecycleImpact, setDecisionLifecycleImpact] = useState<DecisionLifecycleImpact>();
+  const [decisionImpactLoading, setDecisionImpactLoading] = useState(false);
   const [assumptionResolutionStatus, setAssumptionResolutionStatus] = useState<"confirmed" | "rejected" | "expired">("confirmed");
   const [assumptionResolutionRationale, setAssumptionResolutionRationale] = useState("");
   const [assumptionCreateDecision, setAssumptionCreateDecision] = useState(false);
@@ -2390,6 +2408,24 @@ export default function Home() {
     }
   };
 
+  const loadDecisionImpact = async () => {
+    if (!selectedDecision) return;
+    setDecisionImpactLoading(true);
+    setError(undefined);
+    try {
+      setDecisionLifecycleImpact(await bridgeFetch<DecisionLifecycleImpact>(
+        `/v1/decisions/${selectedDecision.id}/impact`,
+        undefined,
+        activePrincipalId,
+      ));
+    } catch (requestError) {
+      setDecisionLifecycleImpact(undefined);
+      setError(requestError instanceof Error ? requestError.message : "Unable to analyze decision impact.");
+    } finally {
+      setDecisionImpactLoading(false);
+    }
+  };
+
   const resolveAssumption = async () => {
     if (
       !selectedAssumption ||
@@ -3669,6 +3705,31 @@ export default function Home() {
                           </div>
                         </section>
                       ) : null}
+                      <section>
+                        <h3>Change impact</h3>
+                        <p className="muted-copy">Preview direct and transitive records that may need review before changing this decision. Analysis does not alter authority.</p>
+                        <button className="secondary" type="button" disabled={decisionImpactLoading} onClick={() => void loadDecisionImpact()}>
+                          {decisionImpactLoading ? "Analyzing…" : "Analyze impact"}
+                        </button>
+                        {decisionLifecycleImpact ? (
+                          <div className="impact-analysis" aria-live="polite">
+                            <p className="impact">
+                              {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.questionIds.length} question(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
+                            </p>
+                            <div className="spec-meta">
+                              <span>Dependency depth {decisionLifecycleImpact.maxDepthReached}</span>
+                              <span>{decisionLifecycleImpact.nodes.length} records</span>
+                              <span>{decisionLifecycleImpact.edges.length} links</span>
+                              {decisionLifecycleImpact.truncated ? <span>Bound reached; narrow or rerun with API limits</span> : <span>Complete within configured bounds</span>}
+                            </div>
+                            <div className="impact-paths">
+                              {decisionLifecycleImpact.nodes.filter((node) => node.depth > 0).slice(0, 8).map((node) => (
+                                <div key={node.id}><strong>Level {node.depth} · {node.type.replaceAll("_", " ")}</strong><span>{node.label}</span></div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </section>
                       {selectedDecision.status === "active" ? (
                         <section className="response-form">
                           <h3>Retire this decision</h3>
@@ -3715,14 +3776,6 @@ export default function Home() {
                             disabled={submitting || decisionLifecycleRationale.trim().length < 10 || (decisionLifecycleStatus === "superseded" && !replacementDecisionId)}
                             onClick={() => void changeDecisionLifecycle()}
                           >Apply lifecycle change</button>
-                        </section>
-                      ) : null}
-                      {decisionLifecycleImpact ? (
-                        <section>
-                          <h3>Potentially affected records</h3>
-                          <p className="impact">
-                            {decisionLifecycleImpact.artifactIds.length} specification(s), {decisionLifecycleImpact.assumptionIds.length} assumption(s), {decisionLifecycleImpact.runIds.length} agent run(s), and {decisionLifecycleImpact.workItems.length} work item(s).
-                          </p>
                         </section>
                       ) : null}
                       {selectedDecision.questionId ? (
