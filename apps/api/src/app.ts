@@ -12,6 +12,7 @@ import {
   contextQuerySchema,
   continuationQuerySchema,
   createOrganizationMemberInputSchema,
+  createDirectoryGroupInputSchema,
   createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
@@ -50,6 +51,7 @@ import {
   startAgentRunInputSchema,
   syncGithubPullRequestInputSchema,
   syncGithubIssueInputSchema,
+  syncDirectoryGroupInputSchema,
   updateOrganizationMemberInputSchema,
   revokeServiceIdentityInputSchema,
   rotateServiceIdentityInputSchema,
@@ -132,6 +134,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   {
     match: /^\/v1\/notifications(?:$|\/)/,
     scopes: readWriteScopes(bridgeScopes.notificationsRead, bridgeScopes.notificationsWrite),
+  },
+  {
+    match: /^\/v1\/admin\/organization\/directory-groups\/[^/]+\/sync$/,
+    scopes: { POST: bridgeScopes.directorySync },
   },
   {
     match: /^\/v1\/admin\/organization\//,
@@ -561,6 +567,32 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = updateOrganizationMemberInputSchema.parse(request.body);
       return options.service.updateOrganizationMember(principal, request.params.memberId, input);
+    },
+  );
+
+  app.get("/v1/admin/organization/directory-groups", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listDirectoryGroups(principal) };
+  });
+
+  app.post<{ Body: unknown }>(
+    "/v1/admin/organization/directory-groups",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = createDirectoryGroupInputSchema.parse(request.body);
+      const registration = await options.service.createDirectoryGroup(principal, input);
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.post<{ Params: { groupId: string }; Body: unknown }>(
+    "/v1/admin/organization/directory-groups/:groupId/sync",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncDirectoryGroupInputSchema.parse(request.body);
+      return options.service.syncDirectoryGroup(principal, request.params.groupId, input);
     },
   );
 

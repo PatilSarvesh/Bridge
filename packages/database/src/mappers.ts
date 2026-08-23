@@ -8,6 +8,8 @@ import {
   type AuditEvent,
   type ContextSnapshot,
   type Decision,
+  type DirectoryGroup,
+  type DirectoryGroupMember,
   type GithubPullRequestContext,
   type GithubIssueWorkItem,
   type Notification,
@@ -39,6 +41,8 @@ import {
   auditEvents,
   contextSnapshots,
   decisions,
+  directoryGroups,
+  directoryGroupMembers,
   githubPullRequests,
   githubIssues,
   projects,
@@ -62,6 +66,8 @@ import {
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+export type DirectoryGroupRow = typeof directoryGroups.$inferSelect;
+export type DirectoryGroupMemberRow = typeof directoryGroupMembers.$inferSelect;
 export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ProjectOwnershipConfigurationRow = typeof projectOwnershipConfigurations.$inferSelect;
@@ -119,6 +125,27 @@ export function organizationMembershipToRow(
 export function organizationMembershipFromRow(
   row: OrganizationMembershipRow,
 ): OrganizationMembership {
+  return { ...row };
+}
+
+export function directoryGroupToRow(group: DirectoryGroup): typeof directoryGroups.$inferInsert {
+  return { ...group, sourceUpdatedAt: group.sourceUpdatedAt ?? null };
+}
+
+export function directoryGroupFromRow(row: DirectoryGroupRow): DirectoryGroup {
+  const { sourceUpdatedAt, ...group } = row;
+  return { ...group, ...(sourceUpdatedAt === null ? {} : { sourceUpdatedAt }) };
+}
+
+export function directoryGroupMemberToRow(
+  member: DirectoryGroupMember,
+): typeof directoryGroupMembers.$inferInsert {
+  return { ...member };
+}
+
+export function directoryGroupMemberFromRow(
+  row: DirectoryGroupMemberRow,
+): DirectoryGroupMember {
   return { ...row };
 }
 

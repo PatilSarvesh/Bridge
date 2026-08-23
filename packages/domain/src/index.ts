@@ -49,6 +49,7 @@ export type BridgeErrorCode =
   | "OUTBOX_EVENT_NOT_FOUND"
   | "PULL_REQUEST_NOT_FOUND"
   | "WORK_ITEM_NOT_FOUND"
+  | "DIRECTORY_GROUP_NOT_FOUND"
   | "MEMBER_NOT_FOUND"
   | "IDENTITY_NOT_CONFIGURED"
   | "LAST_ORGANIZATION_ADMIN"
@@ -126,6 +127,34 @@ export interface OrganizationMembership {
   readonly status: MembershipStatus;
   readonly roles: readonly string[];
   readonly allProjects: boolean;
+  readonly provisioning: "manual" | "directory";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface DirectoryGroup {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly provider: string;
+  readonly issuer: string;
+  readonly externalGroupId: string;
+  readonly displayName: string;
+  readonly status: "active" | "disabled";
+  readonly sourceUpdatedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface DirectoryGroupMember {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly groupId: string;
+  readonly principalId: string;
+  readonly externalSubject: string;
+  readonly displayName: string;
+  readonly status: "active" | "removed";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly version: number;
@@ -156,12 +185,15 @@ export interface OrganizationAuditEvent {
     | "service_identity.revoked"
     | "audit.exported"
     | "authentication.succeeded"
-    | "authentication.logged_out";
+    | "authentication.logged_out"
+    | "directory_group.created"
+    | "directory_group.synced";
   readonly subjectType:
     | "organization_membership"
     | "service_credential"
     | "audit_export"
-    | "principal_identity";
+    | "principal_identity"
+    | "directory_group";
   readonly subjectId: string;
   readonly createdAt: string;
 }

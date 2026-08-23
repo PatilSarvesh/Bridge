@@ -324,6 +324,7 @@ export const bridgeCapabilityScopeSchema = z.enum([
   "bridge:notifications:read",
   "bridge:notifications:write",
   "bridge:diagnostics:write",
+  "bridge:directory:sync",
   "bridge:organization:read",
   "bridge:organization:admin",
   "bridge:project:admin",
@@ -350,6 +351,7 @@ export const bridgeCapabilityScopes = {
   notificationsRead: "bridge:notifications:read",
   notificationsWrite: "bridge:notifications:write",
   diagnosticsWrite: "bridge:diagnostics:write",
+  directorySync: "bridge:directory:sync",
   organizationRead: "bridge:organization:read",
   organizationAdmin: "bridge:organization:admin",
   projectAdmin: "bridge:project:admin",
@@ -388,6 +390,43 @@ export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and
   expectedVersion: z.number().int().positive(),
   status: membershipStatusSchema,
 }));
+
+export const createDirectoryGroupInputSchema = z.object({
+  provider: z.string().trim().min(2).max(50).regex(/^[a-z0-9][a-z0-9._-]*$/),
+  issuer: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://"),
+    "issuer must use HTTPS.",
+  ),
+  externalGroupId: z.string().trim().min(1).max(300),
+  displayName: z.string().trim().min(2).max(200),
+});
+
+export const directoryGroupStatusSchema = z.enum(["active", "disabled"]);
+export const syncDirectoryGroupInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  status: directoryGroupStatusSchema,
+  members: z.array(z.object({
+    subject: z.string().trim().min(1).max(300),
+    displayName: z.string().trim().min(2).max(200),
+  })).max(1_000),
+}).superRefine((value, context) => {
+  if (value.status === "disabled" && value.members.length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: "Disabled provider groups must synchronize an empty member snapshot.",
+      path: ["members"],
+    });
+  }
+  const subjects = value.members.map((member) => member.subject);
+  if (new Set(subjects).size !== subjects.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Directory member subjects must be unique.",
+      path: ["members"],
+    });
+  }
+});
 
 const serviceIdentityConfigurationSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -1002,6 +1041,9 @@ export type ProjectPolicyRuleInput = z.infer<typeof projectPolicyRuleInputSchema
 export type ReplaceProjectPolicyInput = z.infer<typeof replaceProjectPolicyInputSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
+export type CreateDirectoryGroupInput = z.infer<typeof createDirectoryGroupInputSchema>;
+export type DirectoryGroupStatus = z.infer<typeof directoryGroupStatusSchema>;
+export type SyncDirectoryGroupInput = z.infer<typeof syncDirectoryGroupInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;
 export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
 export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;

@@ -71,6 +71,52 @@ describe("Bridge API vertical slice", () => {
 
     currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
     expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+
+    const group = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/directory-groups",
+      payload: {
+        provider: "auth0",
+        issuer: "https://bridge.local/",
+        externalGroupId: "api-scope-engineering",
+        displayName: "API Scope Engineering",
+      },
+    });
+    expect(group.statusCode).toBe(201);
+    const groupId = group.json<{ group: { id: string } }>().group.id;
+    const syncPayload = {
+      expectedVersion: 1,
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      status: "active",
+      members: [{ subject: "auth0|api-scope-member", displayName: "API Scope Member" }],
+    };
+    currentPrincipal = {
+      ...demoPrincipals.agent,
+      type: "integration",
+      roles: ["integration"],
+      scopes: ["bridge:write"],
+    };
+    const coarseWriteDenied = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/directory-groups/${groupId}/sync`,
+      payload: syncPayload,
+    });
+    expect(coarseWriteDenied.statusCode).toBe(403);
+    expect(coarseWriteDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:directory:sync" },
+    });
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:directory:sync"] };
+    const scopedSync = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/directory-groups/${groupId}/sync`,
+      payload: syncPayload,
+    });
+    expect(scopedSync.statusCode).toBe(200);
+    expect(scopedSync.json()).toMatchObject({
+      group: { version: 2 },
+      membershipChanges: { provisioned: 1 },
+      humanApprovalChanged: false,
+    });
   });
 
   it("limits fine-grained bearer scopes to their mapped REST resource family", async () => {

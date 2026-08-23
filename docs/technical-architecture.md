@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-24):** Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, bounded provider-group membership synchronization, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, provider invitations/SCIM hosting, and live deployment/provider/isolation evidence are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -623,6 +623,9 @@ GET    /v1/admin/projects/:projectId/audit?action=&actorId=&subjectType=&subject
 POST   /v1/admin/projects/:projectId/audit/export
 GET    /v1/admin/organization/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
 POST   /v1/admin/organization/audit/export
+GET    /v1/admin/organization/directory-groups
+POST   /v1/admin/organization/directory-groups
+POST   /v1/admin/organization/directory-groups/:groupId/sync
 ```
 
 Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
@@ -630,6 +633,8 @@ Decision collection semantics are intentionally conservative: `GET /v1/projects/
 Artifact version comparison is an authorized, derived read over two immutable versions of the same artifact. The application layer verifies artifact access and version ownership before comparing normalized lines. It uses an exact longest-common-subsequence diff within a fixed one-million-cell and 5,000-line-per-side budget; larger inputs fall back to deterministic removed/added regions. Responses include complete counts and provenance but cap rendered lines at 2,000 so the browser degrades predictably. Comparison does not write an artifact, version, audit event, or outbox event, and it never changes stored Markdown or hashes.
 
 Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the mapped REST capability boundary (`bridge:project:admin`, `bridge:organization:admin`, or the explicit `bridge:admin` wildcard), with coarse `bridge:read`/`bridge:write` compatibility grants retained; application role and human-approval checks remain authoritative.
+
+Directory-group creation/listing remains human organization-administrator-only. The one lifecycle reconciliation route is an explicit exception for `integration` principals carrying `bridge:directory:sync`; coarse `bridge:write` is deliberately insufficient. A configured group is bound to the application's exact OIDC issuer. Sync accepts at most 1,000 unique subject/display-name pairs plus provider timestamp/status, creates human identities and active organization memberships with `provisioning=directory`, zero roles, no all-project grant, and no project memberships, and records versioned group/member lifecycle rows. Removal disables a directory-provisioned organization membership only after the principal has no active synchronized group membership. Any human administrator update changes provenance to `manual`, so provider removal preserves that access. The operation never assigns a role/project, mutates an approval, or exposes an MCP tool; provider discovery, SCIM hosting, invitations, and live webhook/token validation remain outside this slice.
 
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
 
@@ -718,12 +723,13 @@ bridge:artifacts:write
 bridge:notifications:read
 bridge:notifications:write
 bridge:diagnostics:write
+bridge:directory:sync
 bridge:organization:read
 bridge:organization:admin
 bridge:project:admin
 ```
 
-REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible, and `bridge:admin` is the explicit wildcard; Bridge does not issue these scopes itself.
+REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible except that the high-impact directory reconciliation command requires explicit `bridge:directory:sync`; `bridge:admin` remains the explicit wildcard. Bridge does not issue these scopes itself.
 
 ### 13.4 Idempotency
 

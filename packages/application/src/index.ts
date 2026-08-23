@@ -12,6 +12,7 @@ import type {
   ChangeDecisionLifecycleInput,
   ContextQuery,
   CreateOrganizationMemberInput,
+  CreateDirectoryGroupInput,
   CreateServiceIdentityInput,
   DecisionListQuery,
   DecisionConflictQuery,
@@ -38,6 +39,7 @@ import type {
   Scope,
   StartAgentRunInput,
   UpdateOrganizationMemberInput,
+  SyncDirectoryGroupInput,
   RevokeServiceIdentityInput,
   RotateServiceIdentityInput,
   NotificationListQuery,
@@ -86,6 +88,8 @@ import {
   type ContextItem,
   type ContextSnapshot,
   type Decision,
+  type DirectoryGroup,
+  type DirectoryGroupMember,
   type GithubPullRequestContext,
   type GithubIssueWorkItem,
   type Principal,
@@ -170,6 +174,15 @@ export interface BridgeRepository {
     membership: OrganizationMembership,
     expectedVersion?: number,
   ): Promise<boolean>;
+  getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined>;
+  listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]>;
+  saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean>;
+  listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]>;
+  listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]>;
+  saveDirectoryGroupMember(member: DirectoryGroupMember, expectedVersion?: number): Promise<boolean>;
   listProjectMemberships(
     organizationId: string,
     principalId: string,
@@ -367,10 +380,31 @@ export interface OrganizationMember {
   readonly status: OrganizationMembership["status"];
   readonly roles: readonly string[];
   readonly allProjects: boolean;
+  readonly provisioning: OrganizationMembership["provisioning"];
   readonly projectMemberships: readonly ProjectMembership[];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly version: number;
+}
+
+export interface DirectoryGroupView {
+  readonly group: DirectoryGroup;
+  readonly members: readonly DirectoryGroupMember[];
+}
+
+export interface DirectoryGroupRegistration extends DirectoryGroupView {
+  readonly disposition: "created" | "idempotent_replay";
+}
+
+export interface DirectoryGroupSyncResult extends DirectoryGroupView {
+  readonly disposition: "updated" | "idempotent_replay";
+  readonly membershipChanges: {
+    readonly provisioned: number;
+    readonly reactivated: number;
+    readonly disabled: number;
+    readonly preserved: number;
+  };
+  readonly humanApprovalChanged: false;
 }
 
 export interface OrganizationMemberRegistration {
@@ -1129,6 +1163,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly principalIdentities = new Map<string, PrincipalIdentity>();
   private readonly serviceCredentials = new Map<string, ServiceCredential>();
   private readonly organizationMemberships = new Map<string, OrganizationMembership>();
+  private readonly directoryGroups = new Map<string, DirectoryGroup>();
+  private readonly directoryGroupMembers = new Map<string, DirectoryGroupMember>();
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
@@ -1183,6 +1219,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       principalIdentities: new Map(this.principalIdentities),
       serviceCredentials: new Map(this.serviceCredentials),
       organizationMemberships: new Map(this.organizationMemberships),
+      directoryGroups: new Map(this.directoryGroups),
+      directoryGroupMembers: new Map(this.directoryGroupMembers),
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
@@ -1218,6 +1256,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.principalIdentities, snapshot.principalIdentities);
       this.restoreMap(this.serviceCredentials, snapshot.serviceCredentials);
       this.restoreMap(this.organizationMemberships, snapshot.organizationMemberships);
+      this.restoreMap(this.directoryGroups, snapshot.directoryGroups);
+      this.restoreMap(this.directoryGroupMembers, snapshot.directoryGroupMembers);
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
@@ -1356,6 +1396,55 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       key,
       membership,
     );
+    return true;
+  }
+
+  async getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined> {
+    return this.directoryGroups.get(groupId);
+  }
+
+  async listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]> {
+    return [...this.directoryGroups.values()]
+      .filter((group) => group.organizationId === organizationId)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id));
+  }
+
+  async saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean> {
+    const current = this.directoryGroups.get(group.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.directoryGroups.set(group.id, group);
+    return true;
+  }
+
+  async listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]> {
+    return [...this.directoryGroupMembers.values()]
+      .filter((member) => member.groupId === groupId)
+      .sort((left, right) => left.externalSubject.localeCompare(right.externalSubject));
+  }
+
+  async listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]> {
+    return [...this.directoryGroupMembers.values()]
+      .filter((member) =>
+        member.organizationId === organizationId && member.principalId === principalId)
+      .sort((left, right) => left.groupId.localeCompare(right.groupId));
+  }
+
+  async saveDirectoryGroupMember(
+    member: DirectoryGroupMember,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.directoryGroupMembers.get(member.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.directoryGroupMembers.set(member.id, member);
     return true;
   }
 
@@ -2702,6 +2791,298 @@ export class BridgeService {
     });
   }
 
+  async listDirectoryGroups(principal: Principal): Promise<readonly DirectoryGroupView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading directory groups");
+      return Promise.all((await repository.listDirectoryGroups(principal.organizationId)).map(async (group) => ({
+        group,
+        members: await repository.listDirectoryGroupMembers(group.id),
+      })));
+    });
+  }
+
+  async createDirectoryGroup(
+    principal: Principal,
+    input: CreateDirectoryGroupInput,
+  ): Promise<DirectoryGroupRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Configuring a directory group");
+      this.assertSecretSafe("administration", input);
+      if (!this.identityIssuer) {
+        throw new BridgeError(
+          "IDENTITY_NOT_CONFIGURED",
+          "Directory group provisioning requires a configured OIDC issuer.",
+          503,
+        );
+      }
+      const issuer = `${input.issuer.replace(/\/+$/, "")}/`;
+      if (issuer !== this.identityIssuer) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The directory group issuer must match the configured organization identity issuer.",
+          422,
+        );
+      }
+      const provider = input.provider.trim().toLowerCase();
+      const externalGroupId = input.externalGroupId.trim();
+      const groupId = `dgr_${createHash("sha256")
+        .update(`${principal.organizationId}:${provider}:${issuer}:${externalGroupId}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getDirectoryGroup(groupId);
+      if (existing) {
+        const exactReplay = existing.organizationId === principal.organizationId &&
+          existing.provider === provider &&
+          existing.issuer === issuer &&
+          existing.externalGroupId === externalGroupId &&
+          existing.displayName === input.displayName.trim();
+        if (!exactReplay) {
+          throw new BridgeError("CONFLICT", "This directory group has different configuration.", 409);
+        }
+        return {
+          group: existing,
+          members: await repository.listDirectoryGroupMembers(existing.id),
+          disposition: "idempotent_replay",
+        };
+      }
+      const timestamp = this.now().toISOString();
+      const group: DirectoryGroup = {
+        id: groupId,
+        organizationId: principal.organizationId,
+        provider,
+        issuer,
+        externalGroupId,
+        displayName: input.displayName.trim(),
+        status: "active",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveDirectoryGroup(group)) {
+        throw new BridgeError("CONFLICT", "The directory group was created concurrently.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "directory_group.created",
+        group.id,
+        timestamp,
+        "directory_group",
+      );
+      return { group, members: [], disposition: "created" };
+    });
+  }
+
+  async syncDirectoryGroup(
+    principal: Principal,
+    groupId: string,
+    input: SyncDirectoryGroupInput,
+  ): Promise<DirectoryGroupSyncResult> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertDirectorySyncWriter(principal, "Synchronizing a directory group");
+      this.assertSecretSafe("administration", input);
+      const group = await repository.getDirectoryGroup(groupId);
+      if (!group || group.organizationId !== principal.organizationId) {
+        throw new BridgeError("DIRECTORY_GROUP_NOT_FOUND", "Directory group not found.", 404);
+      }
+      const sourceUpdatedAt = new Date(input.sourceUpdatedAt).toISOString();
+      const normalizedMembers = [...input.members]
+        .map((member) => ({
+          subject: member.subject.trim(),
+          displayName: member.displayName.trim(),
+        }))
+        .sort((left, right) => left.subject.localeCompare(right.subject));
+      const existingMembers = await repository.listDirectoryGroupMembers(group.id);
+      const activeSnapshot = existingMembers
+        .filter((member) => member.status === "active")
+        .map((member) => ({ subject: member.externalSubject, displayName: member.displayName }))
+        .sort((left, right) => left.subject.localeCompare(right.subject));
+      if (group.sourceUpdatedAt) {
+        const sourceOrder = sourceUpdatedAt.localeCompare(group.sourceUpdatedAt);
+        const sameSnapshot = group.status === input.status &&
+          JSON.stringify(activeSnapshot) === JSON.stringify(normalizedMembers);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !sameSnapshot)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The directory group event is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: group.version, sourceUpdatedAt: group.sourceUpdatedAt },
+          );
+        }
+        if (sourceOrder === 0 && sameSnapshot) {
+          return {
+            group,
+            members: existingMembers,
+            disposition: "idempotent_replay",
+            membershipChanges: { provisioned: 0, reactivated: 0, disabled: 0, preserved: 0 },
+            humanApprovalChanged: false,
+          };
+        }
+      }
+      if (group.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The directory group changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: group.version,
+        });
+      }
+      const timestamp = this.now().toISOString();
+      const existingBySubject = new Map(
+        existingMembers.map((member) => [member.externalSubject, member]),
+      );
+      const desiredSubjects = new Set(normalizedMembers.map((member) => member.subject));
+      const changes = { provisioned: 0, reactivated: 0, disabled: 0, preserved: 0 };
+      for (const desired of normalizedMembers) {
+        let identity = await repository.getPrincipalIdentityByOidc(group.issuer, desired.subject);
+        if (!identity) {
+          identity = {
+            id: `usr_${createHash("sha256")
+              .update(`${group.issuer}:${desired.subject}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            type: "human",
+            displayName: desired.displayName,
+            oidcIssuer: group.issuer,
+            oidcSubject: desired.subject,
+            createdAt: timestamp,
+          };
+          await repository.savePrincipalIdentity(identity);
+        } else if (identity.type !== "human") {
+          throw new BridgeError("CONFLICT", "A directory member subject belongs to a service principal.", 409);
+        } else if (identity.displayName !== desired.displayName) {
+          identity = { ...identity, displayName: desired.displayName };
+          await repository.savePrincipalIdentity(identity);
+        }
+        const membership = await repository.getOrganizationMembership(
+          principal.organizationId,
+          identity.id,
+        );
+        if (!membership) {
+          await repository.saveOrganizationMembership({
+            organizationId: principal.organizationId,
+            principalId: identity.id,
+            status: "active",
+            roles: [],
+            allProjects: false,
+            provisioning: "directory",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            version: 1,
+          });
+          changes.provisioned += 1;
+        } else if (membership.provisioning === "directory" && membership.status === "disabled") {
+          if (!await repository.saveOrganizationMembership({
+            ...membership,
+            status: "active",
+            updatedAt: timestamp,
+            version: membership.version + 1,
+          }, membership.version)) {
+            throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
+          }
+          changes.reactivated += 1;
+        } else if (membership.provisioning === "manual") {
+          changes.preserved += 1;
+        }
+        const existingMember = existingBySubject.get(desired.subject);
+        if (existingMember) {
+          if (
+            existingMember.status !== "active" ||
+            existingMember.displayName !== desired.displayName ||
+            existingMember.principalId !== identity.id
+          ) {
+            if (!await repository.saveDirectoryGroupMember({
+              ...existingMember,
+              principalId: identity.id,
+              displayName: desired.displayName,
+              status: "active",
+              updatedAt: timestamp,
+              version: existingMember.version + 1,
+            }, existingMember.version)) {
+              throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
+            }
+          }
+        } else {
+          const groupMember: DirectoryGroupMember = {
+            id: `dgm_${createHash("sha256")
+              .update(`${group.id}:${desired.subject}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            organizationId: principal.organizationId,
+            groupId: group.id,
+            principalId: identity.id,
+            externalSubject: desired.subject,
+            displayName: desired.displayName,
+            status: "active",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            version: 1,
+          };
+          if (!await repository.saveDirectoryGroupMember(groupMember)) {
+            throw new BridgeError("CONFLICT", "A directory group member was created concurrently.", 409);
+          }
+        }
+      }
+      const removedPrincipalIds = new Set<string>();
+      for (const existing of existingMembers) {
+        if (existing.status !== "active" || desiredSubjects.has(existing.externalSubject)) continue;
+        if (!await repository.saveDirectoryGroupMember({
+          ...existing,
+          status: "removed",
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        }, existing.version)) {
+          throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
+        }
+        removedPrincipalIds.add(existing.principalId);
+      }
+      for (const principalId of removedPrincipalIds) {
+        const remainsInDirectory = (await repository.listDirectoryGroupMembersForPrincipal(
+          principal.organizationId,
+          principalId,
+        )).some((member) => member.status === "active");
+        const membership = await repository.getOrganizationMembership(principal.organizationId, principalId);
+        if (remainsInDirectory || !membership || membership.status !== "active") continue;
+        if (membership.provisioning === "manual") {
+          changes.preserved += 1;
+          continue;
+        }
+        if (!await repository.saveOrganizationMembership({
+          ...membership,
+          status: "disabled",
+          updatedAt: timestamp,
+          version: membership.version + 1,
+        }, membership.version)) {
+          throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
+        }
+        changes.disabled += 1;
+      }
+      const updatedGroup: DirectoryGroup = {
+        ...group,
+        status: input.status,
+        sourceUpdatedAt,
+        updatedAt: timestamp,
+        version: group.version + 1,
+      };
+      if (!await repository.saveDirectoryGroup(updatedGroup, group.version)) {
+        throw new BridgeError("CONFLICT", "The directory group changed during synchronization.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "directory_group.synced",
+        group.id,
+        timestamp,
+        "directory_group",
+      );
+      return {
+        group: updatedGroup,
+        members: await repository.listDirectoryGroupMembers(group.id),
+        disposition: "updated",
+        membershipChanges: changes,
+        humanApprovalChanged: false,
+      };
+    });
+  }
+
   async listServiceIdentities(principal: Principal): Promise<readonly ServiceIdentity[]> {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading service identities");
@@ -2761,6 +3142,7 @@ export class BridgeService {
         status: "active",
         roles: this.normalizedRoles(input.roles),
         allProjects: input.allProjects,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -2979,6 +3361,7 @@ export class BridgeService {
         status: "active",
         roles,
         allProjects: input.allProjects,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -3061,6 +3444,7 @@ export class BridgeService {
         status: input.status,
         roles,
         allProjects: input.allProjects,
+        provisioning: "manual",
         updatedAt: timestamp,
         version: current.version + 1,
       };
@@ -7418,6 +7802,20 @@ export class BridgeService {
     }
   }
 
+  private assertDirectorySyncWriter(principal: Principal, action: string): void {
+    if (principal.type === "human") {
+      this.assertOrganizationAdministrator(principal, action);
+      return;
+    }
+    if (principal.type !== "integration") {
+      throw new BridgeError(
+        "FORBIDDEN",
+        `${action} requires an organization administrator or directory integration identity.`,
+        403,
+      );
+    }
+  }
+
   private filterAuditRecords(
     records: readonly AuditRecord[],
     query: Pick<AuditListQuery, "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
@@ -8039,6 +8437,7 @@ export class BridgeService {
       status: membership.status,
       roles: membership.roles,
       allProjects: membership.allProjects,
+      provisioning: membership.provisioning,
       projectMemberships: [...projectMemberships].sort((left, right) =>
         left.projectId.localeCompare(right.projectId)),
       createdAt: membership.createdAt,

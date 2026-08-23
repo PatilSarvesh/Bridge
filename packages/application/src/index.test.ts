@@ -8,6 +8,7 @@ import type {
   ReplaceProjectPolicyInput,
   SyncGithubPullRequestInput,
   SyncGithubIssueInput,
+  SyncDirectoryGroupInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
@@ -226,6 +227,7 @@ async function seedOrganizationAdministrator(repository: InMemoryBridgeRepositor
     status: "active",
     roles: organizationAdmin.roles,
     allProjects: true,
+    provisioning: "manual",
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
@@ -250,6 +252,7 @@ async function seedOwnershipMembers(repository: InMemoryBridgeRepository): Promi
       status: "active",
       roles: principal.roles,
       allProjects: principal.allProjects ?? false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: timestamp,
       version: 1,
@@ -286,6 +289,7 @@ async function seedProjectMember(
     status: "active",
     roles: principal.roles,
     allProjects: principal.allProjects ?? false,
+    provisioning: "manual",
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
@@ -1172,6 +1176,127 @@ describe("Bridge decision workflow", () => {
       { action: "organization_member.updated", subjectId: created.member.id },
       { action: "organization_member.created", subjectId: created.member.id },
     ]);
+  });
+
+  it("provisions bounded directory groups without granting roles or overriding manual access", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    await expect(service.createDirectoryGroup(contributor, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const registration = await service.createDirectoryGroup(organizationAdmin, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    });
+    expect(registration).toMatchObject({
+      disposition: "created",
+      group: { id: expect.stringMatching(/^dgr_/), status: "active", version: 1 },
+      members: [],
+    });
+    await expect(service.createDirectoryGroup(organizationAdmin, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    })).resolves.toEqual({ ...registration, disposition: "idempotent_replay" });
+
+    const initialSync: SyncDirectoryGroupInput = {
+      expectedVersion: 1,
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      status: "active",
+      members: [
+        { subject: "auth0|directory-one", displayName: "Directory One" },
+        { subject: "auth0|directory-two", displayName: "Directory Two" },
+      ],
+    };
+    await expect(service.syncDirectoryGroup(agent, registration.group.id, initialSync))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    const synced = await service.syncDirectoryGroup(
+      githubIntegration,
+      registration.group.id,
+      initialSync,
+    );
+    expect(synced).toMatchObject({
+      disposition: "updated",
+      group: { status: "active", sourceUpdatedAt: initialSync.sourceUpdatedAt, version: 2 },
+      membershipChanges: { provisioned: 2, reactivated: 0, disabled: 0, preserved: 0 },
+      humanApprovalChanged: false,
+    });
+    expect(synced.members).toHaveLength(2);
+    for (const member of synced.members) {
+      await expect(repository.getOrganizationMembership(project.organizationId, member.principalId))
+        .resolves.toMatchObject({
+          status: "active",
+          roles: [],
+          allProjects: false,
+          provisioning: "directory",
+          version: 1,
+        });
+      await expect(repository.listProjectMemberships(project.organizationId, member.principalId))
+        .resolves.toEqual([]);
+    }
+    await expect(service.syncDirectoryGroup(
+      githubIntegration,
+      registration.group.id,
+      initialSync,
+    )).resolves.toMatchObject({ disposition: "idempotent_replay", group: { version: 2 } });
+
+    const manuallyManaged = synced.members.find((member) =>
+      member.externalSubject === "auth0|directory-one")!;
+    await service.updateOrganizationMember(organizationAdmin, manuallyManaged.principalId, {
+      expectedVersion: 1,
+      status: "active",
+      roles: ["contributor"],
+      allProjects: false,
+      projectMemberships: [],
+    });
+    const reduced = await service.syncDirectoryGroup(githubIntegration, registration.group.id, {
+      expectedVersion: 2,
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+      status: "active",
+      members: [{ subject: "auth0|directory-two", displayName: "Directory Two" }],
+    });
+    expect(reduced.membershipChanges).toMatchObject({ disabled: 0, preserved: 1 });
+    await expect(repository.getOrganizationMembership(
+      project.organizationId,
+      manuallyManaged.principalId,
+    )).resolves.toMatchObject({
+      status: "active",
+      roles: ["contributor"],
+      provisioning: "manual",
+    });
+
+    const directoryManaged = synced.members.find((member) =>
+      member.externalSubject === "auth0|directory-two")!;
+    const disabled = await service.syncDirectoryGroup(githubIntegration, registration.group.id, {
+      expectedVersion: 3,
+      sourceUpdatedAt: "2026-01-01T03:00:00.000Z",
+      status: "disabled",
+      members: [],
+    });
+    expect(disabled).toMatchObject({
+      group: { status: "disabled", version: 4 },
+      membershipChanges: { disabled: 1 },
+      humanApprovalChanged: false,
+    });
+    await expect(repository.getOrganizationMembership(
+      project.organizationId,
+      directoryManaged.principalId,
+    )).resolves.toMatchObject({ status: "disabled", provisioning: "directory" });
+    await expect(service.listDirectoryGroups(organizationAdmin)).resolves.toEqual([
+      expect.objectContaining({ group: expect.objectContaining({ id: registration.group.id }) }),
+    ]);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "directory_group.created", subjectType: "directory_group" }),
+        expect.objectContaining({ action: "directory_group.synced", subjectType: "directory_group" }),
+      ]),
+    );
   });
 
   it("records human web authentication events without granting agents an audit path", async () => {
@@ -2939,6 +3064,7 @@ describe("Bridge decision workflow", () => {
         status: "active",
         roles: member.roles,
         allProjects: member.allProjects ?? false,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -4178,6 +4304,7 @@ describe("Bridge decision workflow", () => {
       status: "active",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: timestamp,
       version: 1,
@@ -4211,6 +4338,7 @@ describe("Bridge decision workflow", () => {
       status: "disabled",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: "2026-01-02T00:00:00.000Z",
       version: 2,

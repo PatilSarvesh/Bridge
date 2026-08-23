@@ -166,6 +166,7 @@ export async function createDemoRuntimeWithRepository(
         status: "active",
         roles: principal.roles,
         allProjects: principal.allProjects ?? false,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,

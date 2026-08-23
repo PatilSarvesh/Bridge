@@ -8,6 +8,8 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  DirectoryGroup,
+  DirectoryGroupMember,
   GithubPullRequestContext,
   GithubIssueWorkItem,
   Notification,
@@ -40,6 +42,10 @@ import {
   artifactVersionToRow,
   decisionFromRow,
   decisionToRow,
+  directoryGroupFromRow,
+  directoryGroupMemberFromRow,
+  directoryGroupMemberToRow,
+  directoryGroupToRow,
   githubPullRequestFromRow,
   githubPullRequestToRow,
   githubIssueFromRow,
@@ -86,6 +92,8 @@ import {
   type ArtifactVersionRow,
   type AuditEventRow,
   type DecisionRow,
+  type DirectoryGroupRow,
+  type DirectoryGroupMemberRow,
   type GithubPullRequestRow,
   type GithubIssueRow,
   type ContextSnapshotRow,
@@ -462,6 +470,7 @@ describe("PostgreSQL domain mappings", () => {
       status: "active",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: organization.createdAt,
       updatedAt: organization.createdAt,
       version: 1,
@@ -510,12 +519,42 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: identity.id,
       createdAt: organization.createdAt,
     };
+    const directoryGroup: DirectoryGroup = {
+      id: "dgr_mapping",
+      organizationId: organization.id,
+      provider: "auth0",
+      issuer: identity.oidcIssuer,
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+      status: "active",
+      sourceUpdatedAt: "2026-08-07T09:30:00.000Z",
+      createdAt: organization.createdAt,
+      updatedAt: "2026-08-07T09:30:00.000Z",
+      version: 2,
+    };
+    const directoryGroupMember: DirectoryGroupMember = {
+      id: "dgm_mapping",
+      organizationId: organization.id,
+      groupId: directoryGroup.id,
+      principalId: identity.id,
+      externalSubject: identity.oidcSubject,
+      displayName: identity.displayName,
+      status: "active",
+      createdAt: organization.createdAt,
+      updatedAt: organization.createdAt,
+      version: 1,
+    };
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
     expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
     expect(organizationMembershipFromRow(
       organizationMembershipToRow(organizationMembership) as OrganizationMembershipRow,
     )).toEqual(organizationMembership);
+    expect(directoryGroupFromRow(directoryGroupToRow(directoryGroup) as DirectoryGroupRow))
+      .toEqual(directoryGroup);
+    expect(directoryGroupMemberFromRow(
+      directoryGroupMemberToRow(directoryGroupMember) as DirectoryGroupMemberRow,
+    )).toEqual(directoryGroupMember);
     expect(projectMembershipFromRow(
       projectMembershipToRow(projectMembership) as ProjectMembershipRow,
     )).toEqual(projectMembership);

@@ -1,6 +1,8 @@
 import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
+  DirectoryGroup,
+  DirectoryGroupMember,
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
@@ -143,6 +145,10 @@ function relatedTenantPolicy(name: string, matchesTenant: ReturnType<typeof sql>
 }
 
 export const membershipStatusEnum = pgEnum("bridge_membership_status", ["active", "disabled"]);
+export const membershipProvisioningEnum = pgEnum("bridge_membership_provisioning", [
+  "manual",
+  "directory",
+]);
 
 export const organizations = pgTable("bridge_organizations", {
   id: text("id").primaryKey(),
@@ -205,6 +211,7 @@ export const organizationMemberships = pgTable(
     status: membershipStatusEnum("status").notNull(),
     roles: jsonb("roles").$type<readonly string[]>().notNull(),
     allProjects: boolean("all_projects").notNull(),
+    provisioning: membershipProvisioningEnum("provisioning").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
     version: integer("version").default(1).notNull(),
@@ -213,6 +220,86 @@ export const organizationMemberships = pgTable(
     primaryKey({ columns: [table.organizationId, table.principalId] }),
     index("bridge_organization_memberships_principal_idx").on(table.principalId),
     tenantPolicy("bridge_organization_memberships_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const directoryGroups = pgTable(
+  "bridge_directory_groups",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    issuer: text("issuer").notNull(),
+    externalGroupId: text("external_group_id").notNull(),
+    displayName: text("display_name").notNull(),
+    status: text("status").$type<DirectoryGroup["status"]>().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_directory_groups_provider_identity_unique").on(
+      table.organizationId,
+      table.provider,
+      table.issuer,
+      table.externalGroupId,
+    ),
+    unique("bridge_directory_groups_org_id_unique").on(table.organizationId, table.id),
+    index("bridge_directory_groups_org_status_name_idx").on(
+      table.organizationId,
+      table.status,
+      table.displayName,
+    ),
+    check("bridge_directory_groups_status_check", sql`${table.status} IN ('active', 'disabled')`),
+    check("bridge_directory_groups_version_check", sql`${table.version} > 0`),
+    tenantPolicy("bridge_directory_groups_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const directoryGroupMembers = pgTable(
+  "bridge_directory_group_members",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => directoryGroups.id, { onDelete: "cascade" }),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => principalIdentities.id, { onDelete: "restrict" }),
+    externalSubject: text("external_subject").notNull(),
+    displayName: text("display_name").notNull(),
+    status: text("status").$type<DirectoryGroupMember["status"]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_directory_group_members_group_subject_unique").on(
+      table.groupId,
+      table.externalSubject,
+    ),
+    index("bridge_directory_group_members_principal_status_idx").on(
+      table.organizationId,
+      table.principalId,
+      table.status,
+    ),
+    check(
+      "bridge_directory_group_members_status_check",
+      sql`${table.status} IN ('active', 'removed')`,
+    ),
+    check("bridge_directory_group_members_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_directory_group_members_organization_group_fk",
+      columns: [table.organizationId, table.groupId],
+      foreignColumns: [directoryGroups.organizationId, directoryGroups.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_directory_group_members_tenant", table.organizationId),
   ],
 ).enableRLS();
 
@@ -861,11 +948,11 @@ export const organizationAuditEvents = pgTable(
     index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
     check(
       "bridge_organization_audit_events_action_check",
-      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out')`,
+      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out', 'directory_group.created', 'directory_group.synced')`,
     ),
     check(
       "bridge_organization_audit_events_subject_check",
-      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity'))`,
+      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity') OR (${table.action} IN ('directory_group.created', 'directory_group.synced') AND ${table.subjectType} = 'directory_group'))`,
     ),
     tenantPolicy("bridge_organization_audit_events_tenant", table.organizationId),
   ],

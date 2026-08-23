@@ -13,6 +13,8 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  DirectoryGroup,
+  DirectoryGroupMember,
   GithubPullRequestContext,
   GithubIssueWorkItem,
   Notification,
@@ -50,6 +52,10 @@ import {
   contextSnapshotFromRow,
   decisionFromRow,
   decisionToRow,
+  directoryGroupFromRow,
+  directoryGroupMemberFromRow,
+  directoryGroupMemberToRow,
+  directoryGroupToRow,
   githubPullRequestFromRow,
   githubPullRequestToRow,
   githubIssueFromRow,
@@ -96,6 +102,8 @@ import {
   auditEvents,
   contextSnapshots,
   decisions,
+  directoryGroups,
+  directoryGroupMembers,
   githubPullRequests,
   githubIssues,
   idempotencyRecords,
@@ -468,6 +476,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
         status: row.status,
         roles: row.roles,
         allProjects: row.allProjects,
+        provisioning: row.provisioning,
         updatedAt: row.updatedAt,
         version: row.version,
       }).where(and(
@@ -483,11 +492,112 @@ export class PostgresBridgeRepository implements BridgeRepository {
         status: row.status,
         roles: row.roles,
         allProjects: row.allProjects,
+        provisioning: row.provisioning,
         updatedAt: row.updatedAt,
         version: row.version,
       },
     });
     return true;
+  }
+
+  async getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(directoryGroups)
+      .where(eq(directoryGroups.id, groupId))
+      .limit(1);
+    return row ? directoryGroupFromRow(row) : undefined;
+  }
+
+  async listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroups)
+      .where(eq(directoryGroups.organizationId, organizationId))
+      .orderBy(asc(directoryGroups.displayName), asc(directoryGroups.id));
+    return rows.map(directoryGroupFromRow);
+  }
+
+  async saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean> {
+    const row = directoryGroupToRow(group);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(directoryGroups)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: directoryGroups.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(directoryGroups)
+      .set({
+        status: row.status,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(directoryGroups.id, group.id),
+        eq(directoryGroups.organizationId, group.organizationId),
+        eq(directoryGroups.version, expectedVersion),
+      ))
+      .returning({ id: directoryGroups.id });
+    return updated.length === 1;
+  }
+
+  async listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroupMembers)
+      .where(eq(directoryGroupMembers.groupId, groupId))
+      .orderBy(asc(directoryGroupMembers.externalSubject));
+    return rows.map(directoryGroupMemberFromRow);
+  }
+
+  async listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroupMembers)
+      .where(and(
+        eq(directoryGroupMembers.organizationId, organizationId),
+        eq(directoryGroupMembers.principalId, principalId),
+      ))
+      .orderBy(asc(directoryGroupMembers.groupId));
+    return rows.map(directoryGroupMemberFromRow);
+  }
+
+  async saveDirectoryGroupMember(
+    member: DirectoryGroupMember,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = directoryGroupMemberToRow(member);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(directoryGroupMembers)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: directoryGroupMembers.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(directoryGroupMembers)
+      .set({
+        principalId: row.principalId,
+        displayName: row.displayName,
+        status: row.status,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(directoryGroupMembers.id, member.id),
+        eq(directoryGroupMembers.organizationId, member.organizationId),
+        eq(directoryGroupMembers.version, expectedVersion),
+      ))
+      .returning({ id: directoryGroupMembers.id });
+    return updated.length === 1;
   }
 
   async listProjectMemberships(

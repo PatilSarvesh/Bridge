@@ -114,6 +114,7 @@ if (oidcEnabled) {
           status: "active",
           roles: ["organization-admin", "project-admin"],
           allProjects: true,
+          provisioning: "manual",
           createdAt: now,
           updatedAt: now,
           version: 1,
