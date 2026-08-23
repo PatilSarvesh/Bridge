@@ -632,7 +632,9 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       expect(await service.getArtifact(owner, artifactId)).toMatchObject({
         versions: [expect.objectContaining({
           id: artifactVersionId,
-          reviews: [expect.objectContaining({ status: "commented", reviewerId: owner.id })],
+          reviews: expect.arrayContaining([
+            expect.objectContaining({ status: "commented", reviewerId: owner.id }),
+          ]),
         })],
       });
       const persistedOutbox = await inTenant(secondStore.repository, project.organizationId, (repository) =>

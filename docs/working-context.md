@@ -2128,7 +2128,7 @@ Deliberate boundaries:
 
 Implemented and locally verified:
 
-1. The shared contract, domain, in-memory repository, PostgreSQL repository, mapper, and forward-only migration `0037_aberrant_ezekiel.sql` now persist one tenant-scoped `email` preference per human principal with `immediate`, `digest`, or `muted` values. The table is membership-owned and protected by forced RLS; no email address is stored.
+1. The shared contract, domain, in-memory repository, PostgreSQL repository, mapper, and forward-only migration `0037_aberrant_ezekiel.sql` now persist one tenant-scoped `email` preference per human principal with `immediate`, `digest`, or `muted` values. The table is membership-owned, its tenant policy is enabled by `0037`, and forward-only corrective migration `0041_force_notification_preferences_rls.sql` forces RLS after isolated-PostgreSQL CI detected the missing table-owner restriction; no email address is stored.
 2. Canonical `GET /v1/notifications/preferences` and `POST /v1/notifications/preferences` routes expose the preference read/write path. The application wraps both operations in the existing organization transaction and rejects non-human principals before persistence. Existing notification scope mapping covers both routes; MCP remains optional and exposes no separate preference authority.
 3. The provider-neutral email handler reads the persisted human preference when the repository-backed store supplies it, falling back to the injected directory default for compatibility. Protected review notifications still bypass muted/digest suppression and are recorded as immediate delivery outcomes.
 4. The web Notifications view includes a compact email preference control and clearly states that protected review email remains immediate. Application, API, mapper, worker, migration-shape, and RLS-table coverage was added; PostgreSQL integration remains gated by an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
@@ -2290,6 +2290,10 @@ Deliberate boundaries:
 - This detects byte-level drift in explicitly bound files. It does not infer semantic compliance, cover undeclared code, crawl a source provider, validate commits/pull requests, or make a checked-in manifest tamper-proof. Human code review must treat baseline edits as consequential provenance changes.
 - The CLI check consumes REST authority and does not require MCP. It can fail CI but cannot approve a specification or grant authority to an agent/CI principal; human approval remains separate.
 
+### 20.78 Corrected notification-preference RLS from isolated-PostgreSQL CI
+
+GitHub Actions PR run `32657002153` exercised the explicitly isolated `BRIDGE_TEST_DATABASE_URL` path that local validation intentionally skipped. It found that migration `0037_aberrant_ezekiel.sql` enabled the tenant policy for `bridge_notification_preferences` but did not force it, allowing a table owner to bypass the intended fail-closed posture. Forward-only custom migration `0041_force_notification_preferences_rls.sql`, its generated Drizzle metadata, and a static migration regression now force and preserve the policy without rewriting an applied migration. The same run exposed a stale integration assertion that expected an approved artifact to contain exactly one review; the assertion now verifies that the earlier comment remains present while allowing the subsequently appended human approval review. No local or production database command was run for this correction.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2355,6 +2359,7 @@ Deliberate boundaries:
 - Artifact approval-quorum migration: `packages/database/drizzle/0038_natural_puppet_master.sql`
 - Deferred email-digest scheduling migration: `packages/database/drizzle/0039_concerned_wrecking_crew.sql`
 - Blocking-question escalation migration: `packages/database/drizzle/0040_big_black_crow.sql`
+- Notification-preference forced-RLS correction: `packages/database/drizzle/0041_force_notification_preferences_rls.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`

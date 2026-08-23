@@ -112,3 +112,26 @@ describe("project policy row security migration", () => {
     expect(migration).toContain("bridge_project_policy_configurations_project_fk");
   });
 });
+
+describe("notification preference row security migrations", () => {
+  it("enables a tenant policy and forces isolation for preference records", async () => {
+    const createMigration = await readFile(
+      new URL("../drizzle/0037_aberrant_ezekiel.sql", import.meta.url),
+      "utf8",
+    );
+    const forceMigration = await readFile(
+      new URL("../drizzle/0041_force_notification_preferences_rls.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(createMigration).toContain(
+      'ALTER TABLE "bridge_notification_preferences" ENABLE ROW LEVEL SECURITY',
+    );
+    expect(createMigration).toContain(
+      'CREATE POLICY "bridge_notification_preferences_tenant" ON "bridge_notification_preferences"',
+    );
+    expect(forceMigration).toContain(
+      'ALTER TABLE "bridge_notification_preferences" FORCE ROW LEVEL SECURITY',
+    );
+  });
+});
