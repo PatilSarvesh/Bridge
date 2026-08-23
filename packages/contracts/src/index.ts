@@ -514,6 +514,12 @@ export const questionAudienceViewQuerySchema = z.object({
   mode: z.enum(["explain", "rewrite"]).default("explain"),
 });
 
+export const questionDecisionDigestQuerySchema = z.object({
+  category: z.string().trim().min(2).max(100).optional(),
+  maxDigests: z.coerce.number().int().min(1).max(20).default(10),
+  maxQuestionsPerDigest: z.coerce.number().int().min(2).max(20).default(10),
+});
+
 export const questionSubmissionDispositionSchema = z.enum([
   "created",
   "idempotent_replay",
@@ -911,6 +917,7 @@ export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
 export type FindQuestionMatchesInput = z.infer<typeof findQuestionMatchesInputSchema>;
 export type QuestionInboxQuery = z.infer<typeof questionInboxQuerySchema>;
 export type QuestionAudienceViewQuery = z.infer<typeof questionAudienceViewQuerySchema>;
+export type QuestionDecisionDigestQuery = z.infer<typeof questionDecisionDigestQuerySchema>;
 export type QuestionSubmissionDisposition = z.infer<typeof questionSubmissionDispositionSchema>;
 export type ProposeAnswerInput = z.infer<typeof proposeAnswerInputSchema>;
 export type AcceptAnswerInput = z.infer<typeof acceptAnswerInputSchema>;

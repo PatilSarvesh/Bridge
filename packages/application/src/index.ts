@@ -43,6 +43,7 @@ import type {
   ReassignQuestionInput,
   QuestionInboxQuery,
   QuestionAudienceViewQuery,
+  QuestionDecisionDigestQuery,
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
@@ -761,6 +762,27 @@ export interface QuestionAudienceView {
     readonly sourceFieldsUnchanged: true;
     readonly humanApprovalRequired: true;
   };
+}
+
+export interface QuestionDecisionDigest {
+  readonly id: string;
+  readonly category: string;
+  readonly scope: Scope;
+  readonly questionCount: number;
+  readonly remainingQuestionCount: number;
+  readonly earliestDueAt?: string;
+  readonly groupingReasons: readonly ["low risk and non-blocking", "same category", "same exact scope"];
+  readonly questions: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly whyItMatters: string;
+    readonly status: Question["status"];
+    readonly dueAt?: string;
+    readonly dueStatus: QuestionInboxItem["dueStatus"];
+    readonly canAccept: boolean;
+  }[];
+  readonly humanApprovalRequired: true;
+  readonly batchAcceptanceAvailable: false;
 }
 
 interface NotificationDraft {
@@ -4252,6 +4274,75 @@ export class BridgeService {
         if (discussionDifference !== 0) return discussionDifference;
         return Date.parse(right.createdAt) - Date.parse(left.createdAt);
       });
+    });
+  }
+
+  async listQuestionDecisionDigests(
+    principal: Principal,
+    projectId: string,
+    query: QuestionDecisionDigestQuery,
+  ): Promise<readonly QuestionDecisionDigest[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const now = this.now();
+      const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
+      const candidates = (await repository.listQuestions(projectId))
+        .map((question) => questionInboxItem(principal, question, now))
+        .filter((question) =>
+          question.inboxReasons.length > 0 &&
+          ["open", "in_discussion"].includes(question.status) &&
+          question.risk === "low" &&
+          !question.blocking &&
+          (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory),
+        );
+      const grouped = new Map<string, QuestionInboxItem[]>();
+      for (const question of candidates) {
+        const scopeKey = JSON.stringify(Object.entries(question.scope).sort(([left], [right]) => left.localeCompare(right)));
+        const key = `${question.category.normalize("NFKC").toLocaleLowerCase("en")}\u0000${scopeKey}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), question]);
+      }
+
+      return [...grouped.entries()]
+        .filter(([, questions]) => questions.length >= 2)
+        .map(([key, questions]): QuestionDecisionDigest => {
+          const ordered = [...questions].sort((left, right) => {
+            const leftDue = left.dueAt ? Date.parse(left.dueAt) : Number.POSITIVE_INFINITY;
+            const rightDue = right.dueAt ? Date.parse(right.dueAt) : Number.POSITIVE_INFINITY;
+            return leftDue - rightDue || Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id);
+          });
+          const first = ordered[0]!;
+          const shown = ordered.slice(0, query.maxQuestionsPerDigest);
+          const earliestDueAt = ordered.find((question) => question.dueAt)?.dueAt;
+          return {
+            id: `qdg_${createHash("sha256")
+              .update(`${projectId}\u0000${principal.id}\u0000${key}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            category: first.category,
+            scope: { ...first.scope },
+            questionCount: ordered.length,
+            remainingQuestionCount: ordered.length - shown.length,
+            ...(earliestDueAt ? { earliestDueAt } : {}),
+            groupingReasons: ["low risk and non-blocking", "same category", "same exact scope"],
+            questions: shown.map((question) => ({
+              id: question.id,
+              title: question.title,
+              whyItMatters: question.whyItMatters,
+              status: question.status,
+              ...(question.dueAt ? { dueAt: question.dueAt } : {}),
+              dueStatus: question.dueStatus,
+              canAccept: question.canAccept,
+            })),
+            humanApprovalRequired: true,
+            batchAcceptanceAvailable: false,
+          };
+        })
+        .sort((left, right) => {
+          const leftDue = left.earliestDueAt ? Date.parse(left.earliestDueAt) : Number.POSITIVE_INFINITY;
+          const rightDue = right.earliestDueAt ? Date.parse(right.earliestDueAt) : Number.POSITIVE_INFINITY;
+          return leftDue - rightDue || right.questionCount - left.questionCount || left.id.localeCompare(right.id);
+        })
+        .slice(0, query.maxDigests);
     });
   }
 

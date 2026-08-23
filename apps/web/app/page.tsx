@@ -296,6 +296,26 @@ interface QuestionAudienceView {
   };
 }
 
+interface QuestionDecisionDigest {
+  readonly id: string;
+  readonly category: string;
+  readonly scope: Readonly<Record<string, string>>;
+  readonly questionCount: number;
+  readonly remainingQuestionCount: number;
+  readonly earliestDueAt?: string;
+  readonly groupingReasons: readonly string[];
+  readonly questions: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly status: string;
+    readonly dueAt?: string;
+    readonly dueStatus: Question["dueStatus"];
+    readonly canAccept: boolean;
+  }[];
+  readonly humanApprovalRequired: true;
+  readonly batchAcceptanceAvailable: false;
+}
+
 type InboxFilterKey = "status" | "risk" | "category" | "role" | "due";
 type InboxFilters = Partial<Record<InboxFilterKey, string>>;
 type DecisionFilterKey = "search" | "status" | "category" | "ownerId" | "component" | "createdFrom" | "createdTo";
@@ -756,6 +776,7 @@ export default function Home() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [questions, setQuestions] = useState<readonly Question[]>([]);
   const [inboxQuestions, setInboxQuestions] = useState<readonly Question[]>([]);
+  const [questionDigests, setQuestionDigests] = useState<readonly QuestionDecisionDigest[]>([]);
   const [inboxFilters, setInboxFilters] = useState<InboxFilters>({});
   const [inboxFiltersReady, setInboxFiltersReady] = useState(false);
   const [decisionFilters, setDecisionFilters] = useState<DecisionFilters>({});
@@ -1240,6 +1261,7 @@ export default function Home() {
     if (!selectedProjectId) {
       setQuestions([]);
       setInboxQuestions([]);
+      setQuestionDigests([]);
       setQuestionsLoading(false);
       return;
     }
@@ -1249,7 +1271,7 @@ export default function Home() {
       const inboxQuery = new URLSearchParams(
         Object.entries(inboxFilters).filter((entry): entry is [string, string] => Boolean(entry[1])),
       ).toString();
-      const [questionsResponse, inboxResponse] = await Promise.all([
+      const [questionsResponse, inboxResponse, digestResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Question[] }>(
           `/v1/projects/${selectedProjectId}/questions`,
           undefined,
@@ -1260,9 +1282,15 @@ export default function Home() {
           undefined,
           activePrincipalId,
         ),
+        bridgeFetch<{ items: readonly QuestionDecisionDigest[] }>(
+          `/v1/projects/${selectedProjectId}/question-digests`,
+          undefined,
+          activePrincipalId,
+        ),
       ]);
       setQuestions(questionsResponse.items);
       setInboxQuestions(inboxResponse.items);
+      setQuestionDigests(digestResponse.items);
       setSelectedId((current) =>
         current && questionsResponse.items.some((question) => question.id === current)
           ? current
@@ -3919,6 +3947,39 @@ export default function Home() {
                   {hasInboxFilters ? (
                     <button className="secondary" type="button" onClick={() => setInboxFilters({})}>Clear filters</button>
                   ) : null}
+                  </div>
+                </details>
+              ) : null}
+
+              {view === "inbox" && questionDigests.length > 0 ? (
+                <details className="digest-disclosure">
+                  <summary>Low-risk decision digests <span>{questionDigests.length} related {questionDigests.length === 1 ? "group" : "groups"}</span></summary>
+                  <div className="digest-list">
+                    {questionDigests.map((digest) => (
+                      <article className="digest-card" key={digest.id}>
+                        <div className="digest-heading">
+                          <div><strong>{digest.category}</strong><small>{Object.entries(digest.scope).map(([field, value]) => `${field}: ${value}`).join(" · ") || "Project-wide"}</small></div>
+                          <span>{digest.questionCount} questions</span>
+                        </div>
+                        <p>Grouped because these items are low risk, non-blocking, and share the same category and scope. Each still needs an individual human decision.</p>
+                        <div className="digest-questions">
+                          {digest.questions.map((question) => (
+                            <button
+                              className="text-button"
+                              type="button"
+                              key={question.id}
+                              onClick={() => {
+                                setInboxFilters({ risk: "low", category: digest.category });
+                                setSelectedId(question.id);
+                              }}
+                            >
+                              {question.title}{question.dueAt ? ` · ${new Date(question.dueAt).toLocaleDateString()}` : ""}
+                            </button>
+                          ))}
+                        </div>
+                        {digest.remainingQuestionCount > 0 ? <small>+ {digest.remainingQuestionCount} more in this digest</small> : null}
+                      </article>
+                    ))}
                   </div>
                 </details>
               ) : null}

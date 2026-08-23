@@ -2018,6 +2018,71 @@ describe("Bridge decision workflow", () => {
     ).rejects.toMatchObject({ code: "QUESTION_NOT_FOUND", statusCode: 404 });
   });
 
+  it("groups only related low-risk routed questions into human decision digests", async () => {
+    const { service } = await runtime();
+    const createDigestQuestion = async (
+      suffix: string,
+      overrides: Partial<CreateQuestionInput> = {},
+    ) => service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: `question-digest-${suffix}`,
+      title: `Which transfer dashboard detail should use the ${suffix} presentation?`,
+      context: `The transfer dashboard needs a bounded ${suffix} presentation for routine operator review.`,
+      whyItMatters: `A consistent ${suffix} presentation keeps low-risk operator choices understandable.`,
+      category: "product-experience",
+      risk: "low",
+      reversible: true,
+      blocking: false,
+      scope: { component: "transfer-dashboard" },
+      ...overrides,
+    }));
+    const first = await createDigestQuestion("summary", { dueAt: "2026-01-03T00:00:00.000Z" });
+    const second = await createDigestQuestion("compact");
+    const third = await createDigestQuestion("expanded", { dueAt: "2026-01-02T00:00:00.000Z" });
+    const highRisk = await createDigestQuestion("protected", { risk: "high" });
+    const otherScope = await createDigestQuestion("mobile", { scope: { component: "mobile-dashboard" } });
+
+    const digests = await service.listQuestionDecisionDigests(owner, project.id, {
+      maxDigests: 10,
+      maxQuestionsPerDigest: 2,
+    });
+    expect(digests).toHaveLength(1);
+    expect(digests[0]).toMatchObject({
+      category: "product-experience",
+      scope: { component: "transfer-dashboard" },
+      questionCount: 3,
+      remainingQuestionCount: 1,
+      earliestDueAt: "2026-01-02T00:00:00.000Z",
+      groupingReasons: ["low risk and non-blocking", "same category", "same exact scope"],
+      humanApprovalRequired: true,
+      batchAcceptanceAvailable: false,
+    });
+    expect(digests[0]!.questions.map((question) => question.id)).toEqual([third.id, first.id]);
+    expect(digests[0]!.questions.map((question) => question.id)).not.toEqual(
+      expect.arrayContaining([highRisk.id, otherScope.id]),
+    );
+    expect(await service.listQuestionDecisionDigests(contributor, project.id, {
+      maxDigests: 10,
+      maxQuestionsPerDigest: 10,
+    })).toEqual([]);
+    await expect(service.listQuestionDecisionDigests(outsider, project.id, {
+      maxDigests: 10,
+      maxQuestionsPerDigest: 10,
+    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
+
+    await service.acceptAnswer(owner, third.id, {
+      optionKey: "transient",
+      rationale: "The selected low-risk presentation is clear and remains individually approved.",
+    });
+    const afterAcceptance = await service.listQuestionDecisionDigests(owner, project.id, {
+      maxDigests: 10,
+      maxQuestionsPerDigest: 10,
+    });
+    expect(afterAcceptance[0]).toMatchObject({ questionCount: 2, remainingQuestionCount: 0 });
+    expect(afterAcceptance[0]!.questions.map((question) => question.id)).toEqual(
+      expect.arrayContaining([first.id, second.id]),
+    );
+  });
+
   it("requires human approval and exposes the accepted decision as later context", async () => {
     const { service } = await runtime();
     const question = await service.createQuestion(agent, project.id, questionInput());

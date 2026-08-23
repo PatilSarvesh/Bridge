@@ -23,6 +23,7 @@ import {
   questionClarificationInputSchema,
   questionAudienceViewQuerySchema,
   questionCommentInputSchema,
+  questionDecisionDigestQuerySchema,
   notificationListQuerySchema,
   notificationPreferenceInputSchema,
   notificationReadAllInputSchema,
@@ -181,7 +182,7 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
     scopes: { POST: bridgeScopes.questionsRead },
   },
   {
-    match: /^\/v1\/projects\/[^/]+\/(?:questions|inbox)(?:$|\/)/,
+    match: /^\/v1\/projects\/[^/]+\/(?:questions|inbox|question-digests)(?:$|\/)/,
     scopes: readWriteScopes(bridgeScopes.questionsRead, bridgeScopes.questionsWrite),
   },
   {
@@ -839,6 +840,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
       return {
         items: await options.service.listQuestionInbox(principal, request.params.projectId, filters),
+      };
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/projects/:projectId/question-digests",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = questionDecisionDigestQuerySchema.parse({
+        category: request.query.category,
+        maxDigests: request.query.maxDigests,
+        maxQuestionsPerDigest: request.query.maxQuestionsPerDigest,
+      });
+      return {
+        items: await options.service.listQuestionDecisionDigests(
+          principal,
+          request.params.projectId,
+          query,
+        ),
       };
     },
   );

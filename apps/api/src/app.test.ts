@@ -1058,6 +1058,77 @@ describe("Bridge API vertical slice", () => {
     expect(crossTenant.statusCode).toBe(404);
   });
 
+  it("returns personalized low-risk decision digests without bulk acceptance authority", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const createQuestion = async (suffix: string) => app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        idempotencyKey: `api-question-digest-${suffix}`,
+        title: `Which onboarding hint should use the ${suffix} presentation?`,
+        type: "decision",
+        category: "product-experience",
+        context: `The onboarding flow needs a bounded ${suffix} presentation for routine user guidance.`,
+        whyItMatters: `A consistent ${suffix} presentation keeps the low-risk onboarding choice understandable.`,
+        intendedOwnerIds: [demoPrincipals.qaLead.id],
+        intendedOwnerRoles: [],
+        risk: "low",
+        reversible: true,
+        blocking: false,
+        options: [
+          { key: "transient", label: "Use the hint", tradeoffs: "Adds guidance with minor visual weight." },
+          { key: "all", label: "Omit the hint", tradeoffs: "Keeps the view sparse but may reduce comprehension." },
+        ],
+        recommendationKey: "transient",
+        scope: { component: "onboarding" },
+      },
+    });
+    const first = await createQuestion("inline");
+    const second = await createQuestion("popover");
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests?maxQuestionsPerDigest=2`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [{
+        category: "product-experience",
+        scope: { component: "onboarding" },
+        questionCount: 2,
+        remainingQuestionCount: 0,
+        humanApprovalRequired: true,
+        batchAcceptanceAvailable: false,
+      }],
+    });
+
+    const unrouted = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(unrouted.statusCode).toBe(200);
+    expect(unrouted.json()).toEqual({ items: [] });
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests?maxDigests=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/question-digests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("registers and lists a fresh project for the local prototype", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

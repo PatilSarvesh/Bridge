@@ -57,6 +57,7 @@
     "POST /v1/assumptions/:assumptionId/resolve",
     "GET /v1/projects/:projectId/questions",
     "GET /v1/projects/:projectId/inbox",
+    "GET /v1/projects/:projectId/question-digests",
     "GET /v1/questions/:questionId",
     "GET /v1/questions/:questionId/audience-view",
     "POST /v1/questions/:questionId/responses",
