@@ -6,6 +6,8 @@ import type {
   RecordAssumptionInput,
   ReplaceProjectOwnershipInput,
   ReplaceProjectPolicyInput,
+  SyncGithubPullRequestInput,
+  SyncGithubIssueInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
@@ -896,7 +898,7 @@ describe("Bridge decision workflow", () => {
       owner: "bridge-org",
       name: "bridge",
       canonicalUrl: "https://github.com/bridge-org/bridge",
-    } as const;
+    };
 
     await expect(service.linkRepository(agent, project.id, input)).rejects.toMatchObject({ code: "FORBIDDEN" });
     const created = await service.linkRepository(owner, project.id, input);
@@ -950,7 +952,7 @@ describe("Bridge decision workflow", () => {
     await service.approveArtifactVersion(owner, publication.version.id, {
       rationale: "The specification faithfully captures the accepted decision.",
     });
-    const input = {
+    const input: SyncGithubPullRequestInput = {
       repositoryId: linked.repository.id,
       number: 42,
       title: "Add bounded transfer retries",
@@ -962,7 +964,7 @@ describe("Bridge decision workflow", () => {
       sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
       decisionIds: [decision.id],
       artifactVersionIds: [publication.version.id],
-    } as const;
+    };
 
     await expect(service.syncGithubPullRequest(agent, project.id, input)).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -1015,6 +1017,97 @@ describe("Bridge decision workflow", () => {
         action: "integration.pull_request_synced",
         subjectType: "pull_request_context",
       }),
+    ]));
+  });
+
+  it("synchronizes GitHub Issues and prioritizes their explicit work-item guidance", async () => {
+    const { repository, service } = await runtime();
+    const linked = await service.linkRepository(owner, project.id, {
+      idempotencyKey: "github-issue-repository-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "github-issue-decision-001",
+      title: "Which retry behavior should issue 77 implement?",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Issue 77 must preserve bounded retries and idempotency.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "github-issue-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The approved specification records the work-item behavior.",
+    });
+    const input: SyncGithubIssueInput = {
+      repositoryId: linked.repository.id,
+      number: 77,
+      title: "Implement bounded retries",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/77",
+      labels: ["backend", "priority:high"],
+      sourceUpdatedAt: "2026-01-01T03:00:00.000Z",
+      decisionIds: [decision.id],
+      artifactVersionIds: [publication.version.id],
+    };
+
+    await expect(service.syncGithubIssue(agent, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const created = await service.syncGithubIssue(githubIntegration, project.id, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      issue: {
+        id: expect.stringMatching(/^gwi_/),
+        reference: "github:bridge-org/bridge#77",
+        state: "open",
+        version: 1,
+      },
+    });
+    await expect(service.syncGithubIssue(githubIntegration, project.id, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.syncGithubIssue(githubIntegration, project.id, {
+      ...input,
+      title: "Conflicting provider event",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.listGithubIssues(agent, project.id, {
+      limit: 100,
+      label: "backend",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: 77 }),
+        decisions: [expect.objectContaining({ id: decision.id })],
+        artifactVersions: [expect.objectContaining({ versionId: publication.version.id })],
+        humanApprovalChanged: false,
+      }),
+    ]);
+    await expect(service.getGithubIssueContext(agent, project.id, 77, {
+      repositoryId: linked.repository.id,
+    })).resolves.toMatchObject({ issue: { reference: created.issue.reference } });
+
+    const context = await service.getContext(agent, project.id, {
+      task: "Implement the selected work item",
+      scope: { workItem: created.issue.reference },
+      categories: [],
+      maxItems: 1,
+    });
+    expect(context.items).toEqual([expect.objectContaining({ id: decision.id, type: "decision" })]);
+
+    const updated = await service.syncGithubIssue(githubIntegration, project.id, {
+      ...input,
+      state: "closed",
+      sourceUpdatedAt: "2026-01-01T04:00:00.000Z",
+    });
+    expect(updated).toMatchObject({ disposition: "updated", issue: { state: "closed", version: 2 } });
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "integration.work_item_synced", subjectType: "work_item" }),
     ]));
   });
 

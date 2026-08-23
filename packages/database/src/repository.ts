@@ -14,6 +14,7 @@ import type {
   ContextSnapshot,
   Decision,
   GithubPullRequestContext,
+  GithubIssueWorkItem,
   Notification,
   NotificationPreference,
   Organization,
@@ -51,6 +52,8 @@ import {
   decisionToRow,
   githubPullRequestFromRow,
   githubPullRequestToRow,
+  githubIssueFromRow,
+  githubIssueToRow,
   notificationFromRow,
   notificationPreferenceFromRow,
   notificationPreferenceToRow,
@@ -94,6 +97,7 @@ import {
   contextSnapshots,
   decisions,
   githubPullRequests,
+  githubIssues,
   idempotencyRecords,
   projects,
   projectRepositories,
@@ -752,6 +756,58 @@ export class PostgresBridgeRepository implements BridgeRepository {
         eq(githubPullRequests.version, expectedVersion),
       ))
       .returning({ id: githubPullRequests.id });
+    return updated.length === 1;
+  }
+
+  async getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(githubIssues)
+      .where(eq(githubIssues.id, issueId))
+      .limit(1);
+    return row ? githubIssueFromRow(row) : undefined;
+  }
+
+  async listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]> {
+    const rows = await this.database
+      .select()
+      .from(githubIssues)
+      .where(eq(githubIssues.projectId, projectId))
+      .orderBy(desc(githubIssues.sourceUpdatedAt), asc(githubIssues.id));
+    return rows.map(githubIssueFromRow);
+  }
+
+  async saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean> {
+    const row = githubIssueToRow(issue);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(githubIssues)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: githubIssues.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(githubIssues)
+      .set({
+        reference: row.reference,
+        title: row.title,
+        state: row.state,
+        canonicalUrl: row.canonicalUrl,
+        labels: row.labels,
+        decisionIds: row.decisionIds,
+        artifactVersionIds: row.artifactVersionIds,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(githubIssues.id, issue.id),
+        eq(githubIssues.organizationId, issue.organizationId),
+        eq(githubIssues.projectId, issue.projectId),
+        eq(githubIssues.version, expectedVersion),
+      ))
+      .returning({ id: githubIssues.id });
     return updated.length === 1;
   }
 

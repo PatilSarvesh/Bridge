@@ -9,6 +9,7 @@ import {
   type ContextSnapshot,
   type Decision,
   type GithubPullRequestContext,
+  type GithubIssueWorkItem,
   type Notification,
   type NotificationPreference,
   type Organization,
@@ -39,6 +40,7 @@ import {
   contextSnapshots,
   decisions,
   githubPullRequests,
+  githubIssues,
   projects,
   projectRepositories,
   questionResponses,
@@ -68,6 +70,7 @@ export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type RepositoryRecordRow = typeof projectRepositories.$inferSelect;
 export type GithubPullRequestRow = typeof githubPullRequests.$inferSelect;
+export type GithubIssueRow = typeof githubIssues.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AdapterDiagnosticRow = typeof adapterDiagnostics.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -402,6 +405,14 @@ export function githubPullRequestToRow(
 }
 
 export function githubPullRequestFromRow(row: GithubPullRequestRow): GithubPullRequestContext {
+  return { ...row };
+}
+
+export function githubIssueToRow(issue: GithubIssueWorkItem): typeof githubIssues.$inferInsert {
+  return { ...issue };
+}
+
+export function githubIssueFromRow(row: GithubIssueRow): GithubIssueWorkItem {
   return { ...row };
 }
 

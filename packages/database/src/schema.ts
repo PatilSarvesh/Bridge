@@ -16,6 +16,7 @@ import type {
   QuestionRoutingExplanation,
   RepositoryRecord,
   GithubPullRequestContext,
+  GithubIssueWorkItem,
 } from "@bridge/domain";
 import { sql } from "drizzle-orm";
 import {
@@ -305,6 +306,52 @@ export const githubPullRequests = pgTable(
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
     tenantPolicy("bridge_github_pull_requests_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const githubIssues = pgTable(
+  "bridge_github_issues",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => projectRepositories.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    reference: text("reference").notNull(),
+    title: text("title").notNull(),
+    state: text("state").$type<GithubIssueWorkItem["state"]>().notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    labels: jsonb("labels").$type<readonly string[]>().notNull(),
+    decisionIds: jsonb("decision_ids").$type<readonly string[]>().notNull(),
+    artifactVersionIds: jsonb("artifact_version_ids").$type<readonly string[]>().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_github_issues_repository_number_unique").on(table.repositoryId, table.number),
+    unique("bridge_github_issues_repository_reference_unique").on(
+      table.repositoryId,
+      table.reference,
+    ),
+    index("bridge_github_issues_project_source_updated_idx").on(
+      table.projectId,
+      table.sourceUpdatedAt,
+    ),
+    check("bridge_github_issues_number_check", sql`${table.number} > 0`),
+    check("bridge_github_issues_state_check", sql`${table.state} IN ('open', 'closed')`),
+    check("bridge_github_issues_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_github_issues_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_github_issues_tenant", table.organizationId),
   ],
 ).enableRLS();
 

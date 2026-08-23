@@ -22,6 +22,8 @@ import {
   findQuestionMatchesInputSchema,
   githubPullRequestContextQuerySchema,
   githubPullRequestListQuerySchema,
+  githubIssueContextQuerySchema,
+  githubIssueListQuerySchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
   questionClarificationInputSchema,
@@ -47,6 +49,7 @@ import {
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
   syncGithubPullRequestInputSchema,
+  syncGithubIssueInputSchema,
   updateOrganizationMemberInputSchema,
   revokeServiceIdentityInputSchema,
   rotateServiceIdentityInputSchema,
@@ -156,6 +159,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   },
   {
     match: /^\/v1\/projects\/[^/]+\/integrations\/github\/pull-requests(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/integrations\/github\/issues(?:$|\/)/,
     scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
   },
   {
@@ -677,6 +684,58 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         principal,
         request.params.projectId,
         pullRequestNumber,
+        query,
+      );
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/integrations/github/issues",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncGithubIssueInputSchema.parse(request.body);
+      const registration = await options.service.syncGithubIssue(
+        principal,
+        request.params.projectId,
+        input,
+      );
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: unknown }>(
+    "/v1/projects/:projectId/integrations/github/issues",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = githubIssueListQuerySchema.parse(request.query);
+      return {
+        items: await options.service.listGithubIssues(
+          principal,
+          request.params.projectId,
+          query,
+        ),
+      };
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string; issueNumber: string };
+    Querystring: unknown;
+  }>(
+    "/v1/projects/:projectId/integrations/github/issues/:issueNumber/context",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const issueNumber = Number(request.params.issueNumber);
+      if (!Number.isInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) {
+        throw new BridgeError("VALIDATION_FAILED", "Issue number must be a positive integer.", 400);
+      }
+      const query = githubIssueContextQuerySchema.parse(request.query);
+      return options.service.getGithubIssueContext(
+        principal,
+        request.params.projectId,
+        issueNumber,
         query,
       );
     },

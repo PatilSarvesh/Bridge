@@ -302,6 +302,13 @@
       "when": 1787509504957,
       "tag": "0042_even_wallop",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787510124337,
+      "tag": "0043_misty_dragon_man",
+      "breakpoints": true
     }
   ]
 }

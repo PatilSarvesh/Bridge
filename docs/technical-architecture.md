@@ -606,6 +606,9 @@ POST   /v1/projects/:projectId/adapter-diagnostics
 POST   /v1/projects/:projectId/integrations/github/pull-requests
 GET    /v1/projects/:projectId/integrations/github/pull-requests?repositoryId=&state=&limit=
 GET    /v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context?repositoryId=
+POST   /v1/projects/:projectId/integrations/github/issues
+GET    /v1/projects/:projectId/integrations/github/issues?repositoryId=&state=&label=&limit=
+GET    /v1/projects/:projectId/integrations/github/issues/:issueNumber/context?repositoryId=
 GET    /v1/projects/:projectId/inbox?status=&risk=&category=&role=&due=
 GET    /v1/notifications?projectId=&unreadOnly=
 POST   /v1/notifications/:notificationId/read
@@ -635,6 +638,8 @@ Project audit browsing/export requires a human project administrator after tenan
 Project repository metadata is managed through the canonical REST endpoints, the administrator-only web **Repositories** view, or the equivalent CLI `repository list` and `repository link` commands. These surfaces exchange only provider, owner, repository name, canonical URL, project scope, and timestamps. They do not fetch source or infer provider connectivity from a caller-supplied URL; provider-backed validation and synchronization remain integration work.
 
 The first source-control integration adds canonical REST synchronization and reads for GitHub pull-request metadata. A project administrator or project-scoped `ci`/`integration` service identity may submit the repository reference, number, title/state, canonical URL, branch names, head SHA, provider timestamp, and explicit active-decision/approved-specification links. Ordinary agents cannot synchronize. Provider timestamps reject stale or conflicting events, deterministic IDs make exact retries idempotent, and authorized project members receive bounded guidance summaries with `humanApprovalChanged: false`. Bridge does not request or retain source, diffs, pull-request bodies/comments, or credentials, and MCP exposes no alternate integration surface.
+
+GitHub Issues use the same canonical integration boundary and authorization model. Bridge persists only repository/issue identity, title/state, canonical URL, labels, provider timestamp, and explicit guidance links; GitHub remains authoritative and Bridge performs no provider mutation. Each item exposes a deterministic `github:owner/repository#number` reference. Exact matches against `ContextQuery.scope.workItem`—or the canonical issue URL—add a bounded ranking boost to linked active decisions and the currently approved linked specification without excluding normal context candidates. The direct issue context read can also show a linked superseded specification as provenance. No issue body, comments, assignees, source, or provider credentials are retained.
 
 Project ownership configuration is managed through canonical administrator REST endpoints and the web **Ownership** view. The application validates active human team membership and direct targets, normalizes role/team/rule keys, detects equal-priority overlap per responsibility lane, performs an optimistic aggregate-version write, and appends the project audit event in one transaction. Question creation resolves each owner lane in this order: explicit owner, repository/component-scoped rule, category rule, project-wide rule or configured project decision owner, then an empty administrator-visible fallback. Required policy roles are always retained. Reviewer targets resolve independently through scoped, category, project-wide, then policy routes so reviewer visibility never becomes owner acceptance authority. The question records the selected source, rule keys, and ownership/policy versions.
 

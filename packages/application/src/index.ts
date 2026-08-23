@@ -23,6 +23,9 @@ import type {
   LinkRepositoryInput,
   GithubPullRequestListQuery,
   GithubPullRequestContextQuery,
+  GithubIssueContextQuery,
+  GithubIssueListQuery,
+  SyncGithubIssueInput,
   SyncGithubPullRequestInput,
   PublishArtifactInput,
   ProposeAnswerInput,
@@ -84,6 +87,7 @@ import {
   type ContextSnapshot,
   type Decision,
   type GithubPullRequestContext,
+  type GithubIssueWorkItem,
   type Principal,
   type Project,
   type Question,
@@ -190,6 +194,9 @@ export interface BridgeRepository {
     pullRequest: GithubPullRequestContext,
     expectedVersion?: number,
   ): Promise<boolean>;
+  getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined>;
+  listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]>;
+  saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean>;
   getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined>;
   saveProjectOwnershipConfiguration(
     configuration: ProjectOwnershipConfiguration,
@@ -338,6 +345,18 @@ export interface GithubPullRequestContextView {
     readonly status: ArtifactVersion["status"];
     readonly summary: string;
   }[];
+  readonly humanApprovalChanged: false;
+}
+
+export interface GithubIssueRegistration {
+  readonly issue: GithubIssueWorkItem;
+  readonly disposition: "created" | "updated" | "idempotent_replay";
+}
+
+export interface GithubIssueContextView {
+  readonly issue: GithubIssueWorkItem;
+  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly artifactVersions: GithubPullRequestContextView["artifactVersions"];
   readonly humanApprovalChanged: false;
 }
 
@@ -1114,6 +1133,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
   private readonly githubPullRequests = new Map<string, GithubPullRequestContext>();
+  private readonly githubIssues = new Map<string, GithubIssueWorkItem>();
   private readonly projectOwnershipConfigurations = new Map<string, ProjectOwnershipConfiguration>();
   private readonly projectPolicyConfigurations = new Map<string, ProjectPolicyConfiguration>();
   private readonly runs = new Map<string, AgentRun>();
@@ -1167,6 +1187,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
       githubPullRequests: new Map(this.githubPullRequests),
+      githubIssues: new Map(this.githubIssues),
       projectOwnershipConfigurations: new Map(this.projectOwnershipConfigurations),
       projectPolicyConfigurations: new Map(this.projectPolicyConfigurations),
       runs: new Map(this.runs),
@@ -1201,6 +1222,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
       this.restoreMap(this.githubPullRequests, snapshot.githubPullRequests);
+      this.restoreMap(this.githubIssues, snapshot.githubIssues);
       this.restoreMap(this.projectOwnershipConfigurations, snapshot.projectOwnershipConfigurations);
       this.restoreMap(this.projectPolicyConfigurations, snapshot.projectPolicyConfigurations);
       this.restoreMap(this.runs, snapshot.runs);
@@ -1496,6 +1518,27 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       (expectedVersion !== undefined && current?.version !== expectedVersion)
     ) return false;
     this.githubPullRequests.set(pullRequest.id, pullRequest);
+    return true;
+  }
+
+  async getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined> {
+    return this.githubIssues.get(issueId);
+  }
+
+  async listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]> {
+    return [...this.githubIssues.values()]
+      .filter((issue) => issue.projectId === projectId)
+      .sort((left, right) =>
+        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+  }
+
+  async saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean> {
+    const current = this.githubIssues.get(issue.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.githubIssues.set(issue.id, issue);
     return true;
   }
 
@@ -2290,6 +2333,175 @@ export class BridgeService {
         throw new BridgeError("PULL_REQUEST_NOT_FOUND", "Pull-request context not found.", 404);
       }
       return this.githubPullRequestView(repository, pullRequest);
+    });
+  }
+
+  async syncGithubIssue(
+    principal: Principal,
+    projectId: string,
+    input: SyncGithubIssueInput,
+  ): Promise<GithubIssueRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertIntegrationWriter(principal, "Synchronizing GitHub issue work items", projectId);
+      this.assertSecretSafe("administration", input);
+      const linkedRepository = await repository.getRepositoryRecord(input.repositoryId);
+      if (
+        !linkedRepository ||
+        linkedRepository.projectId !== projectId ||
+        linkedRepository.organizationId !== principal.organizationId ||
+        linkedRepository.provider !== "github"
+      ) {
+        throw new BridgeError("PROJECT_NOT_FOUND", "Linked GitHub repository not found.", 404);
+      }
+      const expectedUrl = new URL(linkedRepository.canonicalUrl);
+      expectedUrl.pathname = `${expectedUrl.pathname.replace(/\/$/, "")}/issues/${input.number}`;
+      expectedUrl.search = "";
+      expectedUrl.hash = "";
+      const suppliedUrl = new URL(input.canonicalUrl);
+      suppliedUrl.search = "";
+      suppliedUrl.hash = "";
+      if (suppliedUrl.toString() !== expectedUrl.toString()) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The issue URL does not match the linked GitHub repository and number.",
+          422,
+        );
+      }
+      for (const decisionId of input.decisionIds) {
+        const decision = await this.requireDecision(principal, decisionId, repository);
+        if (decision.projectId !== projectId || decision.status !== "active") {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Work-item guidance can cite only active decisions in the same project.",
+            422,
+          );
+        }
+      }
+      for (const versionId of input.artifactVersionIds) {
+        const artifact = await repository.getArtifactByVersionId(versionId);
+        const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+        if (
+          !artifact ||
+          artifact.projectId !== projectId ||
+          !version ||
+          !["approved", "superseded"].includes(version.status)
+        ) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Work-item guidance can cite only approved specification versions in the same project.",
+            422,
+          );
+        }
+      }
+      const issueId = `gwi_${createHash("sha256")
+        .update(`${principal.organizationId}:${input.repositoryId}:${input.number}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getGithubIssue(issueId);
+      const timestamp = this.now().toISOString();
+      const normalized = {
+        repositoryId: input.repositoryId,
+        number: input.number,
+        reference: `github:${linkedRepository.owner}/${linkedRepository.name}#${input.number}`.toLowerCase(),
+        title: input.title.trim(),
+        state: input.state,
+        canonicalUrl: suppliedUrl.toString(),
+        labels: [...input.labels].sort((left, right) => left.localeCompare(right)),
+        decisionIds: [...input.decisionIds].sort(),
+        artifactVersionIds: [...input.artifactVersionIds].sort(),
+        sourceUpdatedAt: new Date(input.sourceUpdatedAt).toISOString(),
+      } as const;
+      if (existing) {
+        const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
+        const same = this.githubIssueMatches(existing, normalized);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The GitHub issue update is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
+          );
+        }
+        if (same) return { issue: existing, disposition: "idempotent_replay" };
+        const updated: GithubIssueWorkItem = {
+          ...existing,
+          ...normalized,
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        };
+        if (!await repository.saveGithubIssue(updated, existing.version)) {
+          throw new BridgeError("CONFLICT", "The work item changed during synchronization.", 409);
+        }
+        await this.audit(
+          repository,
+          principal,
+          projectId,
+          "integration.work_item_synced",
+          "work_item",
+          updated.id,
+          timestamp,
+        );
+        return { issue: updated, disposition: "updated" };
+      }
+      const created: GithubIssueWorkItem = {
+        id: issueId,
+        organizationId: principal.organizationId,
+        projectId,
+        ...normalized,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveGithubIssue(created)) {
+        throw new BridgeError("CONFLICT", "The work item was created concurrently.", 409);
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "integration.work_item_synced",
+        "work_item",
+        created.id,
+        timestamp,
+      );
+      return { issue: created, disposition: "created" };
+    });
+  }
+
+  async listGithubIssues(
+    principal: Principal,
+    projectId: string,
+    query: GithubIssueListQuery,
+  ): Promise<readonly GithubIssueContextView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const items = (await repository.listGithubIssues(projectId))
+        .filter((item) => !query.repositoryId || item.repositoryId === query.repositoryId)
+        .filter((item) => !query.state || item.state === query.state)
+        .filter((item) => !query.label || item.labels.includes(query.label))
+        .slice(0, query.limit);
+      return Promise.all(items.map((item) => this.githubIssueView(repository, item)));
+    });
+  }
+
+  async getGithubIssueContext(
+    principal: Principal,
+    projectId: string,
+    issueNumber: number,
+    query: GithubIssueContextQuery,
+  ): Promise<GithubIssueContextView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const issueId = `gwi_${createHash("sha256")
+        .update(`${principal.organizationId}:${query.repositoryId}:${issueNumber}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const issue = await repository.getGithubIssue(issueId);
+      if (!issue || issue.projectId !== projectId) {
+        throw new BridgeError("WORK_ITEM_NOT_FOUND", "Work-item context not found.", 404);
+      }
+      return this.githubIssueView(repository, issue);
     });
   }
 
@@ -6563,6 +6775,14 @@ export class BridgeService {
       assumptions.push(await this.expireAssumptionIfDue(repository, principal, assumption));
     }
     const artifacts = await repository.listArtifacts(projectId);
+    const normalizedWorkItem = query.scope.workItem?.trim().toLowerCase();
+    const linkedIssue = normalizedWorkItem
+      ? (await repository.listGithubIssues(projectId)).find((issue) =>
+        issue.reference.toLowerCase() === normalizedWorkItem ||
+        issue.canonicalUrl.toLowerCase() === normalizedWorkItem)
+      : undefined;
+    const linkedDecisionIds = new Set(linkedIssue?.decisionIds ?? []);
+    const linkedArtifactVersionIds = new Set(linkedIssue?.artifactVersionIds ?? []);
     const taskTokens = new Set(query.task.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2));
     const scopeMatch = (scope: Scope): number => {
       let score = 0;
@@ -6590,7 +6810,11 @@ export class BridgeService {
           }),
           updatedAt: decision.createdAt,
         };
-        return { item, score: 10 + scopeMatch(decision.scope) + textScore };
+        return {
+          item,
+          score: 10 + scopeMatch(decision.scope) + textScore +
+            (linkedDecisionIds.has(decision.id) ? 12 : 0),
+        };
       });
     const artifactCandidates = artifacts.flatMap((artifact) => {
       const version = artifact.versions.find(
@@ -6621,7 +6845,11 @@ export class BridgeService {
         }),
         updatedAt: version.approvedAt ?? version.createdAt,
       };
-      return [{ item, score: 10 + scopeMatch(artifact.scope) + textScore }];
+      return [{
+        item,
+        score: 10 + scopeMatch(artifact.scope) + textScore +
+          (linkedArtifactVersionIds.has(version.id) ? 12 : 0),
+      }];
     });
     const assumptionCandidates = assumptions
       .filter((assumption) => ["active", "confirmed"].includes(assumption.status))
@@ -8006,6 +8234,78 @@ export class BridgeService {
       version !== undefined);
     return {
       pullRequest,
+      decisions,
+      artifactVersions,
+      humanApprovalChanged: false,
+    };
+  }
+
+  private githubIssueMatches(
+    existing: GithubIssueWorkItem,
+    candidate: Pick<
+      GithubIssueWorkItem,
+      | "repositoryId"
+      | "number"
+      | "reference"
+      | "title"
+      | "state"
+      | "canonicalUrl"
+      | "labels"
+      | "decisionIds"
+      | "artifactVersionIds"
+      | "sourceUpdatedAt"
+    >,
+  ): boolean {
+    return existing.repositoryId === candidate.repositoryId &&
+      existing.number === candidate.number &&
+      existing.reference === candidate.reference &&
+      existing.title === candidate.title &&
+      existing.state === candidate.state &&
+      existing.canonicalUrl === candidate.canonicalUrl &&
+      existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
+      JSON.stringify(existing.labels) === JSON.stringify(candidate.labels) &&
+      JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+  }
+
+  private async githubIssueView(
+    repository: BridgeRepository,
+    issue: GithubIssueWorkItem,
+  ): Promise<GithubIssueContextView> {
+    const decisions = (
+      await Promise.all(issue.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
+    )
+      .filter((decision): decision is Decision =>
+        decision !== undefined &&
+        decision.projectId === issue.projectId &&
+        decision.status === "active")
+      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+    const artifactVersions = (
+      await Promise.all(
+        issue.artifactVersionIds.map(async (versionId) => {
+          const artifact = await repository.getArtifactByVersionId(versionId);
+          const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+          if (
+            !artifact ||
+            artifact.projectId !== issue.projectId ||
+            !version ||
+            !["approved", "superseded"].includes(version.status)
+          ) return undefined;
+          return {
+            artifactId: artifact.id,
+            artifactTitle: artifact.title,
+            artifactType: artifact.type,
+            versionId: version.id,
+            version: version.version,
+            status: version.status,
+            summary: version.summary,
+          };
+        }),
+      )
+    ).filter((version): version is GithubIssueContextView["artifactVersions"][number] =>
+      version !== undefined);
+    return {
+      issue,
       decisions,
       artifactVersions,
       humanApprovalChanged: false,

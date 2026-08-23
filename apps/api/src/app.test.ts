@@ -1275,6 +1275,40 @@ describe("Bridge API vertical slice", () => {
       artifactVersions: [],
       humanApprovalChanged: false,
     });
+
+    const issuePayload = {
+      repositoryId: pullRequestPayload.repositoryId,
+      number: 11,
+      title: "Track work-item context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/11",
+      labels: ["integration"],
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+      decisionIds: [],
+      artifactVersionIds: [],
+    };
+    const syncedIssue = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/issues`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: issuePayload,
+    });
+    expect(syncedIssue.statusCode).toBe(201);
+    expect(syncedIssue.json()).toMatchObject({
+      disposition: "created",
+      issue: { number: 11, reference: "github:bridge-org/bridge#11", version: 1 },
+    });
+
+    const issueContext = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/integrations/github/issues/11/context?repositoryId=${issuePayload.repositoryId}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(issueContext.statusCode).toBe(200);
+    expect(issueContext.json()).toMatchObject({
+      issue: { canonicalUrl: issuePayload.canonicalUrl, labels: ["integration"] },
+      humanApprovalChanged: false,
+    });
   });
 
   it("exposes versioned project ownership configuration only to administrators", async () => {

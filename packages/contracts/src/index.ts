@@ -482,6 +482,50 @@ export const githubPullRequestContextQuerySchema = z.object({
   repositoryId: z.string().trim().min(1).max(100),
 });
 
+export const githubIssueStateSchema = z.enum(["open", "closed"]);
+export const syncGithubIssueInputSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+  number: z.number().int().positive().max(2_147_483_647),
+  title: z.string().trim().min(1).max(500),
+  state: githubIssueStateSchema,
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://github.com/"),
+    "canonicalUrl must be an HTTPS GitHub issue URL.",
+  ),
+  labels: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["labels", value.labels],
+    ["decisionIds", value.decisionIds],
+    ["artifactVersionIds", value.artifactVersionIds],
+  ] as const) {
+    const normalized = field === "labels"
+      ? values.map((label) => label.toLocaleLowerCase("en"))
+      : values;
+    if (new Set(normalized).size !== values.length) {
+      context.addIssue({
+        code: "custom",
+        message: `${field} values must be unique.`,
+        path: [field],
+      });
+    }
+  }
+});
+
+export const githubIssueListQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100).optional(),
+  state: githubIssueStateSchema.optional(),
+  label: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
+export const githubIssueContextQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+});
+
 export const questionOptionInputSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/),
   label: z.string().trim().min(1).max(500),
@@ -967,6 +1011,10 @@ export type GithubPullRequestState = z.infer<typeof githubPullRequestStateSchema
 export type SyncGithubPullRequestInput = z.infer<typeof syncGithubPullRequestInputSchema>;
 export type GithubPullRequestListQuery = z.infer<typeof githubPullRequestListQuerySchema>;
 export type GithubPullRequestContextQuery = z.infer<typeof githubPullRequestContextQuerySchema>;
+export type GithubIssueState = z.infer<typeof githubIssueStateSchema>;
+export type SyncGithubIssueInput = z.infer<typeof syncGithubIssueInputSchema>;
+export type GithubIssueListQuery = z.infer<typeof githubIssueListQuerySchema>;
+export type GithubIssueContextQuery = z.infer<typeof githubIssueContextQuerySchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;

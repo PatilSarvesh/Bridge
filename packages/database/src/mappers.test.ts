@@ -9,6 +9,7 @@ import type {
   ContextSnapshot,
   Decision,
   GithubPullRequestContext,
+  GithubIssueWorkItem,
   Notification,
   NotificationPreference,
   Organization,
@@ -41,6 +42,8 @@ import {
   decisionToRow,
   githubPullRequestFromRow,
   githubPullRequestToRow,
+  githubIssueFromRow,
+  githubIssueToRow,
   contextSnapshotFromRow,
   contextSnapshotToRow,
   projectFromRow,
@@ -84,6 +87,7 @@ import {
   type AuditEventRow,
   type DecisionRow,
   type GithubPullRequestRow,
+  type GithubIssueRow,
   type ContextSnapshotRow,
   type ProjectRow,
   type RepositoryRecordRow,
@@ -562,6 +566,25 @@ describe("PostgreSQL domain mappings", () => {
     expect(githubPullRequestFromRow(
       githubPullRequestToRow(pullRequest) as GithubPullRequestRow,
     )).toEqual(pullRequest);
+    const issue: GithubIssueWorkItem = {
+      id: "gwi_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      repositoryId: repositoryRecord.id,
+      number: 77,
+      reference: "github:bridge-org/bridge#77",
+      title: "Map issue work item",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/77",
+      labels: ["backend"],
+      decisionIds: ["dec_mapping"],
+      artifactVersionIds: ["avr_mapping"],
+      sourceUpdatedAt: "2026-08-07T12:00:00.000Z",
+      createdAt: "2026-08-07T12:01:00.000Z",
+      updatedAt: "2026-08-07T12:01:00.000Z",
+      version: 1,
+    };
+    expect(githubIssueFromRow(githubIssueToRow(issue) as GithubIssueRow)).toEqual(issue);
     const ownershipConfiguration: ProjectOwnershipConfiguration = {
       organizationId: project.organizationId,
       projectId: project.id,

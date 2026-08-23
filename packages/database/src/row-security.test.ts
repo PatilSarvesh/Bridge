@@ -154,3 +154,18 @@ describe("GitHub pull-request context row security migration", () => {
     expect(migration).toContain("bridge_github_pull_requests_organization_project_fk");
   });
 });
+
+describe("GitHub issue work-item row security migration", () => {
+  it("forces tenant isolation for issue metadata", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0043_misty_dragon_man.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_github_issues" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_github_issues" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain(
+      'CREATE POLICY "bridge_github_issues_tenant" ON "bridge_github_issues"',
+    );
+    expect(migration).toContain("bridge_github_issues_organization_project_fk");
+  });
+});
