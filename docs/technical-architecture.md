@@ -157,9 +157,11 @@ Responsibilities:
 - Human-friendly access to context, questions, assumptions, and artifact publishing.
 - Interactive `login`, `logout`, and authentication status through public-client Authorization Code + S256 PKCE, a hardened exact loopback callback, and API-side bearer-token/membership validation.
 - API-specific human-token storage in macOS Keychain or Linux Secret Service, with refresh-or-login behavior and no repository credential files; organization-admin service-identity create/list/rotate/revoke commands use the REST boundary and do not persist one-time bearer tokens.
+- Noninteractive CI reads can receive a narrowly scoped opaque service token through the runner's masked `BRIDGE_SERVICE_TOKEN`; the CLI sends it only as a bearer header and never falls back to a human credential store.
 - Filtered human inbox reads through `bridge inbox` for operators who do not use the web UI.
 - Bounded polling for accepted decisions.
 - Stable JSON output by default, opt-in human-readable success output, JSON errors with stable exit codes, and repository snapshots for CI and restricted environments.
+- Approved-specification drift capture/check commands that bind canonical approved version hashes to explicit repository files, reject path/symlink escape, and fail CI deterministically without changing approval state.
 
 ### 5.6 Agent adapters
 

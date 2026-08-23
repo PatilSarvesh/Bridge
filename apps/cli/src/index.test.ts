@@ -281,6 +281,13 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       state.artifacts = [artifact];
       return json({ artifact, version: artifact.versions[0] }, 201);
     }
+    if (/^\/v1\/artifacts\/[^/]+$/.test(url.pathname)) {
+      const artifactId = url.pathname.split("/").at(-1);
+      const artifact = state.artifacts.find((candidate) => candidate.id === artifactId);
+      return artifact
+        ? json(artifact)
+        : json({ code: "ARTIFACT_NOT_FOUND", message: "Artifact not found." }, 404);
+    }
     if (url.pathname === "/v1/questions/qst_cli_1") return json(state.question);
     if (url.pathname.endsWith("/context")) {
       return json({
@@ -1177,12 +1184,13 @@ describe("Bridge CLI fallback adapter", () => {
   it("publishes Markdown and pulls only its approved immutable version", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-"));
     const stdout: string[] = [];
+    const stderr: string[] = [];
     const state: MockState = { question: {}, artifacts: [], assumptions: [] };
     const runtime: Partial<CliRuntime> = {
       cwd,
       fetch: mockBridge(state),
       stdout: (text) => stdout.push(text),
-      stderr: () => undefined,
+      stderr: (text) => stderr.push(text),
       now: () => new Date("2026-08-07T00:00:00.000Z"),
     };
     await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
@@ -1234,6 +1242,87 @@ describe("Bridge CLI fallback adapter", () => {
     expect(manifest.items).toEqual([expect.objectContaining({ artifactId: "art_cli_1" })]);
     expect(await readFile(join(cwd, ".bridge", "specs", "adr-transfer-retry-policy-art-cli-1.md"), "utf8"))
       .toContain("bounded exponential backoff");
+
+    await mkdir(join(cwd, "src"));
+    const implementationPath = join(cwd, "src", "retry.ts");
+    const approvedImplementation = "export const retryLimit = 3;\n";
+    await writeFile(implementationPath, approvedImplementation);
+    expect(await runCli([
+      "spec",
+      "drift",
+      "capture",
+      "--artifact-id",
+      "art_cli_1",
+      "--file",
+      "src/retry.ts",
+    ], runtime)).toBe(cliExitCodes.success);
+    const driftManifest = JSON.parse(await readFile(join(cwd, ".bridge", "spec-drift.json"), "utf8")) as {
+      projectId: string;
+      items: Array<{ artifactId: string; approvedVersionId: string; files: Array<{ path: string }> }>;
+    };
+    expect(driftManifest).toMatchObject({
+      projectId: "prj_payments",
+      items: [{
+        artifactId: "art_cli_1",
+        approvedVersionId: "av_cli_1",
+        files: [{ path: "src/retry.ts" }],
+      }],
+    });
+    expect(await runCli(["spec", "drift", "check"], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain('"status": "in_sync"');
+
+    await writeFile(implementationPath, "export const retryLimit = 9;\n");
+    expect(await runCli(["spec", "drift", "check"], runtime)).toBe(cliExitCodes.pending);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "SPECIFICATION_DRIFT",
+      exitCode: cliExitCodes.pending,
+      details: {
+        issueCount: 1,
+        issues: [{ kind: "implementation_changed", artifactId: "art_cli_1", path: "src/retry.ts" }],
+      },
+    });
+
+    await writeFile(implementationPath, approvedImplementation);
+    const artifact = state.artifacts[0]!;
+    artifact.approvedVersionId = "av_cli_2";
+    artifact.currentVersionId = "av_cli_2";
+    (artifact.versions as Array<Record<string, unknown>>).push({
+      id: "av_cli_2",
+      artifactId: "art_cli_1",
+      version: 2,
+      summary: "Revised retry policy.",
+      body: "# Retry policy\n\nRetry transient failures at most once.\n",
+      status: "approved",
+      approvedAt: "2026-08-08T00:00:00.000Z",
+      approvedById: "usr_architect",
+    });
+    expect(await runCli(["spec", "drift", "check"], runtime)).toBe(cliExitCodes.pending);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      details: {
+        issues: [{
+          kind: "approved_specification_changed",
+          artifactId: "art_cli_1",
+          expectedVersionId: "av_cli_1",
+          currentVersionId: "av_cli_2",
+        }],
+      },
+    });
+    expect(await runCli(["spec", "drift", "check", "--offline"], runtime)).toBe(cliExitCodes.success);
+    expect(stdout.at(-1)).toContain('"remoteChecked": false');
+    expect(String(artifact.approvedVersionId)).toBe("av_cli_2");
+    expect(await runCli([
+      "spec",
+      "drift",
+      "capture",
+      "--artifact-id",
+      "art_cli_1",
+      "--file",
+      "../outside.ts",
+    ], runtime)).toBe(cliExitCodes.configuration);
+    expect(JSON.parse(stderr.at(-1) ?? "{}")).toMatchObject({
+      code: "DRIFT_PATH_OUTSIDE_REPOSITORY",
+      exitCode: cliExitCodes.configuration,
+    });
   });
 
   it("returns a stable pending exit code when an answer has not arrived", async () => {
@@ -1255,6 +1344,46 @@ describe("Bridge CLI fallback adapter", () => {
 
     expect(exitCode).toBe(cliExitCodes.pending);
     expect(JSON.parse(stderr[0] ?? "{}")).toMatchObject({ code: "QUESTION_PENDING", exitCode: 10 });
+  });
+
+  it("uses a secret-manager service token for noninteractive OIDC CI reads", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-ci-token-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const serviceToken = `brg_srv_${"c".repeat(43)}`;
+    let authorization: string | null = null;
+    const exitCode = await runCli(["spec", "get", "art_ci"], {
+      cwd,
+      environment: {
+        BRIDGE_API_URL: "https://bridge.test",
+        BRIDGE_SERVICE_TOKEN: serviceToken,
+      },
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      credentialStore: {
+        kind: "unavailable-in-ci",
+        get: async () => { throw new Error("credential store must not be used"); },
+        set: async () => { throw new Error("credential store must not be used"); },
+        delete: async () => { throw new Error("credential store must not be used"); },
+      },
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/v1/auth/config") {
+          return new Response(JSON.stringify({ mode: "oidc" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        authorization = new Headers(init?.headers).get("authorization");
+        return new Response(JSON.stringify({ id: "art_ci", versions: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    expect(exitCode).toBe(cliExitCodes.success);
+    expect(authorization).toBe(`Bearer ${serviceToken}`);
+    expect([...stdout, ...stderr].join("\n")).not.toContain(serviceToken);
   });
 
   it("logs in with public-client PKCE, refreshes, authenticates API calls, and revokes logout", async () => {

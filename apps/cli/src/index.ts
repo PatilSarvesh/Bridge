@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
@@ -194,6 +194,8 @@ Usage:
   bridge spec publish [project-id] --file <spec.md> --title <title> --type <prd|adr|api_contract|test_plan> [--run-id <id>] [--reviewers <ids>] [--reviewer-roles <roles>] [--reviewer-teams <teams>] [--required-approvals <count>]
   bridge spec get <artifact-id>
   bridge spec pull [project-id] [--out <directory>]
+  bridge spec drift capture [project-id] --artifact-id <id> --file <path> [--file <path>...] [--manifest <path>]
+  bridge spec drift check [project-id] [--manifest <path>] [--offline]
 
 Output:
   --output <json|human>  JSON is the stable default for agents and automation.
@@ -210,6 +212,7 @@ Development environment:
   BRIDGE_API_URL        Overrides the configured API URL
   BRIDGE_MCP_URL        Overrides the optional configured MCP endpoint
   BRIDGE_PRINCIPAL_ID   Development-mode identity (default: agt_codex; ignored by OIDC servers)
+  BRIDGE_SERVICE_TOKEN  OIDC-mode CI service token supplied by the CI secret manager
 
 Exit codes:
   0 success, 2 invalid input, 3 configuration, 4 connection/server,
@@ -550,7 +553,7 @@ async function bridgeFetch(
   if (!response.ok) {
     if (response.status === 401 && authenticate) {
       const configuration = await authenticationState(options).publicConfiguration?.catch(() => undefined);
-      if (configuration?.mode === "oidc") {
+      if (configuration?.mode === "oidc" && !runtime.environment.BRIDGE_SERVICE_TOKEN) {
         await deleteStoredSession(options, runtime).catch(() => undefined);
       }
     }
@@ -605,6 +608,17 @@ async function resolveAuthenticationHeaders(
   const configuration = await publicAuthenticationConfiguration(options, runtime);
   if (configuration.mode === "development") {
     return { "x-bridge-principal-id": options.principalId };
+  }
+  const serviceToken = runtime.environment.BRIDGE_SERVICE_TOKEN?.trim();
+  if (serviceToken) {
+    if (!/^brg_srv_[A-Za-z0-9_-]{43,512}$/.test(serviceToken)) {
+      throw new CliError(
+        "INVALID_SERVICE_TOKEN",
+        "BRIDGE_SERVICE_TOKEN is not a valid Bridge service token.",
+        cliExitCodes.configuration,
+      );
+    }
+    return { authorization: `Bearer ${serviceToken}` };
   }
   const session = await usableStoredSession(options, runtime, configuration);
   if (!session) {
@@ -1402,6 +1416,434 @@ function approvedArtifactVersion(artifact: Readonly<Record<string, unknown>>): R
   return versions.find(
     (version) => Boolean(version && version.id === artifact.approvedVersionId && version.status === "approved"),
   );
+}
+
+interface SpecificationDriftFileBinding {
+  readonly path: string;
+  readonly contentSha256: string;
+}
+
+interface SpecificationDriftBinding {
+  readonly artifactId: string;
+  readonly approvedVersionId: string;
+  readonly approvedContentSha256: string;
+  readonly files: readonly SpecificationDriftFileBinding[];
+}
+
+interface SpecificationDriftManifest {
+  readonly schemaVersion: 1;
+  readonly projectId: string;
+  readonly capturedAt: string;
+  readonly source: string;
+  readonly items: readonly SpecificationDriftBinding[];
+}
+
+function parseSpecificationDriftManifest(value: unknown): SpecificationDriftManifest {
+  const record = asRecord(value);
+  const rawItems = record?.items;
+  if (
+    record?.schemaVersion !== 1 ||
+    typeof record.projectId !== "string" ||
+    record.projectId.length < 1 ||
+    typeof record.capturedAt !== "string" ||
+    !Number.isFinite(Date.parse(record.capturedAt)) ||
+    typeof record.source !== "string" ||
+    !Array.isArray(rawItems) ||
+    rawItems.length > 100
+  ) {
+    throw new CliError(
+      "INVALID_DRIFT_MANIFEST",
+      "The specification drift manifest is malformed or uses an unsupported schema version.",
+      cliExitCodes.configuration,
+    );
+  }
+  const items: SpecificationDriftBinding[] = [];
+  const artifactIds = new Set<string>();
+  for (const rawItem of rawItems) {
+    const item = asRecord(rawItem);
+    const rawFiles = item?.files;
+    if (
+      !item ||
+      typeof item.artifactId !== "string" ||
+      item.artifactId.length < 1 ||
+      typeof item.approvedVersionId !== "string" ||
+      item.approvedVersionId.length < 1 ||
+      typeof item.approvedContentSha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(item.approvedContentSha256) ||
+      !Array.isArray(rawFiles) ||
+      rawFiles.length < 1 ||
+      rawFiles.length > 1_000 ||
+      artifactIds.has(item.artifactId)
+    ) {
+      throw new CliError(
+        "INVALID_DRIFT_MANIFEST",
+        "Each drift binding must identify one approved version and one or more unique repository files.",
+        cliExitCodes.configuration,
+      );
+    }
+    artifactIds.add(item.artifactId);
+    const filePaths = new Set<string>();
+    const files: SpecificationDriftFileBinding[] = [];
+    for (const rawFile of rawFiles) {
+      const file = asRecord(rawFile);
+      if (
+        !file ||
+        typeof file.path !== "string" ||
+        file.path.length < 1 ||
+        isAbsolute(file.path) ||
+        file.path.split(/[\\/]/).includes("..") ||
+        typeof file.contentSha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(file.contentSha256) ||
+        filePaths.has(file.path)
+      ) {
+        throw new CliError(
+          "INVALID_DRIFT_MANIFEST",
+          "Drift file bindings must use unique relative paths and SHA-256 checksums.",
+          cliExitCodes.configuration,
+        );
+      }
+      filePaths.add(file.path);
+      files.push({ path: file.path, contentSha256: file.contentSha256 });
+    }
+    items.push({
+      artifactId: item.artifactId,
+      approvedVersionId: item.approvedVersionId,
+      approvedContentSha256: item.approvedContentSha256,
+      files,
+    });
+  }
+  if (items.length === 0) {
+    throw new CliError(
+      "EMPTY_DRIFT_MANIFEST",
+      "The specification drift manifest has no bindings to check.",
+      cliExitCodes.configuration,
+    );
+  }
+  return {
+    schemaVersion: 1,
+    projectId: record.projectId,
+    capturedAt: record.capturedAt,
+    source: record.source,
+    items,
+  };
+}
+
+function pathLeavesRoot(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath);
+}
+
+async function driftManifestLocation(
+  cwd: string,
+  input: string,
+  createParent: boolean,
+): Promise<{ readonly absolutePath: string; readonly relativePath: string }> {
+  const lexicalRoot = resolve(cwd);
+  const repositoryRoot = await realpath(cwd);
+  const candidate = resolve(cwd, input);
+  if (pathLeavesRoot(lexicalRoot, candidate)) {
+    throw new CliError(
+      "DRIFT_PATH_OUTSIDE_REPOSITORY",
+      "The drift manifest must remain inside the current repository.",
+      cliExitCodes.configuration,
+    );
+  }
+  if (createParent) await mkdir(dirname(candidate), { recursive: true });
+  let canonicalParent: string;
+  try {
+    canonicalParent = await realpath(dirname(candidate));
+  } catch {
+    throw new CliError(
+      "DRIFT_MANIFEST_UNAVAILABLE",
+      "The drift manifest directory does not exist or cannot be read.",
+      cliExitCodes.configuration,
+    );
+  }
+  if (pathLeavesRoot(repositoryRoot, canonicalParent)) {
+    throw new CliError(
+      "DRIFT_PATH_OUTSIDE_REPOSITORY",
+      "The drift manifest cannot traverse a symlink outside the current repository.",
+      cliExitCodes.configuration,
+    );
+  }
+  const absolutePath = resolve(canonicalParent, basename(candidate));
+  try {
+    await access(absolutePath);
+    const canonicalFile = await realpath(absolutePath);
+    if (pathLeavesRoot(repositoryRoot, canonicalFile)) {
+      throw new CliError(
+        "DRIFT_PATH_OUTSIDE_REPOSITORY",
+        "The drift manifest cannot be a symlink outside the current repository.",
+        cliExitCodes.configuration,
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof CliError ||
+      !(error instanceof Error) ||
+      !["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")
+    ) throw error;
+  }
+  return {
+    absolutePath,
+    relativePath: relative(repositoryRoot, absolutePath).split(sep).join("/"),
+  };
+}
+
+async function driftImplementationFile(
+  cwd: string,
+  input: string,
+): Promise<{ readonly absolutePath: string; readonly relativePath: string }> {
+  const lexicalRoot = resolve(cwd);
+  const repositoryRoot = await realpath(cwd);
+  const candidate = resolve(cwd, input);
+  if (pathLeavesRoot(lexicalRoot, candidate)) {
+    throw new CliError(
+      "DRIFT_PATH_OUTSIDE_REPOSITORY",
+      "Specification drift bindings may reference only files inside the current repository.",
+      cliExitCodes.configuration,
+    );
+  }
+  let canonical: string;
+  try {
+    canonical = await realpath(candidate);
+  } catch {
+    canonical = candidate;
+  }
+  if (pathLeavesRoot(repositoryRoot, canonical)) {
+    throw new CliError(
+      "DRIFT_PATH_OUTSIDE_REPOSITORY",
+      "Specification drift bindings cannot traverse a symlink outside the current repository.",
+      cliExitCodes.configuration,
+    );
+  }
+  return {
+    absolutePath: canonical,
+    relativePath: relative(repositoryRoot, canonical).split(sep).join("/"),
+  };
+}
+
+function approvedVersionIdentity(artifact: Readonly<Record<string, unknown>>): {
+  readonly versionId: string;
+  readonly contentSha256: string;
+} | undefined {
+  const version = approvedArtifactVersion(artifact);
+  if (!version || typeof version.id !== "string") return undefined;
+  const canonicalHash = typeof version.contentSha256 === "string" && /^[a-f0-9]{64}$/.test(version.contentSha256)
+    ? version.contentSha256
+    : typeof version.body === "string"
+      ? createHash("sha256").update(version.body).digest("hex")
+      : undefined;
+  return canonicalHash ? { versionId: version.id, contentSha256: canonicalHash } : undefined;
+}
+
+async function readSpecificationDriftManifest(path: string): Promise<SpecificationDriftManifest> {
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    throw new CliError(
+      "DRIFT_MANIFEST_UNAVAILABLE",
+      "The specification drift manifest is missing or invalid JSON.",
+      cliExitCodes.configuration,
+      { cause: error instanceof Error ? error.message : String(error) },
+    );
+  }
+  return parseSpecificationDriftManifest(value);
+}
+
+async function runSpecificationDrift(
+  args: readonly string[],
+  config: ProjectConfig | undefined,
+  connection: ConnectionOptions,
+  runtime: CliRuntime,
+): Promise<void> {
+  const action = args[2];
+  if (action !== "capture" && action !== "check") {
+    throw new CliError(
+      "UNKNOWN_SPEC_DRIFT_COMMAND",
+      "Use `bridge spec drift capture` or `bridge spec drift check`.",
+      cliExitCodes.usage,
+    );
+  }
+  const projectId = requireProjectId(firstPositional(args, 3), config);
+  const manifest = await driftManifestLocation(
+    runtime.cwd,
+    optionValue(args, "--manifest") ?? ".bridge/spec-drift.json",
+    action === "capture",
+  );
+
+  if (action === "capture") {
+    const artifactId = requiredOptionValue(
+      args,
+      "--artifact-id",
+      "spec drift capture requires --artifact-id.",
+    );
+    const requestedFiles = [...new Set(optionValues(args, "--file"))];
+    if (requestedFiles.length === 0) {
+      throw new CliError(
+        "DRIFT_FILES_REQUIRED",
+        "spec drift capture requires at least one --file path.",
+        cliExitCodes.usage,
+      );
+    }
+    const artifact = asRecord(await bridgeFetch(
+      `/v1/artifacts/${encodeURIComponent(artifactId)}`,
+      connection,
+      runtime,
+    ));
+    const approved = artifact ? approvedVersionIdentity(artifact) : undefined;
+    if (!artifact || artifact.projectId !== projectId || !approved) {
+      throw new CliError(
+        "APPROVED_SPECIFICATION_REQUIRED",
+        "The artifact must belong to this project and have a current approved version before drift capture.",
+        cliExitCodes.conflict,
+      );
+    }
+    const files: SpecificationDriftFileBinding[] = [];
+    for (const input of requestedFiles) {
+      const file = await driftImplementationFile(runtime.cwd, input);
+      let content: Buffer;
+      try {
+        content = await readFile(file.absolutePath);
+      } catch {
+        throw new CliError(
+          "DRIFT_FILE_UNAVAILABLE",
+          `Cannot capture missing implementation file ${file.relativePath}.`,
+          cliExitCodes.configuration,
+        );
+      }
+      files.push({
+        path: file.relativePath,
+        contentSha256: createHash("sha256").update(content).digest("hex"),
+      });
+    }
+    let previousItems: readonly SpecificationDriftBinding[] = [];
+    try {
+      await access(manifest.absolutePath);
+      previousItems = (await readSpecificationDriftManifest(manifest.absolutePath)).items;
+    } catch (error) {
+      if (!(error instanceof Error) || !["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+        throw error;
+      }
+    }
+    const items = [
+      ...previousItems.filter((item) => item.artifactId !== artifactId),
+      {
+        artifactId,
+        approvedVersionId: approved.versionId,
+        approvedContentSha256: approved.contentSha256,
+        files: files.sort((left, right) => left.path.localeCompare(right.path)),
+      },
+    ].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
+    await writeAtomic(manifest.absolutePath, `${JSON.stringify({
+      schemaVersion: 1,
+      projectId,
+      capturedAt: runtime.now().toISOString(),
+      source: connection.apiUrl,
+      items,
+    }, null, 2)}\n`);
+    output(runtime, {
+      ok: true,
+      status: "captured",
+      projectId,
+      artifactId,
+      approvedVersionId: approved.versionId,
+      fileCount: files.length,
+      manifest: manifest.relativePath,
+      humanApprovalChanged: false,
+    });
+    return;
+  }
+
+  const driftManifest = await readSpecificationDriftManifest(manifest.absolutePath);
+  if (driftManifest.projectId !== projectId) {
+    throw new CliError(
+      "DRIFT_PROJECT_MISMATCH",
+      "The drift manifest belongs to a different Bridge project.",
+      cliExitCodes.configuration,
+    );
+  }
+  const issues: Array<Record<string, unknown>> = [];
+  for (const binding of driftManifest.items) {
+    for (const expected of binding.files) {
+      const file = await driftImplementationFile(runtime.cwd, expected.path);
+      let content: Buffer;
+      try {
+        content = await readFile(file.absolutePath);
+      } catch {
+        issues.push({
+          kind: "implementation_file_missing",
+          artifactId: binding.artifactId,
+          path: expected.path,
+        });
+        continue;
+      }
+      if (createHash("sha256").update(content).digest("hex") !== expected.contentSha256) {
+        issues.push({
+          kind: "implementation_changed",
+          artifactId: binding.artifactId,
+          path: expected.path,
+        });
+      }
+    }
+  }
+  const offline = args.includes("--offline");
+  if (!offline) {
+    const response = await bridgeFetch(
+      `/v1/projects/${encodeURIComponent(projectId)}/artifacts`,
+      connection,
+      runtime,
+    );
+    const artifacts = new Map(
+      itemsFrom(response)
+        .map(asRecord)
+        .filter((artifact): artifact is Readonly<Record<string, unknown>> => Boolean(artifact && typeof artifact.id === "string"))
+        .map((artifact) => [String(artifact.id), artifact]),
+    );
+    for (const binding of driftManifest.items) {
+      const approved = artifacts.get(binding.artifactId)
+        ? approvedVersionIdentity(artifacts.get(binding.artifactId)!)
+        : undefined;
+      if (!approved) {
+        issues.push({ kind: "approved_specification_missing", artifactId: binding.artifactId });
+      } else if (
+        approved.versionId !== binding.approvedVersionId ||
+        approved.contentSha256 !== binding.approvedContentSha256
+      ) {
+        issues.push({
+          kind: "approved_specification_changed",
+          artifactId: binding.artifactId,
+          expectedVersionId: binding.approvedVersionId,
+          currentVersionId: approved.versionId,
+        });
+      }
+    }
+  }
+  if (issues.length > 0) {
+    throw new CliError(
+      "SPECIFICATION_DRIFT",
+      "Approved specification drift was detected; review the implementation and recapture only after human approval is current.",
+      cliExitCodes.pending,
+      {
+        projectId,
+        manifest: manifest.relativePath,
+        remoteChecked: !offline,
+        issueCount: issues.length,
+        issues,
+      },
+    );
+  }
+  output(runtime, {
+    ok: true,
+    status: "in_sync",
+    projectId,
+    manifest: manifest.relativePath,
+    bindingCount: driftManifest.items.length,
+    fileCount: driftManifest.items.reduce((total, item) => total + item.files.length, 0),
+    remoteChecked: !offline,
+    humanApprovalChanged: false,
+  });
 }
 
 function renderContextMarkdown(projectId: string, task: string, context: unknown): string {
@@ -2649,6 +3091,10 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
 
   if (command === "spec") {
     const action = args[1];
+    if (action === "drift") {
+      await runSpecificationDrift(args, config, connection, runtime);
+      return;
+    }
     if (action === "publish") {
       const projectId = requireProjectId(firstPositional(args, 2), config);
       const file = optionValue(args, "--file");
@@ -2779,7 +3225,7 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
 
     throw new CliError(
       "UNKNOWN_SPEC_COMMAND",
-      "Use `bridge spec publish`, `bridge spec get`, or `bridge spec pull`.",
+      "Use `bridge spec publish`, `bridge spec get`, `bridge spec pull`, or `bridge spec drift`.",
       cliExitCodes.usage,
     );
   }

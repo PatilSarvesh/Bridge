@@ -140,6 +140,8 @@ Service-token resolution re-checks expiry, revocation, active organization membe
 
 Rotation is optimistic-versioned and immediately invalidates the previous token. The replacement token is returned once, while Bridge stores only its hash and an audit event records the rotation. This is a credential-management foundation, not workload identity federation; provider-side exchange, rate limits, and live authorization-provider validation remain follow-up work. Never commit, print, or log a service token.
 
+For noninteractive CLI checks, a CI runner may inject that opaque token as the masked secret `BRIDGE_SERVICE_TOKEN`. In OIDC mode the CLI validates the prefix/shape and sends it only as an `Authorization: Bearer` header; it does not read or write the human OS credential store and never includes the token in command output or errors. Use a project-restricted `ci` identity with only the mapped capabilities needed by the job—for specification drift, `bridge:artifacts:read` is sufficient. Development mode continues to use the explicit local principal seam and ignores this token path. Do not place the value in workflow YAML, command arguments, `.bridge`, shell profile files, caches, or artifacts.
+
 The CLI provides the same REST-backed administration path for an organization administrator:
 
 ```bash

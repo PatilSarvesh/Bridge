@@ -1121,7 +1121,7 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
-Implementation status (2026-08-23): BRG-120 through BRG-123 are complete. Role-aware presentations preserve an exact source envelope; personalized low-risk digests retain individual acceptance; conflict scans remain advisory; and bounded transitive impact analysis traces source questions, citing specification versions, confirmed assumptions, context consumption, producing/continuing runs, downstream records, and external work links. BRG-124 through BRG-130 remain pending.
+Implementation status (2026-08-23): BRG-120 through BRG-124 are complete. Role-aware views, low-risk digests, advisory conflict scans, bounded transitive impact graphs, and the CI-safe approved-specification drift manifest/check are implemented while preserving canonical REST reads and human authority. Drift coverage is explicit-file/hash based; source-provider semantic analysis remains future integration work. BRG-125 through BRG-130 remain pending.
 
 ## 21. Critical path
 

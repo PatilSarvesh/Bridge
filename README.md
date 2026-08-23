@@ -301,6 +301,13 @@ pnpm --filter @bridge/cli dev -- spec publish \
 # Pull only human-approved specification versions into the repository
 pnpm --filter @bridge/cli dev -- spec pull
 
+# Bind an approved specification to implementation files, then run the CI-safe drift check
+pnpm --filter @bridge/cli dev -- spec drift capture \
+  --artifact-id <artifact-id> \
+  --file src/transfer-retry.ts \
+  --file test/transfer-retry.test.ts
+pnpm --filter @bridge/cli dev -- spec drift check
+
 # Read the current run version, then report a terminal outcome.
 pnpm --filter @bridge/cli dev -- run get <run-id>
 pnpm --filter @bridge/cli dev -- run report <run-id> \
@@ -311,7 +318,7 @@ pnpm --filter @bridge/cli dev -- run report <run-id> \
 
 `bridge question matches` returns deterministic exact or related candidates. Creating a policy-equivalent exact match reuses the existing unresolved question or active accepted decision and links it to the new run; related matches are suggestions only and are never auto-merged. The response field `submissionDisposition` tells the caller whether Bridge created, replayed, or reused the question.
 
-`bridge sync` writes current context and provenance to `.bridge/context.md`, `.bridge/context.json`, `.bridge/decisions.json`, `.bridge/assumptions.json`, `.bridge/questions.json`, `.bridge/specifications.json`, and `.bridge/sync-metadata.json`. The questions snapshot contains unresolved questions so offline agents can avoid repeating them. Active assumptions are clearly labeled as temporary and lower-authority than accepted decisions; confirmed assumptions remain distinct from formal decisions. Rejected, expired, and superseded assumptions are not exported as current agent context. `bridge spec pull` writes approved Markdown bodies plus a checksum manifest under `.bridge/specs/`. Draft and in-review specification bodies are never exported as approved repository context. Successful command output defaults to stable JSON for agents and CI; human operators can add `--output human`. Errors remain JSON with stable exit codes in both modes so automation can react deterministically.
+`bridge sync` writes current context and provenance to `.bridge/context.md`, `.bridge/context.json`, `.bridge/decisions.json`, `.bridge/assumptions.json`, `.bridge/questions.json`, `.bridge/specifications.json`, and `.bridge/sync-metadata.json`. The questions snapshot contains unresolved questions so offline agents can avoid repeating them. Active assumptions are clearly labeled as temporary and lower-authority than accepted decisions; confirmed assumptions remain distinct from formal decisions. Rejected, expired, and superseded assumptions are not exported as current agent context. `bridge spec pull` writes approved Markdown bodies plus a checksum manifest under `.bridge/specs/`. Draft and in-review specification bodies are never exported as approved repository context. `bridge spec drift capture` records an approved version identity plus selected repository-file SHA-256 values in `.bridge/spec-drift.json`; `bridge spec drift check` exits `10` when those files change or the server's approved version changes. Capture never approves a version, and the checked-in binding remains reviewable repository evidence rather than a cryptographic attestation. See [`docs/specification-drift.md`](docs/specification-drift.md). Successful command output defaults to stable JSON for agents and CI; human operators can add `--output human`. Errors remain JSON with stable exit codes in both modes so automation can react deterministically.
 
 A blocking question atomically changes its linked run to `waiting_for_human`. Accepting the answer does not silently restart an agent session. `run continue` reports whether work can continue and which decisions were accepted; a later session explicitly creates a new linked run. The resume-context key is an opaque locator, not an authorization credential—project access is still required—and the current unauthenticated prototype must not be exposed as a production service.
 
