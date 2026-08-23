@@ -36,6 +36,7 @@ import {
   notificationReadAllInputSchema,
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
+  projectDataExportInputSchema,
   questionReviewInputSchema,
   reassignQuestionInputSchema,
   questionInboxQuerySchema,
@@ -494,6 +495,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = auditExportInputSchema.parse(request.body ?? {});
       const result = await options.service.exportProjectAudit(principal, request.params.projectId, input);
+      return reply
+        .header("content-disposition", `attachment; filename="${result.filename}"`)
+        .type(result.contentType)
+        .send(result.body);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/export",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = projectDataExportInputSchema.parse(request.body ?? {});
+      const result = await options.service.exportProjectData(principal, request.params.projectId, input);
       return reply
         .header("content-disposition", `attachment; filename="${result.filename}"`)
         .type(result.contentType)

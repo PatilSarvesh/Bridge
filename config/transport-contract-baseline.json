@@ -21,6 +21,7 @@
     "GET /v1/admin/projects/:projectId/support",
     "GET /v1/admin/projects/:projectId/audit",
     "POST /v1/admin/projects/:projectId/audit/export",
+    "POST /v1/admin/projects/:projectId/export",
     "POST /v1/admin/outbox/:eventId/replay",
     "GET /v1/principals",
     "GET /v1/admin/organization/members",

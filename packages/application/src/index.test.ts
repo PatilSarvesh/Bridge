@@ -1421,6 +1421,93 @@ describe("Bridge decision workflow", () => {
     );
   });
 
+  it("exports bounded governed project data without changing human approval state", async () => {
+    const { repository, service } = await runtime();
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "project-export-question-001",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "A human owner selected bounded transient retries for the governed export fixture.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "project-export-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The approved specification accurately records the human decision.",
+    });
+    const decisionBeforeExport = await repository.getDecision(decision.id);
+    const artifactBeforeExport = await repository.getArtifact(publication.artifact.id);
+    const input = {
+      decisionOffset: 0,
+      maxDecisions: 1_000,
+      artifactOffset: 0,
+      maxArtifacts: 100,
+      auditOffset: 0,
+      maxAuditItems: 5_000,
+    };
+
+    await expect(service.exportProjectData(contributor, project.id, input))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.exportProjectData(outsider, project.id, input))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+
+    const exported = await service.exportProjectData(owner, project.id, input);
+    const body = JSON.parse(exported.body) as {
+      readonly schemaVersion: number;
+      readonly project: Project;
+      readonly counts: {
+        readonly decisions: { readonly total: number; readonly included: number; readonly offset: number };
+        readonly artifacts: { readonly total: number; readonly included: number; readonly offset: number };
+        readonly auditEvents: { readonly total: number; readonly included: number; readonly offset: number };
+      };
+      readonly humanApprovalChanged: boolean;
+      readonly decisions: readonly { readonly id: string; readonly answer: string }[];
+      readonly artifacts: readonly {
+        readonly id: string;
+        readonly approvedVersionId?: string;
+        readonly versions: readonly { readonly id: string; readonly body: string; readonly status: string }[];
+      }[];
+      readonly auditEvents: readonly AuditEvent[];
+    };
+    expect(exported).toMatchObject({
+      contentType: "application/json; charset=utf-8",
+      humanApprovalChanged: false,
+      counts: {
+        decisions: { total: 1, included: 1, offset: 0 },
+        artifacts: { total: 1, included: 1, offset: 0 },
+      },
+    });
+    expect(exported.filename).toContain(`bridge-project-${project.id}-`);
+    expect(body).toMatchObject({
+      schemaVersion: 1,
+      project: { id: project.id, organizationId: project.organizationId },
+      humanApprovalChanged: false,
+      decisions: [expect.objectContaining({ id: decision.id, answer: "Retry transient failures" })],
+      artifacts: [expect.objectContaining({
+        id: publication.artifact.id,
+        approvedVersionId: publication.version.id,
+        versions: [expect.objectContaining({
+          id: publication.version.id,
+          body: artifactInput().body,
+          status: "approved",
+        })],
+      })],
+    });
+    expect(body.auditEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "project.exported",
+        subjectType: "project_export",
+        actorId: owner.id,
+      }),
+    ]));
+    expect(body.counts.auditEvents.total).toBeGreaterThan(0);
+    expect(body.counts.auditEvents.included).toBe(body.auditEvents.length);
+    await expect(repository.getDecision(decision.id)).resolves.toEqual(decisionBeforeExport);
+    await expect(repository.getArtifact(publication.artifact.id)).resolves.toEqual(artifactBeforeExport);
+  });
+
   it("creates, resolves, lists, and revokes a scoped service identity", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);

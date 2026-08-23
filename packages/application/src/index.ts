@@ -47,6 +47,7 @@ import type {
   NotificationReadAllInput,
   OutboxOperationsQuery,
   ProjectAnalyticsQuery,
+  ProjectDataExportInput,
   ProjectMembershipConfiguration,
   QuestionReviewInput,
   OverrideQuestionApprovalInput,
@@ -665,6 +666,25 @@ export interface AuditExport {
   readonly contentType: "application/json; charset=utf-8" | "text/csv; charset=utf-8";
   readonly body: string;
   readonly itemCount: number;
+}
+
+export interface ProjectDataExportCount {
+  readonly total: number;
+  readonly included: number;
+  readonly offset: number;
+  readonly nextOffset?: number;
+}
+
+export interface ProjectDataExport {
+  readonly filename: string;
+  readonly contentType: "application/json; charset=utf-8";
+  readonly body: string;
+  readonly counts: {
+    readonly decisions: ProjectDataExportCount;
+    readonly artifacts: ProjectDataExportCount;
+    readonly auditEvents: ProjectDataExportCount;
+  };
+  readonly humanApprovalChanged: false;
 }
 
 export interface ProjectAnalyticsActivity {
@@ -4020,6 +4040,68 @@ export class BridgeService {
         timestamp,
       );
       return this.renderAuditExport("project", projectId, records, input.format, timestamp);
+    });
+  }
+
+  async exportProjectData(
+    principal: Principal,
+    projectId: string,
+    input: ProjectDataExportInput,
+  ): Promise<ProjectDataExport> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Exporting project data", projectId);
+      const exportedAt = this.now().toISOString();
+      const exportId = `pex_${this.id()}`;
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "project.exported",
+        "project_export",
+        exportId,
+        exportedAt,
+      );
+
+      const decisions = (await repository.listDecisions(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const artifacts = (await repository.listArtifacts(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const auditEvents = (await repository.listAuditEvents(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+
+      const decisionItems = decisions.slice(input.decisionOffset, input.decisionOffset + input.maxDecisions);
+      const artifactItems = artifacts.slice(input.artifactOffset, input.artifactOffset + input.maxArtifacts);
+      const auditItems = auditEvents.slice(input.auditOffset, input.auditOffset + input.maxAuditItems);
+      const counts = {
+        decisions: this.projectDataExportCount(decisions.length, input.decisionOffset, decisionItems.length),
+        artifacts: this.projectDataExportCount(artifacts.length, input.artifactOffset, artifactItems.length),
+        auditEvents: this.projectDataExportCount(auditEvents.length, input.auditOffset, auditItems.length),
+      };
+      const safeTimestamp = exportedAt.replace(/[:.]/g, "-");
+      return {
+        filename: `bridge-project-${projectId}-${safeTimestamp}.json`,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          exportId,
+          exportedAt,
+          project,
+          counts,
+          humanApprovalChanged: false,
+          decisions: decisionItems,
+          artifacts: artifactItems,
+          auditEvents: auditItems,
+        }, null, 2),
+        counts,
+        humanApprovalChanged: false,
+      };
     });
   }
 
@@ -7879,6 +7961,20 @@ export class BridgeService {
       contentType: "text/csv; charset=utf-8",
       body,
       itemCount: records.length,
+    };
+  }
+
+  private projectDataExportCount(
+    total: number,
+    offset: number,
+    included: number,
+  ): ProjectDataExportCount {
+    const nextOffset = offset + included < total ? offset + included : undefined;
+    return {
+      total,
+      included,
+      offset,
+      ...(nextOffset === undefined ? {} : { nextOffset }),
     };
   }
 

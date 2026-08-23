@@ -1117,11 +1117,11 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-125 | P1 | L | Add first source-control pull-request context integration — complete | Integration roadmap |
 | BRG-126 | P1 | L | Add first work-item synchronization integration — complete | Integration roadmap |
 | BRG-127 | P1 | M | Add enterprise group provisioning and lifecycle sync — complete (bounded provider-group slice) | AUTH-05 |
-| BRG-128 | P1 | M | Export project decisions, artifacts, and audit records | ADM-02 |
+| BRG-128 | P1 | M | Export project decisions, artifacts, and audit records — complete | ADM-02 |
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
-Implementation status (2026-08-24): BRG-120 through BRG-127 are complete. The bounded AUTH-05 slice lets a human administrator configure an exact OIDC/provider group and an explicitly scoped integration reconcile subject/display-name membership lifecycle. Directory-created users receive no roles or project access, manual administration takes precedence over later provider removal, and sync has no approval authority. Bridge does not host SCIM or map groups to roles/projects. BRG-128 through BRG-130 remain pending.
+Implementation status (2026-08-24): BRG-120 through BRG-128 are complete. The ADM-02 slice gives human project administrators an audited, bounded JSON export of canonical decisions, full artifact/version aggregates, and project audit events. Independent collection offsets make larger exports resumable, exported files are explicitly sensitive governed project data, and the command cannot change approval state. BRG-129 and BRG-130 remain pending.
 
 ## 21. Critical path
 

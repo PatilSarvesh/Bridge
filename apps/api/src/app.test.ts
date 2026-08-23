@@ -458,6 +458,36 @@ describe("Bridge API vertical slice", () => {
       expect(jsonExport.body).not.toContain(question.context);
     }
 
+    const projectDataExport = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/export`,
+      headers: adminHeader,
+      payload: {},
+    });
+    expect(projectDataExport.statusCode).toBe(200);
+    expect(projectDataExport.headers["content-disposition"]).toContain(`bridge-project-${demoProject.id}-`);
+    expect(projectDataExport.headers["content-type"]).toContain("application/json");
+    expect(projectDataExport.json()).toMatchObject({
+      schemaVersion: 1,
+      project: { id: demoProject.id, organizationId: demoProject.organizationId },
+      humanApprovalChanged: false,
+      counts: {
+        decisions: { offset: 0 },
+        artifacts: { offset: 0 },
+        auditEvents: { offset: 0 },
+      },
+      auditEvents: expect.arrayContaining([
+        expect.objectContaining({ action: "project.exported", subjectType: "project_export" }),
+      ]),
+    });
+    const projectDataContributorDenied = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/export`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {},
+    });
+    expect(projectDataContributorDenied.statusCode).toBe(403);
+
     const organizationView = await app.inject({
       method: "GET",
       url: "/v1/admin/organization/audit?action=organization_member.created",

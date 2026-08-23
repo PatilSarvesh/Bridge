@@ -822,6 +822,15 @@ export const auditExportInputSchema = z.object({
   maxItems: z.number().int().min(1).max(5_000).default(1_000),
 }).superRefine(validateAuditDateRange);
 
+export const projectDataExportInputSchema = z.object({
+  decisionOffset: z.number().int().min(0).max(10_000).default(0),
+  maxDecisions: z.number().int().min(1).max(1_000).default(1_000),
+  artifactOffset: z.number().int().min(0).max(10_000).default(0),
+  maxArtifacts: z.number().int().min(1).max(100).default(100),
+  auditOffset: z.number().int().min(0).max(10_000).default(0),
+  maxAuditItems: z.number().int().min(1).max(5_000).default(5_000),
+});
+
 export const replayOutboxEventInputSchema = z.object({
   expectedAttempts: z.number().int().nonnegative(),
 });
@@ -1082,6 +1091,7 @@ export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
 export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
 export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
 export type AuditExportInput = z.infer<typeof auditExportInputSchema>;
+export type ProjectDataExportInput = z.infer<typeof projectDataExportInputSchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
