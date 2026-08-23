@@ -1121,7 +1121,7 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
 | BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
 
-Implementation status (2026-08-23): BRG-120 and BRG-121 are complete. Role-aware presentations preserve an exact source envelope and remain derived/read-only. Personalized decision digests group two or more unresolved, low-risk, non-blocking questions only when category and exact scope match; the web provides compact navigation, while every item retains its individual human acceptance path. BRG-122 through BRG-130 remain pending.
+Implementation status (2026-08-23): BRG-120 through BRG-122 are complete. Role-aware presentations preserve an exact source envelope; personalized low-risk digests retain individual acceptance; and active-decision conflict scans flag exact-scope divergent answers or explicit opposing language across overlapping same-category scopes. All three are advisory/read-only and preserve human authority. BRG-123 through BRG-130 remain pending.
 
 ## 21. Critical path
 

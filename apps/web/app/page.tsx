@@ -440,6 +440,19 @@ interface DecisionLifecycleImpact {
   readonly workItems: readonly string[];
 }
 
+interface DecisionConflict {
+  readonly id: string;
+  readonly category: string;
+  readonly confidence: "high" | "medium";
+  readonly scopeRelation: "exact" | "ancestor_descendant" | "partial";
+  readonly overlappingFields: readonly string[];
+  readonly signals: readonly string[];
+  readonly left: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly right: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly advisory: true;
+  readonly humanResolutionRequired: true;
+}
+
 interface Assumption {
   readonly id: string;
   readonly runId?: string;
@@ -785,6 +798,7 @@ export default function Home() {
   const [notifications, setNotifications] = useState<readonly Notification[]>([]);
   const [notificationPreference, setNotificationPreference] = useState<NotificationDeliveryPreference>("immediate");
   const [decisions, setDecisions] = useState<readonly Decision[]>([]);
+  const [decisionConflicts, setDecisionConflicts] = useState<readonly DecisionConflict[]>([]);
   const [assumptions, setAssumptions] = useState<readonly Assumption[]>([]);
   const [assumptionStatusFilter, setAssumptionStatusFilter] = useState<Assumption["status"] | "all">("all");
   const [runs, setRuns] = useState<readonly AgentRun[]>([]);
@@ -1394,6 +1408,7 @@ export default function Home() {
   const loadReferenceData = useCallback(async () => {
     if (!selectedProjectId) {
       setDecisions([]);
+      setDecisionConflicts([]);
       setAssumptions([]);
       setRuns([]);
       setReferenceDataLoading(false);
@@ -1412,9 +1427,14 @@ export default function Home() {
       if (decisionFilters.createdFrom) decisionParameters.set("createdFrom", `${decisionFilters.createdFrom}T00:00:00.000Z`);
       if (decisionFilters.createdTo) decisionParameters.set("createdTo", `${decisionFilters.createdTo}T23:59:59.999Z`);
       const decisionQuery = decisionParameters.toString();
-      const [decisionResponse, assumptionResponse, runResponse] = await Promise.all([
+      const [decisionResponse, conflictResponse, assumptionResponse, runResponse] = await Promise.all([
         bridgeFetch<{ items: readonly Decision[] }>(
           `/v1/projects/${selectedProjectId}/decisions${decisionQuery ? `?${decisionQuery}` : ""}`,
+          undefined,
+          activePrincipalId,
+        ),
+        bridgeFetch<{ items: readonly DecisionConflict[] }>(
+          `/v1/projects/${selectedProjectId}/decision-conflicts`,
           undefined,
           activePrincipalId,
         ),
@@ -1430,6 +1450,7 @@ export default function Home() {
         ),
       ]);
       setDecisions(decisionResponse.items);
+      setDecisionConflicts(conflictResponse.items);
       setAssumptions(assumptionResponse.items);
       setRuns(runResponse.items);
       setSelectedDecisionId((current) => {
@@ -1892,6 +1913,13 @@ export default function Home() {
   const selectedDecision = useMemo(
     () => decisions.find((decision) => decision.id === selectedDecisionId) ?? decisions[0],
     [decisions, selectedDecisionId],
+  );
+  const selectedDecisionConflicts = useMemo(
+    () => selectedDecision
+      ? decisionConflicts.filter((conflict) =>
+          conflict.left.id === selectedDecision.id || conflict.right.id === selectedDecision.id)
+      : [],
+    [decisionConflicts, selectedDecision],
   );
   const visibleAssumptions = useMemo(
     () => assumptionStatusFilter === "all"
@@ -3585,7 +3613,7 @@ export default function Home() {
                         onClick={() => setSelectedDecisionId(decision.id)}
                       >
                         <span className="document-mark" aria-hidden="true">✓</span>
-                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}</small></span>
+                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}{decisionConflicts.some((conflict) => conflict.left.id === decision.id || conflict.right.id === decision.id) ? " · potential conflict" : ""}</small></span>
                         <span className={`status status-${decision.status}`}>{decision.status}</span>
                       </button>
                     ))}
@@ -3597,6 +3625,31 @@ export default function Home() {
                         <span className={`status status-${selectedDecision.status}`}>{selectedDecision.status}</span>
                       </div>
                       <section><h3>Decision rationale</h3><p>{selectedDecision.rationale}</p></section>
+                      {selectedDecisionConflicts.length > 0 ? (
+                        <section>
+                          <h3>Potential active conflicts</h3>
+                          <p className="muted-copy">Advisory signals only. A human owner must inspect the scope and rationale before changing either decision.</p>
+                          <div className="conflict-list">
+                            {selectedDecisionConflicts.map((conflict) => {
+                              const other = conflict.left.id === selectedDecision.id ? conflict.right : conflict.left;
+                              return (
+                                <article className="conflict-card" key={conflict.id}>
+                                  <div><strong>{conflict.confidence} confidence</strong><span>{conflict.scopeRelation.replaceAll("_", " ")} scope · {conflict.signals.join(" · ")}</span></div>
+                                  <p>{other.answer}</p>
+                                  <button
+                                    className="text-button"
+                                    type="button"
+                                    onClick={() => {
+                                      setDecisionFilters({ includeHistory: true });
+                                      setSelectedDecisionId(other.id);
+                                    }}
+                                  >Open other active decision</button>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ) : null}
                       <section>
                         <h3>Authority and review</h3>
                         <div className="spec-meta">

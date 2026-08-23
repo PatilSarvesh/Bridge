@@ -505,6 +505,8 @@ Formal specification reviewers may append `commented` or `changes_requested` fee
 6. Persist the transition, audit event, `decision.lifecycle_changed` outbox event, and any recipient notifications plus `notification.created` delivery intents in one transaction.
 7. Exclude the retired decision from subsequent default context while preserving it in history reads.
 
+`GET /v1/projects/:projectId/decision-conflicts` provides the read-only DEC-05 advisory scan. It compares active same-category decisions only when their scopes can overlap: a missing scope field is broader, while unequal values in the same field are disjoint. Pairs are returned when answers differ in exact scope or use a bounded set of explicit opposing terms across broader/narrower scopes. Results include stable pair IDs, confidence, scope relation, overlapping fields, signals, and immutable decision summaries. The scanner deliberately avoids claiming semantic certainty, performs no lifecycle write, and never selects a winner; a human owner must use the separately version-checked lifecycle command to resolve a real conflict.
+
 ### 11.4 Record assumption
 
 1. Validate scope, risk, reversibility, expiry, and source run.

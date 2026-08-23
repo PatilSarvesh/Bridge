@@ -731,6 +731,12 @@ export const decisionListQuerySchema = z
     }
   });
 
+export const decisionConflictQuerySchema = z.object({
+  category: z.string().trim().min(2).max(100).optional(),
+  scope: scopeSchema.default({}),
+  maxItems: z.coerce.number().int().min(1).max(100).default(50),
+});
+
 export const publishArtifactInputSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   artifactId: z.string().trim().min(1).max(100).optional(),
@@ -939,6 +945,7 @@ export type AuditExportInput = z.infer<typeof auditExportInputSchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
+export type DecisionConflictQuery = z.infer<typeof decisionConflictQuerySchema>;
 export type PublishArtifactInput = z.infer<typeof publishArtifactInputSchema>;
 export type ApproveArtifactVersionInput = z.infer<typeof approveArtifactVersionInputSchema>;
 export type ArtifactReviewInput = z.infer<typeof artifactReviewInputSchema>;

@@ -2115,6 +2115,84 @@ describe("Bridge decision workflow", () => {
     });
   });
 
+  it("detects advisory conflicts between active decisions with overlapping scopes", async () => {
+    const { service } = await runtime();
+    const createDecision = async (
+      suffix: string,
+      answer: string,
+      scope: CreateQuestionInput["scope"],
+    ) => {
+      const question = await service.createQuestion(agent, project.id, questionInput({
+        idempotencyKey: `decision-conflict-${suffix}`,
+        title: `Which ${suffix} operating rule should govern transfer processing?`,
+        context: `The transfer system needs a durable ${suffix} operating rule for the selected scope.`,
+        whyItMatters: `Competing ${suffix} rules can make agent and human implementation choices inconsistent.`,
+        scope,
+      }));
+      return service.acceptAnswer(owner, question.id, {
+        answer,
+        rationale: `This records the ${suffix} rule so downstream work can use one explicit direction.`,
+      });
+    };
+    const enabled = await createDecision("retry-enabled", "Enable automatic retries", { component: "transfers" });
+    const disabled = await createDecision("retry-disabled", "Disable automatic retries", { component: "transfers" });
+    const broadRetention = await createDecision("repository-retention", "Always retain transfer receipts", { repository: "bridge" });
+    const narrowRetention = await createDecision(
+      "component-retention",
+      "Never retain transfer receipts",
+      { repository: "bridge", component: "transfers" },
+    );
+    await createDecision("unrelated-component", "Disable automatic retries", { component: "billing" });
+
+    const conflicts = await service.listDecisionConflicts(owner, project.id, {
+      scope: {},
+      maxItems: 50,
+    });
+    expect(conflicts).toHaveLength(2);
+    const exactConflict = conflicts.find((conflict) => conflict.scopeRelation === "exact")!;
+    expect(exactConflict).toMatchObject({
+      confidence: "high",
+      overlappingFields: ["component"],
+      signals: ["different answers in exact scope", "opposing language"],
+      advisory: true,
+      humanResolutionRequired: true,
+    });
+    expect([exactConflict.left.id, exactConflict.right.id]).toEqual(
+      expect.arrayContaining([enabled.id, disabled.id]),
+    );
+    const inheritedConflict = conflicts.find((conflict) => conflict.scopeRelation === "ancestor_descendant")!;
+    expect(inheritedConflict).toMatchObject({
+      confidence: "medium",
+      overlappingFields: ["repository"],
+      signals: ["opposing language"],
+    });
+    expect([inheritedConflict.left.id, inheritedConflict.right.id]).toEqual(
+      expect.arrayContaining([broadRetention.id, narrowRetention.id]),
+    );
+    expect(await service.listDecisionConflicts(owner, project.id, {
+      scope: { component: "billing" },
+      maxItems: 50,
+    })).toEqual([]);
+    await expect(service.listDecisionConflicts(outsider, project.id, {
+      scope: {},
+      maxItems: 50,
+    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
+
+    await service.changeDecisionLifecycle(owner, disabled.id, {
+      expectedVersion: disabled.version,
+      status: "revoked",
+      rationale: "The conflicting retry prohibition is retired after human review of the active policy.",
+    });
+    const afterRetirement = await service.listDecisionConflicts(owner, project.id, {
+      scope: {},
+      maxItems: 50,
+    });
+    expect(afterRetirement).toHaveLength(1);
+    expect([afterRetirement[0]!.left.id, afterRetirement[0]!.right.id]).toEqual(
+      expect.arrayContaining([broadRetention.id, narrowRetention.id]),
+    );
+  });
+
   it("supersedes a decision with owner authority, provenance, impact, and context exclusion", async () => {
     const { repository, service } = await runtime();
     const run = await service.startRun(agent, project.id, {

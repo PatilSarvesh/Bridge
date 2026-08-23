@@ -14,6 +14,7 @@ import type {
   CreateOrganizationMemberInput,
   CreateServiceIdentityInput,
   DecisionListQuery,
+  DecisionConflictQuery,
   CreateQuestionInput,
   EditQuestionCommentInput,
   EditQuestionResponseInput,
@@ -367,6 +368,19 @@ export interface DecisionLifecycleImpact {
 export interface DecisionLifecycleChange {
   readonly decision: Decision;
   readonly impact: DecisionLifecycleImpact;
+}
+
+export interface DecisionConflict {
+  readonly id: string;
+  readonly category: string;
+  readonly confidence: "high" | "medium";
+  readonly scopeRelation: "exact" | "ancestor_descendant" | "partial";
+  readonly overlappingFields: readonly (keyof Scope)[];
+  readonly signals: readonly ("different answers in exact scope" | "opposing language")[];
+  readonly left: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly right: Pick<Decision, "id" | "answer" | "rationale" | "scope" | "ownerId" | "createdAt" | "version">;
+  readonly advisory: true;
+  readonly humanResolutionRequired: true;
 }
 
 export interface AssumptionExpiryCycleResult {
@@ -5452,6 +5466,90 @@ export class BridgeService {
     });
   }
 
+  async listDecisionConflicts(
+    principal: Principal,
+    projectId: string,
+    query: DecisionConflictQuery,
+  ): Promise<readonly DecisionConflict[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
+      const decisions = (await repository.listDecisions(projectId))
+        .filter((decision) =>
+          decision.status === "active" &&
+          (!normalizedCategory || decision.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
+          this.scopesOverlap(decision.scope, query.scope),
+        )
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const conflicts: DecisionConflict[] = [];
+      for (let leftIndex = 0; leftIndex < decisions.length; leftIndex += 1) {
+        const left = decisions[leftIndex]!;
+        for (let rightIndex = leftIndex + 1; rightIndex < decisions.length; rightIndex += 1) {
+          const right = decisions[rightIndex]!;
+          if (
+            left.category.normalize("NFKC").toLocaleLowerCase("en") !==
+              right.category.normalize("NFKC").toLocaleLowerCase("en") ||
+            !this.scopesOverlap(left.scope, right.scope) ||
+            this.normalizeQuestionText(left.answer) === this.normalizeQuestionText(right.answer)
+          ) continue;
+          const opposingLanguage = this.answersUseOpposingLanguage(left.answer, right.answer);
+          const exactScope = this.scopesEqual(left.scope, right.scope);
+          if (!exactScope && !opposingLanguage) continue;
+          const signals: DecisionConflict["signals"] = [
+            ...(exactScope ? ["different answers in exact scope" as const] : []),
+            ...(opposingLanguage ? ["opposing language" as const] : []),
+          ];
+          const leftScopeEntries = Object.entries(left.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+          const rightScopeEntries = Object.entries(right.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+          const leftContainsRight = rightScopeEntries.every(([key, value]) => left.scope[key] === value);
+          const rightContainsLeft = leftScopeEntries.every(([key, value]) => right.scope[key] === value);
+          const pairIds = [left.id, right.id].sort((a, b) => a.localeCompare(b));
+          conflicts.push({
+            id: `dcf_${createHash("sha256").update(`${projectId}\u0000${pairIds.join("\u0000")}`).digest("hex").slice(0, 24)}`,
+            category: left.category,
+            confidence: opposingLanguage && exactScope ? "high" : "medium",
+            scopeRelation: exactScope
+              ? "exact"
+              : leftContainsRight || rightContainsLeft
+                ? "ancestor_descendant"
+                : "partial",
+            overlappingFields: leftScopeEntries
+              .filter(([key, value]) => right.scope[key] === value)
+              .map(([key]) => key),
+            signals,
+            left: {
+              id: left.id,
+              answer: left.answer,
+              rationale: left.rationale,
+              scope: { ...left.scope },
+              ownerId: left.ownerId,
+              createdAt: left.createdAt,
+              version: left.version,
+            },
+            right: {
+              id: right.id,
+              answer: right.answer,
+              rationale: right.rationale,
+              scope: { ...right.scope },
+              ownerId: right.ownerId,
+              createdAt: right.createdAt,
+              version: right.version,
+            },
+            advisory: true,
+            humanResolutionRequired: true,
+          });
+        }
+      }
+      return conflicts
+        .sort((left, right) =>
+          Number(right.confidence === "high") - Number(left.confidence === "high") ||
+          right.signals.length - left.signals.length ||
+          left.id.localeCompare(right.id),
+        )
+        .slice(0, query.maxItems);
+    });
+  }
+
   async changeDecisionLifecycle(
     principal: Principal,
     decisionId: string,
@@ -6425,6 +6523,34 @@ export class BridgeService {
   private scopesEqual(left: Scope, right: Scope): boolean {
     return (["repository", "component", "branch", "environment", "workItem"] as const)
       .every((key) => left[key] === right[key]);
+  }
+
+  private scopesOverlap(left: Scope, right: Scope): boolean {
+    return (["repository", "component", "branch", "environment", "workItem"] as const)
+      .every((key) => !left[key] || !right[key] || left[key] === right[key]);
+  }
+
+  private answersUseOpposingLanguage(left: string, right: string): boolean {
+    const normalize = (value: string) => ` ${this.normalizeQuestionText(value)} `;
+    const leftText = normalize(left);
+    const rightText = normalize(right);
+    const opposingPairs = [
+      ["enable", "disable"],
+      ["enabled", "disabled"],
+      ["allow", "deny"],
+      ["allowed", "denied"],
+      ["required", "optional"],
+      ["always", "never"],
+      ["retain", "delete"],
+      ["include", "exclude"],
+      ["synchronous", "asynchronous"],
+      ["sync", "async"],
+    ] as const;
+    const has = (text: string, phrase: string) => text.includes(` ${phrase} `);
+    return opposingPairs.some(([affirmative, negative]) =>
+      (has(leftText, affirmative) && has(rightText, negative)) ||
+      (has(leftText, negative) && has(rightText, affirmative)),
+    );
   }
 
   private normalizePremise(value: string): string {

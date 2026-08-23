@@ -1599,6 +1599,92 @@ describe("Bridge API vertical slice", () => {
     });
   });
 
+  it("reports advisory active-decision conflicts through the canonical REST read path", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    const createAcceptedDecision = async (suffix: string, answer: string) => {
+      const created = await app.inject({
+        method: "POST",
+        url: `/v1/projects/${demoProject.id}/questions`,
+        headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+        payload: {
+          idempotencyKey: `api-decision-conflict-${suffix}`,
+          title: `Should automatic settlement retries be ${suffix}?`,
+          type: "decision",
+          category: "architecture",
+          context: `The settlement component needs an explicit ${suffix} retry policy for production processing.`,
+          whyItMatters: "Contradictory active retry policies can produce inconsistent implementation behavior.",
+          intendedOwnerIds: [demoPrincipals.architect.id],
+          intendedOwnerRoles: [],
+          risk: "high",
+          reversible: false,
+          blocking: true,
+          options: [
+            { key: "enable", label: "Enable retries", tradeoffs: "Recovers transient failures with added complexity." },
+            { key: "disable", label: "Disable retries", tradeoffs: "Avoids loops but loses automatic recovery." },
+          ],
+          scope: { component: "settlement" },
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const accepted = await app.inject({
+        method: "POST",
+        url: `/v1/questions/${created.json<{ id: string }>().id}/accept`,
+        headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+        payload: {
+          answer,
+          rationale: `The ${suffix} policy is being recorded as the current human-approved direction.`,
+        },
+      });
+      expect(accepted.statusCode).toBe(201);
+      return accepted.json<{ id: string; status: string }>();
+    };
+    const enabled = await createAcceptedDecision("enabled", "Enable automatic retries");
+    const disabled = await createAcceptedDecision("disabled", "Disable automatic retries");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts?component=settlement`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(response.statusCode).toBe(200);
+    const conflict = response.json<{ items: Array<{
+      confidence: string;
+      scopeRelation: string;
+      overlappingFields: string[];
+      signals: string[];
+      left: { id: string };
+      right: { id: string };
+      advisory: boolean;
+      humanResolutionRequired: boolean;
+    }> }>().items[0]!;
+    expect(conflict).toMatchObject({
+      confidence: "high",
+      scopeRelation: "exact",
+      overlappingFields: ["component"],
+      signals: ["different answers in exact scope", "opposing language"],
+      advisory: true,
+      humanResolutionRequired: true,
+    });
+    expect([conflict.left.id, conflict.right.id]).toEqual(expect.arrayContaining([enabled.id, disabled.id]));
+    expect(enabled.status).toBe("active");
+    expect(disabled.status).toBe("active");
+
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts?maxItems=0`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${demoProject.id}/decision-conflicts`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("exposes version-checked decision lifecycle routes and affected-record evidence", async () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -15,6 +15,7 @@ import {
   createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
+  decisionConflictQuerySchema,
   editQuestionCommentInputSchema,
   editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
@@ -170,7 +171,7 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
     scopes: { GET: bridgeScopes.runsRead, HEAD: bridgeScopes.runsRead, PATCH: bridgeScopes.runsWrite },
   },
   {
-    match: /^\/v1\/projects\/[^/]+\/decisions$/,
+    match: /^\/v1\/projects\/[^/]+\/(?:decisions|decision-conflicts)$/,
     scopes: { GET: bridgeScopes.decisionsRead, HEAD: bridgeScopes.decisionsRead },
   },
   {
@@ -1012,6 +1013,27 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         },
       });
       return { items: await options.service.listDecisions(principal, request.params.projectId, query) };
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
+    "/v1/projects/:projectId/decision-conflicts",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = decisionConflictQuerySchema.parse({
+        category: request.query.category,
+        scope: {
+          ...(request.query.repository ? { repository: request.query.repository } : {}),
+          ...(request.query.component ? { component: request.query.component } : {}),
+          ...(request.query.branch ? { branch: request.query.branch } : {}),
+          ...(request.query.environment ? { environment: request.query.environment } : {}),
+          ...(request.query.workItem ? { workItem: request.query.workItem } : {}),
+        },
+        maxItems: request.query.maxItems,
+      });
+      return {
+        items: await options.service.listDecisionConflicts(principal, request.params.projectId, query),
+      };
     },
   );
 

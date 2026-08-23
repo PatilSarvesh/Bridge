@@ -137,6 +137,11 @@ h3 { font-size: 1rem; }
 .audience-view small { color: var(--muted); }
 .audience-view .impact { margin-top: 12px; }
 .audience-focus { margin-top: 10px; color: var(--action); }
+.conflict-list { display: grid; gap: 9px; }
+.conflict-card { padding: 12px; border: 1px solid var(--warning); border-radius: 9px; background: #fbf2e6; }
+.conflict-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.conflict-card span { color: var(--muted); font-size: .8rem; }
+.conflict-card p { margin: 9px 0; }
 .options { display: grid; gap: 9px; }
 .option { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); color: var(--text); text-align: left; }
 .option.selected { border-color: var(--action); box-shadow: inset 3px 0 0 var(--action); background: var(--action-soft); }

@@ -71,6 +71,7 @@
     "POST /v1/questions/:questionId/accept",
     "POST /v1/questions/:questionId/override",
     "GET /v1/projects/:projectId/decisions",
+    "GET /v1/projects/:projectId/decision-conflicts",
     "POST /v1/projects/:projectId/artifacts",
     "GET /v1/projects/:projectId/artifacts",
     "GET /v1/artifacts/:artifactId",
