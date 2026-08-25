@@ -1,11 +1,11 @@
-import { createPostgresBridgeStore } from "@bridge/database";
 import { OidcAuthenticator, type OidcConfiguration } from "@bridge/auth";
 import { BridgeMetrics } from "@bridge/observability";
-import { createDemoRuntime, createDemoRuntimeWithRepository } from "@bridge/test-support";
 
 import { buildApp } from "./app.js";
+import { createRuntimeForServer } from "./runtime-bootstrap.js";
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const devSeedDatabaseUrl = process.env.BRIDGE_DEV_SEED_DATABASE_URL?.trim();
 const publicWebUrl = process.env.BRIDGE_PUBLIC_WEB_URL ?? "http://127.0.0.1:3000";
 const publicApiUrl = process.env.BRIDGE_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
 const configuredOidcIssuer = process.env.BRIDGE_OIDC_ISSUER?.trim();
@@ -17,28 +17,16 @@ if (process.env.NODE_ENV === "production" && oidcEnabled && !databaseUrl) {
   throw new Error("DATABASE_URL is required for durable production organization membership.");
 }
 const metrics = new BridgeMetrics();
-const postgresStore = databaseUrl ? createPostgresBridgeStore(databaseUrl, { metrics }) : undefined;
-const runtime = postgresStore
-  ? await createDemoRuntimeWithRepository(postgresStore.repository, {
-      seedFixtures: !oidcEnabled,
-      seedQuestion: !oidcEnabled,
-      seedArtifact: !oidcEnabled,
-      serviceOptions: {
-        publicBaseUrl: publicWebUrl,
-        ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),
-        metrics,
-      },
-    })
-  : await createDemoRuntime({
-      seedFixtures: !oidcEnabled,
-      seedQuestion: !oidcEnabled,
-      seedArtifact: !oidcEnabled,
-      serviceOptions: {
-        publicBaseUrl: publicWebUrl,
-        ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),
-        metrics,
-      },
-    });
+const { runtime, postgresStore } = await createRuntimeForServer({
+  ...(databaseUrl ? { databaseUrl } : {}),
+  ...(devSeedDatabaseUrl ? { devSeedDatabaseUrl } : {}),
+  oidcEnabled,
+  serviceOptions: {
+    publicBaseUrl: publicWebUrl,
+    ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),
+    metrics,
+  },
+});
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();

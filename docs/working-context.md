@@ -895,12 +895,15 @@ http://127.0.0.1:3000
 Optional durable PostgreSQL mode:
 
 ```bash
-export DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5432/bridge
-pnpm db:migrate
+export DATABASE_URL=postgresql://bridge_runtime:bridge_runtime@127.0.0.1:5433/bridge
+export BRIDGE_DEV_SEED_DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5433/bridge
+DATABASE_URL="$BRIDGE_DEV_SEED_DATABASE_URL" pnpm db:migrate
 pnpm dev:api
 ```
 
-API startup does not run migrations. Without `DATABASE_URL`, the seeded in-memory demo remains the default.
+API startup does not run migrations. In durable local development without OIDC, the explicit seed
+connection writes the fixed fixtures and the API serves through the non-superuser runtime role in
+`DATABASE_URL`. Without `DATABASE_URL`, the seeded in-memory demo remains the default.
 
 Optional MCP server:
 
@@ -928,9 +931,12 @@ See `README.md` for run, continuation, assumption, question, context, synchroniz
 
 ### 17.1 Persistence
 
-Durable persistence is implemented but opt-in. Without `DATABASE_URL`, the API uses `InMemoryBridgeRepository` and state is lost when it restarts. With `DATABASE_URL`, it uses `PostgresBridgeRepository` after an operator runs the explicit migration.
+Durable persistence is implemented but opt-in. Without `DATABASE_URL`, the API uses `InMemoryBridgeRepository` and state is lost when it restarts. With `DATABASE_URL`, it uses `PostgresBridgeRepository` after an operator runs the explicit migration. Durable local development without OIDC also requires the separate `BRIDGE_DEV_SEED_DATABASE_URL` bootstrap connection so fixed fixture seeding does not weaken the runtime role's bootstrap-table read boundary.
 
-Local PostgreSQL tooling is now installed and API readiness was previously verified against a local repository, but the live reconnect integration test still has not run because it requires an explicitly isolated `BRIDGE_TEST_DATABASE_URL`.
+Local PostgreSQL tooling and Docker are available on this workstation; the Bridge Docker database
+uses host port `5433` so the existing local PostgreSQL service on `5432` remains untouched. The live
+reconnect integration test still has not run because it requires an explicitly isolated
+`BRIDGE_TEST_DATABASE_URL`.
 
 ### 17.2 Transactions and concurrency
 
@@ -2413,6 +2419,31 @@ Deliberate boundaries:
 - This completes BRG-035's duplicate-suggestion acceptance criteria, not semantic matching, embeddings, or automatic merging of similar records. BRG-130 continues to reject vector infrastructure on current evidence.
 - An operator's migration role must be allowed to install the trusted `pg_trgm` extension. API, web, worker, CLI, and MCP startup never run migrations or extension commands.
 - Intentionally revisiting an accepted decision uses the existing human lifecycle/supersession boundary rather than fabricating or automatically reopening a question. REST remains canonical and MCP remains optional.
+
+### 20.86 Implemented secure durable local development bootstrap
+
+Implemented and locally verified:
+
+1. Durable local development now requires an explicit `BRIDGE_DEV_SEED_DATABASE_URL` when OIDC is
+   disabled. `DATABASE_URL` remains the API's non-superuser `NOBYPASSRLS` runtime connection.
+2. The API uses the development seed connection only to idempotently create the fixed local demo
+   fixtures, closes that connection, and then builds the serving runtime on `DATABASE_URL`. This
+   keeps the bootstrap-table `SELECT` revocation intact for normal API/MCP traffic.
+3. Startup rejects an ambiguous durable development configuration instead of silently attempting
+   fixture writes through an unsafe or under-privileged runtime role. OIDC-enabled deployments do
+   not seed development fixtures.
+4. API bootstrap regression tests cover the required seed URL, separate store usage, seed-store
+   closure, and runtime fixture suppression. README and database-security guidance document the
+   local Docker port/role setup.
+
+Deliberate boundaries:
+
+- `BRIDGE_DEV_SEED_DATABASE_URL` is a local fixture-bootstrap escape hatch, not a production API,
+  MCP, worker, or restore connection. Production still requires the documented role separation.
+- The seed connection does not grant the runtime role direct access to bootstrap identity or
+  credential rows, and no migration is run automatically by API startup.
+- This change does not start MCP or the worker; MCP remains optional and the worker still requires
+  its separate maintenance-role connection.
 
 ## 21. Important implementation files
 

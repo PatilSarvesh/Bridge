@@ -41,15 +41,16 @@ Questions may carry an optional ISO due timestamp. The personalized inbox derive
 
 For contributors and coding agents, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/working-context.md`](docs/working-context.md). Root [`AGENTS.md`](AGENTS.md) is also referenced by [`CLAUDE.md`](CLAUDE.md) so Claude-based contributors receive the same architecture and scope constraints. Every push and pull request runs repository format, package-boundary, REST/MCP surface, secret, typecheck, test, production-build, distribution, and isolated PostgreSQL checks through GitHub Actions. CI also runs `pnpm dependency:check` against production dependencies. The reviewed transport baseline lives in [`config/transport-contract-baseline.json`](config/transport-contract-baseline.json); intentional route or tool changes must update it in the same change.
 
-By default the API uses a seeded in-memory repository. To preserve agent-run metadata, assumptions, questions, accepted decisions, specifications, context snapshots, continuation locators, audit events, in-app notifications, and their transactional delivery intents across API restarts, provide a PostgreSQL database:
+By default the API uses a seeded in-memory repository. To preserve agent-run metadata, assumptions, questions, accepted decisions, specifications, context snapshots, continuation locators, audit events, in-app notifications, and their transactional delivery intents across API restarts, provide a PostgreSQL database. Durable local development without OIDC uses a separate explicit bootstrap connection for the fixed demo fixtures; the API itself stays on the non-superuser runtime role:
 
 ```bash
-export DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5432/bridge
-pnpm db:migrate
+export DATABASE_URL=postgresql://bridge_runtime:bridge_runtime@127.0.0.1:5433/bridge
+export BRIDGE_DEV_SEED_DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5433/bridge
+DATABASE_URL="$BRIDGE_DEV_SEED_DATABASE_URL" pnpm db:migrate
 pnpm dev:api
 ```
 
-Migrations are explicit; API startup does not modify the schema. With `DATABASE_URL` set, the same fixed demo project and sample records are seeded idempotently into PostgreSQL. The standalone MCP server requires this durable mode so MCP writes and the web/API read the same canonical state. Without `DATABASE_URL`, the API/web and CLI path remains dependency-free and resets when the API restarts.
+Migrations are explicit; API startup does not modify the schema. With both variables set, the fixed demo project and sample records are seeded idempotently through the bootstrap connection, then the API serves all requests through `DATABASE_URL`. `BRIDGE_DEV_SEED_DATABASE_URL` is development-only and must not be configured as an application or MCP runtime connection. The standalone MCP server requires durable mode so MCP writes and the web/API read the same canonical state. Without `DATABASE_URL`, the API/web and CLI path remains dependency-free and resets when the API restarts.
 
 The PostgreSQL adapter uses the same application repository contract as the in-memory implementation. Run registration/status changes, assumption lifecycle/provenance, decision acceptance/lifecycle transitions, question creation, response proposals, specification publication/approval, context snapshots, idempotency records, bounded adapter diagnostics, notifications, outbox intents, and their audit events are committed atomically. Aggregate reads used for runs, assumptions, decisions, and approvals take row locks inside tenant-scoped transactions. PostgreSQL RLS fails closed when that transaction scope is absent. API/MCP connections must use a non-superuser `NOBYPASSRLS` role; cross-tenant queue and restore work requires a separate maintenance connection. See [`docs/database-security.md`](docs/database-security.md) for role provisioning, protected tables, bootstrap exceptions, and live verification. The worker uses that explicit maintenance connection for cross-tenant outbox claims; its notification handlers remain independently injectable.
 
