@@ -48,6 +48,26 @@ Use three credentials in deployed environments:
 
 The exact role names may be changed by deployment, but the separation and attributes may not. Keep each credential in a different secret. Never place a migration or maintenance URL in `DATABASE_URL` for the API or MCP service.
 
+## Durable local development
+
+The dependency-free development fixtures need a separate bootstrap connection because the
+application role must not directly read the bootstrap directory tables. When OIDC is disabled and
+`DATABASE_URL` points to a PostgreSQL `NOBYPASSRLS` runtime role, set
+`BRIDGE_DEV_SEED_DATABASE_URL` to a separate local bootstrap or migration-capable connection:
+
+```bash
+export DATABASE_URL='postgresql://bridge_runtime:bridge_runtime@127.0.0.1:5433/bridge'
+export BRIDGE_DEV_SEED_DATABASE_URL='postgresql://bridge:bridge@127.0.0.1:5433/bridge'
+DATABASE_URL="$BRIDGE_DEV_SEED_DATABASE_URL" pnpm db:migrate
+pnpm dev:api
+```
+
+API startup uses the development seed connection only to idempotently write the fixed local
+fixtures, closes it, and then builds the API runtime on `DATABASE_URL`. The seed variable is a
+local-development escape hatch for fixture creation, not a production configuration; it must not
+be set for a deployed API or MCP process. OIDC-enabled deployments do not seed development
+fixtures.
+
 Use the repository's idempotent role/grant reconciliation script with a separate
 role-management-capable operator connection. It creates missing roles without
 passwords, reconciles `NOSUPERUSER`/`NOBYPASSRLS`/`BYPASSRLS`, grants the required
