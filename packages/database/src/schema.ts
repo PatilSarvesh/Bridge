@@ -1,6 +1,9 @@
 import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
+  AgentRun,
+  DirectoryGroup,
+  DirectoryGroupMember,
   ArtifactReview,
   OrganizationAuditEvent,
   OutboxPayload,
@@ -15,6 +18,8 @@ import type {
   QuestionResponseRevision,
   QuestionRoutingExplanation,
   RepositoryRecord,
+  GithubPullRequestContext,
+  GithubIssueWorkItem,
 } from "@bridge/domain";
 import { sql } from "drizzle-orm";
 import {
@@ -141,6 +146,10 @@ function relatedTenantPolicy(name: string, matchesTenant: ReturnType<typeof sql>
 }
 
 export const membershipStatusEnum = pgEnum("bridge_membership_status", ["active", "disabled"]);
+export const membershipProvisioningEnum = pgEnum("bridge_membership_provisioning", [
+  "manual",
+  "directory",
+]);
 
 export const organizations = pgTable("bridge_organizations", {
   id: text("id").primaryKey(),
@@ -203,6 +212,7 @@ export const organizationMemberships = pgTable(
     status: membershipStatusEnum("status").notNull(),
     roles: jsonb("roles").$type<readonly string[]>().notNull(),
     allProjects: boolean("all_projects").notNull(),
+    provisioning: membershipProvisioningEnum("provisioning").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
     version: integer("version").default(1).notNull(),
@@ -211,6 +221,86 @@ export const organizationMemberships = pgTable(
     primaryKey({ columns: [table.organizationId, table.principalId] }),
     index("bridge_organization_memberships_principal_idx").on(table.principalId),
     tenantPolicy("bridge_organization_memberships_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const directoryGroups = pgTable(
+  "bridge_directory_groups",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    issuer: text("issuer").notNull(),
+    externalGroupId: text("external_group_id").notNull(),
+    displayName: text("display_name").notNull(),
+    status: text("status").$type<DirectoryGroup["status"]>().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_directory_groups_provider_identity_unique").on(
+      table.organizationId,
+      table.provider,
+      table.issuer,
+      table.externalGroupId,
+    ),
+    unique("bridge_directory_groups_org_id_unique").on(table.organizationId, table.id),
+    index("bridge_directory_groups_org_status_name_idx").on(
+      table.organizationId,
+      table.status,
+      table.displayName,
+    ),
+    check("bridge_directory_groups_status_check", sql`${table.status} IN ('active', 'disabled')`),
+    check("bridge_directory_groups_version_check", sql`${table.version} > 0`),
+    tenantPolicy("bridge_directory_groups_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const directoryGroupMembers = pgTable(
+  "bridge_directory_group_members",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => directoryGroups.id, { onDelete: "cascade" }),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => principalIdentities.id, { onDelete: "restrict" }),
+    externalSubject: text("external_subject").notNull(),
+    displayName: text("display_name").notNull(),
+    status: text("status").$type<DirectoryGroupMember["status"]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_directory_group_members_group_subject_unique").on(
+      table.groupId,
+      table.externalSubject,
+    ),
+    index("bridge_directory_group_members_principal_status_idx").on(
+      table.organizationId,
+      table.principalId,
+      table.status,
+    ),
+    check(
+      "bridge_directory_group_members_status_check",
+      sql`${table.status} IN ('active', 'removed')`,
+    ),
+    check("bridge_directory_group_members_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_directory_group_members_organization_group_fk",
+      columns: [table.organizationId, table.groupId],
+      foreignColumns: [directoryGroups.organizationId, directoryGroups.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_directory_group_members_tenant", table.organizationId),
   ],
 ).enableRLS();
 
@@ -255,6 +345,101 @@ export const projectRepositories = pgTable(
       foreignColumns: [projects.organizationId, projects.id],
     }).onDelete("cascade"),
     tenantPolicy("bridge_project_repositories_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const githubPullRequests = pgTable(
+  "bridge_github_pull_requests",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => projectRepositories.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    state: text("state").$type<GithubPullRequestContext["state"]>().notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    headBranch: text("head_branch").notNull(),
+    baseBranch: text("base_branch").notNull(),
+    headSha: text("head_sha").notNull(),
+    decisionIds: jsonb("decision_ids").$type<readonly string[]>().notNull(),
+    artifactVersionIds: jsonb("artifact_version_ids").$type<readonly string[]>().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_github_pull_requests_repository_number_unique").on(
+      table.repositoryId,
+      table.number,
+    ),
+    index("bridge_github_pull_requests_project_source_updated_idx").on(
+      table.projectId,
+      table.sourceUpdatedAt,
+    ),
+    check("bridge_github_pull_requests_number_check", sql`${table.number} > 0`),
+    check(
+      "bridge_github_pull_requests_state_check",
+      sql`${table.state} IN ('open', 'closed', 'merged')`,
+    ),
+    check("bridge_github_pull_requests_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_github_pull_requests_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_github_pull_requests_tenant", table.organizationId),
+  ],
+).enableRLS();
+
+export const githubIssues = pgTable(
+  "bridge_github_issues",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => projectRepositories.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    reference: text("reference").notNull(),
+    title: text("title").notNull(),
+    state: text("state").$type<GithubIssueWorkItem["state"]>().notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    labels: jsonb("labels").$type<readonly string[]>().notNull(),
+    decisionIds: jsonb("decision_ids").$type<readonly string[]>().notNull(),
+    artifactVersionIds: jsonb("artifact_version_ids").$type<readonly string[]>().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (table) => [
+    unique("bridge_github_issues_repository_number_unique").on(table.repositoryId, table.number),
+    unique("bridge_github_issues_repository_reference_unique").on(
+      table.repositoryId,
+      table.reference,
+    ),
+    index("bridge_github_issues_project_source_updated_idx").on(
+      table.projectId,
+      table.sourceUpdatedAt,
+    ),
+    check("bridge_github_issues_number_check", sql`${table.number} > 0`),
+    check("bridge_github_issues_state_check", sql`${table.state} IN ('open', 'closed')`),
+    check("bridge_github_issues_version_check", sql`${table.version} > 0`),
+    foreignKey({
+      name: "bridge_github_issues_organization_project_fk",
+      columns: [table.organizationId, table.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }).onDelete("cascade"),
+    tenantPolicy("bridge_github_issues_tenant", table.organizationId),
   ],
 ).enableRLS();
 
@@ -351,6 +536,7 @@ export const agentRuns = pgTable(
     agentType: principalTypeEnum("agent_type").notNull(),
     client: agentRunClientEnum("client").notNull(),
     capability: agentRunCapabilityEnum("capability").notNull(),
+    continuationMode: text("continuation_mode").$type<AgentRun["continuationMode"]>().notNull(),
     taskSummary: text("task_summary").notNull(),
     scope: jsonb("scope").$type<Scope>().notNull(),
     status: agentRunStatusEnum("status").notNull(),
@@ -370,6 +556,13 @@ export const agentRuns = pgTable(
   (table) => [
     index("bridge_agent_runs_project_started_idx").on(table.projectId, table.startedAt),
     index("bridge_agent_runs_project_status_idx").on(table.projectId, table.status),
+    check(
+      "bridge_agent_runs_continuation_mode_check",
+      sql`(
+        ${table.continuationMode} = 'manual' OR
+        (${table.continuationMode} = 'automatic' AND ${table.client} = 'codex' AND ${table.capability} IN ('hooks', 'orchestrated'))
+      )`,
+    ),
     tenantPolicy("bridge_agent_runs_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -416,16 +609,23 @@ export const runContinuationLocators = pgTable(
       .primaryKey()
       .references(() => agentRuns.id, { onDelete: "cascade" }),
     resumeContextKey: text("resume_context_key").notNull().unique(),
+    vendorSessionId: text("vendor_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
-  (table) => [relatedTenantPolicy(
-    "bridge_run_continuation_locators_tenant",
-    sql`exists (
-      select 1 from ${agentRuns}
-      where ${agentRuns.id} = ${table.runId}
-        and ${agentRuns.organizationId} = ${currentOrganizationId}
-    )`,
-  )],
+  (table) => [
+    check(
+      "bridge_run_continuation_locators_vendor_session_check",
+      sql`${table.vendorSessionId} IS NULL OR ${table.vendorSessionId} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    relatedTenantPolicy(
+      "bridge_run_continuation_locators_tenant",
+      sql`exists (
+        select 1 from ${agentRuns}
+        where ${agentRuns.id} = ${table.runId}
+          and ${agentRuns.organizationId} = ${currentOrganizationId}
+      )`,
+    ),
+  ],
 ).enableRLS();
 
 export const questions = pgTable(
@@ -479,6 +679,19 @@ export const questions = pgTable(
     index("bridge_questions_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_questions_project_status_idx").on(table.projectId, table.status),
     index("bridge_questions_project_due_idx").on(table.projectId, table.dueAt),
+    index("bridge_questions_full_text_idx").using("gin", sql`(
+      setweight(to_tsvector('simple', coalesce(${table.projectId}, '')), 'D') ||
+      setweight(to_tsvector('simple', coalesce(${table.title}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${table.context}, '')), 'B')
+    )`),
+    index("bridge_questions_title_trigram_idx").using(
+      "gin",
+      sql`lower(${table.projectId} || ':' || ${table.title}) gin_trgm_ops`,
+    ),
+    index("bridge_questions_context_trigram_idx").using(
+      "gin",
+      sql`lower(${table.projectId} || ':' || ${table.context}) gin_trgm_ops`,
+    ),
     check(
       "bridge_questions_required_reviewer_quorum_shape_check",
       sql`${table.requiredReviewerQuorum} IS NOT NULL AND jsonb_typeof(${table.requiredReviewerQuorum}) = 'object'`,
@@ -764,11 +977,11 @@ export const organizationAuditEvents = pgTable(
     index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
     check(
       "bridge_organization_audit_events_action_check",
-      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out')`,
+      sql`${table.action} IN ('organization_member.created', 'organization_member.updated', 'service_identity.created', 'service_identity.rotated', 'service_identity.revoked', 'audit.exported', 'authentication.succeeded', 'authentication.logged_out', 'directory_group.created', 'directory_group.synced')`,
     ),
     check(
       "bridge_organization_audit_events_subject_check",
-      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity'))`,
+      sql`((${table.action} IN ('organization_member.created', 'organization_member.updated') AND ${table.subjectType} = 'organization_membership') OR (${table.action} IN ('service_identity.created', 'service_identity.rotated', 'service_identity.revoked') AND ${table.subjectType} = 'service_credential') OR (${table.action} = 'audit.exported' AND ${table.subjectType} = 'audit_export') OR (${table.action} IN ('authentication.succeeded', 'authentication.logged_out') AND ${table.subjectType} = 'principal_identity') OR (${table.action} IN ('directory_group.created', 'directory_group.synced') AND ${table.subjectType} = 'directory_group'))`,
     ),
     tenantPolicy("bridge_organization_audit_events_tenant", table.organizationId),
   ],

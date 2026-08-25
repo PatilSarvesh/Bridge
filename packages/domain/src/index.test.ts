@@ -41,6 +41,8 @@ describe("capability scopes", () => {
     expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.questionsRead)).toBe(true);
     expect(principalHasScope({ ...agent, scopes: [bridgeScopes.read] }, bridgeScopes.projectAdmin)).toBe(false);
     expect(principalHasScope({ ...agent, scopes: [bridgeScopes.admin] }, bridgeScopes.projectAdmin)).toBe(true);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.write] }, bridgeScopes.directorySync)).toBe(false);
+    expect(principalHasScope({ ...agent, scopes: [bridgeScopes.directorySync] }, bridgeScopes.directorySync)).toBe(true);
   });
 });
 

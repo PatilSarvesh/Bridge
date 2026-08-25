@@ -6,6 +6,9 @@ import type {
   RecordAssumptionInput,
   ReplaceProjectOwnershipInput,
   ReplaceProjectPolicyInput,
+  SyncGithubPullRequestInput,
+  SyncGithubIssueInput,
+  SyncDirectoryGroupInput,
 } from "@bridge/contracts";
 import type { AuditEvent, Notification, Principal, Project } from "@bridge/domain";
 import { BridgeMetrics } from "@bridge/observability";
@@ -28,6 +31,15 @@ const agent: Principal = {
   allProjects: true,
   roles: ["agent"],
   displayName: "Agent",
+};
+
+const githubIntegration: Principal = {
+  id: "int_github",
+  type: "integration",
+  organizationId: "org_one",
+  projectIds: [project.id],
+  roles: ["integration"],
+  displayName: "GitHub Integration",
 };
 
 const owner: Principal = {
@@ -215,6 +227,7 @@ async function seedOrganizationAdministrator(repository: InMemoryBridgeRepositor
     status: "active",
     roles: organizationAdmin.roles,
     allProjects: true,
+    provisioning: "manual",
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
@@ -239,6 +252,7 @@ async function seedOwnershipMembers(repository: InMemoryBridgeRepository): Promi
       status: "active",
       roles: principal.roles,
       allProjects: principal.allProjects ?? false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: timestamp,
       version: 1,
@@ -275,6 +289,7 @@ async function seedProjectMember(
     status: "active",
     roles: principal.roles,
     allProjects: principal.allProjects ?? false,
+    provisioning: "manual",
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
@@ -887,7 +902,7 @@ describe("Bridge decision workflow", () => {
       owner: "bridge-org",
       name: "bridge",
       canonicalUrl: "https://github.com/bridge-org/bridge",
-    } as const;
+    };
 
     await expect(service.linkRepository(agent, project.id, input)).rejects.toMatchObject({ code: "FORBIDDEN" });
     const created = await service.linkRepository(owner, project.id, input);
@@ -916,6 +931,188 @@ describe("Bridge decision workflow", () => {
     await repository.saveProject(otherProject);
     await expect(service.linkRepository(owner, otherProject.id, input)).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(service.listProjectRepositories(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+  });
+
+  it("synchronizes read-only GitHub pull-request metadata with approved guidance", async () => {
+    const { repository, service } = await runtime();
+    const linked = await service.linkRepository(owner, project.id, {
+      idempotencyKey: "github-context-repository-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "github-context-decision-001",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Transient failures are bounded and preserve idempotency.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "github-context-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The specification faithfully captures the accepted decision.",
+    });
+    const input: SyncGithubPullRequestInput = {
+      repositoryId: linked.repository.id,
+      number: 42,
+      title: "Add bounded transfer retries",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/42",
+      headBranch: "feature/retries",
+      baseBranch: "main",
+      headSha: "a".repeat(40),
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      decisionIds: [decision.id],
+      artifactVersionIds: [publication.version.id],
+    };
+
+    await expect(service.syncGithubPullRequest(agent, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const created = await service.syncGithubPullRequest(githubIntegration, project.id, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      pullRequest: {
+        id: expect.stringMatching(/^gpr_/),
+        organizationId: project.organizationId,
+        projectId: project.id,
+        number: 42,
+        version: 1,
+      },
+    });
+    await expect(service.syncGithubPullRequest(githubIntegration, project.id, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.syncGithubPullRequest(githubIntegration, project.id, {
+      ...input,
+      title: "Conflicting provider event",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const updated = await service.syncGithubPullRequest(githubIntegration, project.id, {
+      ...input,
+      state: "merged",
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+    });
+    expect(updated).toMatchObject({ disposition: "updated", pullRequest: { state: "merged", version: 2 } });
+    await expect(service.listGithubPullRequests(agent, project.id, {
+      limit: 100,
+      repositoryId: linked.repository.id,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({ number: 42, state: "merged" }),
+        decisions: [expect.objectContaining({ id: decision.id, status: "active" })],
+        artifactVersions: [expect.objectContaining({
+          versionId: publication.version.id,
+          status: "approved",
+        })],
+        humanApprovalChanged: false,
+      }),
+    ]);
+    await expect(service.getGithubPullRequestContext(agent, project.id, 42, {
+      repositoryId: linked.repository.id,
+    })).resolves.toMatchObject({ pullRequest: { number: 42 } });
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "integration.pull_request_synced",
+        subjectType: "pull_request_context",
+      }),
+    ]));
+  });
+
+  it("synchronizes GitHub Issues and prioritizes their explicit work-item guidance", async () => {
+    const { repository, service } = await runtime();
+    const linked = await service.linkRepository(owner, project.id, {
+      idempotencyKey: "github-issue-repository-001",
+      provider: "github",
+      owner: "bridge-org",
+      name: "bridge",
+      canonicalUrl: "https://github.com/bridge-org/bridge",
+    });
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "github-issue-decision-001",
+      title: "Which retry behavior should issue 77 implement?",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "Issue 77 must preserve bounded retries and idempotency.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "github-issue-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The approved specification records the work-item behavior.",
+    });
+    const input: SyncGithubIssueInput = {
+      repositoryId: linked.repository.id,
+      number: 77,
+      title: "Implement bounded retries",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/77",
+      labels: ["backend", "priority:high"],
+      sourceUpdatedAt: "2026-01-01T03:00:00.000Z",
+      decisionIds: [decision.id],
+      artifactVersionIds: [publication.version.id],
+    };
+
+    await expect(service.syncGithubIssue(agent, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const created = await service.syncGithubIssue(githubIntegration, project.id, input);
+    expect(created).toMatchObject({
+      disposition: "created",
+      issue: {
+        id: expect.stringMatching(/^gwi_/),
+        reference: "github:bridge-org/bridge#77",
+        state: "open",
+        version: 1,
+      },
+    });
+    await expect(service.syncGithubIssue(githubIntegration, project.id, input)).resolves.toEqual({
+      ...created,
+      disposition: "idempotent_replay",
+    });
+    await expect(service.syncGithubIssue(githubIntegration, project.id, {
+      ...input,
+      title: "Conflicting provider event",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.listGithubIssues(agent, project.id, {
+      limit: 100,
+      label: "backend",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: 77 }),
+        decisions: [expect.objectContaining({ id: decision.id })],
+        artifactVersions: [expect.objectContaining({ versionId: publication.version.id })],
+        humanApprovalChanged: false,
+      }),
+    ]);
+    await expect(service.getGithubIssueContext(agent, project.id, 77, {
+      repositoryId: linked.repository.id,
+    })).resolves.toMatchObject({ issue: { reference: created.issue.reference } });
+
+    const context = await service.getContext(agent, project.id, {
+      task: "Implement the selected work item",
+      scope: { workItem: created.issue.reference },
+      categories: [],
+      maxItems: 1,
+    });
+    expect(context.items).toEqual([expect.objectContaining({ id: decision.id, type: "decision" })]);
+
+    const updated = await service.syncGithubIssue(githubIntegration, project.id, {
+      ...input,
+      state: "closed",
+      sourceUpdatedAt: "2026-01-01T04:00:00.000Z",
+    });
+    expect(updated).toMatchObject({ disposition: "updated", issue: { state: "closed", version: 2 } });
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "integration.work_item_synced", subjectType: "work_item" }),
+    ]));
   });
 
   it("creates, lists, audits, and version-updates organization members", async () => {
@@ -979,6 +1176,127 @@ describe("Bridge decision workflow", () => {
       { action: "organization_member.updated", subjectId: created.member.id },
       { action: "organization_member.created", subjectId: created.member.id },
     ]);
+  });
+
+  it("provisions bounded directory groups without granting roles or overriding manual access", async () => {
+    const { repository, service } = await runtime();
+    await seedOrganizationAdministrator(repository);
+    await expect(service.createDirectoryGroup(contributor, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const registration = await service.createDirectoryGroup(organizationAdmin, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    });
+    expect(registration).toMatchObject({
+      disposition: "created",
+      group: { id: expect.stringMatching(/^dgr_/), status: "active", version: 1 },
+      members: [],
+    });
+    await expect(service.createDirectoryGroup(organizationAdmin, {
+      provider: "auth0",
+      issuer: "https://identity.example/",
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+    })).resolves.toEqual({ ...registration, disposition: "idempotent_replay" });
+
+    const initialSync: SyncDirectoryGroupInput = {
+      expectedVersion: 1,
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      status: "active",
+      members: [
+        { subject: "auth0|directory-one", displayName: "Directory One" },
+        { subject: "auth0|directory-two", displayName: "Directory Two" },
+      ],
+    };
+    await expect(service.syncDirectoryGroup(agent, registration.group.id, initialSync))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    const synced = await service.syncDirectoryGroup(
+      githubIntegration,
+      registration.group.id,
+      initialSync,
+    );
+    expect(synced).toMatchObject({
+      disposition: "updated",
+      group: { status: "active", sourceUpdatedAt: initialSync.sourceUpdatedAt, version: 2 },
+      membershipChanges: { provisioned: 2, reactivated: 0, disabled: 0, preserved: 0 },
+      humanApprovalChanged: false,
+    });
+    expect(synced.members).toHaveLength(2);
+    for (const member of synced.members) {
+      await expect(repository.getOrganizationMembership(project.organizationId, member.principalId))
+        .resolves.toMatchObject({
+          status: "active",
+          roles: [],
+          allProjects: false,
+          provisioning: "directory",
+          version: 1,
+        });
+      await expect(repository.listProjectMemberships(project.organizationId, member.principalId))
+        .resolves.toEqual([]);
+    }
+    await expect(service.syncDirectoryGroup(
+      githubIntegration,
+      registration.group.id,
+      initialSync,
+    )).resolves.toMatchObject({ disposition: "idempotent_replay", group: { version: 2 } });
+
+    const manuallyManaged = synced.members.find((member) =>
+      member.externalSubject === "auth0|directory-one")!;
+    await service.updateOrganizationMember(organizationAdmin, manuallyManaged.principalId, {
+      expectedVersion: 1,
+      status: "active",
+      roles: ["contributor"],
+      allProjects: false,
+      projectMemberships: [],
+    });
+    const reduced = await service.syncDirectoryGroup(githubIntegration, registration.group.id, {
+      expectedVersion: 2,
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+      status: "active",
+      members: [{ subject: "auth0|directory-two", displayName: "Directory Two" }],
+    });
+    expect(reduced.membershipChanges).toMatchObject({ disabled: 0, preserved: 1 });
+    await expect(repository.getOrganizationMembership(
+      project.organizationId,
+      manuallyManaged.principalId,
+    )).resolves.toMatchObject({
+      status: "active",
+      roles: ["contributor"],
+      provisioning: "manual",
+    });
+
+    const directoryManaged = synced.members.find((member) =>
+      member.externalSubject === "auth0|directory-two")!;
+    const disabled = await service.syncDirectoryGroup(githubIntegration, registration.group.id, {
+      expectedVersion: 3,
+      sourceUpdatedAt: "2026-01-01T03:00:00.000Z",
+      status: "disabled",
+      members: [],
+    });
+    expect(disabled).toMatchObject({
+      group: { status: "disabled", version: 4 },
+      membershipChanges: { disabled: 1 },
+      humanApprovalChanged: false,
+    });
+    await expect(repository.getOrganizationMembership(
+      project.organizationId,
+      directoryManaged.principalId,
+    )).resolves.toMatchObject({ status: "disabled", provisioning: "directory" });
+    await expect(service.listDirectoryGroups(organizationAdmin)).resolves.toEqual([
+      expect.objectContaining({ group: expect.objectContaining({ id: registration.group.id }) }),
+    ]);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "directory_group.created", subjectType: "directory_group" }),
+        expect.objectContaining({ action: "directory_group.synced", subjectType: "directory_group" }),
+      ]),
+    );
   });
 
   it("records human web authentication events without granting agents an audit path", async () => {
@@ -1101,6 +1419,93 @@ describe("Bridge decision workflow", () => {
         expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" }),
       ]),
     );
+  });
+
+  it("exports bounded governed project data without changing human approval state", async () => {
+    const { repository, service } = await runtime();
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "project-export-question-001",
+    }));
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "A human owner selected bounded transient retries for the governed export fixture.",
+    });
+    const publication = await service.publishArtifact(agent, project.id, artifactInput({
+      idempotencyKey: "project-export-artifact-001",
+      citedDecisionIds: [decision.id],
+    }));
+    await service.approveArtifactVersion(owner, publication.version.id, {
+      rationale: "The approved specification accurately records the human decision.",
+    });
+    const decisionBeforeExport = await repository.getDecision(decision.id);
+    const artifactBeforeExport = await repository.getArtifact(publication.artifact.id);
+    const input = {
+      decisionOffset: 0,
+      maxDecisions: 1_000,
+      artifactOffset: 0,
+      maxArtifacts: 100,
+      auditOffset: 0,
+      maxAuditItems: 5_000,
+    };
+
+    await expect(service.exportProjectData(contributor, project.id, input))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.exportProjectData(outsider, project.id, input))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+
+    const exported = await service.exportProjectData(owner, project.id, input);
+    const body = JSON.parse(exported.body) as {
+      readonly schemaVersion: number;
+      readonly project: Project;
+      readonly counts: {
+        readonly decisions: { readonly total: number; readonly included: number; readonly offset: number };
+        readonly artifacts: { readonly total: number; readonly included: number; readonly offset: number };
+        readonly auditEvents: { readonly total: number; readonly included: number; readonly offset: number };
+      };
+      readonly humanApprovalChanged: boolean;
+      readonly decisions: readonly { readonly id: string; readonly answer: string }[];
+      readonly artifacts: readonly {
+        readonly id: string;
+        readonly approvedVersionId?: string;
+        readonly versions: readonly { readonly id: string; readonly body: string; readonly status: string }[];
+      }[];
+      readonly auditEvents: readonly AuditEvent[];
+    };
+    expect(exported).toMatchObject({
+      contentType: "application/json; charset=utf-8",
+      humanApprovalChanged: false,
+      counts: {
+        decisions: { total: 1, included: 1, offset: 0 },
+        artifacts: { total: 1, included: 1, offset: 0 },
+      },
+    });
+    expect(exported.filename).toContain(`bridge-project-${project.id}-`);
+    expect(body).toMatchObject({
+      schemaVersion: 1,
+      project: { id: project.id, organizationId: project.organizationId },
+      humanApprovalChanged: false,
+      decisions: [expect.objectContaining({ id: decision.id, answer: "Retry transient failures" })],
+      artifacts: [expect.objectContaining({
+        id: publication.artifact.id,
+        approvedVersionId: publication.version.id,
+        versions: [expect.objectContaining({
+          id: publication.version.id,
+          body: artifactInput().body,
+          status: "approved",
+        })],
+      })],
+    });
+    expect(body.auditEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "project.exported",
+        subjectType: "project_export",
+        actorId: owner.id,
+      }),
+    ]));
+    expect(body.counts.auditEvents.total).toBeGreaterThan(0);
+    expect(body.counts.auditEvents.included).toBe(body.auditEvents.length);
+    await expect(repository.getDecision(decision.id)).resolves.toEqual(decisionBeforeExport);
+    await expect(repository.getArtifact(publication.artifact.id)).resolves.toEqual(artifactBeforeExport);
   });
 
   it("creates, resolves, lists, and revokes a scoped service identity", async () => {
@@ -1784,6 +2189,76 @@ describe("Bridge decision workflow", () => {
     expect(completed).toMatchObject({ status: "completed", version: 4 });
   });
 
+  it("queues an explicit Codex session continuation only after every blocker is human-resolved", async () => {
+    const { repository, service } = await runtime();
+    const vendorSessionId = "123e4567-e89b-42d3-a456-426614174000";
+    const registration = await service.startRun(agent, project.id, {
+      idempotencyKey: "automatic-continuation-run-001",
+      client: "codex",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+      vendorSessionId,
+      taskSummary: "Implement transfer retry handling with an orchestrated Codex session",
+      scope: { component: "transfers" },
+      externalLinks: [],
+    });
+    expect(registration.run).toMatchObject({
+      client: "codex",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+    });
+    expect(registration.run).not.toHaveProperty("vendorSessionId");
+    expect(await repository.getRunVendorSessionId(registration.run.id)).toBe(vendorSessionId);
+    const question = await service.createQuestion(agent, project.id, questionInput({
+      idempotencyKey: "automatic-continuation-question-001",
+      runId: registration.run.id,
+    }));
+    expect(await repository.listOutboxEvents(project.id)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "run.continuation_ready" }),
+    ]));
+
+    const decision = await service.acceptAnswer(owner, question.id, {
+      optionKey: "transient",
+      rationale: "The human owner selected bounded retries before the Codex session may continue.",
+    });
+
+    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "run.continuation_ready",
+        payload: {
+          runId: registration.run.id,
+          client: "codex",
+          vendorSessionId,
+          triggeringDecisionId: decision.id,
+          runVersion: 2,
+        },
+      }),
+    ]));
+    expect(await service.getRun(agent, registration.run.id)).toMatchObject({
+      status: "waiting_for_human",
+      continuationMode: "automatic",
+      version: 2,
+    });
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "run.continuation_queued",
+        subjectType: "run",
+        subjectId: registration.run.id,
+      }),
+    ]));
+
+    await expect(service.startRun(agent, project.id, {
+      idempotencyKey: "unsupported-automatic-continuation",
+      client: "claude_code",
+      capability: "orchestrated",
+      continuationMode: "automatic",
+      vendorSessionId,
+      taskSummary: "Attempt unsupported automatic continuation",
+      scope: {},
+      externalLinks: [],
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
   it("rolls back every related write when an atomic workflow fails", async () => {
     const repository = new FailingAuditRepository();
     await repository.saveProject(project);
@@ -1900,6 +2375,21 @@ describe("Bridge decision workflow", () => {
     });
     expect(matches).toEqual([
       expect.objectContaining({ questionId: first.id, matchKind: "exact", score: 100 }),
+    ]);
+    const typoMatches = await service.findQuestionMatches(agent, project.id, {
+      title: "Whcih reetry polciy sholud the wroker use?",
+      type: firstInput.type,
+      category: firstInput.category,
+      context: "The wroker needs a consitent reetry polciy for trasfer failurs.",
+      scope: firstInput.scope,
+      maxItems: 5,
+    });
+    expect(typoMatches).toEqual([
+      expect.objectContaining({
+        questionId: first.id,
+        matchKind: "related",
+        reasons: expect.arrayContaining(["similar title", "similar context"]),
+      }),
     ]);
 
     const secondRun = await service.startRun(agent, project.id, {
@@ -2746,6 +3236,7 @@ describe("Bridge decision workflow", () => {
         status: "active",
         roles: member.roles,
         allProjects: member.allProjects ?? false,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -3985,6 +4476,7 @@ describe("Bridge decision workflow", () => {
       status: "active",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: timestamp,
       version: 1,
@@ -4018,6 +4510,7 @@ describe("Bridge decision workflow", () => {
       status: "disabled",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: timestamp,
       updatedAt: "2026-01-02T00:00:00.000Z",
       version: 2,

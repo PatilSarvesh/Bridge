@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_directory_groups" ADD CONSTRAINT "bridge_directory_groups_org_id_unique" UNIQUE("organization_id","id");--> statement-breakpoint
+ALTER TABLE "bridge_directory_group_members" ADD CONSTRAINT "bridge_directory_group_members_organization_group_fk" FOREIGN KEY ("organization_id","group_id") REFERENCES "public"."bridge_directory_groups"("organization_id","id") ON DELETE cascade ON UPDATE no action;

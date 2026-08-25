@@ -5,7 +5,7 @@ Bridge can run in one of two explicit authentication modes:
 - **Development mode** keeps the seeded `x-bridge-principal-id` switcher for local demonstrations. It is rejected when `NODE_ENV=production`.
 - **OIDC mode** validates RS256 access and ID tokens against the configured issuer JWKS and uses server-side Bridge memberships for authority.
 
-OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, interactive CLI public-client authentication, coarse and mapped least-privilege REST/MCP bearer-capability enforcement, standalone MCP bearer validation, revocable scoped service identities, and durable human web sign-in/logout audit events are implemented; MCP authorization-server provisioning, provider-backed invitations, enterprise provisioning, external scope issuance, and failed/unknown authentication attribution remain separate work.
+OIDC mode currently completes BRG-010's application foundation. Version-checked organization-member administration, bounded provider-group membership synchronization, interactive CLI public-client authentication, coarse and mapped least-privilege REST/MCP bearer-capability enforcement, standalone MCP bearer validation, revocable scoped service identities, and durable human web sign-in/logout audit events are implemented; MCP authorization-server provisioning, provider-backed invitations, SCIM protocol hosting, external scope issuance, live-provider validation, and failed/unknown authentication attribution remain separate work.
 
 ## Security boundary
 
@@ -27,6 +27,7 @@ For non-human bearer principals, Bridge validates the optional scope claim and a
 - `bridge:read` and `bridge:write` remain compatibility grants for every mapped read or write resource family.
 - Fine-grained scopes such as `bridge:projects:read`, `bridge:questions:write`, `bridge:runs:read`, and `bridge:artifacts:write` grant only their mapped REST resource family.
 - `bridge:organization:admin` and `bridge:project:admin` identify administrative endpoint families; existing application policy still requires a human administrator for the current organization/project administration commands.
+- `bridge:directory:sync` is an explicit non-human capability for the one bounded directory-group sync command. Coarse `bridge:write` does not satisfy it, and it grants no role, project-access, decision, or approval authority.
 - `bridge:admin` is the explicit wildcard and satisfies every mapped scope.
 - Human principals continue to use server-side membership and role policy; provider scopes do not replace those checks.
 
@@ -203,6 +204,6 @@ This is an interactive delegated-human flow. CI and unattended agents must use a
 - The standalone MCP process now validates external OIDC bearer tokens when configured; development may still use the fixed principal. Dynamic client registration, MCP-side authorization-server/token issuance, and live-provider validation remain pending.
 - Coarse and mapped fine-grained capabilities are enforced for non-human REST and MCP bearer principals, including revocable Bridge service tokens. External authorization-server scope issuance, provider-specific policy mapping, and live-provider validation remain pending.
 - Windows Credential Manager is not supported by the current CLI build; the implemented pilot stores are macOS Keychain and Linux Secret Service.
-- Member provisioning currently requires an administrator to know the exact OIDC subject. Provider-backed email invitations, profile synchronization, and SCIM/group provisioning are not implemented.
+- Human administrators can configure an exact provider group, and a scoped integration can reconcile bounded subject/display-name snapshots. Directory-created members receive no roles or project grants; a later manual admin edit prevents provider removal from disabling that membership. Bridge does not host SCIM, discover groups, send invitations, map provider groups to roles/projects, or claim live-provider validation.
 - PostgreSQL RLS and a separate maintenance role remain part of BRG-012.
 - A real Auth0 tenant and hosted callback/logout configuration require deployment-owner validation. Failed/unknown authentication attribution and provider-specific authentication event coverage remain future work.

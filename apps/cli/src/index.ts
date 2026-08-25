@@ -174,7 +174,7 @@ Usage:
   bridge repository link [project-id] --provider <provider> --owner <owner> --name <name> --url <http(s)-url> [--idempotency-key <key>]
   bridge doctor
   bridge conformance [project-id] --task <description> [--run-id <id>]
-  bridge run start [project-id] --task <description> [--client <name>] [--capability <level>] [--continues <run-id> --resume-key <key>]
+  bridge run start [project-id] --task <description> [--client <name>] [--capability <level>] [--continuation-mode manual|automatic] [--vendor-session-id <uuid>] [--continues <run-id> --resume-key <key>]
   bridge run get <run-id>
   bridge run report <run-id> --status <status> --version <number> [--summary <text>]
   bridge run continue <run-id> --resume-key <key>
@@ -2972,6 +2972,37 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
       if (!["instructions", "cli", "mcp", "hooks", "orchestrated"].includes(capability)) {
         throw new CliError("INVALID_RUN_CAPABILITY", "Unsupported --capability value.", cliExitCodes.usage);
       }
+      const continuationMode = optionValue(args, "--continuation-mode") ?? "manual";
+      const vendorSessionId = optionValue(args, "--vendor-session-id");
+      if (!["manual", "automatic"].includes(continuationMode)) {
+        throw new CliError(
+          "INVALID_CONTINUATION_MODE",
+          "--continuation-mode must be manual or automatic.",
+          cliExitCodes.usage,
+        );
+      }
+      if (
+        continuationMode === "automatic" &&
+        (
+          client !== "codex" ||
+          !["hooks", "orchestrated"].includes(capability) ||
+          !vendorSessionId ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(vendorSessionId)
+        )
+      ) {
+        throw new CliError(
+          "INVALID_AUTOMATIC_CONTINUATION",
+          "Automatic continuation requires --client codex, hooks or orchestrated capability, and a Codex session UUID.",
+          cliExitCodes.usage,
+        );
+      }
+      if (continuationMode === "manual" && vendorSessionId) {
+        throw new CliError(
+          "INVALID_AUTOMATIC_CONTINUATION",
+          "--vendor-session-id requires --continuation-mode automatic.",
+          cliExitCodes.usage,
+        );
+      }
       const continuesRunId = optionValue(args, "--continues");
       const resumeContextKey = optionValue(args, "--resume-key");
       if (Boolean(continuesRunId) !== Boolean(resumeContextKey)) {
@@ -2987,6 +3018,7 @@ async function executeCli(args: readonly string[], runtime: CliRuntime): Promise
           `run-${createHash("sha256").update(`${projectId}:${taskSummary}:${continuesRunId ?? "new"}`).digest("hex").slice(0, 32)}`,
         client,
         capability,
+        ...(continuationMode === "automatic" ? { continuationMode, vendorSessionId } : {}),
         taskSummary,
         scope: Object.fromEntries(
           (["repository", "component", "branch", "environment", "workItem"] as const)

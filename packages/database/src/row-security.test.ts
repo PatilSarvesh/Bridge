@@ -135,3 +135,68 @@ describe("notification preference row security migrations", () => {
     );
   });
 });
+
+describe("GitHub pull-request context row security migration", () => {
+  it("forces tenant isolation for pull-request metadata", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0042_even_wallop.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "bridge_github_pull_requests" ENABLE ROW LEVEL SECURITY',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "bridge_github_pull_requests" FORCE ROW LEVEL SECURITY',
+    );
+    expect(migration).toContain(
+      'CREATE POLICY "bridge_github_pull_requests_tenant" ON "bridge_github_pull_requests"',
+    );
+    expect(migration).toContain("bridge_github_pull_requests_organization_project_fk");
+  });
+});
+
+describe("GitHub issue work-item row security migration", () => {
+  it("forces tenant isolation for issue metadata", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0043_misty_dragon_man.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('ALTER TABLE "bridge_github_issues" ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('ALTER TABLE "bridge_github_issues" FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain(
+      'CREATE POLICY "bridge_github_issues_tenant" ON "bridge_github_issues"',
+    );
+    expect(migration).toContain("bridge_github_issues_organization_project_fk");
+  });
+});
+
+describe("directory group row security migration", () => {
+  it("backfills manual provenance and forces tenant isolation for group lifecycle records", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0044_marvelous_lockjaw.sql", import.meta.url),
+      "utf8",
+    );
+    for (const table of ["bridge_directory_groups", "bridge_directory_group_members"]) {
+      expect(migration).toContain(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`);
+      expect(migration).toContain(`ALTER TABLE "${table}" FORCE ROW LEVEL SECURITY`);
+      expect(migration).toContain(`CREATE POLICY "${table}_tenant" ON "${table}"`);
+    }
+    const backfill = migration.indexOf(
+      'ADD COLUMN "provisioning" "bridge_membership_provisioning" DEFAULT \'manual\' NOT NULL',
+    );
+    const dropDefault = migration.indexOf(
+      'ALTER COLUMN "provisioning" DROP DEFAULT',
+    );
+    expect(backfill).toBeGreaterThanOrEqual(0);
+    expect(dropDefault).toBeGreaterThan(backfill);
+    expect(migration).toContain("directory_group.created");
+    expect(migration).toContain("directory_group.synced");
+    const tenantConstraint = await readFile(
+      new URL("../drizzle/0045_short_mercury.sql", import.meta.url),
+      "utf8",
+    );
+    expect(tenantConstraint.indexOf("bridge_directory_groups_org_id_unique")).toBeLessThan(
+      tenantConstraint.indexOf("bridge_directory_group_members_organization_group_fk"),
+    );
+  });
+});

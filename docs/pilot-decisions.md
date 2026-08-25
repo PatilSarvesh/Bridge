@@ -230,6 +230,8 @@ The first slice includes durable organizations, OIDC identities, active/disabled
 
 **Review trigger:** Evaluate embeddings only when a labeled pilot dataset shows unacceptable retrieval recall after metadata and full-text tuning.
 
+**2026-08-24 repository evidence:** The dependency-free BRG-130 benchmark records 1.0000 Recall@5 for both the weighted lexical proxy and a hashed sparse TF-IDF vector on 20 synthetic records and 12 curated queries. The zero recall gain is below the predeclared 0.10 material-gain threshold, so this evidence does not reopen the no-vector-database decision. The benchmark is reproducible with `pnpm retrieval:evaluate`; production and dense-embedding evaluation still require privacy-reviewed labeled pilot data.
+
 ### PILOT-021 — Policy engine
 
 **Decision:** Implement a limited declarative Bridge policy schema evaluated in application code. Do not add a general embedded policy language in the MVP.

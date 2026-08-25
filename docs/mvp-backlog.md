@@ -431,7 +431,7 @@ Acceptance criteria:
 
 - **Priority:** P1
 - **Size:** M
-- **Status:** Partial — deterministic pilot slice complete
+- **Status:** Implemented — exact policy-equivalent reuse plus indexed PostgreSQL full-text/trigram and dependency-free deterministic typo-tolerant related suggestions are available through REST, CLI, and optional MCP
 - **Dependencies:** BRG-030, BRG-041
 - **PRD references:** QST-07
 
@@ -447,9 +447,10 @@ Acceptance criteria:
 Implementation checkpoint:
 
 - Exact normalized, policy-equivalent unresolved questions and active accepted decisions are reused and linked to the new run.
-- Related candidates are ranked with deterministic token overlap and remain advisory.
+- PostgreSQL preselects candidates through project-scoped weighted full-text and title/context trigram expressions under forced tenant RLS; the shared application ranker combines deterministic token and character-trigram similarity with category, type, and scope signals.
+- Related candidates remain advisory and are never automatically merged.
 - REST, optional MCP, CLI, and offline unresolved-question export are implemented.
-- PostgreSQL full-text/trigram indexing and an explicit decision-reopening workflow remain follow-up work.
+- Exact policy-equivalent reuse remains an exhaustive application check so an index cannot convert a fuzzy match into automatic reuse. Intentionally reopening or replacing an accepted decision remains a separate BRG-042 lifecycle workflow.
 
 ## 12. E4 — Decisions and lifecycle
 
@@ -1114,14 +1115,14 @@ These stories are intentionally not on the controlled-MVP critical path.
 | BRG-122 | P1 | L | Detect overlapping contradictory active decisions | DEC-05 |
 | BRG-123 | P1 | L | Produce deeper transitive impact analysis when a decision changes | DEC-06 |
 | BRG-124 | P1 | L | Detect approved specification drift in CI | ART-07 |
-| BRG-125 | P1 | L | Add first source-control pull-request context integration | Integration roadmap |
-| BRG-126 | P1 | L | Add first work-item synchronization integration | Integration roadmap |
-| BRG-127 | P1 | M | Add enterprise group provisioning and lifecycle sync | AUTH-05 |
-| BRG-128 | P1 | M | Export project decisions, artifacts, and audit records | ADM-02 |
-| BRG-129 | P2 | XL | Add vendor-specific automatic session continuation | RUN-03 |
-| BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset | Context roadmap |
+| BRG-125 | P1 | L | Add first source-control pull-request context integration — complete | Integration roadmap |
+| BRG-126 | P1 | L | Add first work-item synchronization integration — complete | Integration roadmap |
+| BRG-127 | P1 | M | Add enterprise group provisioning and lifecycle sync — complete (bounded provider-group slice) | AUTH-05 |
+| BRG-128 | P1 | M | Export project decisions, artifacts, and audit records — complete | ADM-02 |
+| BRG-129 | P2 | XL | Add vendor-specific automatic session continuation — complete (bounded Codex CLI adapter) | RUN-03 |
+| BRG-130 | P2 | L | Evaluate vector retrieval against a curated relevance dataset — complete (offline synthetic benchmark) | Context roadmap |
 
-Implementation status (2026-08-23): BRG-120 through BRG-124 are complete. Role-aware views, low-risk digests, advisory conflict scans, bounded transitive impact graphs, and the CI-safe approved-specification drift manifest/check are implemented while preserving canonical REST reads and human authority. Drift coverage is explicit-file/hash based; source-provider semantic analysis remains future integration work. BRG-125 through BRG-130 remain pending.
+Implementation status (2026-08-24): BRG-120 through BRG-130 are complete. RUN-03 adds explicit per-run Codex CLI automatic-continuation opt-in, queues only after every linked blocker has human acceptance, and invokes the existing vendor session through a bounded worker without bypassing approvals or carrying decision content/Bridge locators. BRG-130 adds an offline synthetic relevance dataset and deterministic Recall@5/MRR/nDCG@5 comparison: both rankers reach 1.0000 Recall@5, so the sparse TF-IDF candidate's zero recall gain is below the predeclared 0.10 threshold and vector infrastructure is not adopted. Live provider/session conformance and privacy-reviewed pilot relevance labels remain external evidence.
 
 ## 21. Critical path
 
@@ -1216,7 +1217,7 @@ Demo: Protected approval, supersession impact, cross-tenant denial, recovery, an
 | Agent client differs from assumed MCP behavior | BRG-052 requires a compatibility spike before broad adapter work |
 | Human UI grows too broad | Delivery slices restrict the first UI to inbox, question, and decision flows |
 | Policy engine becomes a product of its own | BRG-022 starts with a limited declarative matcher |
-| Search quality is unclear | BRG-051 begins deterministic; BRG-130 requires evaluation before vector infrastructure |
+| Search quality is unclear | BRG-051 remains deterministic; BRG-130's synthetic benchmark rejects vector adoption at the declared threshold, while labeled pilot queries remain required before reopening it |
 | Slack integration delays core loop | In-app and SES email can support early slices, but Slack remains a P0 pilot gate |
 | Audit added too late | BRG-100 is required in the first human decision slice |
 | Specifications delay central decision loop | E8 begins only after Slice B proves durable decision reuse |

@@ -12,7 +12,7 @@
 
 This document translates the Bridge PRD into a buildable technical design. It defines system boundaries, deployable components, data ownership, interfaces, security controls, execution flows, and the recommended MVP implementation shape.
 
-> **Identity scope update (2026-08-10):** The founder reopened authentication and organization work. Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, enterprise provisioning, and live deployment/isolation evidence are still incomplete and must not be represented as production-ready.
+> **Identity scope update (2026-08-24):** Configurable OIDC web/API authentication, interactive CLI PKCE, durable membership administration, bounded provider-group membership synchronization, revocable scoped service identities, coarse plus mapped least-privilege REST/MCP bearer-capability enforcement, MCP protected-resource metadata, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, and repeatable PostgreSQL role/grant reconciliation are active; fixed principals remain development-only. External token issuance, MCP-side authorization-server/token issuance, provider invitations/SCIM hosting, and live deployment/provider/isolation evidence are still incomplete and must not be represented as production-ready.
 
 The design optimizes for:
 
@@ -603,6 +603,12 @@ GET    /v1/runs/:runId
 POST   /v1/runs/:runId/continuation
 
 POST   /v1/projects/:projectId/adapter-diagnostics
+POST   /v1/projects/:projectId/integrations/github/pull-requests
+GET    /v1/projects/:projectId/integrations/github/pull-requests?repositoryId=&state=&limit=
+GET    /v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context?repositoryId=
+POST   /v1/projects/:projectId/integrations/github/issues
+GET    /v1/projects/:projectId/integrations/github/issues?repositoryId=&state=&label=&limit=
+GET    /v1/projects/:projectId/integrations/github/issues/:issueNumber/context?repositoryId=
 GET    /v1/projects/:projectId/inbox?status=&risk=&category=&role=&due=
 GET    /v1/notifications?projectId=&unreadOnly=
 POST   /v1/notifications/:notificationId/read
@@ -615,8 +621,12 @@ GET    /v1/admin/projects/:projectId/analytics?client=&startedFrom=&startedTo=
 GET    /v1/admin/projects/:projectId/support
 GET    /v1/admin/projects/:projectId/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
 POST   /v1/admin/projects/:projectId/audit/export
+POST   /v1/admin/projects/:projectId/export
 GET    /v1/admin/organization/audit?action=&actorId=&subjectType=&subjectId=&correlationId=&createdFrom=&createdTo=&offset=&limit=
 POST   /v1/admin/organization/audit/export
+GET    /v1/admin/organization/directory-groups
+POST   /v1/admin/organization/directory-groups
+POST   /v1/admin/organization/directory-groups/:groupId/sync
 ```
 
 Decision collection semantics are intentionally conservative: `GET /v1/projects/:projectId/decisions` returns active decisions unless the caller supplies `includeHistory=true` or an explicit lifecycle `status`. `search` queries answer, rationale, and category text after tenant/project authorization; PostgreSQL uses a weighted `simple` text-search vector with answer weighted above rationale and category, while the in-memory adapter applies deterministic all-token matching with the same field weights. Authorized callers can combine search with exact case-insensitive category, owner, inclusive creation-time range, and any supplied exact scope dimensions (`repository`, `component`, `branch`, `environment`, and `workItem`). `createdFrom` must not be later than `createdTo`. Lifecycle history remains an explicit human browsing concern; agent context retrieval continues to include active decisions only. The MCP decision-search tool delegates to this application query and does not define a separate authority or matching path.
@@ -625,11 +635,19 @@ Artifact version comparison is an authorized, derived read over two immutable ve
 
 Administrative endpoints are separated under `/v1/admin`. Outbox operations and project analytics require a human project administrator for the target project whether the principal came from OIDC or development fixtures. Non-human bearer requests first pass the mapped REST capability boundary (`bridge:project:admin`, `bridge:organization:admin`, or the explicit `bridge:admin` wildcard), with coarse `bridge:read`/`bridge:write` compatibility grants retained; application role and human-approval checks remain authoritative.
 
+Directory-group creation/listing remains human organization-administrator-only. The one lifecycle reconciliation route is an explicit exception for `integration` principals carrying `bridge:directory:sync`; coarse `bridge:write` is deliberately insufficient. A configured group is bound to the application's exact OIDC issuer. Sync accepts at most 1,000 unique subject/display-name pairs plus provider timestamp/status, creates human identities and active organization memberships with `provisioning=directory`, zero roles, no all-project grant, and no project memberships, and records versioned group/member lifecycle rows. Removal disables a directory-provisioned organization membership only after the principal has no active synchronized group membership. Any human administrator update changes provenance to `manual`, so provider removal preserves that access. The operation never assigns a role/project, mutates an approval, or exposes an MCP tool; provider discovery, SCIM hosting, invitations, and live webhook/token validation remain outside this slice.
+
 Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
+
+The separate project-data export is a human-project-administrator-only REST command that returns a versioned JSON archive of canonical decision and artifact aggregates, including artifact version bodies/reviews, plus project audit events. Decisions, artifacts, and audit events have independent bounded offsets and limits and stable oldest-first ordering, so later appends do not shift already-consumed pages. The command appends `project.exported` before reading the audit collection, sets `humanApprovalChanged: false`, and never mutates decision lifecycle or artifact approval state. The archive is sensitive governed project data rather than the metadata-only audit export; MCP has no alternate export path.
 
 `GET /v1/principals` returns active same-organization human directory summaries after authentication. Development mode uses those summaries for the **Reviewing as** policy switcher; OIDC mode hides impersonation and keeps the signed-in identity. The inbox endpoint applies validated status, risk, category, owner-or-reviewer role, and due-state filters only after project authorization and personalized routing. Web filters round-trip through prefixed URL query parameters without becoming a separate authority boundary. Protected questions expose a separate human policy-review command for each required reviewer role before an owner lacking that reviewer role may finalize acceptance. Notifications are human-only, project-scoped, and readable through REST/web whether or not MCP is approved; ordinary agent principals receive a deterministic denial.
 
 Project repository metadata is managed through the canonical REST endpoints, the administrator-only web **Repositories** view, or the equivalent CLI `repository list` and `repository link` commands. These surfaces exchange only provider, owner, repository name, canonical URL, project scope, and timestamps. They do not fetch source or infer provider connectivity from a caller-supplied URL; provider-backed validation and synchronization remain integration work.
+
+The first source-control integration adds canonical REST synchronization and reads for GitHub pull-request metadata. A project administrator or project-scoped `ci`/`integration` service identity may submit the repository reference, number, title/state, canonical URL, branch names, head SHA, provider timestamp, and explicit active-decision/approved-specification links. Ordinary agents cannot synchronize. Provider timestamps reject stale or conflicting events, deterministic IDs make exact retries idempotent, and authorized project members receive bounded guidance summaries with `humanApprovalChanged: false`. Bridge does not request or retain source, diffs, pull-request bodies/comments, or credentials, and MCP exposes no alternate integration surface.
+
+GitHub Issues use the same canonical integration boundary and authorization model. Bridge persists only repository/issue identity, title/state, canonical URL, labels, provider timestamp, and explicit guidance links; GitHub remains authoritative and Bridge performs no provider mutation. Each item exposes a deterministic `github:owner/repository#number` reference. Exact matches against `ContextQuery.scope.workItem`—or the canonical issue URL—add a bounded ranking boost to linked active decisions and the currently approved linked specification without excluding normal context candidates. The direct issue context read can also show a linked superseded specification as provenance. No issue body, comments, assignees, source, or provider credentials are retained.
 
 Project ownership configuration is managed through canonical administrator REST endpoints and the web **Ownership** view. The application validates active human team membership and direct targets, normalizes role/team/rule keys, detects equal-priority overlap per responsibility lane, performs an optimistic aggregate-version write, and appends the project audit event in one transaction. Question creation resolves each owner lane in this order: explicit owner, repository/component-scoped rule, category rule, project-wide rule or configured project decision owner, then an empty administrator-visible fallback. Required policy roles are always retained. Reviewer targets resolve independently through scoped, category, project-wide, then policy routes so reviewer visibility never becomes owner acceptance authority. The question records the selected source, rule keys, and ownership/policy versions.
 
@@ -708,12 +726,13 @@ bridge:artifacts:write
 bridge:notifications:read
 bridge:notifications:write
 bridge:diagnostics:write
+bridge:directory:sync
 bridge:organization:read
 bridge:organization:admin
 bridge:project:admin
 ```
 
-REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible, and `bridge:admin` is the explicit wildcard; Bridge does not issue these scopes itself.
+REST routes and MCP tools require the matching mapped family before application policy. Coarse read/write grants remain compatible except that the high-impact directory reconciliation command requires explicit `bridge:directory:sync`; `bridge:admin` remains the explicit wildcard. Bridge does not issue these scopes itself.
 
 ### 13.4 Idempotency
 
@@ -763,21 +782,21 @@ Persist the IDs and versions returned to an agent run. This makes it possible to
 
 - Eligible candidates are unresolved questions and accepted questions whose decisions remain active.
 - Exact comparison uses Unicode normalization, case/punctuation folding, category, type, and exact scope.
-- Related scoring uses deterministic title/context token overlap plus category, type, and scope signals.
+- Related scoring uses the stronger of deterministic title/context token overlap and character-trigram similarity plus category, type, and scope signals.
 - Results include the question ID, lifecycle state, decision ID when present, scope, score, match kind, and explainable reasons.
-- The current repository-service scan is appropriate for the pilot corpus and keeps behavior identical in memory and PostgreSQL.
+- PostgreSQL preselects candidates with a weighted `simple` full-text query and `pg_trgm` title/context similarity over tenant-scoped rows. Matching GIN indexes are rebuildable from canonical question text. Dependency-free mode scans the bounded project corpus, and both paths use the same final application scorer.
 
 ### 15.2 Duplicate suggestion
 
 The read-only match query and question-creation guard perform a bounded pre-check:
 
 1. Compare normalized title and context within category, type, and exact scope.
-2. Rank related lexical candidates above the conservative threshold.
+2. Rank related lexical or typo-tolerant candidates above the conservative threshold.
 3. Return active accepted decisions and unresolved questions.
 4. On creation, require risk, reversibility, and blocking policy to match before exact reuse.
 5. Atomically link a reused question to the new run and preserve the existing human review/decision path.
 
-Exact policy-equivalent questions are automatically reused. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
+Exact policy-equivalent questions are automatically reused through an exhaustive application check rather than the fuzzy candidate index. Semantic or merely related candidates remain advisory and are never merged automatically. The submission response distinguishes `created`, `idempotent_replay`, `reused_pending`, and `reused_accepted`.
 
 ### 15.3 Role-aware question presentation
 
@@ -789,7 +808,9 @@ Exact policy-equivalent questions are automatically reused. Semantic or merely r
 
 ### 15.5 Later retrieval enhancement
 
-Add PostgreSQL full-text/trigram indexes after corpus and latency measurements justify them. Add vector retrieval only after evaluation shows material recall improvements. Any derived search index must contain tenant scope and be rebuildable from canonical records.
+BRG-130 makes the vector threshold executable without changing production retrieval. `config/context-retrieval-evaluation.json` contains 20 synthetic Bridge-style records and 12 curated relevance queries. `pnpm retrieval:evaluate` compares a proxy of the current weighted lexical ranker with a deterministic hashed sparse TF-IDF vector while preserving the same category eligibility, authority weights, and exact-scope boosts. It reports Recall@5, MRR, nDCG@5, and per-query top-five evidence without network, database, or model access.
+
+The 2026-08-24 result is 1.0000 Recall@5 for both rankers: zero recall gain, below the predeclared 0.10 material-gain threshold. The sparse candidate improves nDCG@5 from 0.9773 to 0.9875 but does not change MRR from 1.0000. The architectural decision therefore remains: do not add a vector database, pgvector, or an embedding provider from this evidence. The synthetic benchmark is a repeatable engineering gate, not production or dense-embedding validation. Re-evaluate with privacy-reviewed labeled pilot queries that expose lexical recall failures. Any later derived search index must contain tenant scope, remain rebuildable from canonical records, and preserve lifecycle, authority, explicit-link, and scope rules.
 
 ## 16. Event and job architecture
 
@@ -910,11 +931,15 @@ Creating a linked blocking question changes the run from `running` to `waiting_f
 
 ### 18.3 Adapter-specific auto-resume
 
-Auto-resume adapters subscribe to accepted-decision events and invoke a vendor-supported continuation mechanism. Bridge records the attempt and result. Unsupported adapters notify the operator and rely on manual continuation.
+The first adapter is an explicit Codex CLI integration. A run may select `continuationMode=automatic` only with `client=codex`, `capability=hooks|orchestrated`, and a validated vendor session UUID. The vendor UUID is stored beside the tenant-protected continuation locator and is excluded from ordinary run reads. When human acceptance resolves the final linked blocking question, the same transaction appends a metadata-only `run.continuation_ready` outbox event and `run.continuation_queued` audit event. The event carries run/session identifiers and the triggering decision ID, never the decision body or Bridge continuation locator.
+
+The maintenance worker resolves an operator-configured absolute workspace for the project and invokes `codex exec resume --json <session-id> <bounded-prompt>` with `shell=false`, ignored process output, a bounded timeout, and no approval- or sandbox-bypass flags. The prompt tells the existing session to use its retained Bridge locator, re-check canonical continuation, retrieve approved context, and continue only when `canContinue=true`. Outbox attempts, processed status, sanitized failures, retry budget, and dead-letter state are the continuation attempt/result record. Process exit success means the vendor turn completed; it does not itself change the Bridge run from `waiting_for_human`, accept a decision, or prove task completion. The resumed principal must still call Bridge through its normal REST/CLI/MCP authorization boundary and explicitly report run state.
+
+Missing project mapping, unavailable local vendor session/authentication state, approval requirements, command failure, or timeout fails closed through ordinary outbox retry/dead-letter handling. Claude Code, Cursor, Copilot, custom clients, and Codex runs without explicit automatic opt-in retain the manual continuation flow. Deployment must colocate the worker with an approved checkout and the matching Codex session store; live provider conformance remains deployment evidence rather than a repository claim.
 
 ### 18.4 Current implementation checkpoint
 
-The prototype implements the manual continuation baseline across the application service, in-memory repository, PostgreSQL repository, REST, MCP, and CLI:
+The prototype implements the manual continuation baseline across the application service, in-memory repository, PostgreSQL repository, REST, MCP, and CLI, plus the explicit Codex CLI adapter described above:
 
 - Run start is idempotent and returns a metadata-only run plus a 32-byte random base64url locator.
 - Context snapshots, questions, and artifact versions are linked to a non-terminal run in the same transaction that creates them.
@@ -924,7 +949,7 @@ The prototype implements the manual continuation baseline across the application
 - The locator is stored separately from the public run record. It is currently stored as a value to allow exact replay of an idempotent start response; hashing or encryption at rest belongs to a future production identity/security slice.
 - The implementation never persists raw prompts, full outputs, transcripts, repository source, or hidden reasoning.
 
-Automatic vendor-session resume is not implemented. The web application provides a read-only run list/detail and source-record navigation, while continuation itself remains an explicit CLI/API operation into a linked later run. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; human email preferences, provider-neutral immediate/digest email, scheduled expiry/escalation, Slack delivery, and process-local worker telemetry export are implemented, while live email/provider/collector deployment evidence remains future work.
+The web application provides a read-only run list/detail, continuation-mode visibility, and source-record navigation. Manual continuation remains available for every client; only explicitly configured Codex CLI sessions receive a worker trigger. In-app human notifications and their transactional outbox intents are implemented for core question/review/specification events; human email preferences, provider-neutral immediate/digest email, scheduled expiry/escalation, Slack delivery, and process-local worker telemetry export are implemented, while live Codex/email/provider/collector deployment evidence remains future work.
 
 ## 19. Audit design
 

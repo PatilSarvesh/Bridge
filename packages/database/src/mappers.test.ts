@@ -8,6 +8,10 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  DirectoryGroup,
+  DirectoryGroupMember,
+  GithubPullRequestContext,
+  GithubIssueWorkItem,
   Notification,
   NotificationPreference,
   Organization,
@@ -38,6 +42,14 @@ import {
   artifactVersionToRow,
   decisionFromRow,
   decisionToRow,
+  directoryGroupFromRow,
+  directoryGroupMemberFromRow,
+  directoryGroupMemberToRow,
+  directoryGroupToRow,
+  githubPullRequestFromRow,
+  githubPullRequestToRow,
+  githubIssueFromRow,
+  githubIssueToRow,
   contextSnapshotFromRow,
   contextSnapshotToRow,
   projectFromRow,
@@ -80,6 +92,10 @@ import {
   type ArtifactVersionRow,
   type AuditEventRow,
   type DecisionRow,
+  type DirectoryGroupRow,
+  type DirectoryGroupMemberRow,
+  type GithubPullRequestRow,
+  type GithubIssueRow,
   type ContextSnapshotRow,
   type ProjectRow,
   type RepositoryRecordRow,
@@ -237,6 +253,7 @@ const run: AgentRun = {
   agentType: "agent",
   client: "codex",
   capability: "cli",
+  continuationMode: "manual",
   taskSummary: "Implement durable persistence mappings",
   scope: { repository: "bridge", component: "persistence" },
   status: "running",
@@ -454,6 +471,7 @@ describe("PostgreSQL domain mappings", () => {
       status: "active",
       roles: ["organization-member"],
       allProjects: false,
+      provisioning: "manual",
       createdAt: organization.createdAt,
       updatedAt: organization.createdAt,
       version: 1,
@@ -502,12 +520,42 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: identity.id,
       createdAt: organization.createdAt,
     };
+    const directoryGroup: DirectoryGroup = {
+      id: "dgr_mapping",
+      organizationId: organization.id,
+      provider: "auth0",
+      issuer: identity.oidcIssuer,
+      externalGroupId: "engineering",
+      displayName: "Engineering",
+      status: "active",
+      sourceUpdatedAt: "2026-08-07T09:30:00.000Z",
+      createdAt: organization.createdAt,
+      updatedAt: "2026-08-07T09:30:00.000Z",
+      version: 2,
+    };
+    const directoryGroupMember: DirectoryGroupMember = {
+      id: "dgm_mapping",
+      organizationId: organization.id,
+      groupId: directoryGroup.id,
+      principalId: identity.id,
+      externalSubject: identity.oidcSubject,
+      displayName: identity.displayName,
+      status: "active",
+      createdAt: organization.createdAt,
+      updatedAt: organization.createdAt,
+      version: 1,
+    };
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
     expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
     expect(organizationMembershipFromRow(
       organizationMembershipToRow(organizationMembership) as OrganizationMembershipRow,
     )).toEqual(organizationMembership);
+    expect(directoryGroupFromRow(directoryGroupToRow(directoryGroup) as DirectoryGroupRow))
+      .toEqual(directoryGroup);
+    expect(directoryGroupMemberFromRow(
+      directoryGroupMemberToRow(directoryGroupMember) as DirectoryGroupMemberRow,
+    )).toEqual(directoryGroupMember);
     expect(projectMembershipFromRow(
       projectMembershipToRow(projectMembership) as ProjectMembershipRow,
     )).toEqual(projectMembership);
@@ -536,6 +584,47 @@ describe("PostgreSQL domain mappings", () => {
     };
     expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
       .toEqual(repositoryRecord);
+    const pullRequest: GithubPullRequestContext = {
+      id: "gpr_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      repositoryId: repositoryRecord.id,
+      number: 42,
+      title: "Map pull-request context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/42",
+      headBranch: "feature/context",
+      baseBranch: "main",
+      headSha: "a".repeat(40),
+      decisionIds: ["dec_mapping"],
+      artifactVersionIds: ["avr_mapping"],
+      sourceUpdatedAt: "2026-08-07T11:00:00.000Z",
+      createdAt: "2026-08-07T11:01:00.000Z",
+      updatedAt: "2026-08-07T11:01:00.000Z",
+      version: 1,
+    };
+    expect(githubPullRequestFromRow(
+      githubPullRequestToRow(pullRequest) as GithubPullRequestRow,
+    )).toEqual(pullRequest);
+    const issue: GithubIssueWorkItem = {
+      id: "gwi_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      repositoryId: repositoryRecord.id,
+      number: 77,
+      reference: "github:bridge-org/bridge#77",
+      title: "Map issue work item",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/77",
+      labels: ["backend"],
+      decisionIds: ["dec_mapping"],
+      artifactVersionIds: ["avr_mapping"],
+      sourceUpdatedAt: "2026-08-07T12:00:00.000Z",
+      createdAt: "2026-08-07T12:01:00.000Z",
+      updatedAt: "2026-08-07T12:01:00.000Z",
+      version: 1,
+    };
+    expect(githubIssueFromRow(githubIssueToRow(issue) as GithubIssueRow)).toEqual(issue);
     const ownershipConfiguration: ProjectOwnershipConfiguration = {
       organizationId: project.organizationId,
       projectId: project.id,
@@ -979,5 +1068,36 @@ describe("PostgreSQL domain mappings", () => {
     expect(authenticationAuditMigration).toContain("'authentication.succeeded'");
     expect(authenticationAuditMigration).toContain("'authentication.logged_out'");
     expect(authenticationAuditMigration).toContain("'principal_identity'");
+
+    const automaticContinuationMigration = readFileSync(
+      new URL("../drizzle/0046_new_thunderball.sql", import.meta.url),
+      "utf8",
+    );
+    expect(automaticContinuationMigration).toContain(
+      "ADD COLUMN \"continuation_mode\" text DEFAULT 'manual' NOT NULL",
+    );
+    expect(automaticContinuationMigration).toContain(
+      "ALTER COLUMN \"continuation_mode\" DROP DEFAULT",
+    );
+    expect(automaticContinuationMigration).toContain("bridge_agent_runs_continuation_mode_check");
+    expect(automaticContinuationMigration).toContain(
+      "ALTER TABLE \"bridge_run_continuation_locators\" ADD COLUMN \"vendor_session_id\" text",
+    );
+    expect(automaticContinuationMigration).not.toContain(
+      "ALTER TABLE \"bridge_agent_runs\" ADD COLUMN \"vendor_session_id\"",
+    );
+    expect(automaticContinuationMigration).toContain("'run.continuation_ready'");
+
+    const questionSearchMigration = readFileSync(
+      new URL("../drizzle/0047_early_juggernaut.sql", import.meta.url),
+      "utf8",
+    );
+    expect(questionSearchMigration).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+    expect(questionSearchMigration).toContain("bridge_questions_full_text_idx");
+    expect(questionSearchMigration).toContain("bridge_questions_title_trigram_idx");
+    expect(questionSearchMigration).toContain("bridge_questions_context_trigram_idx");
+    expect(questionSearchMigration).toContain("gin_trgm_ops");
+    expect(questionSearchMigration).toContain("coalesce(\"project_id\", '')");
+    expect(questionSearchMigration).toContain("lower(\"project_id\" || ':' || \"title\")");
   });
 });

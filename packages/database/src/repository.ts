@@ -1,4 +1,8 @@
-import type { BridgeRepository, RepositoryTransactionContext } from "@bridge/application";
+import type {
+  BridgeRepository,
+  QuestionMatchCandidateQuery,
+  RepositoryTransactionContext,
+} from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
 import {
   type BridgeMetrics,
@@ -13,6 +17,10 @@ import type {
   AuditEvent,
   ContextSnapshot,
   Decision,
+  DirectoryGroup,
+  DirectoryGroupMember,
+  GithubPullRequestContext,
+  GithubIssueWorkItem,
   Notification,
   NotificationPreference,
   Organization,
@@ -48,6 +56,14 @@ import {
   contextSnapshotFromRow,
   decisionFromRow,
   decisionToRow,
+  directoryGroupFromRow,
+  directoryGroupMemberFromRow,
+  directoryGroupMemberToRow,
+  directoryGroupToRow,
+  githubPullRequestFromRow,
+  githubPullRequestToRow,
+  githubIssueFromRow,
+  githubIssueToRow,
   notificationFromRow,
   notificationPreferenceFromRow,
   notificationPreferenceToRow,
@@ -90,6 +106,10 @@ import {
   auditEvents,
   contextSnapshots,
   decisions,
+  directoryGroups,
+  directoryGroupMembers,
+  githubPullRequests,
+  githubIssues,
   idempotencyRecords,
   projects,
   projectRepositories,
@@ -109,6 +129,15 @@ import {
   projectPolicyConfigurations,
   serviceCredentials,
 } from "./schema.js";
+
+function questionSearchTsQuery(value: string): string {
+  const lexemes = value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en")
+    .split(/[^\p{L}\p{N}_]+/gu)
+    .filter((lexeme) => lexeme.length > 0 && lexeme.length <= 100);
+  return [...new Set(lexemes)].slice(0, 128).join(" | ") || "__bridge_no_match__";
+}
 
 type BridgeDatabase = PostgresJsDatabase<typeof schema>;
 type IdempotencyKind = (typeof schema.idempotencyKindEnum.enumValues)[number];
@@ -460,6 +489,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
         status: row.status,
         roles: row.roles,
         allProjects: row.allProjects,
+        provisioning: row.provisioning,
         updatedAt: row.updatedAt,
         version: row.version,
       }).where(and(
@@ -475,11 +505,112 @@ export class PostgresBridgeRepository implements BridgeRepository {
         status: row.status,
         roles: row.roles,
         allProjects: row.allProjects,
+        provisioning: row.provisioning,
         updatedAt: row.updatedAt,
         version: row.version,
       },
     });
     return true;
+  }
+
+  async getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(directoryGroups)
+      .where(eq(directoryGroups.id, groupId))
+      .limit(1);
+    return row ? directoryGroupFromRow(row) : undefined;
+  }
+
+  async listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroups)
+      .where(eq(directoryGroups.organizationId, organizationId))
+      .orderBy(asc(directoryGroups.displayName), asc(directoryGroups.id));
+    return rows.map(directoryGroupFromRow);
+  }
+
+  async saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean> {
+    const row = directoryGroupToRow(group);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(directoryGroups)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: directoryGroups.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(directoryGroups)
+      .set({
+        status: row.status,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(directoryGroups.id, group.id),
+        eq(directoryGroups.organizationId, group.organizationId),
+        eq(directoryGroups.version, expectedVersion),
+      ))
+      .returning({ id: directoryGroups.id });
+    return updated.length === 1;
+  }
+
+  async listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroupMembers)
+      .where(eq(directoryGroupMembers.groupId, groupId))
+      .orderBy(asc(directoryGroupMembers.externalSubject));
+    return rows.map(directoryGroupMemberFromRow);
+  }
+
+  async listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]> {
+    const rows = await this.database
+      .select()
+      .from(directoryGroupMembers)
+      .where(and(
+        eq(directoryGroupMembers.organizationId, organizationId),
+        eq(directoryGroupMembers.principalId, principalId),
+      ))
+      .orderBy(asc(directoryGroupMembers.groupId));
+    return rows.map(directoryGroupMemberFromRow);
+  }
+
+  async saveDirectoryGroupMember(
+    member: DirectoryGroupMember,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = directoryGroupMemberToRow(member);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(directoryGroupMembers)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: directoryGroupMembers.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(directoryGroupMembers)
+      .set({
+        principalId: row.principalId,
+        displayName: row.displayName,
+        status: row.status,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(directoryGroupMembers.id, member.id),
+        eq(directoryGroupMembers.organizationId, member.organizationId),
+        eq(directoryGroupMembers.version, expectedVersion),
+      ))
+      .returning({ id: directoryGroupMembers.id });
+    return updated.length === 1;
   }
 
   async listProjectMemberships(
@@ -693,6 +824,116 @@ export class PostgresBridgeRepository implements BridgeRepository {
       });
   }
 
+  async getGithubPullRequest(
+    pullRequestId: string,
+  ): Promise<GithubPullRequestContext | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(githubPullRequests)
+      .where(eq(githubPullRequests.id, pullRequestId))
+      .limit(1);
+    return row ? githubPullRequestFromRow(row) : undefined;
+  }
+
+  async listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]> {
+    const rows = await this.database
+      .select()
+      .from(githubPullRequests)
+      .where(eq(githubPullRequests.projectId, projectId))
+      .orderBy(desc(githubPullRequests.sourceUpdatedAt), asc(githubPullRequests.id));
+    return rows.map(githubPullRequestFromRow);
+  }
+
+  async saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const row = githubPullRequestToRow(pullRequest);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(githubPullRequests)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: githubPullRequests.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(githubPullRequests)
+      .set({
+        title: row.title,
+        state: row.state,
+        canonicalUrl: row.canonicalUrl,
+        headBranch: row.headBranch,
+        baseBranch: row.baseBranch,
+        headSha: row.headSha,
+        decisionIds: row.decisionIds,
+        artifactVersionIds: row.artifactVersionIds,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(githubPullRequests.id, pullRequest.id),
+        eq(githubPullRequests.organizationId, pullRequest.organizationId),
+        eq(githubPullRequests.projectId, pullRequest.projectId),
+        eq(githubPullRequests.version, expectedVersion),
+      ))
+      .returning({ id: githubPullRequests.id });
+    return updated.length === 1;
+  }
+
+  async getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined> {
+    const [row] = await this.database
+      .select()
+      .from(githubIssues)
+      .where(eq(githubIssues.id, issueId))
+      .limit(1);
+    return row ? githubIssueFromRow(row) : undefined;
+  }
+
+  async listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]> {
+    const rows = await this.database
+      .select()
+      .from(githubIssues)
+      .where(eq(githubIssues.projectId, projectId))
+      .orderBy(desc(githubIssues.sourceUpdatedAt), asc(githubIssues.id));
+    return rows.map(githubIssueFromRow);
+  }
+
+  async saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean> {
+    const row = githubIssueToRow(issue);
+    if (expectedVersion === undefined) {
+      const inserted = await this.database
+        .insert(githubIssues)
+        .values(row)
+        .onConflictDoNothing()
+        .returning({ id: githubIssues.id });
+      return inserted.length === 1;
+    }
+    const updated = await this.database
+      .update(githubIssues)
+      .set({
+        reference: row.reference,
+        title: row.title,
+        state: row.state,
+        canonicalUrl: row.canonicalUrl,
+        labels: row.labels,
+        decisionIds: row.decisionIds,
+        artifactVersionIds: row.artifactVersionIds,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        updatedAt: row.updatedAt,
+        version: row.version,
+      })
+      .where(and(
+        eq(githubIssues.id, issue.id),
+        eq(githubIssues.organizationId, issue.organizationId),
+        eq(githubIssues.projectId, issue.projectId),
+        eq(githubIssues.version, expectedVersion),
+      ))
+      .returning({ id: githubIssues.id });
+    return updated.length === 1;
+  }
+
   async getProjectOwnershipConfiguration(
     projectId: string,
   ): Promise<ProjectOwnershipConfiguration | undefined> {
@@ -865,10 +1106,23 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return row?.resumeContextKey;
   }
 
-  async saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void> {
+  async getRunVendorSessionId(runId: string): Promise<string | undefined> {
+    const [row] = await this.database
+      .select({ vendorSessionId: runContinuationLocators.vendorSessionId })
+      .from(runContinuationLocators)
+      .where(eq(runContinuationLocators.runId, runId))
+      .limit(1);
+    return row?.vendorSessionId ?? undefined;
+  }
+
+  async saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void> {
     await this.database
       .insert(runContinuationLocators)
-      .values({ runId, resumeContextKey })
+      .values({ runId, resumeContextKey, vendorSessionId })
       .onConflictDoNothing({ target: runContinuationLocators.runId });
   }
 
@@ -947,6 +1201,50 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .from(questions)
       .where(eq(questions.projectId, projectId))
       .orderBy(desc(questions.createdAt));
+    if (rows.length === 0) return [];
+    const responses = await this.database
+      .select()
+      .from(questionResponses)
+      .where(inArray(questionResponses.questionId, rows.map((row) => row.id)))
+      .orderBy(asc(questionResponses.createdAt));
+    return rows.map((row) => questionFromRows(row, responses));
+  }
+
+  async searchQuestionMatchCandidates(
+    projectId: string,
+    candidateQuery: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]> {
+    const searchText = `${candidateQuery.title} ${candidateQuery.context}`;
+    const tsQuery = questionSearchTsQuery(searchText);
+    const document = sql`(
+      setweight(to_tsvector('simple', coalesce(${questions.projectId}, '')), 'D') ||
+      setweight(to_tsvector('simple', coalesce(${questions.title}, '')), 'A') ||
+      setweight(to_tsvector('simple', coalesce(${questions.context}, '')), 'B')
+    )`;
+    const query = sql`to_tsquery('simple', ${tsQuery})`;
+    const projectQuery = sql`plainto_tsquery('simple', ${projectId})`;
+    const scopedTitle = `${projectId}:${candidateQuery.title}`;
+    const scopedContext = `${projectId}:${candidateQuery.context}`;
+    const rows = await this.database
+      .select()
+      .from(questions)
+      .where(and(
+        eq(questions.projectId, projectId),
+        inArray(questions.status, ["open", "in_discussion", "accepted"]),
+        or(
+          sql`${document} @@ (${projectQuery} && ${query})`,
+          sql`lower(${questions.projectId} || ':' || ${questions.title}) % lower(${scopedTitle})`,
+          sql`lower(${questions.projectId} || ':' || ${questions.context}) % lower(${scopedContext})`,
+        ),
+      ))
+      .orderBy(
+        desc(sql<number>`greatest(
+          ts_rank_cd(${document}, ${query}),
+          similarity(lower(${questions.title}), lower(${candidateQuery.title})),
+          similarity(lower(${questions.context}), lower(${candidateQuery.context}))
+        )`),
+        desc(questions.createdAt),
+      );
     if (rows.length === 0) return [];
     const responses = await this.database
       .select()

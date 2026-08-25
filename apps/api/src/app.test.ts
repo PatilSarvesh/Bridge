@@ -71,6 +71,52 @@ describe("Bridge API vertical slice", () => {
 
     currentPrincipal = { ...demoPrincipals.architect, scopes: [] };
     expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(200);
+
+    const group = await app.inject({
+      method: "POST",
+      url: "/v1/admin/organization/directory-groups",
+      payload: {
+        provider: "auth0",
+        issuer: "https://bridge.local/",
+        externalGroupId: "api-scope-engineering",
+        displayName: "API Scope Engineering",
+      },
+    });
+    expect(group.statusCode).toBe(201);
+    const groupId = group.json<{ group: { id: string } }>().group.id;
+    const syncPayload = {
+      expectedVersion: 1,
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      status: "active",
+      members: [{ subject: "auth0|api-scope-member", displayName: "API Scope Member" }],
+    };
+    currentPrincipal = {
+      ...demoPrincipals.agent,
+      type: "integration",
+      roles: ["integration"],
+      scopes: ["bridge:write"],
+    };
+    const coarseWriteDenied = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/directory-groups/${groupId}/sync`,
+      payload: syncPayload,
+    });
+    expect(coarseWriteDenied.statusCode).toBe(403);
+    expect(coarseWriteDenied.json()).toMatchObject({
+      details: { requiredScope: "bridge:directory:sync" },
+    });
+    currentPrincipal = { ...currentPrincipal, scopes: ["bridge:directory:sync"] };
+    const scopedSync = await app.inject({
+      method: "POST",
+      url: `/v1/admin/organization/directory-groups/${groupId}/sync`,
+      payload: syncPayload,
+    });
+    expect(scopedSync.statusCode).toBe(200);
+    expect(scopedSync.json()).toMatchObject({
+      group: { version: 2 },
+      membershipChanges: { provisioned: 1 },
+      humanApprovalChanged: false,
+    });
   });
 
   it("limits fine-grained bearer scopes to their mapped REST resource family", async () => {
@@ -411,6 +457,36 @@ describe("Bridge API vertical slice", () => {
       expect(jsonExport.body).not.toContain(question.title);
       expect(jsonExport.body).not.toContain(question.context);
     }
+
+    const projectDataExport = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/export`,
+      headers: adminHeader,
+      payload: {},
+    });
+    expect(projectDataExport.statusCode).toBe(200);
+    expect(projectDataExport.headers["content-disposition"]).toContain(`bridge-project-${demoProject.id}-`);
+    expect(projectDataExport.headers["content-type"]).toContain("application/json");
+    expect(projectDataExport.json()).toMatchObject({
+      schemaVersion: 1,
+      project: { id: demoProject.id, organizationId: demoProject.organizationId },
+      humanApprovalChanged: false,
+      counts: {
+        decisions: { offset: 0 },
+        artifacts: { offset: 0 },
+        auditEvents: { offset: 0 },
+      },
+      auditEvents: expect.arrayContaining([
+        expect.objectContaining({ action: "project.exported", subjectType: "project_export" }),
+      ]),
+    });
+    const projectDataContributorDenied = await app.inject({
+      method: "POST",
+      url: `/v1/admin/projects/${demoProject.id}/export`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload: {},
+    });
+    expect(projectDataContributorDenied.statusCode).toBe(403);
 
     const organizationView = await app.inject({
       method: "GET",
@@ -1229,6 +1305,86 @@ describe("Bridge API vertical slice", () => {
     expect(visibleRepositories.statusCode).toBe(200);
     expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items)
       .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
+
+    const pullRequestPayload = {
+      repositoryId: linkedRepository.json<{ repository: { id: string } }>().repository.id,
+      number: 10,
+      title: "Expose read-only Bridge context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/pull/10",
+      headBranch: "feature/context",
+      baseBranch: "main",
+      headSha: "b".repeat(40),
+      sourceUpdatedAt: "2026-01-01T01:00:00.000Z",
+      decisionIds: [],
+      artifactVersionIds: [],
+    };
+    const deniedPullRequestSync = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: pullRequestPayload,
+    });
+    expect(deniedPullRequestSync.statusCode).toBe(403);
+
+    const syncedPullRequest = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: pullRequestPayload,
+    });
+    expect(syncedPullRequest.statusCode).toBe(201);
+    expect(syncedPullRequest.json()).toMatchObject({
+      disposition: "created",
+      pullRequest: { number: 10, state: "open", version: 1 },
+    });
+
+    const pullRequestContext = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/integrations/github/pull-requests/10/context?repositoryId=${pullRequestPayload.repositoryId}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(pullRequestContext.statusCode).toBe(200);
+    expect(pullRequestContext.json()).toMatchObject({
+      pullRequest: { number: 10, canonicalUrl: pullRequestPayload.canonicalUrl },
+      decisions: [],
+      artifactVersions: [],
+      humanApprovalChanged: false,
+    });
+
+    const issuePayload = {
+      repositoryId: pullRequestPayload.repositoryId,
+      number: 11,
+      title: "Track work-item context",
+      state: "open",
+      canonicalUrl: "https://github.com/bridge-org/bridge/issues/11",
+      labels: ["integration"],
+      sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
+      decisionIds: [],
+      artifactVersionIds: [],
+    };
+    const syncedIssue = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${registration.project.id}/integrations/github/issues`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: issuePayload,
+    });
+    expect(syncedIssue.statusCode).toBe(201);
+    expect(syncedIssue.json()).toMatchObject({
+      disposition: "created",
+      issue: { number: 11, reference: "github:bridge-org/bridge#11", version: 1 },
+    });
+
+    const issueContext = await app.inject({
+      method: "GET",
+      url: `/v1/projects/${registration.project.id}/integrations/github/issues/11/context?repositoryId=${issuePayload.repositoryId}`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+    });
+    expect(issueContext.statusCode).toBe(200);
+    expect(issueContext.json()).toMatchObject({
+      issue: { canonicalUrl: issuePayload.canonicalUrl, labels: ["integration"] },
+      humanApprovalChanged: false,
+    });
   });
 
   it("exposes versioned project ownership configuration only to administrators", async () => {
@@ -1986,7 +2142,9 @@ describe("Bridge API vertical slice", () => {
       payload: {
         idempotencyKey: "api-run-test-001",
         client: "codex",
-        capability: "cli",
+        capability: "orchestrated",
+        continuationMode: "automatic",
+        vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
         taskSummary: "Implement transfer retry handling",
         scope: { component: "transfers" },
         externalLinks: [],
@@ -1994,9 +2152,10 @@ describe("Bridge API vertical slice", () => {
     });
     expect(startResponse.statusCode).toBe(201);
     const registration = startResponse.json<{
-      run: { id: string };
+      run: { id: string; continuationMode: string };
       resumeContextKey: string;
     }>();
+    expect(registration.run.continuationMode).toBe("automatic");
 
     const questionResponse = await app.inject({
       method: "POST",
@@ -2051,6 +2210,16 @@ describe("Bridge API vertical slice", () => {
       canContinue: true,
       acceptedDecisionIds: [expect.any(String)],
     });
+    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "run.continuation_ready",
+        payload: expect.objectContaining({
+          runId: registration.run.id,
+          client: "codex",
+          vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
+        }),
+      }),
+    ]));
   });
 
   it("supports shared responses before the owner accepts a question and returns the decision as context", async () => {
@@ -2405,6 +2574,20 @@ describe("Bridge API vertical slice", () => {
     expect(matches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items).toEqual([
       expect.objectContaining({ questionId: firstQuestion.id, matchKind: "exact" }),
     ]);
+
+    const typoMatches = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/questions/matches`,
+      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+      payload: {
+        ...input,
+        title: "Which trasfer failurs sholud be retried automaticaly?",
+        context: "The trasfer wroker reetries evry faield requset without clasifying the failur.",
+      },
+    });
+    expect(typoMatches.statusCode).toBe(200);
+    expect(typoMatches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items)
+      .toEqual([expect.objectContaining({ questionId: firstQuestion.id, matchKind: "related" })]);
 
     const reused = await app.inject({
       method: "POST",

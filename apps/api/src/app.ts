@@ -12,6 +12,7 @@ import {
   contextQuerySchema,
   continuationQuerySchema,
   createOrganizationMemberInputSchema,
+  createDirectoryGroupInputSchema,
   createServiceIdentityInputSchema,
   createQuestionInputSchema,
   decisionListQuerySchema,
@@ -20,6 +21,10 @@ import {
   editQuestionCommentInputSchema,
   editQuestionResponseInputSchema,
   findQuestionMatchesInputSchema,
+  githubPullRequestContextQuerySchema,
+  githubPullRequestListQuerySchema,
+  githubIssueContextQuerySchema,
+  githubIssueListQuerySchema,
   publishArtifactInputSchema,
   proposeAnswerInputSchema,
   questionClarificationInputSchema,
@@ -31,6 +36,7 @@ import {
   notificationReadAllInputSchema,
   outboxOperationsQuerySchema,
   projectAnalyticsQuerySchema,
+  projectDataExportInputSchema,
   questionReviewInputSchema,
   reassignQuestionInputSchema,
   questionInboxQuerySchema,
@@ -44,6 +50,9 @@ import {
   resolveAssumptionInputSchema,
   replayOutboxEventInputSchema,
   startAgentRunInputSchema,
+  syncGithubPullRequestInputSchema,
+  syncGithubIssueInputSchema,
+  syncDirectoryGroupInputSchema,
   updateOrganizationMemberInputSchema,
   revokeServiceIdentityInputSchema,
   rotateServiceIdentityInputSchema,
@@ -128,6 +137,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
     scopes: readWriteScopes(bridgeScopes.notificationsRead, bridgeScopes.notificationsWrite),
   },
   {
+    match: /^\/v1\/admin\/organization\/directory-groups\/[^/]+\/sync$/,
+    scopes: { POST: bridgeScopes.directorySync },
+  },
+  {
     match: /^\/v1\/admin\/organization\//,
     scopes: allMutationMethods(bridgeScopes.organizationAdmin),
   },
@@ -149,6 +162,14 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   },
   {
     match: /^\/v1\/projects\/[^/]+\/repositories$/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/integrations\/github\/pull-requests(?:$|\/)/,
+    scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/integrations\/github\/issues(?:$|\/)/,
     scopes: readWriteScopes(bridgeScopes.repositoriesRead, bridgeScopes.repositoriesWrite),
   },
   {
@@ -481,6 +502,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/admin/projects/:projectId/export",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = projectDataExportInputSchema.parse(request.body ?? {});
+      const result = await options.service.exportProjectData(principal, request.params.projectId, input);
+      return reply
+        .header("content-disposition", `attachment; filename="${result.filename}"`)
+        .type(result.contentType)
+        .send(result.body);
+    },
+  );
+
   app.post<{ Params: { eventId: string }; Body: unknown }>(
     "/v1/admin/outbox/:eventId/replay",
     async (request) => {
@@ -550,6 +584,32 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
+  app.get("/v1/admin/organization/directory-groups", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listDirectoryGroups(principal) };
+  });
+
+  app.post<{ Body: unknown }>(
+    "/v1/admin/organization/directory-groups",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = createDirectoryGroupInputSchema.parse(request.body);
+      const registration = await options.service.createDirectoryGroup(principal, input);
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.post<{ Params: { groupId: string }; Body: unknown }>(
+    "/v1/admin/organization/directory-groups/:groupId/sync",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncDirectoryGroupInputSchema.parse(request.body);
+      return options.service.syncDirectoryGroup(principal, request.params.groupId, input);
+    },
+  );
+
   app.get("/v1/admin/organization/service-identities", async (request) => {
     const principal = await resolvePrincipal(request, options);
     return { items: await options.service.listServiceIdentities(principal) };
@@ -616,6 +676,114 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncGithubPullRequestInputSchema.parse(request.body);
+      const registration = await options.service.syncGithubPullRequest(
+        principal,
+        request.params.projectId,
+        input,
+      );
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: unknown }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = githubPullRequestListQuerySchema.parse(request.query);
+      return {
+        items: await options.service.listGithubPullRequests(
+          principal,
+          request.params.projectId,
+          query,
+        ),
+      };
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string; pullRequestNumber: string };
+    Querystring: unknown;
+  }>(
+    "/v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const pullRequestNumber = Number(request.params.pullRequestNumber);
+      if (
+        !Number.isInteger(pullRequestNumber) ||
+        pullRequestNumber < 1 ||
+        pullRequestNumber > 2_147_483_647
+      ) {
+        throw new BridgeError("VALIDATION_FAILED", "Pull-request number must be a positive integer.", 400);
+      }
+      const query = githubPullRequestContextQuerySchema.parse(request.query);
+      return options.service.getGithubPullRequestContext(
+        principal,
+        request.params.projectId,
+        pullRequestNumber,
+        query,
+      );
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/integrations/github/issues",
+    async (request, reply) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = syncGithubIssueInputSchema.parse(request.body);
+      const registration = await options.service.syncGithubIssue(
+        principal,
+        request.params.projectId,
+        input,
+      );
+      return reply
+        .status(registration.disposition === "created" ? 201 : 200)
+        .send(registration);
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: unknown }>(
+    "/v1/projects/:projectId/integrations/github/issues",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const query = githubIssueListQuerySchema.parse(request.query);
+      return {
+        items: await options.service.listGithubIssues(
+          principal,
+          request.params.projectId,
+          query,
+        ),
+      };
+    },
+  );
+
+  app.get<{
+    Params: { projectId: string; issueNumber: string };
+    Querystring: unknown;
+  }>(
+    "/v1/projects/:projectId/integrations/github/issues/:issueNumber/context",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const issueNumber = Number(request.params.issueNumber);
+      if (!Number.isInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) {
+        throw new BridgeError("VALIDATION_FAILED", "Issue number must be a positive integer.", 400);
+      }
+      const query = githubIssueContextQuerySchema.parse(request.query);
+      return options.service.getGithubIssueContext(
+        principal,
+        request.params.projectId,
+        issueNumber,
+        query,
+      );
     },
   );
 

@@ -497,6 +497,7 @@ interface AgentRun {
   readonly agentId: string;
   readonly client: string;
   readonly capability: string;
+  readonly continuationMode: "manual" | "automatic";
   readonly taskSummary: string;
   readonly scope: Readonly<Record<string, string>>;
   readonly status: "running" | "waiting_for_human" | "completed" | "failed" | "cancelled";
@@ -910,6 +911,7 @@ export default function Home() {
   const [policyLoading, setPolicyLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
+  const [projectDataExporting, setProjectDataExporting] = useState(false);
   const [organizationMembersLoading, setOrganizationMembersLoading] = useState(false);
   const [memberSubmitting, setMemberSubmitting] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -928,7 +930,8 @@ export default function Home() {
   const isOrganizationAdmin = activePrincipal?.roles.some(
     (role) => normalizedRole(role) === "organization-admin",
   ) ?? false;
-  const isProjectAdmin = activeRoles.some((role) => normalizedRole(role) === "project-admin");
+  const isProjectAdmin = isOrganizationAdmin ||
+    activeRoles.some((role) => normalizedRole(role) === "project-admin");
   const selectedOrganizationMember = useMemo(
     () => organizationMembers.find((member) => member.id === selectedMemberId) ?? organizationMembers[0],
     [organizationMembers, selectedMemberId],
@@ -1622,6 +1625,24 @@ export default function Home() {
       setAuditExporting(false);
     }
   }, [activePrincipalId, auditFilters, auditScope, loadAudit, selectedProjectId]);
+
+  const exportProjectData = useCallback(async () => {
+    if (!selectedProjectId) return;
+    setProjectDataExporting(true);
+    setError(undefined);
+    try {
+      await bridgeDownload(
+        `/v1/admin/projects/${selectedProjectId}/export`,
+        {},
+        activePrincipalId,
+      );
+      await loadAudit(0);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to export project data.");
+    } finally {
+      setProjectDataExporting(false);
+    }
+  }, [activePrincipalId, loadAudit, selectedProjectId]);
 
   const loadOrganizationMembers = useCallback(async () => {
     if (!isOrganizationAdmin) {
@@ -3315,6 +3336,17 @@ export default function Home() {
                   <p>Permission-restricted operational metadata. Record bodies, prompts, answers, credentials, and private reasoning are excluded.</p>
                 </div>
                 <div className="audit-actions">
+                  {auditScope === "project" && isProjectAdmin ? (
+                    <button
+                      className="secondary"
+                      type="button"
+                      disabled={projectDataExporting}
+                      title="Downloads bounded decision and specification content plus project audit records."
+                      onClick={() => void exportProjectData()}
+                    >
+                      Export project data
+                    </button>
+                  ) : null}
                   <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("json")}>Export JSON</button>
                   <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("csv")}>Export CSV</button>
                   <button className="secondary" type="button" disabled={auditLoading} onClick={() => void loadAudit(0)}>Refresh</button>
@@ -3933,7 +3965,7 @@ export default function Home() {
                         onClick={() => setSelectedRunId(run.id)}
                       >
                         <span className="document-mark" aria-hidden="true">↻</span>
-                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · version {run.version}</small></span>
+                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · {run.continuationMode} continuation · version {run.version}</small></span>
                         <span className={`status status-${run.status}`}>{run.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
@@ -3949,6 +3981,7 @@ export default function Home() {
                         <div className="spec-meta">
                           <span>Agent: {selectedRun.agentId}</span>
                           <span>Capability: {selectedRun.capability}</span>
+                          <span>Continuation: {selectedRun.continuationMode}</span>
                           <span>Started: {new Date(selectedRun.startedAt).toLocaleString()}</span>
                           <span>Updated: {new Date(selectedRun.updatedAt).toLocaleString()}</span>
                         </div>

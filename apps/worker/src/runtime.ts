@@ -7,6 +7,9 @@ import {
 } from "@bridge/observability";
 
 import {
+  createCodexCliSessionResumer,
+  createCodexContinuationHandler,
+  createCodexWorkspaceDirectoryFromEnvironment,
   runOutboxCycle,
   type AssumptionExpiryCycle,
   type BlockingQuestionEscalationCycle,
@@ -36,6 +39,9 @@ export interface WorkerConfiguration {
   readonly baseBackoffMs: number;
   readonly maxBackoffMs: number;
   readonly retryJitterRatio: number;
+  readonly codexExecutable: string;
+  readonly codexProjectWorkspaces?: string;
+  readonly codexContinuationTimeoutMs: number;
   readonly metricsHost: string;
   readonly metricsPort: number;
 }
@@ -53,6 +59,9 @@ export interface WorkerEnvironment {
   readonly BRIDGE_WORKER_BASE_BACKOFF_MS?: string;
   readonly BRIDGE_WORKER_MAX_BACKOFF_MS?: string;
   readonly BRIDGE_WORKER_RETRY_JITTER_PERCENT?: string;
+  readonly BRIDGE_CODEX_EXECUTABLE?: string;
+  readonly BRIDGE_CODEX_PROJECT_WORKSPACES?: string;
+  readonly BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS?: string;
   readonly BRIDGE_WORKER_METRICS_HOST?: string;
   readonly BRIDGE_WORKER_METRICS_PORT?: string;
 }
@@ -192,6 +201,17 @@ export function loadWorkerConfiguration(
       0,
       100,
     ) / 100,
+    codexExecutable: environment.BRIDGE_CODEX_EXECUTABLE?.trim() || "codex",
+    ...(environment.BRIDGE_CODEX_PROJECT_WORKSPACES?.trim()
+      ? { codexProjectWorkspaces: environment.BRIDGE_CODEX_PROJECT_WORKSPACES.trim() }
+      : {}),
+    codexContinuationTimeoutMs: positiveInteger(
+      environment,
+      "BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS",
+      15 * 60 * 1_000,
+      1_000,
+      60 * 60 * 1_000,
+    ),
     metricsHost: validateMetricsHost(environment.BRIDGE_WORKER_METRICS_HOST ?? "127.0.0.1"),
     metricsPort: positiveInteger(environment, "BRIDGE_WORKER_METRICS_PORT", 4_200, 1, 65_535),
   };
@@ -205,13 +225,27 @@ export function createConfiguredWorker(
     mode: "maintenance",
     metrics,
   });
-  const handler = createNotificationSlackHandler({
+  const notificationHandler = createNotificationSlackHandler({
     store: store.repository,
     channels: createSlackChannelDirectoryFromEnvironment(),
     sender: createSlackWebhookSender(),
     publicBaseUrl: configuration.publicWebUrl,
     metrics,
   });
+  const continuationHandler = createCodexContinuationHandler({
+    workspaces: createCodexWorkspaceDirectoryFromEnvironment(configuration.codexProjectWorkspaces),
+    resumer: createCodexCliSessionResumer({
+      executable: configuration.codexExecutable,
+      timeoutMs: configuration.codexContinuationTimeoutMs,
+    }),
+  });
+  const handler: OutboxHandler = async (event) => {
+    if (event.type === "run.continuation_ready") {
+      await continuationHandler(event);
+      return;
+    }
+    await notificationHandler(event);
+  };
   const service = new BridgeService(store.repository);
   return {
     configuration,

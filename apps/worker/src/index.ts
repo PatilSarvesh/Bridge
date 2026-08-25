@@ -11,6 +11,7 @@ import {
 import { startWorkerMetricsServer } from "./metrics-server.js";
 
 export * from "./email.js";
+export * from "./codex.js";
 export * from "./metrics-server.js";
 export * from "./slack.js";
 

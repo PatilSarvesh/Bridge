@@ -12,6 +12,7 @@ import type {
   ChangeDecisionLifecycleInput,
   ContextQuery,
   CreateOrganizationMemberInput,
+  CreateDirectoryGroupInput,
   CreateServiceIdentityInput,
   DecisionListQuery,
   DecisionConflictQuery,
@@ -21,6 +22,12 @@ import type {
   EditQuestionResponseInput,
   FindQuestionMatchesInput,
   LinkRepositoryInput,
+  GithubPullRequestListQuery,
+  GithubPullRequestContextQuery,
+  GithubIssueContextQuery,
+  GithubIssueListQuery,
+  SyncGithubIssueInput,
+  SyncGithubPullRequestInput,
   PublishArtifactInput,
   ProposeAnswerInput,
   QuestionCommentInput,
@@ -32,6 +39,7 @@ import type {
   Scope,
   StartAgentRunInput,
   UpdateOrganizationMemberInput,
+  SyncDirectoryGroupInput,
   RevokeServiceIdentityInput,
   RotateServiceIdentityInput,
   NotificationListQuery,
@@ -39,6 +47,7 @@ import type {
   NotificationReadAllInput,
   OutboxOperationsQuery,
   ProjectAnalyticsQuery,
+  ProjectDataExportInput,
   ProjectMembershipConfiguration,
   QuestionReviewInput,
   OverrideQuestionApprovalInput,
@@ -80,6 +89,10 @@ import {
   type ContextItem,
   type ContextSnapshot,
   type Decision,
+  type DirectoryGroup,
+  type DirectoryGroupMember,
+  type GithubPullRequestContext,
+  type GithubIssueWorkItem,
   type Principal,
   type Project,
   type Question,
@@ -162,6 +175,15 @@ export interface BridgeRepository {
     membership: OrganizationMembership,
     expectedVersion?: number,
   ): Promise<boolean>;
+  getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined>;
+  listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]>;
+  saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean>;
+  listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]>;
+  listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]>;
+  saveDirectoryGroupMember(member: DirectoryGroupMember, expectedVersion?: number): Promise<boolean>;
   listProjectMemberships(
     organizationId: string,
     principalId: string,
@@ -180,6 +202,15 @@ export interface BridgeRepository {
   getRepositoryRecord(repositoryId: string): Promise<RepositoryRecord | undefined>;
   listProjectRepositories(projectId: string): Promise<readonly RepositoryRecord[]>;
   saveRepositoryRecord(repository: RepositoryRecord): Promise<void>;
+  getGithubPullRequest(pullRequestId: string): Promise<GithubPullRequestContext | undefined>;
+  listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]>;
+  saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean>;
+  getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined>;
+  listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]>;
+  saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean>;
   getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined>;
   saveProjectOwnershipConfiguration(
     configuration: ProjectOwnershipConfiguration,
@@ -199,7 +230,12 @@ export interface BridgeRepository {
   getIdempotentRunRequestHash(key: string): Promise<string | undefined>;
   saveIdempotentRun(key: string, runId: string, requestHash: string): Promise<void>;
   getRunContinuationKey(runId: string): Promise<string | undefined>;
-  saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void>;
+  getRunVendorSessionId(runId: string): Promise<string | undefined>;
+  saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void>;
   getAssumption(assumptionId: string): Promise<Assumption | undefined>;
   listAssumptions(projectId: string): Promise<readonly Assumption[]>;
   saveAssumption(assumption: Assumption): Promise<void>;
@@ -208,6 +244,10 @@ export interface BridgeRepository {
   saveIdempotentAssumption(key: string, assumptionId: string, requestHash: string): Promise<void>;
   getQuestion(questionId: string): Promise<Question | undefined>;
   listQuestions(projectId: string): Promise<readonly Question[]>;
+  searchQuestionMatchCandidates(
+    projectId: string,
+    query: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]>;
   saveQuestion(question: Question): Promise<void>;
   findIdempotentQuestion(key: string): Promise<Question | undefined>;
   saveIdempotentQuestion(key: string, questionId: string, requestHash: string): Promise<void>;
@@ -311,6 +351,38 @@ export interface RepositoryRegistration {
   readonly disposition: "created" | "idempotent_replay";
 }
 
+export interface GithubPullRequestRegistration {
+  readonly pullRequest: GithubPullRequestContext;
+  readonly disposition: "created" | "updated" | "idempotent_replay";
+}
+
+export interface GithubPullRequestContextView {
+  readonly pullRequest: GithubPullRequestContext;
+  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly artifactVersions: readonly {
+    readonly artifactId: string;
+    readonly artifactTitle: string;
+    readonly artifactType: Artifact["type"];
+    readonly versionId: string;
+    readonly version: number;
+    readonly status: ArtifactVersion["status"];
+    readonly summary: string;
+  }[];
+  readonly humanApprovalChanged: false;
+}
+
+export interface GithubIssueRegistration {
+  readonly issue: GithubIssueWorkItem;
+  readonly disposition: "created" | "updated" | "idempotent_replay";
+}
+
+export interface GithubIssueContextView {
+  readonly issue: GithubIssueWorkItem;
+  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly artifactVersions: GithubPullRequestContextView["artifactVersions"];
+  readonly humanApprovalChanged: false;
+}
+
 export interface OrganizationMember {
   readonly id: string;
   readonly displayName: string;
@@ -318,10 +390,31 @@ export interface OrganizationMember {
   readonly status: OrganizationMembership["status"];
   readonly roles: readonly string[];
   readonly allProjects: boolean;
+  readonly provisioning: OrganizationMembership["provisioning"];
   readonly projectMemberships: readonly ProjectMembership[];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly version: number;
+}
+
+export interface DirectoryGroupView {
+  readonly group: DirectoryGroup;
+  readonly members: readonly DirectoryGroupMember[];
+}
+
+export interface DirectoryGroupRegistration extends DirectoryGroupView {
+  readonly disposition: "created" | "idempotent_replay";
+}
+
+export interface DirectoryGroupSyncResult extends DirectoryGroupView {
+  readonly disposition: "updated" | "idempotent_replay";
+  readonly membershipChanges: {
+    readonly provisioned: number;
+    readonly reactivated: number;
+    readonly disabled: number;
+    readonly preserved: number;
+  };
+  readonly humanApprovalChanged: false;
 }
 
 export interface OrganizationMemberRegistration {
@@ -584,6 +677,25 @@ export interface AuditExport {
   readonly itemCount: number;
 }
 
+export interface ProjectDataExportCount {
+  readonly total: number;
+  readonly included: number;
+  readonly offset: number;
+  readonly nextOffset?: number;
+}
+
+export interface ProjectDataExport {
+  readonly filename: string;
+  readonly contentType: "application/json; charset=utf-8";
+  readonly body: string;
+  readonly counts: {
+    readonly decisions: ProjectDataExportCount;
+    readonly artifacts: ProjectDataExportCount;
+    readonly auditEvents: ProjectDataExportCount;
+  };
+  readonly humanApprovalChanged: false;
+}
+
 export interface ProjectAnalyticsActivity {
   readonly contextRetrievals: number;
   readonly questionSubmissions: number;
@@ -804,6 +916,11 @@ export interface QuestionMatch {
   readonly matchKind: "exact" | "related";
   readonly reasons: readonly string[];
   readonly createdAt: string;
+}
+
+export interface QuestionMatchCandidateQuery {
+  readonly title: string;
+  readonly context: string;
 }
 
 export interface QuestionAudienceView {
@@ -1080,9 +1197,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly principalIdentities = new Map<string, PrincipalIdentity>();
   private readonly serviceCredentials = new Map<string, ServiceCredential>();
   private readonly organizationMemberships = new Map<string, OrganizationMembership>();
+  private readonly directoryGroups = new Map<string, DirectoryGroup>();
+  private readonly directoryGroupMembers = new Map<string, DirectoryGroupMember>();
   private readonly projectMemberships = new Map<string, ProjectMembership>();
   private readonly projects = new Map<string, Project>();
   private readonly repositoryRecords = new Map<string, RepositoryRecord>();
+  private readonly githubPullRequests = new Map<string, GithubPullRequestContext>();
+  private readonly githubIssues = new Map<string, GithubIssueWorkItem>();
   private readonly projectOwnershipConfigurations = new Map<string, ProjectOwnershipConfiguration>();
   private readonly projectPolicyConfigurations = new Map<string, ProjectPolicyConfiguration>();
   private readonly runs = new Map<string, AgentRun>();
@@ -1103,6 +1224,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   private readonly runIdempotency = new Map<string, RunIdempotencyRecord>();
   private readonly assumptionIdempotency = new Map<string, AssumptionIdempotencyRecord>();
   private readonly runContinuationKeys = new Map<string, string>();
+  private readonly runVendorSessionIds = new Map<string, string>();
   private transactionTail: Promise<void> = Promise.resolve();
 
   constructor(private readonly metrics?: BridgeMetrics) {}
@@ -1132,9 +1254,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       principalIdentities: new Map(this.principalIdentities),
       serviceCredentials: new Map(this.serviceCredentials),
       organizationMemberships: new Map(this.organizationMemberships),
+      directoryGroups: new Map(this.directoryGroups),
+      directoryGroupMembers: new Map(this.directoryGroupMembers),
       projectMemberships: new Map(this.projectMemberships),
       projects: new Map(this.projects),
       repositoryRecords: new Map(this.repositoryRecords),
+      githubPullRequests: new Map(this.githubPullRequests),
+      githubIssues: new Map(this.githubIssues),
       projectOwnershipConfigurations: new Map(this.projectOwnershipConfigurations),
       projectPolicyConfigurations: new Map(this.projectPolicyConfigurations),
       runs: new Map(this.runs),
@@ -1155,6 +1281,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       runIdempotency: new Map(this.runIdempotency),
       assumptionIdempotency: new Map(this.assumptionIdempotency),
       runContinuationKeys: new Map(this.runContinuationKeys),
+      runVendorSessionIds: new Map(this.runVendorSessionIds),
     };
 
     try {
@@ -1165,9 +1292,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.principalIdentities, snapshot.principalIdentities);
       this.restoreMap(this.serviceCredentials, snapshot.serviceCredentials);
       this.restoreMap(this.organizationMemberships, snapshot.organizationMemberships);
+      this.restoreMap(this.directoryGroups, snapshot.directoryGroups);
+      this.restoreMap(this.directoryGroupMembers, snapshot.directoryGroupMembers);
       this.restoreMap(this.projectMemberships, snapshot.projectMemberships);
       this.restoreMap(this.projects, snapshot.projects);
       this.restoreMap(this.repositoryRecords, snapshot.repositoryRecords);
+      this.restoreMap(this.githubPullRequests, snapshot.githubPullRequests);
+      this.restoreMap(this.githubIssues, snapshot.githubIssues);
       this.restoreMap(this.projectOwnershipConfigurations, snapshot.projectOwnershipConfigurations);
       this.restoreMap(this.projectPolicyConfigurations, snapshot.projectPolicyConfigurations);
       this.restoreMap(this.runs, snapshot.runs);
@@ -1188,6 +1319,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       this.restoreMap(this.runIdempotency, snapshot.runIdempotency);
       this.restoreMap(this.assumptionIdempotency, snapshot.assumptionIdempotency);
       this.restoreMap(this.runContinuationKeys, snapshot.runContinuationKeys);
+      this.restoreMap(this.runVendorSessionIds, snapshot.runVendorSessionIds);
       throw error;
     } finally {
       release();
@@ -1301,6 +1433,55 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       key,
       membership,
     );
+    return true;
+  }
+
+  async getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined> {
+    return this.directoryGroups.get(groupId);
+  }
+
+  async listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]> {
+    return [...this.directoryGroups.values()]
+      .filter((group) => group.organizationId === organizationId)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id));
+  }
+
+  async saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean> {
+    const current = this.directoryGroups.get(group.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.directoryGroups.set(group.id, group);
+    return true;
+  }
+
+  async listDirectoryGroupMembers(groupId: string): Promise<readonly DirectoryGroupMember[]> {
+    return [...this.directoryGroupMembers.values()]
+      .filter((member) => member.groupId === groupId)
+      .sort((left, right) => left.externalSubject.localeCompare(right.externalSubject));
+  }
+
+  async listDirectoryGroupMembersForPrincipal(
+    organizationId: string,
+    principalId: string,
+  ): Promise<readonly DirectoryGroupMember[]> {
+    return [...this.directoryGroupMembers.values()]
+      .filter((member) =>
+        member.organizationId === organizationId && member.principalId === principalId)
+      .sort((left, right) => left.groupId.localeCompare(right.groupId));
+  }
+
+  async saveDirectoryGroupMember(
+    member: DirectoryGroupMember,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.directoryGroupMembers.get(member.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.directoryGroupMembers.set(member.id, member);
     return true;
   }
 
@@ -1440,6 +1621,53 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.repositoryRecords.set(repository.id, repository);
   }
 
+  async getGithubPullRequest(
+    pullRequestId: string,
+  ): Promise<GithubPullRequestContext | undefined> {
+    return this.githubPullRequests.get(pullRequestId);
+  }
+
+  async listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]> {
+    return [...this.githubPullRequests.values()]
+      .filter((pullRequest) => pullRequest.projectId === projectId)
+      .sort((left, right) =>
+        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+  }
+
+  async saveGithubPullRequest(
+    pullRequest: GithubPullRequestContext,
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    const current = this.githubPullRequests.get(pullRequest.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.githubPullRequests.set(pullRequest.id, pullRequest);
+    return true;
+  }
+
+  async getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined> {
+    return this.githubIssues.get(issueId);
+  }
+
+  async listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]> {
+    return [...this.githubIssues.values()]
+      .filter((issue) => issue.projectId === projectId)
+      .sort((left, right) =>
+        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+  }
+
+  async saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean> {
+    const current = this.githubIssues.get(issue.id);
+    if (
+      (expectedVersion === undefined && current !== undefined) ||
+      (expectedVersion !== undefined && current?.version !== expectedVersion)
+    ) return false;
+    this.githubIssues.set(issue.id, issue);
+    return true;
+  }
+
   async getProjectOwnershipConfiguration(
     projectId: string,
   ): Promise<ProjectOwnershipConfiguration | undefined> {
@@ -1513,8 +1741,17 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.runContinuationKeys.get(runId);
   }
 
-  async saveRunContinuationKey(runId: string, resumeContextKey: string): Promise<void> {
+  async getRunVendorSessionId(runId: string): Promise<string | undefined> {
+    return this.runVendorSessionIds.get(runId);
+  }
+
+  async saveRunContinuationKey(
+    runId: string,
+    resumeContextKey: string,
+    vendorSessionId?: string,
+  ): Promise<void> {
     this.runContinuationKeys.set(runId, resumeContextKey);
+    if (vendorSessionId) this.runVendorSessionIds.set(runId, vendorSessionId);
   }
 
   async getAssumption(assumptionId: string): Promise<Assumption | undefined> {
@@ -1556,6 +1793,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return [...this.questions.values()]
       .filter((question) => question.projectId === projectId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async searchQuestionMatchCandidates(
+    projectId: string,
+    _query: QuestionMatchCandidateQuery,
+  ): Promise<readonly Question[]> {
+    return this.listQuestions(projectId);
   }
 
   async saveQuestion(question: Question): Promise<void> {
@@ -2065,6 +2309,344 @@ export class BridgeService {
     });
   }
 
+  async syncGithubPullRequest(
+    principal: Principal,
+    projectId: string,
+    input: SyncGithubPullRequestInput,
+  ): Promise<GithubPullRequestRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertIntegrationWriter(principal, "Synchronizing GitHub pull-request context", projectId);
+      this.assertSecretSafe("administration", input);
+      const linkedRepository = await repository.getRepositoryRecord(input.repositoryId);
+      if (
+        !linkedRepository ||
+        linkedRepository.projectId !== projectId ||
+        linkedRepository.organizationId !== principal.organizationId ||
+        linkedRepository.provider !== "github"
+      ) {
+        throw new BridgeError("PROJECT_NOT_FOUND", "Linked GitHub repository not found.", 404);
+      }
+      const expectedUrl = new URL(linkedRepository.canonicalUrl);
+      expectedUrl.pathname = `${expectedUrl.pathname.replace(/\/$/, "")}/pull/${input.number}`;
+      expectedUrl.search = "";
+      expectedUrl.hash = "";
+      const suppliedUrl = new URL(input.canonicalUrl);
+      suppliedUrl.search = "";
+      suppliedUrl.hash = "";
+      if (suppliedUrl.toString() !== expectedUrl.toString()) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The pull-request URL does not match the linked GitHub repository and number.",
+          422,
+        );
+      }
+      for (const decisionId of input.decisionIds) {
+        const decision = await this.requireDecision(principal, decisionId, repository);
+        if (decision.projectId !== projectId || decision.status !== "active") {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Pull-request guidance can cite only active decisions in the same project.",
+            422,
+          );
+        }
+      }
+      for (const versionId of input.artifactVersionIds) {
+        const artifact = await repository.getArtifactByVersionId(versionId);
+        const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+        if (
+          !artifact ||
+          artifact.projectId !== projectId ||
+          !version ||
+          !["approved", "superseded"].includes(version.status)
+        ) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Pull-request guidance can cite only approved specification versions in the same project.",
+            422,
+          );
+        }
+      }
+      const pullRequestId = `gpr_${createHash("sha256")
+        .update(`${principal.organizationId}:${input.repositoryId}:${input.number}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getGithubPullRequest(pullRequestId);
+      const timestamp = this.now().toISOString();
+      const normalized = {
+        repositoryId: input.repositoryId,
+        number: input.number,
+        title: input.title.trim(),
+        state: input.state,
+        canonicalUrl: suppliedUrl.toString(),
+        headBranch: input.headBranch.trim(),
+        baseBranch: input.baseBranch.trim(),
+        headSha: input.headSha,
+        decisionIds: [...input.decisionIds].sort(),
+        artifactVersionIds: [...input.artifactVersionIds].sort(),
+        sourceUpdatedAt: new Date(input.sourceUpdatedAt).toISOString(),
+      } as const;
+      if (existing) {
+        const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
+        const same = this.githubPullRequestMatches(existing, normalized);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The GitHub pull-request update is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
+          );
+        }
+        if (same) return { pullRequest: existing, disposition: "idempotent_replay" };
+        const updated: GithubPullRequestContext = {
+          ...existing,
+          ...normalized,
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        };
+        if (!await repository.saveGithubPullRequest(updated, existing.version)) {
+          throw new BridgeError("CONFLICT", "The pull-request context changed during synchronization.", 409);
+        }
+        await this.audit(
+          repository,
+          principal,
+          projectId,
+          "integration.pull_request_synced",
+          "pull_request_context",
+          updated.id,
+          timestamp,
+        );
+        return { pullRequest: updated, disposition: "updated" };
+      }
+      const created: GithubPullRequestContext = {
+        id: pullRequestId,
+        organizationId: principal.organizationId,
+        projectId,
+        ...normalized,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveGithubPullRequest(created)) {
+        throw new BridgeError("CONFLICT", "The pull-request context was created concurrently.", 409);
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "integration.pull_request_synced",
+        "pull_request_context",
+        created.id,
+        timestamp,
+      );
+      return { pullRequest: created, disposition: "created" };
+    });
+  }
+
+  async listGithubPullRequests(
+    principal: Principal,
+    projectId: string,
+    query: GithubPullRequestListQuery,
+  ): Promise<readonly GithubPullRequestContextView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const items = (await repository.listGithubPullRequests(projectId))
+        .filter((item) => !query.repositoryId || item.repositoryId === query.repositoryId)
+        .filter((item) => !query.state || item.state === query.state)
+        .slice(0, query.limit);
+      return Promise.all(items.map((item) => this.githubPullRequestView(repository, item)));
+    });
+  }
+
+  async getGithubPullRequestContext(
+    principal: Principal,
+    projectId: string,
+    pullRequestNumber: number,
+    query: GithubPullRequestContextQuery,
+  ): Promise<GithubPullRequestContextView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const pullRequestId = `gpr_${createHash("sha256")
+        .update(`${principal.organizationId}:${query.repositoryId}:${pullRequestNumber}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const pullRequest = await repository.getGithubPullRequest(pullRequestId);
+      if (!pullRequest || pullRequest.projectId !== projectId) {
+        throw new BridgeError("PULL_REQUEST_NOT_FOUND", "Pull-request context not found.", 404);
+      }
+      return this.githubPullRequestView(repository, pullRequest);
+    });
+  }
+
+  async syncGithubIssue(
+    principal: Principal,
+    projectId: string,
+    input: SyncGithubIssueInput,
+  ): Promise<GithubIssueRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      this.assertIntegrationWriter(principal, "Synchronizing GitHub issue work items", projectId);
+      this.assertSecretSafe("administration", input);
+      const linkedRepository = await repository.getRepositoryRecord(input.repositoryId);
+      if (
+        !linkedRepository ||
+        linkedRepository.projectId !== projectId ||
+        linkedRepository.organizationId !== principal.organizationId ||
+        linkedRepository.provider !== "github"
+      ) {
+        throw new BridgeError("PROJECT_NOT_FOUND", "Linked GitHub repository not found.", 404);
+      }
+      const expectedUrl = new URL(linkedRepository.canonicalUrl);
+      expectedUrl.pathname = `${expectedUrl.pathname.replace(/\/$/, "")}/issues/${input.number}`;
+      expectedUrl.search = "";
+      expectedUrl.hash = "";
+      const suppliedUrl = new URL(input.canonicalUrl);
+      suppliedUrl.search = "";
+      suppliedUrl.hash = "";
+      if (suppliedUrl.toString() !== expectedUrl.toString()) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The issue URL does not match the linked GitHub repository and number.",
+          422,
+        );
+      }
+      for (const decisionId of input.decisionIds) {
+        const decision = await this.requireDecision(principal, decisionId, repository);
+        if (decision.projectId !== projectId || decision.status !== "active") {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Work-item guidance can cite only active decisions in the same project.",
+            422,
+          );
+        }
+      }
+      for (const versionId of input.artifactVersionIds) {
+        const artifact = await repository.getArtifactByVersionId(versionId);
+        const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+        if (
+          !artifact ||
+          artifact.projectId !== projectId ||
+          !version ||
+          !["approved", "superseded"].includes(version.status)
+        ) {
+          throw new BridgeError(
+            "VALIDATION_FAILED",
+            "Work-item guidance can cite only approved specification versions in the same project.",
+            422,
+          );
+        }
+      }
+      const issueId = `gwi_${createHash("sha256")
+        .update(`${principal.organizationId}:${input.repositoryId}:${input.number}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getGithubIssue(issueId);
+      const timestamp = this.now().toISOString();
+      const normalized = {
+        repositoryId: input.repositoryId,
+        number: input.number,
+        reference: `github:${linkedRepository.owner}/${linkedRepository.name}#${input.number}`.toLowerCase(),
+        title: input.title.trim(),
+        state: input.state,
+        canonicalUrl: suppliedUrl.toString(),
+        labels: [...input.labels].sort((left, right) => left.localeCompare(right)),
+        decisionIds: [...input.decisionIds].sort(),
+        artifactVersionIds: [...input.artifactVersionIds].sort(),
+        sourceUpdatedAt: new Date(input.sourceUpdatedAt).toISOString(),
+      } as const;
+      if (existing) {
+        const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
+        const same = this.githubIssueMatches(existing, normalized);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The GitHub issue update is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
+          );
+        }
+        if (same) return { issue: existing, disposition: "idempotent_replay" };
+        const updated: GithubIssueWorkItem = {
+          ...existing,
+          ...normalized,
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        };
+        if (!await repository.saveGithubIssue(updated, existing.version)) {
+          throw new BridgeError("CONFLICT", "The work item changed during synchronization.", 409);
+        }
+        await this.audit(
+          repository,
+          principal,
+          projectId,
+          "integration.work_item_synced",
+          "work_item",
+          updated.id,
+          timestamp,
+        );
+        return { issue: updated, disposition: "updated" };
+      }
+      const created: GithubIssueWorkItem = {
+        id: issueId,
+        organizationId: principal.organizationId,
+        projectId,
+        ...normalized,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveGithubIssue(created)) {
+        throw new BridgeError("CONFLICT", "The work item was created concurrently.", 409);
+      }
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "integration.work_item_synced",
+        "work_item",
+        created.id,
+        timestamp,
+      );
+      return { issue: created, disposition: "created" };
+    });
+  }
+
+  async listGithubIssues(
+    principal: Principal,
+    projectId: string,
+    query: GithubIssueListQuery,
+  ): Promise<readonly GithubIssueContextView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const items = (await repository.listGithubIssues(projectId))
+        .filter((item) => !query.repositoryId || item.repositoryId === query.repositoryId)
+        .filter((item) => !query.state || item.state === query.state)
+        .filter((item) => !query.label || item.labels.includes(query.label))
+        .slice(0, query.limit);
+      return Promise.all(items.map((item) => this.githubIssueView(repository, item)));
+    });
+  }
+
+  async getGithubIssueContext(
+    principal: Principal,
+    projectId: string,
+    issueNumber: number,
+    query: GithubIssueContextQuery,
+  ): Promise<GithubIssueContextView> {
+    return this.tenantTransaction(principal, async (repository) => {
+      await this.requireProject(principal, projectId, repository);
+      const issueId = `gwi_${createHash("sha256")
+        .update(`${principal.organizationId}:${query.repositoryId}:${issueNumber}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const issue = await repository.getGithubIssue(issueId);
+      if (!issue || issue.projectId !== projectId) {
+        throw new BridgeError("WORK_ITEM_NOT_FOUND", "Work-item context not found.", 404);
+      }
+      return this.githubIssueView(repository, issue);
+    });
+  }
+
   async getProjectOwnershipConfiguration(
     principal: Principal,
     projectId: string,
@@ -2262,6 +2844,298 @@ export class BridgeService {
     });
   }
 
+  async listDirectoryGroups(principal: Principal): Promise<readonly DirectoryGroupView[]> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Reading directory groups");
+      return Promise.all((await repository.listDirectoryGroups(principal.organizationId)).map(async (group) => ({
+        group,
+        members: await repository.listDirectoryGroupMembers(group.id),
+      })));
+    });
+  }
+
+  async createDirectoryGroup(
+    principal: Principal,
+    input: CreateDirectoryGroupInput,
+  ): Promise<DirectoryGroupRegistration> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertOrganizationAdministrator(principal, "Configuring a directory group");
+      this.assertSecretSafe("administration", input);
+      if (!this.identityIssuer) {
+        throw new BridgeError(
+          "IDENTITY_NOT_CONFIGURED",
+          "Directory group provisioning requires a configured OIDC issuer.",
+          503,
+        );
+      }
+      const issuer = `${input.issuer.replace(/\/+$/, "")}/`;
+      if (issuer !== this.identityIssuer) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "The directory group issuer must match the configured organization identity issuer.",
+          422,
+        );
+      }
+      const provider = input.provider.trim().toLowerCase();
+      const externalGroupId = input.externalGroupId.trim();
+      const groupId = `dgr_${createHash("sha256")
+        .update(`${principal.organizationId}:${provider}:${issuer}:${externalGroupId}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const existing = await repository.getDirectoryGroup(groupId);
+      if (existing) {
+        const exactReplay = existing.organizationId === principal.organizationId &&
+          existing.provider === provider &&
+          existing.issuer === issuer &&
+          existing.externalGroupId === externalGroupId &&
+          existing.displayName === input.displayName.trim();
+        if (!exactReplay) {
+          throw new BridgeError("CONFLICT", "This directory group has different configuration.", 409);
+        }
+        return {
+          group: existing,
+          members: await repository.listDirectoryGroupMembers(existing.id),
+          disposition: "idempotent_replay",
+        };
+      }
+      const timestamp = this.now().toISOString();
+      const group: DirectoryGroup = {
+        id: groupId,
+        organizationId: principal.organizationId,
+        provider,
+        issuer,
+        externalGroupId,
+        displayName: input.displayName.trim(),
+        status: "active",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+      };
+      if (!await repository.saveDirectoryGroup(group)) {
+        throw new BridgeError("CONFLICT", "The directory group was created concurrently.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "directory_group.created",
+        group.id,
+        timestamp,
+        "directory_group",
+      );
+      return { group, members: [], disposition: "created" };
+    });
+  }
+
+  async syncDirectoryGroup(
+    principal: Principal,
+    groupId: string,
+    input: SyncDirectoryGroupInput,
+  ): Promise<DirectoryGroupSyncResult> {
+    return this.tenantTransaction(principal, async (repository) => {
+      this.assertDirectorySyncWriter(principal, "Synchronizing a directory group");
+      this.assertSecretSafe("administration", input);
+      const group = await repository.getDirectoryGroup(groupId);
+      if (!group || group.organizationId !== principal.organizationId) {
+        throw new BridgeError("DIRECTORY_GROUP_NOT_FOUND", "Directory group not found.", 404);
+      }
+      const sourceUpdatedAt = new Date(input.sourceUpdatedAt).toISOString();
+      const normalizedMembers = [...input.members]
+        .map((member) => ({
+          subject: member.subject.trim(),
+          displayName: member.displayName.trim(),
+        }))
+        .sort((left, right) => left.subject.localeCompare(right.subject));
+      const existingMembers = await repository.listDirectoryGroupMembers(group.id);
+      const activeSnapshot = existingMembers
+        .filter((member) => member.status === "active")
+        .map((member) => ({ subject: member.externalSubject, displayName: member.displayName }))
+        .sort((left, right) => left.subject.localeCompare(right.subject));
+      if (group.sourceUpdatedAt) {
+        const sourceOrder = sourceUpdatedAt.localeCompare(group.sourceUpdatedAt);
+        const sameSnapshot = group.status === input.status &&
+          JSON.stringify(activeSnapshot) === JSON.stringify(normalizedMembers);
+        if (sourceOrder < 0 || (sourceOrder === 0 && !sameSnapshot)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The directory group event is stale or conflicts with the stored provider version.",
+            409,
+            { currentVersion: group.version, sourceUpdatedAt: group.sourceUpdatedAt },
+          );
+        }
+        if (sourceOrder === 0 && sameSnapshot) {
+          return {
+            group,
+            members: existingMembers,
+            disposition: "idempotent_replay",
+            membershipChanges: { provisioned: 0, reactivated: 0, disabled: 0, preserved: 0 },
+            humanApprovalChanged: false,
+          };
+        }
+      }
+      if (group.version !== input.expectedVersion) {
+        throw new BridgeError("CONFLICT", "The directory group changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion: group.version,
+        });
+      }
+      const timestamp = this.now().toISOString();
+      const existingBySubject = new Map(
+        existingMembers.map((member) => [member.externalSubject, member]),
+      );
+      const desiredSubjects = new Set(normalizedMembers.map((member) => member.subject));
+      const changes = { provisioned: 0, reactivated: 0, disabled: 0, preserved: 0 };
+      for (const desired of normalizedMembers) {
+        let identity = await repository.getPrincipalIdentityByOidc(group.issuer, desired.subject);
+        if (!identity) {
+          identity = {
+            id: `usr_${createHash("sha256")
+              .update(`${group.issuer}:${desired.subject}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            type: "human",
+            displayName: desired.displayName,
+            oidcIssuer: group.issuer,
+            oidcSubject: desired.subject,
+            createdAt: timestamp,
+          };
+          await repository.savePrincipalIdentity(identity);
+        } else if (identity.type !== "human") {
+          throw new BridgeError("CONFLICT", "A directory member subject belongs to a service principal.", 409);
+        } else if (identity.displayName !== desired.displayName) {
+          identity = { ...identity, displayName: desired.displayName };
+          await repository.savePrincipalIdentity(identity);
+        }
+        const membership = await repository.getOrganizationMembership(
+          principal.organizationId,
+          identity.id,
+        );
+        if (!membership) {
+          await repository.saveOrganizationMembership({
+            organizationId: principal.organizationId,
+            principalId: identity.id,
+            status: "active",
+            roles: [],
+            allProjects: false,
+            provisioning: "directory",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            version: 1,
+          });
+          changes.provisioned += 1;
+        } else if (membership.provisioning === "directory" && membership.status === "disabled") {
+          if (!await repository.saveOrganizationMembership({
+            ...membership,
+            status: "active",
+            updatedAt: timestamp,
+            version: membership.version + 1,
+          }, membership.version)) {
+            throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
+          }
+          changes.reactivated += 1;
+        } else if (membership.provisioning === "manual") {
+          changes.preserved += 1;
+        }
+        const existingMember = existingBySubject.get(desired.subject);
+        if (existingMember) {
+          if (
+            existingMember.status !== "active" ||
+            existingMember.displayName !== desired.displayName ||
+            existingMember.principalId !== identity.id
+          ) {
+            if (!await repository.saveDirectoryGroupMember({
+              ...existingMember,
+              principalId: identity.id,
+              displayName: desired.displayName,
+              status: "active",
+              updatedAt: timestamp,
+              version: existingMember.version + 1,
+            }, existingMember.version)) {
+              throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
+            }
+          }
+        } else {
+          const groupMember: DirectoryGroupMember = {
+            id: `dgm_${createHash("sha256")
+              .update(`${group.id}:${desired.subject}`)
+              .digest("hex")
+              .slice(0, 24)}`,
+            organizationId: principal.organizationId,
+            groupId: group.id,
+            principalId: identity.id,
+            externalSubject: desired.subject,
+            displayName: desired.displayName,
+            status: "active",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            version: 1,
+          };
+          if (!await repository.saveDirectoryGroupMember(groupMember)) {
+            throw new BridgeError("CONFLICT", "A directory group member was created concurrently.", 409);
+          }
+        }
+      }
+      const removedPrincipalIds = new Set<string>();
+      for (const existing of existingMembers) {
+        if (existing.status !== "active" || desiredSubjects.has(existing.externalSubject)) continue;
+        if (!await repository.saveDirectoryGroupMember({
+          ...existing,
+          status: "removed",
+          updatedAt: timestamp,
+          version: existing.version + 1,
+        }, existing.version)) {
+          throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
+        }
+        removedPrincipalIds.add(existing.principalId);
+      }
+      for (const principalId of removedPrincipalIds) {
+        const remainsInDirectory = (await repository.listDirectoryGroupMembersForPrincipal(
+          principal.organizationId,
+          principalId,
+        )).some((member) => member.status === "active");
+        const membership = await repository.getOrganizationMembership(principal.organizationId, principalId);
+        if (remainsInDirectory || !membership || membership.status !== "active") continue;
+        if (membership.provisioning === "manual") {
+          changes.preserved += 1;
+          continue;
+        }
+        if (!await repository.saveOrganizationMembership({
+          ...membership,
+          status: "disabled",
+          updatedAt: timestamp,
+          version: membership.version + 1,
+        }, membership.version)) {
+          throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
+        }
+        changes.disabled += 1;
+      }
+      const updatedGroup: DirectoryGroup = {
+        ...group,
+        status: input.status,
+        sourceUpdatedAt,
+        updatedAt: timestamp,
+        version: group.version + 1,
+      };
+      if (!await repository.saveDirectoryGroup(updatedGroup, group.version)) {
+        throw new BridgeError("CONFLICT", "The directory group changed during synchronization.", 409);
+      }
+      await this.auditOrganizationEvent(
+        repository,
+        principal,
+        "directory_group.synced",
+        group.id,
+        timestamp,
+        "directory_group",
+      );
+      return {
+        group: updatedGroup,
+        members: await repository.listDirectoryGroupMembers(group.id),
+        disposition: "updated",
+        membershipChanges: changes,
+        humanApprovalChanged: false,
+      };
+    });
+  }
+
   async listServiceIdentities(principal: Principal): Promise<readonly ServiceIdentity[]> {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading service identities");
@@ -2321,6 +3195,7 @@ export class BridgeService {
         status: "active",
         roles: this.normalizedRoles(input.roles),
         allProjects: input.allProjects,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -2539,6 +3414,7 @@ export class BridgeService {
         status: "active",
         roles,
         allProjects: input.allProjects,
+        provisioning: "manual",
         createdAt: timestamp,
         updatedAt: timestamp,
         version: 1,
@@ -2621,6 +3497,7 @@ export class BridgeService {
         status: input.status,
         roles,
         allProjects: input.allProjects,
+        provisioning: "manual",
         updatedAt: timestamp,
         version: current.version + 1,
       };
@@ -3199,6 +4076,68 @@ export class BridgeService {
     });
   }
 
+  async exportProjectData(
+    principal: Principal,
+    projectId: string,
+    input: ProjectDataExportInput,
+  ): Promise<ProjectDataExport> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Exporting project data", projectId);
+      const exportedAt = this.now().toISOString();
+      const exportId = `pex_${this.id()}`;
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "project.exported",
+        "project_export",
+        exportId,
+        exportedAt,
+      );
+
+      const decisions = (await repository.listDecisions(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const artifacts = (await repository.listArtifacts(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const auditEvents = (await repository.listAuditEvents(projectId))
+        .slice()
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+
+      const decisionItems = decisions.slice(input.decisionOffset, input.decisionOffset + input.maxDecisions);
+      const artifactItems = artifacts.slice(input.artifactOffset, input.artifactOffset + input.maxArtifacts);
+      const auditItems = auditEvents.slice(input.auditOffset, input.auditOffset + input.maxAuditItems);
+      const counts = {
+        decisions: this.projectDataExportCount(decisions.length, input.decisionOffset, decisionItems.length),
+        artifacts: this.projectDataExportCount(artifacts.length, input.artifactOffset, artifactItems.length),
+        auditEvents: this.projectDataExportCount(auditEvents.length, input.auditOffset, auditItems.length),
+      };
+      const safeTimestamp = exportedAt.replace(/[:.]/g, "-");
+      return {
+        filename: `bridge-project-${projectId}-${safeTimestamp}.json`,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          exportId,
+          exportedAt,
+          project,
+          counts,
+          humanApprovalChanged: false,
+          decisions: decisionItems,
+          artifacts: artifactItems,
+          auditEvents: auditItems,
+        }, null, 2),
+        counts,
+        humanApprovalChanged: false,
+      };
+    });
+  }
+
   async replayOutboxEvent(
     principal: Principal,
     eventId: string,
@@ -3275,6 +4214,27 @@ export class BridgeService {
       throw new BridgeError("FORBIDDEN", "Only an agent, CI, or integration principal can start an agent run.", 403);
     }
     this.assertSecretSafe("run", input);
+    const continuationMode = input.continuationMode ?? "manual";
+    if (continuationMode === "automatic") {
+      if (
+        input.client !== "codex" ||
+        !["hooks", "orchestrated"].includes(input.capability) ||
+        !input.vendorSessionId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.vendorSessionId)
+      ) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Automatic continuation requires a Codex session UUID and hooks or orchestrated capability.",
+          422,
+        );
+      }
+    } else if (input.vendorSessionId) {
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "A vendor session ID is allowed only for automatic continuation.",
+        422,
+      );
+    }
 
     const idempotencyKey = `run:${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
     const requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
@@ -3320,6 +4280,7 @@ export class BridgeService {
       agentType: principal.type,
       client: input.client,
       capability: input.capability,
+      continuationMode,
       taskSummary: input.taskSummary,
       scope: { ...input.scope },
       status: "running",
@@ -3336,7 +4297,7 @@ export class BridgeService {
     };
     const resumeContextKey = this.resumeKey();
     await repository.saveRun(run);
-    await repository.saveRunContinuationKey(run.id, resumeContextKey);
+    await repository.saveRunContinuationKey(run.id, resumeContextKey, input.vendorSessionId);
     await repository.saveIdempotentRun(idempotencyKey, run.id, requestHash);
     await this.audit(repository, principal, projectId, "run.started", "run", run.id, timestamp);
     return { run, resumeContextKey };
@@ -4124,7 +5085,7 @@ export class BridgeService {
     projectId: string,
     input: FindQuestionMatchesInput,
   ): Promise<readonly QuestionMatch[]> {
-    const questions = await repository.listQuestions(projectId);
+    const questions = await repository.searchQuestionMatchCandidates(projectId, input);
     const matches: QuestionMatch[] = [];
     for (const question of questions) {
       if (!["open", "in_discussion", "accepted"].includes(question.status)) continue;
@@ -4135,8 +5096,14 @@ export class BridgeService {
         if (!decision || decision.status !== "active") continue;
       }
 
-      const titleSimilarity = this.tokenSimilarity(input.title, question.title);
-      const contextSimilarity = this.tokenSimilarity(input.context, question.context);
+      const titleSimilarity = Math.max(
+        this.tokenSimilarity(input.title, question.title),
+        this.trigramSimilarity(input.title, question.title),
+      );
+      const contextSimilarity = Math.max(
+        this.tokenSimilarity(input.context, question.context),
+        this.trigramSimilarity(input.context, question.context),
+      );
       const sameCategory = this.normalizeQuestionText(input.category) ===
         this.normalizeQuestionText(question.category);
       const sameType = input.type === question.type;
@@ -4284,6 +5251,23 @@ export class BridgeService {
     const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
     const union = new Set([...leftTokens, ...rightTokens]).size;
     return intersection / union;
+  }
+
+  private trigramSimilarity(left: string, right: string): number {
+    const trigrams = (value: string): Set<string> => {
+      const normalized = `  ${this.normalizeQuestionText(value)} `;
+      const characters = Array.from(normalized);
+      if (characters.length <= 3) return new Set([normalized]);
+      return new Set(Array.from(
+        { length: characters.length - 2 },
+        (_, index) => characters.slice(index, index + 3).join(""),
+      ));
+    };
+    const leftTrigrams = trigrams(left);
+    const rightTrigrams = trigrams(right);
+    if (leftTrigrams.size === 0 || rightTrigrams.size === 0) return 0;
+    const overlap = [...leftTrigrams].filter((trigram) => rightTrigrams.has(trigram)).length;
+    return (2 * overlap) / (leftTrigrams.size + rightTrigrams.size);
   }
 
   async listQuestions(principal: Principal, projectId: string): Promise<readonly QuestionInboxItem[]> {
@@ -5492,6 +6476,14 @@ export class BridgeService {
         },
       },
     );
+    await this.queueAutomaticRunContinuations(
+      repository,
+      principal,
+      question.projectId,
+      question.id,
+      decision.id,
+      timestamp,
+    );
     return decision;
   }
 
@@ -6335,6 +7327,14 @@ export class BridgeService {
       assumptions.push(await this.expireAssumptionIfDue(repository, principal, assumption));
     }
     const artifacts = await repository.listArtifacts(projectId);
+    const normalizedWorkItem = query.scope.workItem?.trim().toLowerCase();
+    const linkedIssue = normalizedWorkItem
+      ? (await repository.listGithubIssues(projectId)).find((issue) =>
+        issue.reference.toLowerCase() === normalizedWorkItem ||
+        issue.canonicalUrl.toLowerCase() === normalizedWorkItem)
+      : undefined;
+    const linkedDecisionIds = new Set(linkedIssue?.decisionIds ?? []);
+    const linkedArtifactVersionIds = new Set(linkedIssue?.artifactVersionIds ?? []);
     const taskTokens = new Set(query.task.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2));
     const scopeMatch = (scope: Scope): number => {
       let score = 0;
@@ -6362,7 +7362,11 @@ export class BridgeService {
           }),
           updatedAt: decision.createdAt,
         };
-        return { item, score: 10 + scopeMatch(decision.scope) + textScore };
+        return {
+          item,
+          score: 10 + scopeMatch(decision.scope) + textScore +
+            (linkedDecisionIds.has(decision.id) ? 12 : 0),
+        };
       });
     const artifactCandidates = artifacts.flatMap((artifact) => {
       const version = artifact.versions.find(
@@ -6393,7 +7397,11 @@ export class BridgeService {
         }),
         updatedAt: version.approvedAt ?? version.createdAt,
       };
-      return [{ item, score: 10 + scopeMatch(artifact.scope) + textScore }];
+      return [{
+        item,
+        score: 10 + scopeMatch(artifact.scope) + textScore +
+          (linkedArtifactVersionIds.has(version.id) ? 12 : 0),
+      }];
     });
     const assumptionCandidates = assumptions
       .filter((assumption) => ["active", "confirmed"].includes(assumption.status))
@@ -6962,6 +7970,20 @@ export class BridgeService {
     }
   }
 
+  private assertDirectorySyncWriter(principal: Principal, action: string): void {
+    if (principal.type === "human") {
+      this.assertOrganizationAdministrator(principal, action);
+      return;
+    }
+    if (principal.type !== "integration") {
+      throw new BridgeError(
+        "FORBIDDEN",
+        `${action} requires an organization administrator or directory integration identity.`,
+        403,
+      );
+    }
+  }
+
   private filterAuditRecords(
     records: readonly AuditRecord[],
     query: Pick<AuditListQuery, "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
@@ -7025,6 +8047,20 @@ export class BridgeService {
       contentType: "text/csv; charset=utf-8",
       body,
       itemCount: records.length,
+    };
+  }
+
+  private projectDataExportCount(
+    total: number,
+    offset: number,
+    included: number,
+  ): ProjectDataExportCount {
+    const nextOffset = offset + included < total ? offset + included : undefined;
+    return {
+      total,
+      included,
+      offset,
+      ...(nextOffset === undefined ? {} : { nextOffset }),
     };
   }
 
@@ -7583,6 +8619,7 @@ export class BridgeService {
       status: membership.status,
       roles: membership.roles,
       allProjects: membership.allProjects,
+      provisioning: membership.provisioning,
       projectMemberships: [...projectMemberships].sort((left, right) =>
         left.projectId.localeCompare(right.projectId)),
       createdAt: membership.createdAt,
@@ -7696,6 +8733,166 @@ export class BridgeService {
     }
   }
 
+  private assertIntegrationWriter(principal: Principal, action: string, projectId: string): void {
+    if (principal.type === "human") {
+      this.assertProjectOperator(principal, action, projectId);
+      return;
+    }
+    if (!["ci", "integration"].includes(principal.type)) {
+      throw new BridgeError(
+        "FORBIDDEN",
+        `${action} requires a project administrator or an integration service identity.`,
+        403,
+      );
+    }
+  }
+
+  private githubPullRequestMatches(
+    existing: GithubPullRequestContext,
+    candidate: Pick<
+      GithubPullRequestContext,
+      | "repositoryId"
+      | "number"
+      | "title"
+      | "state"
+      | "canonicalUrl"
+      | "headBranch"
+      | "baseBranch"
+      | "headSha"
+      | "decisionIds"
+      | "artifactVersionIds"
+      | "sourceUpdatedAt"
+    >,
+  ): boolean {
+    return existing.repositoryId === candidate.repositoryId &&
+      existing.number === candidate.number &&
+      existing.title === candidate.title &&
+      existing.state === candidate.state &&
+      existing.canonicalUrl === candidate.canonicalUrl &&
+      existing.headBranch === candidate.headBranch &&
+      existing.baseBranch === candidate.baseBranch &&
+      existing.headSha === candidate.headSha &&
+      existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
+      JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+  }
+
+  private async githubPullRequestView(
+    repository: BridgeRepository,
+    pullRequest: GithubPullRequestContext,
+  ): Promise<GithubPullRequestContextView> {
+    const decisions = (
+      await Promise.all(pullRequest.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
+    )
+      .filter((decision): decision is Decision =>
+        decision !== undefined &&
+        decision.projectId === pullRequest.projectId &&
+        decision.status === "active")
+      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+    const artifactVersions = (
+      await Promise.all(
+        pullRequest.artifactVersionIds.map(async (versionId) => {
+          const artifact = await repository.getArtifactByVersionId(versionId);
+          const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+          if (
+            !artifact ||
+            artifact.projectId !== pullRequest.projectId ||
+            !version ||
+            !["approved", "superseded"].includes(version.status)
+          ) return undefined;
+          return {
+            artifactId: artifact.id,
+            artifactTitle: artifact.title,
+            artifactType: artifact.type,
+            versionId: version.id,
+            version: version.version,
+            status: version.status,
+            summary: version.summary,
+          };
+        }),
+      )
+    ).filter((version): version is GithubPullRequestContextView["artifactVersions"][number] =>
+      version !== undefined);
+    return {
+      pullRequest,
+      decisions,
+      artifactVersions,
+      humanApprovalChanged: false,
+    };
+  }
+
+  private githubIssueMatches(
+    existing: GithubIssueWorkItem,
+    candidate: Pick<
+      GithubIssueWorkItem,
+      | "repositoryId"
+      | "number"
+      | "reference"
+      | "title"
+      | "state"
+      | "canonicalUrl"
+      | "labels"
+      | "decisionIds"
+      | "artifactVersionIds"
+      | "sourceUpdatedAt"
+    >,
+  ): boolean {
+    return existing.repositoryId === candidate.repositoryId &&
+      existing.number === candidate.number &&
+      existing.reference === candidate.reference &&
+      existing.title === candidate.title &&
+      existing.state === candidate.state &&
+      existing.canonicalUrl === candidate.canonicalUrl &&
+      existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
+      JSON.stringify(existing.labels) === JSON.stringify(candidate.labels) &&
+      JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+  }
+
+  private async githubIssueView(
+    repository: BridgeRepository,
+    issue: GithubIssueWorkItem,
+  ): Promise<GithubIssueContextView> {
+    const decisions = (
+      await Promise.all(issue.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
+    )
+      .filter((decision): decision is Decision =>
+        decision !== undefined &&
+        decision.projectId === issue.projectId &&
+        decision.status === "active")
+      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+    const artifactVersions = (
+      await Promise.all(
+        issue.artifactVersionIds.map(async (versionId) => {
+          const artifact = await repository.getArtifactByVersionId(versionId);
+          const version = artifact?.versions.find((candidate) => candidate.id === versionId);
+          if (
+            !artifact ||
+            artifact.projectId !== issue.projectId ||
+            !version ||
+            !["approved", "superseded"].includes(version.status)
+          ) return undefined;
+          return {
+            artifactId: artifact.id,
+            artifactTitle: artifact.title,
+            artifactType: artifact.type,
+            versionId: version.id,
+            version: version.version,
+            status: version.status,
+            summary: version.summary,
+          };
+        }),
+      )
+    ).filter((version): version is GithubIssueContextView["artifactVersions"][number] =>
+      version !== undefined);
+    return {
+      issue,
+      decisions,
+      artifactVersions,
+      humanApprovalChanged: false,
+    };
+  }
+
   private async audit(
     repository: BridgeRepository,
     principal: Principal,
@@ -7771,6 +8968,54 @@ export class BridgeService {
         availableAt: createdAt,
         createdAt,
       });
+    }
+  }
+
+  private async queueAutomaticRunContinuations(
+    repository: BridgeRepository,
+    principal: Principal,
+    projectId: string,
+    resolvedQuestionId: string,
+    triggeringDecisionId: string,
+    createdAt: string,
+  ): Promise<void> {
+    const candidates = (await repository.listRuns(projectId)).filter((run) =>
+      run.status === "waiting_for_human" &&
+      run.continuationMode === "automatic" &&
+      run.client === "codex" &&
+      run.questionIds.includes(resolvedQuestionId));
+    for (const run of candidates) {
+      const vendorSessionId = await repository.getRunVendorSessionId(run.id);
+      if (!vendorSessionId) continue;
+      const blockingQuestions = await this.blockingQuestions(repository, run);
+      if (blockingQuestions.some((question) => ["open", "in_discussion"].includes(question.status))) continue;
+      await repository.saveOutboxEvent({
+        id: `evt_${this.id()}`,
+        correlationId: currentCorrelationId() ?? createCorrelationId(),
+        organizationId: principal.organizationId,
+        projectId,
+        type: "run.continuation_ready",
+        payload: {
+          runId: run.id,
+          client: "codex",
+          vendorSessionId,
+          triggeringDecisionId,
+          runVersion: run.version,
+        },
+        status: "pending",
+        attempts: 0,
+        availableAt: createdAt,
+        createdAt,
+      });
+      await this.audit(
+        repository,
+        principal,
+        projectId,
+        "run.continuation_queued",
+        "run",
+        run.id,
+        createdAt,
+      );
     }
   }
 

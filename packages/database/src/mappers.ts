@@ -8,6 +8,10 @@ import {
   type AuditEvent,
   type ContextSnapshot,
   type Decision,
+  type DirectoryGroup,
+  type DirectoryGroupMember,
+  type GithubPullRequestContext,
+  type GithubIssueWorkItem,
   type Notification,
   type NotificationPreference,
   type Organization,
@@ -37,6 +41,10 @@ import {
   auditEvents,
   contextSnapshots,
   decisions,
+  directoryGroups,
+  directoryGroupMembers,
+  githubPullRequests,
+  githubIssues,
   projects,
   projectRepositories,
   questionResponses,
@@ -58,6 +66,8 @@ import {
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type PrincipalIdentityRow = typeof principalIdentities.$inferSelect;
 export type OrganizationMembershipRow = typeof organizationMemberships.$inferSelect;
+export type DirectoryGroupRow = typeof directoryGroups.$inferSelect;
+export type DirectoryGroupMemberRow = typeof directoryGroupMembers.$inferSelect;
 export type OrganizationAuditEventRow = typeof organizationAuditEvents.$inferSelect;
 export type ProjectMembershipRow = typeof projectMemberships.$inferSelect;
 export type ProjectOwnershipConfigurationRow = typeof projectOwnershipConfigurations.$inferSelect;
@@ -65,6 +75,8 @@ export type ProjectPolicyConfigurationRow = typeof projectPolicyConfigurations.$
 export type ServiceCredentialRow = typeof serviceCredentials.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 export type RepositoryRecordRow = typeof projectRepositories.$inferSelect;
+export type GithubPullRequestRow = typeof githubPullRequests.$inferSelect;
+export type GithubIssueRow = typeof githubIssues.$inferSelect;
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type AdapterDiagnosticRow = typeof adapterDiagnostics.$inferSelect;
 export type AssumptionRow = typeof assumptions.$inferSelect;
@@ -113,6 +125,27 @@ export function organizationMembershipToRow(
 export function organizationMembershipFromRow(
   row: OrganizationMembershipRow,
 ): OrganizationMembership {
+  return { ...row };
+}
+
+export function directoryGroupToRow(group: DirectoryGroup): typeof directoryGroups.$inferInsert {
+  return { ...group, sourceUpdatedAt: group.sourceUpdatedAt ?? null };
+}
+
+export function directoryGroupFromRow(row: DirectoryGroupRow): DirectoryGroup {
+  const { sourceUpdatedAt, ...group } = row;
+  return { ...group, ...(sourceUpdatedAt === null ? {} : { sourceUpdatedAt }) };
+}
+
+export function directoryGroupMemberToRow(
+  member: DirectoryGroupMember,
+): typeof directoryGroupMembers.$inferInsert {
+  return { ...member };
+}
+
+export function directoryGroupMemberFromRow(
+  row: DirectoryGroupMemberRow,
+): DirectoryGroupMember {
   return { ...row };
 }
 
@@ -392,6 +425,24 @@ export function repositoryRecordFromRow(row: RepositoryRecordRow): RepositoryRec
   return { ...row };
 }
 
+export function githubPullRequestToRow(
+  pullRequest: GithubPullRequestContext,
+): typeof githubPullRequests.$inferInsert {
+  return { ...pullRequest };
+}
+
+export function githubPullRequestFromRow(row: GithubPullRequestRow): GithubPullRequestContext {
+  return { ...row };
+}
+
+export function githubIssueToRow(issue: GithubIssueWorkItem): typeof githubIssues.$inferInsert {
+  return { ...issue };
+}
+
+export function githubIssueFromRow(row: GithubIssueRow): GithubIssueWorkItem {
+  return { ...row };
+}
+
 export function runToRow(run: AgentRun): typeof agentRuns.$inferInsert {
   return {
     id: run.id,
@@ -401,6 +452,7 @@ export function runToRow(run: AgentRun): typeof agentRuns.$inferInsert {
     agentType: run.agentType,
     client: run.client,
     capability: run.capability,
+    continuationMode: run.continuationMode,
     taskSummary: run.taskSummary,
     scope: run.scope,
     status: run.status,
@@ -428,6 +480,7 @@ export function runFromRow(row: AgentRunRow): AgentRun {
     agentType: row.agentType,
     client: row.client,
     capability: row.capability,
+    continuationMode: row.continuationMode,
     taskSummary: row.taskSummary,
     scope: row.scope,
     status: row.status,

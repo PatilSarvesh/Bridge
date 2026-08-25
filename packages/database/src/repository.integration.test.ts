@@ -51,6 +51,10 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         "bridge_agent_runs",
         "bridge_adapter_diagnostics",
         "bridge_project_repositories",
+        "bridge_github_pull_requests",
+        "bridge_github_issues",
+        "bridge_directory_groups",
+        "bridge_directory_group_members",
         "bridge_project_ownership_configurations",
         "bridge_project_policy_configurations",
         "bridge_artifact_versions",
@@ -191,6 +195,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         status: "active",
         roles: ["agent"],
         allProjects: true,
+        provisioning: "manual",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         version: 1,
@@ -344,6 +349,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         status: "active",
         roles: ["organization-member"],
         allProjects: false,
+        provisioning: "manual",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         version: 1,
@@ -366,6 +372,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         status: "active",
         roles: ["organization-member", "project-admin"],
         allProjects: false,
+        provisioning: "manual",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
         version: 2,
@@ -377,6 +384,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         status: "disabled",
         roles: [],
         allProjects: false,
+        provisioning: "manual",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-03T00:00:00.000Z",
         version: 3,
@@ -455,6 +463,16 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         scope: { component: "persistence" },
       });
       questionId = question.id;
+      await expect(service.findQuestionMatches(agent, project.id, {
+        title: "Which durabel reposittory sholud Brigde use for this projet?",
+        type: "decision",
+        category: "architecture",
+        context: "The integratoin test must presrve acepted contex after reconecting.",
+        scope: { component: "persistence" },
+        maxItems: 5,
+      })).resolves.toEqual([
+        expect.objectContaining({ questionId, matchKind: "related" }),
+      ]);
       const decision = await service.acceptAnswer(owner, question.id, {
         optionKey: "postgres",
         rationale: "PostgreSQL provides durable transactions and concurrency controls.",

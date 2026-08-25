@@ -5,6 +5,7 @@ import type {
   AdapterDiagnosticMcpStatus,
   AgentRunCapability,
   AgentRunClient,
+  AgentRunContinuationMode,
   AgentRunStatus,
   AssumptionConfidence,
   AssumptionStatus,
@@ -47,6 +48,9 @@ export type BridgeErrorCode =
   | "ASSUMPTION_NOT_FOUND"
   | "NOTIFICATION_NOT_FOUND"
   | "OUTBOX_EVENT_NOT_FOUND"
+  | "PULL_REQUEST_NOT_FOUND"
+  | "WORK_ITEM_NOT_FOUND"
+  | "DIRECTORY_GROUP_NOT_FOUND"
   | "MEMBER_NOT_FOUND"
   | "IDENTITY_NOT_CONFIGURED"
   | "LAST_ORGANIZATION_ADMIN"
@@ -124,6 +128,34 @@ export interface OrganizationMembership {
   readonly status: MembershipStatus;
   readonly roles: readonly string[];
   readonly allProjects: boolean;
+  readonly provisioning: "manual" | "directory";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface DirectoryGroup {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly provider: string;
+  readonly issuer: string;
+  readonly externalGroupId: string;
+  readonly displayName: string;
+  readonly status: "active" | "disabled";
+  readonly sourceUpdatedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface DirectoryGroupMember {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly groupId: string;
+  readonly principalId: string;
+  readonly externalSubject: string;
+  readonly displayName: string;
+  readonly status: "active" | "removed";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly version: number;
@@ -154,12 +186,15 @@ export interface OrganizationAuditEvent {
     | "service_identity.revoked"
     | "audit.exported"
     | "authentication.succeeded"
-    | "authentication.logged_out";
+    | "authentication.logged_out"
+    | "directory_group.created"
+    | "directory_group.synced";
   readonly subjectType:
     | "organization_membership"
     | "service_credential"
     | "audit_export"
-    | "principal_identity";
+    | "principal_identity"
+    | "directory_group";
   readonly subjectId: string;
   readonly createdAt: string;
 }
@@ -180,6 +215,45 @@ export interface RepositoryRecord {
   readonly name: string;
   readonly canonicalUrl: string;
   readonly createdAt: string;
+}
+
+export interface GithubPullRequestContext {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly repositoryId: string;
+  readonly number: number;
+  readonly title: string;
+  readonly state: "open" | "closed" | "merged";
+  readonly canonicalUrl: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly headSha: string;
+  readonly decisionIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
+  readonly sourceUpdatedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface GithubIssueWorkItem {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly repositoryId: string;
+  readonly number: number;
+  readonly reference: string;
+  readonly title: string;
+  readonly state: "open" | "closed";
+  readonly canonicalUrl: string;
+  readonly labels: readonly string[];
+  readonly decisionIds: readonly string[];
+  readonly artifactVersionIds: readonly string[];
+  readonly sourceUpdatedAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly version: number;
 }
 
 export interface ProjectRoleDefinition {
@@ -251,6 +325,7 @@ export interface AgentRun {
   readonly agentType: PrincipalType;
   readonly client: AgentRunClient;
   readonly capability: AgentRunCapability;
+  readonly continuationMode: AgentRunContinuationMode;
   readonly taskSummary: string;
   readonly scope: Scope;
   readonly status: AgentRunStatus;
@@ -493,7 +568,19 @@ export interface QuestionReassignedOutboxPayload {
   readonly questionVersion: number;
 }
 
-export type OutboxPayload = NotificationOutboxPayload | DecisionLifecycleOutboxPayload | QuestionReassignedOutboxPayload;
+export interface RunContinuationReadyOutboxPayload {
+  readonly runId: string;
+  readonly client: "codex";
+  readonly vendorSessionId: string;
+  readonly triggeringDecisionId: string;
+  readonly runVersion: number;
+}
+
+export type OutboxPayload =
+  | NotificationOutboxPayload
+  | DecisionLifecycleOutboxPayload
+  | QuestionReassignedOutboxPayload
+  | RunContinuationReadyOutboxPayload;
 
 export interface OutboxEvent {
   readonly id: string;
@@ -737,7 +824,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export";
+  readonly subjectType: "project" | "repository" | "pull_request_context" | "work_item" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export" | "project_export";
   readonly subjectId: string;
   readonly reason?: string;
   readonly policyVersion?: number;

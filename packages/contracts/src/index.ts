@@ -46,6 +46,7 @@ export const outboxEventTypeSchema = z.enum([
   "notification.created",
   "decision.lifecycle_changed",
   "question.reassigned",
+  "run.continuation_ready",
 ]);
 export const outboxEventStatusSchema = z.enum([
   "pending",
@@ -76,6 +77,7 @@ export const agentRunCapabilitySchema = z.enum([
   "hooks",
   "orchestrated",
 ]);
+export const agentRunContinuationModeSchema = z.enum(["manual", "automatic"]);
 export const adapterDiagnosticMcpStatusSchema = z.enum(["ready", "failed", "not_configured"]);
 export const adapterDiagnosticCheckNameSchema = z.enum([
   "api",
@@ -324,6 +326,7 @@ export const bridgeCapabilityScopeSchema = z.enum([
   "bridge:notifications:read",
   "bridge:notifications:write",
   "bridge:diagnostics:write",
+  "bridge:directory:sync",
   "bridge:organization:read",
   "bridge:organization:admin",
   "bridge:project:admin",
@@ -350,6 +353,7 @@ export const bridgeCapabilityScopes = {
   notificationsRead: "bridge:notifications:read",
   notificationsWrite: "bridge:notifications:write",
   diagnosticsWrite: "bridge:diagnostics:write",
+  directorySync: "bridge:directory:sync",
   organizationRead: "bridge:organization:read",
   organizationAdmin: "bridge:organization:admin",
   projectAdmin: "bridge:project:admin",
@@ -388,6 +392,43 @@ export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and
   expectedVersion: z.number().int().positive(),
   status: membershipStatusSchema,
 }));
+
+export const createDirectoryGroupInputSchema = z.object({
+  provider: z.string().trim().min(2).max(50).regex(/^[a-z0-9][a-z0-9._-]*$/),
+  issuer: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://"),
+    "issuer must use HTTPS.",
+  ),
+  externalGroupId: z.string().trim().min(1).max(300),
+  displayName: z.string().trim().min(2).max(200),
+});
+
+export const directoryGroupStatusSchema = z.enum(["active", "disabled"]);
+export const syncDirectoryGroupInputSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  status: directoryGroupStatusSchema,
+  members: z.array(z.object({
+    subject: z.string().trim().min(1).max(300),
+    displayName: z.string().trim().min(2).max(200),
+  })).max(1_000),
+}).superRefine((value, context) => {
+  if (value.status === "disabled" && value.members.length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: "Disabled provider groups must synchronize an empty member snapshot.",
+      path: ["members"],
+    });
+  }
+  const subjects = value.members.map((member) => member.subject);
+  if (new Set(subjects).size !== subjects.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Directory member subjects must be unique.",
+      path: ["members"],
+    });
+  }
+});
 
 const serviceIdentityConfigurationSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -439,6 +480,91 @@ export const linkRepositoryInputSchema = z.object({
     (value) => value.startsWith("http://") || value.startsWith("https://"),
     "canonicalUrl must use HTTP or HTTPS.",
   ),
+});
+
+export const githubPullRequestStateSchema = z.enum(["open", "closed", "merged"]);
+export const syncGithubPullRequestInputSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+  number: z.number().int().positive().max(2_147_483_647),
+  title: z.string().trim().min(1).max(500),
+  state: githubPullRequestStateSchema,
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://github.com/"),
+    "canonicalUrl must be an HTTPS GitHub pull-request URL.",
+  ),
+  headBranch: z.string().trim().min(1).max(300),
+  baseBranch: z.string().trim().min(1).max(300),
+  headSha: z.string().trim().regex(/^[0-9a-f]{40}$/),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["decisionIds", value.decisionIds],
+    ["artifactVersionIds", value.artifactVersionIds],
+  ] as const) {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({
+        code: "custom",
+        message: `${field} values must be unique.`,
+        path: [field],
+      });
+    }
+  }
+});
+
+export const githubPullRequestListQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100).optional(),
+  state: githubPullRequestStateSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
+export const githubPullRequestContextQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+});
+
+export const githubIssueStateSchema = z.enum(["open", "closed"]);
+export const syncGithubIssueInputSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
+  number: z.number().int().positive().max(2_147_483_647),
+  title: z.string().trim().min(1).max(500),
+  state: githubIssueStateSchema,
+  canonicalUrl: z.string().url().max(2_000).refine(
+    (value) => value.startsWith("https://github.com/"),
+    "canonicalUrl must be an HTTPS GitHub issue URL.",
+  ),
+  labels: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  sourceUpdatedAt: z.string().datetime({ offset: true }),
+  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+}).superRefine((value, context) => {
+  for (const [field, values] of [
+    ["labels", value.labels],
+    ["decisionIds", value.decisionIds],
+    ["artifactVersionIds", value.artifactVersionIds],
+  ] as const) {
+    const normalized = field === "labels"
+      ? values.map((label) => label.toLocaleLowerCase("en"))
+      : values;
+    if (new Set(normalized).size !== values.length) {
+      context.addIssue({
+        code: "custom",
+        message: `${field} values must be unique.`,
+        path: [field],
+      });
+    }
+  }
+});
+
+export const githubIssueListQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100).optional(),
+  state: githubIssueStateSchema.optional(),
+  label: z.string().trim().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
+export const githubIssueContextQuerySchema = z.object({
+  repositoryId: z.string().trim().min(1).max(100),
 });
 
 export const questionOptionInputSchema = z.object({
@@ -698,6 +824,15 @@ export const auditExportInputSchema = z.object({
   maxItems: z.number().int().min(1).max(5_000).default(1_000),
 }).superRefine(validateAuditDateRange);
 
+export const projectDataExportInputSchema = z.object({
+  decisionOffset: z.number().int().min(0).max(10_000).default(0),
+  maxDecisions: z.number().int().min(1).max(1_000).default(1_000),
+  artifactOffset: z.number().int().min(0).max(10_000).default(0),
+  maxArtifacts: z.number().int().min(1).max(100).default(100),
+  auditOffset: z.number().int().min(0).max(10_000).default(0),
+  maxAuditItems: z.number().int().min(1).max(5_000).default(5_000),
+});
+
 export const replayOutboxEventInputSchema = z.object({
   expectedAttempts: z.number().int().nonnegative(),
 });
@@ -788,6 +923,8 @@ export const startAgentRunInputSchema = z
     idempotencyKey: z.string().trim().min(8).max(200),
     client: agentRunClientSchema,
     capability: agentRunCapabilitySchema,
+    continuationMode: agentRunContinuationModeSchema.optional(),
+    vendorSessionId: z.string().trim().uuid().optional(),
     taskSummary: z.string().trim().min(3).max(2_000),
     scope: scopeSchema.default({}),
     externalLinks: z.array(z.string().url().max(2_000)).max(20).default([]),
@@ -800,6 +937,36 @@ export const startAgentRunInputSchema = z
         code: "custom",
         message: "continuesRunId and resumeContextKey must be supplied together.",
         path: [value.continuesRunId ? "resumeContextKey" : "continuesRunId"],
+      });
+    }
+    const continuationMode = value.continuationMode ?? "manual";
+    if (continuationMode === "automatic") {
+      if (value.client !== "codex") {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation is currently supported only for Codex runs.",
+          path: ["client"],
+        });
+      }
+      if (!value.vendorSessionId) {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation requires a Codex vendorSessionId.",
+          path: ["vendorSessionId"],
+        });
+      }
+      if (!["hooks", "orchestrated"].includes(value.capability)) {
+        context.addIssue({
+          code: "custom",
+          message: "Automatic continuation requires hooks or orchestrated capability.",
+          path: ["capability"],
+        });
+      }
+    } else if (value.vendorSessionId) {
+      context.addIssue({
+        code: "custom",
+        message: "vendorSessionId is allowed only for automatic continuation.",
+        path: ["vendorSessionId"],
       });
     }
   });
@@ -899,6 +1066,7 @@ export type ArtifactVersionStatus = z.infer<typeof artifactVersionStatusSchema>;
 export type ArtifactReviewStatus = z.infer<typeof artifactReviewStatusSchema>;
 export type AgentRunClient = z.infer<typeof agentRunClientSchema>;
 export type AgentRunCapability = z.infer<typeof agentRunCapabilitySchema>;
+export type AgentRunContinuationMode = z.infer<typeof agentRunContinuationModeSchema>;
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
 export type AssumptionConfidence = z.infer<typeof assumptionConfidenceSchema>;
 export type AssumptionStatus = z.infer<typeof assumptionStatusSchema>;
@@ -917,11 +1085,22 @@ export type ProjectPolicyRuleInput = z.infer<typeof projectPolicyRuleInputSchema
 export type ReplaceProjectPolicyInput = z.infer<typeof replaceProjectPolicyInputSchema>;
 export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberInputSchema>;
 export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberInputSchema>;
+export type CreateDirectoryGroupInput = z.infer<typeof createDirectoryGroupInputSchema>;
+export type DirectoryGroupStatus = z.infer<typeof directoryGroupStatusSchema>;
+export type SyncDirectoryGroupInput = z.infer<typeof syncDirectoryGroupInputSchema>;
 export type CreateServiceIdentityInput = z.infer<typeof createServiceIdentityInputSchema>;
 export type RevokeServiceIdentityInput = z.infer<typeof revokeServiceIdentityInputSchema>;
 export type RotateServiceIdentityInput = z.infer<typeof rotateServiceIdentityInputSchema>;
 export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>;
 export type LinkRepositoryInput = z.infer<typeof linkRepositoryInputSchema>;
+export type GithubPullRequestState = z.infer<typeof githubPullRequestStateSchema>;
+export type SyncGithubPullRequestInput = z.infer<typeof syncGithubPullRequestInputSchema>;
+export type GithubPullRequestListQuery = z.infer<typeof githubPullRequestListQuerySchema>;
+export type GithubPullRequestContextQuery = z.infer<typeof githubPullRequestContextQuerySchema>;
+export type GithubIssueState = z.infer<typeof githubIssueStateSchema>;
+export type SyncGithubIssueInput = z.infer<typeof syncGithubIssueInputSchema>;
+export type GithubIssueListQuery = z.infer<typeof githubIssueListQuerySchema>;
+export type GithubIssueContextQuery = z.infer<typeof githubIssueContextQuerySchema>;
 export type QuestionOptionInput = z.infer<typeof questionOptionInputSchema>;
 export type QuestionLinkType = z.infer<typeof questionLinkTypeSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionInputSchema>;
@@ -947,6 +1126,7 @@ export type OutboxOperationsQuery = z.infer<typeof outboxOperationsQuerySchema>;
 export type ProjectAnalyticsQuery = z.infer<typeof projectAnalyticsQuerySchema>;
 export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
 export type AuditExportInput = z.infer<typeof auditExportInputSchema>;
+export type ProjectDataExportInput = z.infer<typeof projectDataExportInputSchema>;
 export type ReplayOutboxEventInput = z.infer<typeof replayOutboxEventInputSchema>;
 export type ContextQuery = z.infer<typeof contextQuerySchema>;
 export type DecisionListQuery = z.infer<typeof decisionListQuerySchema>;
