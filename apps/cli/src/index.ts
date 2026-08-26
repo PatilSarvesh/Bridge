@@ -168,7 +168,7 @@ Usage:
   bridge service identity create --name <name> --type <agent|ci|integration> --scope <scope>[,<scope>...] [--role <role>] [--project <project-id[=role,...]>] [--all-projects] [--expires-at <ISO datetime>] [--api-url <url>]
   bridge service identity rotate <credential-id> --version <number> [--api-url <url>]
   bridge service identity revoke <credential-id> --version <number> [--api-url <url>]
-  bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--interactive] [--force] [--yes] [--dry-run]
+  bridge init [project-id] [--name <project-name>] [--client <client>] [--api-url <url>] [--mcp-url <url>] [--repository <name>] [--idempotency-key <key>] [--interactive] [--force] [--yes] [--dry-run]
   bridge install [--client <client>] [--dry-run]
   bridge repository list [project-id]
   bridge repository link [project-id] --provider <provider> --owner <owner> --name <name> --url <http(s)-url> [--idempotency-key <key>]
@@ -213,6 +213,11 @@ Development environment:
   BRIDGE_MCP_URL        Overrides the optional configured MCP endpoint
   BRIDGE_PRINCIPAL_ID   Development-mode identity (default: agt_codex; ignored by OIDC servers)
   BRIDGE_SERVICE_TOKEN  OIDC-mode CI service token supplied by the CI secret manager
+
+Connectivity:
+  Installing the CLI does not start the Bridge API. A loopback CONNECTION_FAILED inside a
+  sandboxed agent can occur even when Bridge is healthy on the host; grant local-network access
+  and retry the same command, or use the operator/CI repository-sync workflow.
 
 Exit codes:
   0 success, 2 invalid input, 3 configuration, 4 connection/server,
@@ -511,6 +516,35 @@ function apiExitCode(status: number): number {
   return cliExitCodes.connection;
 }
 
+function connectionFailure(apiUrl: string, error: unknown): CliError {
+  const hostname = new URL(apiUrl).hostname.toLowerCase();
+  const loopback = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(hostname);
+  const cause = error instanceof Error ? error.message : String(error);
+  return new CliError(
+    "CONNECTION_FAILED",
+    loopback
+      ? `Could not reach Bridge at ${apiUrl}. If Bridge is healthy in a host terminal, this process is network-sandboxed; grant local-network access and retry the same command, or use the operator/CI repository-sync workflow.`
+      : `Could not reach Bridge at ${apiUrl}. Verify the configured endpoint and API readiness before retrying.`,
+    cliExitCodes.connection,
+    {
+      cause,
+      failureKind: loopback ? "loopback_unreachable" : "endpoint_unreachable",
+      retryable: true,
+      recovery: loopback
+        ? [
+            "Keep the Bridge API running and verify /health/ready from a host terminal.",
+            "Grant this agent process local-network access, then retry the exact failed command once.",
+            "If local-network access is unavailable, stop governed work and ask an operator or CI process to run Bridge commands and refresh repository snapshots.",
+          ]
+        : [
+            "Verify the configured Bridge API URL and /health/ready endpoint.",
+            "Keep the API running, then retry the exact failed command once.",
+            "If this environment cannot reach the endpoint, stop governed work and use the approved operator/CI or manual workflow.",
+          ],
+    },
+  );
+}
+
 async function bridgeFetch(
   path: string,
   options: ConnectionOptions,
@@ -533,12 +567,7 @@ async function bridgeFetch(
       },
     });
   } catch (error) {
-    throw new CliError(
-      "CONNECTION_FAILED",
-      `Could not reach Bridge at ${options.apiUrl}.`,
-      cliExitCodes.connection,
-      { cause: error instanceof Error ? error.message : String(error) },
-    );
+    throw connectionFailure(options.apiUrl, error);
   }
 
   const text = await response.text();
@@ -1861,7 +1890,7 @@ function renderContextMarkdown(projectId: string, task: string, context: unknown
   }).filter(Boolean);
   return `# Bridge project context
 
-> Generated file. Refresh with \`bridge sync\`. Authority labels distinguish approved decisions from temporary or confirmed assumptions; local edits never create approval.
+> Generated file. Refresh with \`bridge sync\` from an operator or CI process with Bridge API access. Authority labels distinguish approved decisions from temporary or confirmed assumptions; local edits never create approval.
 
 - Project: \`${projectId}\`
 - Task: ${task}
@@ -1877,12 +1906,18 @@ async function writeAtomic(path: string, content: string): Promise<void> {
   await rename(temporaryPath, path);
 }
 
+const bridgeAgentInstructionsMarker = "<!-- bridge:agent-instructions:v2 -->";
+
 function generatedInstructions(): string {
   return `# Bridge agent instructions
+
+${bridgeAgentInstructionsMarker}
 
 This repository uses Bridge even when MCP is unavailable.
 
 Command invocation: use \`bridge\` when the CLI is installed globally. When it is installed as this repository's pnpm development dependency, replace \`bridge\` in every command below with \`pnpm exec bridge\`. If pnpm refuses to execute because unrelated application dependencies have unapproved install scripts, invoke \`./node_modules/.bin/bridge\` directly; this is the same repository-installed CLI and does not require reinstalling dependencies.
+
+Connection recovery: installing the CLI does not start the Bridge service. If a command returns \`CONNECTION_FAILED\` for a loopback URL while Bridge works in a host terminal, treat the current agent shell as network-sandboxed. Request local-network permission and retry the exact command once. If permission is unavailable, stop governed work and ask an approved operator or CI process with API access to run the required Bridge commands. Do not replace Bridge with a private clarification prompt or claim that governed records were created.
 
 1. Start consequential work with \`bridge run start --task "<current task>"\`; keep the returned run ID and continuation locator outside committed repository files.
 2. Retrieve approved context with \`bridge context --task "<current task>" --run-id <run-id>\`.
@@ -1896,8 +1931,8 @@ Command invocation: use \`bridge\` when the CLI is installed globally. When it i
 10. Cite Bridge decision and assumption IDs in implementation summaries and specifications.
 11. After routing questions and publishing the required specifications, run \`bridge conformance --task "<current task>" --run-id <run-id>\` and fix every failed observable check.
 12. Before claiming completion, verify required specifications were published and report the run using \`bridge run report <run-id> --status completed --version <version> --summary "<outcome>"\`.
-13. Run \`bridge sync --task "<current task>" --run-id <run-id>\` when the agent cannot make outbound calls; read \`.bridge/context.md\` afterward.
-14. Use \`bridge spec pull\` to materialize only human-approved specification versions.
+13. When this agent cannot access Bridge, ask an approved operator or CI process to run \`bridge sync --task "<current task>"\` (adding \`--run-id <run-id>\` only when a run already exists) and \`bridge spec pull\`; read the refreshed repository snapshots only after that process confirms success.
+14. Use \`bridge spec pull\` directly only when this process has Bridge access; otherwise use the operator/CI path in step 13. It materializes only human-approved specification versions.
 
 Generated snapshots are evidence of server-approved context. Local edits do not create or change Bridge decisions.
 `;
@@ -2277,7 +2312,7 @@ async function initializeRepository(args: readonly string[], runtime: CliRuntime
     changes: plannedChanges,
     files: [...Object.values(paths), adapterPath, ...(mcpConfig ? [mcpConfig.path] : [])]
       .map((path) => path.slice(runtime.cwd.length + 1)),
-    next: `Open ${client} in this repository and give it a normal build request. The generated repository instructions activate Bridge automatically.`,
+    next: `Run bridge doctor from the agent execution environment before starting work. Then open ${client} in this repository and give it a normal build request; the generated repository instructions activate Bridge automatically.`,
   });
 }
 
@@ -2513,8 +2548,8 @@ async function runDoctor(
   const checks: DoctorCheck[] = [];
   let health: unknown = null;
   try {
-    health = await bridgeFetch("/health", connection, runtime);
-    checks.push({ name: "api", status: "pass", detail: `Bridge API reachable at ${connection.apiUrl}.` });
+    health = await bridgeFetch("/health/ready", connection, runtime);
+    checks.push({ name: "api", status: "pass", detail: `Bridge API and repository ready at ${connection.apiUrl}.` });
   } catch (error) {
     checks.push({
       name: "api",
@@ -2593,12 +2628,22 @@ async function runDoctor(
 
   const bridgeInstructionsPath = resolve(runtime.cwd, ".bridge", "agent-instructions.md");
   const nativeInstructionsPath = clientInstructionPath(runtime.cwd, config.client);
-  const requiredFiles: Array<{ name: string; path: string; predicate: (content: string) => boolean; detail: string }> = [
+  const requiredFiles: Array<{
+    name: string;
+    path: string;
+    predicate: (content: string) => boolean;
+    detail: string;
+    failureDetail: string;
+  }> = [
     {
       name: "bridge-instructions",
       path: bridgeInstructionsPath,
-      predicate: (content) => content.includes("bridge run start") && content.includes("bridge sync"),
-      detail: "Generated Bridge agent instructions are present.",
+      predicate: (content) =>
+        content.includes(bridgeAgentInstructionsMarker) &&
+        content.includes("bridge run start") &&
+        content.includes("operator or CI process"),
+      detail: "Current generated Bridge agent instructions are present.",
+      failureDetail: "Bridge agent instructions are missing or stale; run `bridge install` in this repository to regenerate the managed files.",
     },
     {
       name: "client-instructions",
@@ -2606,6 +2651,7 @@ async function runDoctor(
       predicate: (content) =>
         content.includes(bridgeInstructionsStart) && content.includes(bridgeInstructionsEnd),
       detail: `Managed Bridge instructions are present in the ${config.client} adapter file.`,
+      failureDetail: `Managed Bridge content is missing from the ${config.client} adapter file; run \`bridge install --client ${config.client}\` to restore it.`,
     },
   ];
   for (const file of requiredFiles) {
@@ -2623,7 +2669,7 @@ async function runDoctor(
     checks.push({
       name: file.name,
       status: file.predicate(content) ? "pass" : "fail",
-      detail: file.predicate(content) ? file.detail : "Required Bridge content is missing or incomplete.",
+      detail: file.predicate(content) ? file.detail : file.failureDetail,
       path: relativePath,
     });
   }
