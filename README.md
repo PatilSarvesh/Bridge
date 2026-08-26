@@ -41,6 +41,8 @@ Questions may carry an optional ISO due timestamp. The personalized inbox derive
 
 For contributors and coding agents, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/working-context.md`](docs/working-context.md). Root [`AGENTS.md`](AGENTS.md) is also referenced by [`CLAUDE.md`](CLAUDE.md) so Claude-based contributors receive the same architecture and scope constraints. Every push and pull request runs repository format, package-boundary, REST/MCP surface, secret, typecheck, test, production-build, distribution, and isolated PostgreSQL checks through GitHub Actions. CI also runs `pnpm dependency:check` against production dependencies. The reviewed transport baseline lives in [`config/transport-contract-baseline.json`](config/transport-contract-baseline.json); intentional route or tool changes must update it in the same change.
 
+## Durable PostgreSQL development
+
 By default the API uses a seeded in-memory repository. To preserve agent-run metadata, assumptions, questions, accepted decisions, specifications, context snapshots, continuation locators, audit events, in-app notifications, and their transactional delivery intents across API restarts, provide a PostgreSQL database. Durable local development without OIDC uses a separate explicit bootstrap connection for the fixed demo fixtures; the API itself stays on the non-superuser runtime role:
 
 ```bash
@@ -160,6 +162,16 @@ pnpm dev:api
 pnpm dev:web
 ```
 
+Installing the Bridge CLI in another repository does not start the Bridge services. Keep the API
+terminal running, and verify the complete API plus repository dependency before opening the agent:
+
+```bash
+curl --fail http://127.0.0.1:4000/health/ready
+```
+
+For durable local acceptance, configure the PostgreSQL runtime and development seed URLs described
+in [Durable PostgreSQL development](#durable-postgresql-development) before starting the API.
+
 Build the local CLI package once:
 
 ```bash
@@ -182,9 +194,17 @@ pnpm exec bridge init \
 # Preview the same registration and adapter changes without mutating anything
 pnpm exec bridge init --dry-run
 
-# Verify the configured project, API, and generated instructions
+# Verify the configured project, API repository dependency, and generated instructions
+# from the same execution environment that will run the agent
 pnpm exec bridge doctor
 ```
+
+If the host `curl` succeeds but `bridge doctor` or another Bridge command reports that the loopback
+API is unreachable, the agent process is network-sandboxed. Grant that process local-network access
+and retry the exact command once. If local-network access is unavailable, stop governed work and
+have an approved operator or CI process with API access run required Bridge commands, including
+`bridge sync` and `bridge spec pull`; the restricted agent then reads the refreshed repository
+snapshots. Do not treat a private prompt or local implementation as a replacement for Bridge records.
 
 If MCP is approved and the shared PostgreSQL-backed MCP service is running, add `--mcp-url http://127.0.0.1:4100/mcp` to the initial `bridge init` command. Codex receives a project-scoped `.codex/config.toml` and Claude Code receives `.mcp.json`; neither file contains credentials. Do not run two initializations; use `bridge init --force --mcp-url ...` only when intentionally updating existing Bridge-owned configuration.
 
@@ -291,7 +311,7 @@ pnpm --filter @bridge/cli dev -- run start \
   --continues <prior-run-id> \
   --resume-key <resume-context-key>
 
-# Materialize approved context for agents without outbound network access
+# From an operator/CI terminal with API access, materialize context for a restricted agent
 pnpm --filter @bridge/cli dev -- sync \
   --task "implement transfer retries" \
   --run-id <run-id>

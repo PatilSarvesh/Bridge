@@ -23,14 +23,23 @@ interface MockState {
   mcpAvailable?: boolean;
   mcpMalformed?: boolean;
   diagnosticPersistenceAvailable?: boolean;
+  requestedPaths?: string[];
 }
 
 function mockBridge(state: MockState): CliRuntime["fetch"] {
   return async (input, init) => {
     const url = new URL(String(input));
+    state.requestedPaths = [...(state.requestedPaths ?? []), url.pathname];
     const json = (value: unknown, status = 200) =>
       new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     if (url.pathname === "/health") return json({ status: "ok", service: "bridge-api" });
+    if (url.pathname === "/health/ready") {
+      return json({
+        service: "bridge-api",
+        status: "ready",
+        checks: [{ name: "repository", status: "ready", backend: "postgresql" }],
+      });
+    }
     if (url.pathname === "/v1/auth/config") return json({ mode: "development" });
     if (url.pathname === "/v1/admin/organization/service-identities" && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -393,6 +402,12 @@ describe("Bridge CLI fallback adapter", () => {
     expect(config).toContain('client: "codex"');
     expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
       .toContain("./node_modules/.bin/bridge");
+    expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
+      .toContain("bridge:agent-instructions:v2");
+    expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
+      .toContain("Request local-network permission and retry the exact command once");
+    expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
+      .toContain("ask an approved operator or CI process to run `bridge sync");
     const firstInstructions = await readFile(join(cwd, "AGENTS.md"), "utf8");
     expect(firstInstructions).toContain("Keep this content.");
     expect(firstInstructions).toContain(".bridge/agent-instructions.md");
@@ -404,6 +419,7 @@ describe("Bridge CLI fallback adapter", () => {
     expect(stdout.at(-1)).toContain('"mcp": "not_configured"');
     expect(stdout.at(-1)).toContain('"name": "project-mapping"');
     expect(stdout.at(-1)).toContain('"diagnosticPersisted": true');
+    expect(state.requestedPaths).toContain("/health/ready");
 
     state.diagnosticPersistenceAvailable = false;
     expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
@@ -424,6 +440,63 @@ describe("Bridge CLI fallback adapter", () => {
     expect(repeatedInstructions).toContain("Keep this content.");
     expect(repeatedInstructions.match(/bridge:instructions:start/g)).toHaveLength(1);
     expect(stdout.at(-1)).toContain('"registrationDisposition": "idempotent_replay"');
+  });
+
+  it("returns actionable recovery for a loopback API blocked by an agent sandbox", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-loopback-recovery-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      environment: {},
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    };
+
+    expect(await runCli(["doctor", "--api-url", "http://127.0.0.1:4000"], runtime))
+      .toBe(cliExitCodes.connection);
+    expect(stdout.at(-1)).toContain("network-sandboxed");
+    const failure = JSON.parse(stderr.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(failure).toMatchObject({
+      code: "CONNECTION_FAILED",
+      exitCode: cliExitCodes.connection,
+      details: {
+        cause: "fetch failed",
+        failureKind: "loopback_unreachable",
+        retryable: true,
+      },
+    });
+    expect(JSON.stringify(failure)).toContain("Grant this agent process local-network access");
+    expect(JSON.stringify(failure)).toContain("stop governed work");
+  });
+
+  it("detects stale generated instructions and points to the adapter repair command", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-stale-instructions-"));
+    const stdout: string[] = [];
+    const state: MockState = { question: {}, artifacts: [], assumptions: [] };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    };
+    await runCli(["init", "prj_payments", "--api-url", "http://bridge.test"], runtime);
+    await writeFile(
+      join(cwd, ".bridge", "agent-instructions.md"),
+      "# Old Bridge instructions\n\nRun bridge run start and bridge sync.\n",
+      "utf8",
+    );
+
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
+    expect(stdout.at(-1)).toContain("Bridge agent instructions are missing or stale");
+    expect(stdout.at(-1)).toContain("bridge install");
+
+    expect(await runCli(["install"], runtime)).toBe(cliExitCodes.success);
+    expect(await readFile(join(cwd, ".bridge", "agent-instructions.md"), "utf8"))
+      .toContain("bridge:agent-instructions:v2");
   });
 
   it("previews fresh-project registration and adapter files without mutating state", async () => {
@@ -1208,6 +1281,7 @@ describe("Bridge CLI fallback adapter", () => {
 
     expect(await runCli(["sync", "--task", "Implement transfer retry handling"], runtime)).toBe(0);
     const context = await readFile(join(cwd, ".bridge", "context.md"), "utf8");
+    expect(context).toContain("operator or CI process with Bridge API access");
     expect(context).toContain("Retry transient failures");
     expect(context).toContain("dec_cli_1");
     expect(await readFile(join(cwd, ".bridge", "assumptions.json"), "utf8"))

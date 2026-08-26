@@ -215,7 +215,9 @@ Agent -> Bridge CLI -> Bridge REST API -> Bridge application service -> reposito
 
 ### 5.3 Repository-sync mode
 
-For agents that cannot make outbound requests, an approved operator or CI process runs `bridge sync` and `bridge spec pull`. The agent reads ordinary repository files afterward.
+For agents that cannot make outbound requests, an approved operator or CI process with Bridge API
+access runs `bridge sync` and `bridge spec pull`. The restricted agent does not run those commands;
+it reads ordinary repository files after the operator confirms the snapshots were refreshed.
 
 Generated files contain provenance, snapshot IDs, approval information, freshness timestamps, and content hashes. Local edits do not create Bridge approval.
 
@@ -719,7 +721,7 @@ It also safely creates or updates the selected client's native repository instru
 
 Unrelated existing content is preserved. `bridge init --name` uses the fixed local project-admin principal to register the project; this is a prototype seam, not organization onboarding or authentication. The CLI can be packaged locally with `pnpm cli:pack`, producing `dist/bridge-cli-0.1.0.tgz`.
 
-The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; for Codex and Claude Code it also plans a project-scoped vendor MCP configuration with no credentials. `BRIDGE_MCP_URL` can override the endpoint for diagnostics only. `bridge doctor` checks API reachability, project mapping, generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
+The generated instructions tell agents to start a run, link context/questions/specifications through `runId`, stop on blocking work, resolve the durable continuation, and report a terminal outcome. The returned resume-context key must remain in the agent/operator session or an approved secret-capable store and must not be committed into `.bridge/` files. `bridge init --dry-run` previews registration and every Bridge-owned/native adapter file change without mutating API or repository state. `--mcp-url <url>` is optional and records an approved absolute HTTP(S) endpoint in `.bridge/project.yaml`; for Codex and Claude Code it also plans a project-scoped vendor MCP configuration with no credentials. `BRIDGE_MCP_URL` can override the endpoint for diagnostics only. `bridge doctor` checks API and repository readiness, project mapping, versioned generated instructions, native adapter markers, and performs an MCP JSON-RPC `initialize` probe only when an endpoint is configured. A loopback connection failure includes sandbox-aware recovery, and stale generated instructions are repaired through `bridge install`. MCP absence remains a valid CLI/instruction-only mode; hooks remain unconfigured.
 `bridge install --client <client>` activates or switches the native adapter for an existing `.bridge/project.yaml` without registering another project. It safely preserves unrelated content, updates only the managed Bridge block, and supports `--dry-run` for a no-mutation preview.
 
 `bridge sync` creates approved repository context:
@@ -2444,6 +2446,39 @@ Deliberate boundaries:
   credential rows, and no migration is run automatically by API startup.
 - This change does not start MCP or the worker; MCP remains optional and the worker still requires
   its separate maintenance-role connection.
+
+### 20.87 Implemented sandbox-aware CLI connectivity recovery
+
+Implemented and locally verified:
+
+1. CLI connection failures now distinguish an unreachable configured endpoint from a loopback
+   endpoint that may be blocked inside an agent network sandbox. The structured error remains
+   machine-readable and adds a retryable classification plus bounded recovery actions.
+2. Version-two generated agent instructions state that installing the CLI does not start Bridge,
+   direct a sandboxed agent to request local-network access and retry the exact command once, and
+   require it to stop governed work when access remains unavailable.
+3. Repository-sync ownership is explicit: an approved operator or CI process with API access runs
+   `bridge sync` and `bridge spec pull`; a restricted agent reads only the refreshed snapshots and
+   cannot treat local prompt text or implementation as an approved Bridge substitute.
+4. `bridge doctor` now checks `/health/ready` so PostgreSQL repository failures are visible, detects
+   stale generated instruction versions, and points maintainers to `bridge install` for safe
+   managed-block regeneration.
+5. CLI regressions cover readiness probing, loopback-sandbox diagnostics, generated recovery
+   guidance, stale-instruction rejection, and repair without removing unrelated adapter content.
+6. A packaged-CLI acceptance run used the separate `expense-tracker-postgres` repository against
+   the explicit local Docker PostgreSQL service. The restricted shell reproduced
+   `loopback_unreachable`; the same installed binary passed doctor after local-network access,
+   reported the `postgresql` repository backend, started a real run through REST, and closed that
+   run as completed. The stale project workflow was regenerated with `bridge install` first.
+
+Deliberate boundaries:
+
+- The CLI cannot bypass an operating-system or agent-host network sandbox; local-network permission
+  remains controlled by the user or client host.
+- Operator/CI command execution remains behind the canonical REST API and does not grant an agent
+  human acceptance or specification-approval authority.
+- No MCP dependency was introduced; the recovery and repository-sync paths work with the CLI and
+  REST API alone.
 
 ## 21. Important implementation files
 

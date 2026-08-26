@@ -681,7 +681,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, project-scoped Codex/Claude MCP configuration generation, API/project/instruction doctor checks, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; MCP authentication, Cursor/Copilot vendor configuration, hooks, and expanded integration diagnostics remain
+- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, project-scoped Codex/Claude MCP configuration generation, readiness-aware API/project/versioned-instruction doctor checks, actionable loopback-sandbox recovery, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; MCP authentication, Cursor/Copilot vendor configuration, hooks, and expanded integration diagnostics remain
 - **Dependencies:** BRG-001, BRG-052, BRG-061
 - **PRD references:** MCP and CLI design
 
@@ -690,10 +690,10 @@ As a repository maintainer, I need `bridge install <adapter>` and `bridge doctor
 Acceptance criteria:
 
 1. Installer generates MCP and instruction configuration appropriate to the selected client. **Implemented for Codex project-scoped `.codex/config.toml` and Claude Code project-scoped `.mcp.json` when an approved `mcp_url` is configured; Cursor and Copilot remain instruction-only.**
-2. Generated content includes a version marker and source ownership.
+2. Generated content includes a version marker and source ownership. **Implemented for the generated workflow and native managed blocks; doctor detects stale generated workflow instructions and points to `bridge install` for repair.**
 3. Existing unrelated configuration is preserved. **Implemented with managed TOML markers/JSON ownership metadata and conflict refusal for an unrelated `bridge` server.**
 4. Dry-run displays file changes. **Implemented through `bridge init --dry-run` and `bridge install --dry-run`.**
-5. Doctor verifies endpoint reachability, project mapping, and required instructions. **Implemented; when `mcp_url` is configured, doctor also verifies an MCP JSON-RPC `initialize` response. Authentication and vendor discovery are intentionally not claimed.**
+5. Doctor verifies endpoint reachability, project mapping, and required instructions. **Implemented against `/health/ready`, including repository readiness, project mapping, versioned instructions, and actionable loopback-sandbox recovery; when `mcp_url` is configured, doctor also verifies an MCP JSON-RPC `initialize` response. Authentication and vendor discovery are intentionally not claimed.**
 6. Capability level is reported accurately. **Implemented for instructions/CLI plus `instructions+mcp`, `instructions+mcp-failed`, and `not_configured` MCP states; hooks remain unconfigured.**
 
 ### BRG-063 — Add essential human CLI commands
