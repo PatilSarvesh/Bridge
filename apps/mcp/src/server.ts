@@ -42,6 +42,7 @@ const runtime = await createDemoRuntimeWithRepository(postgresStore.repository, 
   seedFixtures: !oidcEnabled,
   seedQuestion: !oidcEnabled,
   seedArtifact: !oidcEnabled,
+  seedShowcase: !oidcEnabled,
   serviceOptions: {
     publicBaseUrl: publicWebUrl,
     ...(configuredOidcIssuer ? { identityIssuer: configuredOidcIssuer } : {}),

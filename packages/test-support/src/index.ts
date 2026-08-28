@@ -6,6 +6,10 @@ import {
 } from "@bridge/application";
 import type { Organization, Principal, PrincipalIdentity, Project } from "@bridge/domain";
 
+import { seedShowcaseData } from "./showcase.js";
+
+export { showcaseIds } from "./showcase.js";
+
 export const demoOidcIssuer = "https://bridge.local/";
 
 export const demoOrganization: Organization = {
@@ -117,6 +121,7 @@ export interface DemoRuntimeOptions {
   readonly seedFixtures?: boolean;
   readonly seedQuestion?: boolean;
   readonly seedArtifact?: boolean;
+  readonly seedShowcase?: boolean;
   readonly serviceOptions?: BridgeServiceOptions;
 }
 
@@ -282,6 +287,20 @@ Classify failures before retrying and use bounded exponential backoff with idemp
     });
     sampleArtifactId = publication.artifact.id;
     sampleArtifactVersionId = publication.version.id;
+  }
+  if (options.seedShowcase) {
+    await seedShowcaseData({
+      repository,
+      project: demoProject,
+      principals: {
+        agent: demoPrincipals.agent,
+        architect: demoPrincipals.architect,
+        contributor: demoPrincipals.contributor,
+        qaLead: demoPrincipals.qaLead,
+        securityReviewer: demoPrincipals.securityReviewer,
+        businessAnalyst: demoPrincipals.businessAnalyst,
+      },
+    });
   }
   return {
     repository,
