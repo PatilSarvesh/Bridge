@@ -169,7 +169,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — explicit migrations, seeded in-memory/PostgreSQL fixtures, and documented startup are implemented; bundled PostgreSQL/object-storage startup and reset automation remain
+- **Status:** Partial — explicit migrations, a comprehensive idempotent synthetic showcase for in-memory/PostgreSQL development, and documented startup are implemented; bundled PostgreSQL/object-storage startup and reset automation remain
 - **Dependencies:** BRG-002
 - **PRD references:** Non-functional requirements
 
@@ -179,7 +179,7 @@ Acceptance criteria:
 
 1. One documented command starts required local services.
 2. Migrations create a clean database successfully.
-3. Seed data creates two organizations, users, projects, one agent identity, questions, and decisions.
+3. Seed data creates two organizations, human and agent identities, a project, and representative records for every implemented product workspace without replacing locally changed fixture records.
 4. Local development authentication cannot be enabled in production configuration.
 5. Resetting local data targets only the documented local environment.
 
@@ -377,7 +377,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Implemented for the controlled MVP slice — direct/role owner and reviewer routes, discussion/protected/admin visibility, server-derived action authority, optional due timestamps, overdue/due-soon prioritization, status/risk/category/owner-or-reviewer-role/due filters, URL-persisted web filter state, shared Questions, reviewer switching, approval summaries, and the human notification feed are implemented; quorum enforcement remains owned by BRG-043 rather than inbox policy
+- **Status:** Implemented for the controlled MVP slice — direct/role owner and reviewer routes, discussion/protected/admin visibility, server-derived action authority, optional due timestamps, overdue/due-soon prioritization, status/risk/category/owner-or-reviewer-role/due filters, URL-persisted web filter state, shared Questions, reviewer switching, approval summaries, and the human notification feed are implemented in the responsive modular workspace; quorum enforcement remains owned by BRG-043 rather than inbox policy
 - **Dependencies:** BRG-030, BRG-031
 - **PRD references:** QST-06, NTF-01
 
@@ -413,7 +413,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Implemented for the controlled MVP slice — project-scoped detail includes discussion responses, related repository/work-item/branch/artifact/run links, revision history, human mentions, run/scope provenance, approval summaries, and server-derived edit/clarification/reopen authority; provider synchronization and decision reopening remain separate work
+- **Status:** Implemented for the controlled MVP slice — project-scoped detail includes discussion responses, related repository/work-item/branch/artifact/run links, revision history, human mentions, run/scope provenance, approval summaries, explicit human-authority messaging, progressive disclosure for supporting tools, and server-derived edit/clarification/reopen authority; provider synchronization and decision reopening remain separate work
 - **Dependencies:** BRG-031, BRG-033
 - **PRD references:** QST-02, QST-04
 
@@ -817,7 +817,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Implemented for the Markdown MVP — publication resolves configured direct users, roles, teams, scoped ownership rules, and the project decision-owner fallback into active human reviewers; each immutable version freezes a bounded required approval count, exposes server-derived progress, counts each authorized human once, and becomes authoritative only when quorum is satisfied; append-only comments, approvals, request-changes, single current approval, audit/outbox, and web review/approval are implemented
+- **Status:** Implemented for the Markdown MVP — publication resolves configured direct users, roles, teams, scoped ownership rules, and the project decision-owner fallback into active human reviewers; each immutable version freezes a bounded required approval count, exposes server-derived progress, counts each authorized human once, and becomes authoritative only when quorum is satisfied; append-only comments, approvals, request-changes, single current approval, audit/outbox, and a readable responsive web review/approval workspace are implemented
 - **Dependencies:** BRG-021, BRG-080
 - **PRD references:** ART-03, ART-04
 
@@ -836,7 +836,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Implemented for the Markdown MVP
+- **Status:** Implemented for the Markdown MVP — artifact detail presents immutable Markdown as a safe readable document, preserves an optional technical source view, and keeps version history and provenance available to authorized users
 - **Dependencies:** BRG-081
 - **PRD references:** ART-04, CTX-01
 
@@ -968,7 +968,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, URL validation, and shared high-confidence secret blocking with privacy-safe metrics are implemented; broader DLP/redaction policy, richer per-tenant quotas, and explicit untrusted-content labeling remain
+- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, dependency-free Markdown block rendering without raw HTML injection, bounded client link destinations, URL validation, and shared high-confidence secret blocking with privacy-safe metrics are implemented; broader DLP/redaction policy, richer per-tenant quotas, and explicit untrusted-content labeling remain
 - **Dependencies:** BRG-030, BRG-052, BRG-080
 - **PRD references:** Security and privacy requirements
 

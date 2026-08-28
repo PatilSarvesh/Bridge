@@ -65,12 +65,22 @@ describe("createRuntimeForServer", () => {
     expect(createRuntimeWithRepository).toHaveBeenNthCalledWith(
       1,
       seedRepository,
-      expect.objectContaining({ seedFixtures: true, seedQuestion: true, seedArtifact: true }),
+      expect.objectContaining({
+        seedFixtures: true,
+        seedQuestion: true,
+        seedArtifact: true,
+        seedShowcase: true,
+      }),
     );
     expect(createRuntimeWithRepository).toHaveBeenNthCalledWith(
       2,
       runtimeRepository,
-      expect.objectContaining({ seedFixtures: false, seedQuestion: false, seedArtifact: false }),
+      expect.objectContaining({
+        seedFixtures: false,
+        seedQuestion: false,
+        seedArtifact: false,
+        seedShowcase: false,
+      }),
     );
     expect(seedStore.close).toHaveBeenCalledOnce();
     expect(runtimeStore.close).not.toHaveBeenCalled();

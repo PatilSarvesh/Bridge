@@ -42,6 +42,7 @@ function fixtureOptions(
     seedFixtures: !oidcEnabled,
     seedQuestion: !oidcEnabled,
     seedArtifact: !oidcEnabled,
+    seedShowcase: !oidcEnabled,
     serviceOptions,
   };
 }
@@ -101,6 +102,7 @@ export async function createRuntimeForServer(
       seedFixtures: false,
       seedQuestion: false,
       seedArtifact: false,
+      seedShowcase: false,
       serviceOptions: options.serviceOptions,
     },
   );

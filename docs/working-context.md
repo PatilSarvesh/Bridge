@@ -2480,6 +2480,155 @@ Deliberate boundaries:
 - No MCP dependency was introduced; the recovery and repository-sync paths work with the CLI and
   REST API alone.
 
+### 20.88 Implemented modular human-review workspace redesign
+
+Implemented and locally verified:
+
+1. The web application now uses a restrained midnight command rail and a light modular workspace
+   with a single indigo action color. Amber, red, and green are reserved for risk, error, and
+   accepted-state meaning rather than decoration.
+2. The primary navigation matches the approved pilot information architecture: Inbox, Questions,
+   Decisions, Specifications, Assumptions, and Agent Runs. Administrative destinations are grouped
+   behind one progressive-disclosure control, while notifications live in the workspace header.
+3. Inbox and question-detail surfaces preserve prioritization and context but reduce simultaneous
+   density. Provenance, explanation, discussion, and routing tools are grouped into a collapsed
+   modular section, and empty states provide a clear next action.
+4. The final acceptance area is now an explicit Human approval panel. Its copy states that the
+   accepted Bridge decision is authoritative and the agent recommendation remains advisory.
+5. Responsive behavior supports compact desktop, tablet, and narrow mobile widths without page
+   overflow. Icon-only mobile navigation retains explicit accessible labels.
+6. The redesign was checked with the Next.js production build, TypeScript, desktop and 390-pixel
+   browser views, navigation disclosure interaction, and browser console inspection.
+
+Deliberate boundaries:
+
+- This is a presentation and information-hierarchy change. Existing REST requests, application
+  contracts, project access checks, version semantics, and stored data are unchanged.
+- Human acceptance authority is unchanged. No agent action was promoted to approval, and the UI
+  continues to derive available actions from server authorization.
+- No MCP dependency, database migration, or production database command was introduced.
+
+### 20.89 Implemented readable specification review workspace
+
+Implemented and locally verified:
+
+1. The Specifications area now uses a document-first review workspace with a compact specification
+   selector, streamlined document header, readable actor names, a concise agent summary, explicit
+   human-approval progress, and structured publisher, reviewer, scope, and version metadata. The
+   actual specification begins within the first ordinary desktop viewport.
+2. Immutable Markdown bodies are rendered as readable documents with duplicated leading titles
+   removed from the reader and correctly nested typographic headings,
+   paragraphs, ordered and unordered lists, task markers, blockquotes, fenced code, tables,
+   horizontal rules, inline emphasis, inline code, and bounded links.
+3. Rendering creates React elements from parsed text rather than injecting raw HTML. Unsafe link
+   schemes remain plain text; HTTP(S), mail, fragment, and bounded relative destinations are the
+   only rendered link targets.
+4. Reviewers can still inspect the exact immutable Markdown through a collapsed technical-source
+   disclosure. Version comparison continues to use the existing exact or bounded line diff.
+5. Specification approval now uses the same explicit human-authority visual pattern as decision
+   acceptance and states that agent publication does not grant approval authority.
+6. Parser tests cover common specification blocks and unsafe link rejection. Browser checks cover
+   the rendered document, source disclosure, desktop layout, and a 390-pixel mobile layout without
+   page overflow.
+
+Deliberate boundaries:
+
+- Stored artifact bodies, hashes, versions, REST contracts, review commands, and approval policy
+  are unchanged; presentation never rewrites the immutable Markdown source.
+- Raw HTML embedded in Markdown is intentionally displayed as text rather than interpreted.
+- The renderer is a bounded MVP dialect, not a claim of complete CommonMark or GFM conformance.
+- No dependency on MCP, a hosted Markdown service, or a database change was introduced.
+
+### 20.90 Expanded development showcase and full-workspace visual coverage
+
+1. Local development without OIDC now seeds a comprehensive synthetic showcase in both the
+   in-memory repository and the explicit PostgreSQL bootstrap path. Stable fixture IDs and
+   existence checks make repeated startup idempotent without replacing a fixture record after a
+   local reviewer changes it.
+2. The showcase covers every implemented web area: due-aware and protected questions, responses,
+   comments and revision history, accepted and historical decisions, all four specification types
+   and draft/review/changes-requested/approved/superseded states, active and resolved assumptions,
+   running/waiting/completed/failed/cancelled runs, context snapshots, notifications, repositories,
+   ownership, policy, analytics, audit, support diagnostics, and delivery/outbox states.
+3. Fixture content is clearly synthetic and contains no credentials, customer data, provider
+   tokens, raw transcripts, or private reasoning. OIDC-enabled and production runtimes do not seed
+   it. PostgreSQL still requires the explicit development seed connection and migrations remain an
+   operator action.
+4. Full-data browser review covered all primary, notification, and administrative views at 1280
+   pixels and 390 pixels. It exposed dense Ownership and Policy tables that widened the desktop
+   page, an Analytics grid that widened the mobile page, and absolutely positioned mobile count
+   badges that overlapped navigation icons; contained table scrolling, bounded grid sizing, and
+   dedicated icon/badge columns now keep the workspace readable at the viewport width.
+5. Regression coverage verifies record counts, representative nested history, specification state
+   coverage, support signals, restart idempotency, and preservation of a locally edited fixture.
+
+Deliberate boundaries:
+
+- The showcase is bootstrap data, not UI-only mock state; web reads continue through canonical REST.
+- Seed records demonstrate policy outcomes but cannot grant an agent human approval authority.
+- No schema, migration, production database command, external provider call, or MCP requirement was
+  introduced.
+
+### 20.91 Improved decision and agent-run review workspaces
+
+1. Decision and agent-run selector rows now reserve a dedicated icon column and keep the status on
+   its own readable line. The 30-pixel record glyph can no longer overlap or compress the title into
+   an unreadable sliver at compact desktop or mobile widths.
+2. Decision details now lead with the accepted answer and scope, then separate rationale, human
+   owner, acceptance time, review date, version, advisory conflicts, and read-only impact analysis
+   into labeled sections. Internal IDs remain available as element titles where useful but are no
+   longer presented as the primary human-facing identity.
+3. Active decision retirement is grouped behind a clearly labeled lifecycle disclosure. Revoke,
+   expire, and supersede commands still require an explicit human rationale and use the existing
+   REST lifecycle contracts and server-side authority checks.
+4. Agent-run details now explain the current run state, including an explicit message when Bridge is
+   paused at a human-approval boundary. Provenance, scope, timestamps, durable linked-record counts,
+   outcome summaries, and result links use structured labels instead of concatenated text.
+5. Browser checks covered Decisions and Agent Runs at 1280 pixels and 390 pixels. Both widths remain
+   bounded to the viewport, record icons remain separate from copy, and the labeled metadata and
+   linked-record sections remain readable.
+
+Deliberate boundaries:
+
+- This is a presentation and information-hierarchy change. REST contracts, stored records, version
+  semantics, tenant checks, and application/domain behavior are unchanged.
+- Agents remain unable to accept decisions or approve specifications; the new run-state copy makes
+  the existing human authority boundary more visible.
+- No schema change, migration, production database command, external provider call, or MCP
+  requirement was introduced.
+
+### 20.92 Unified full-workspace control canvas
+
+1. The right-side workspace now uses one neutral control-canvas system across Inbox, Questions,
+   Decisions, Specifications, Assumptions, Agent Runs, Notifications, Repositories, Ownership,
+   Policy, Organization, Analytics, Audit, and Support. Shared spacing, typography, dividers,
+   statuses, tables, and form controls replace the previous mix of lavender panels, gradients,
+   deep shadows, and unrelated card treatments.
+2. Review-heavy pages use a consistent list/detail hierarchy: the selector remains compact while
+   the detail pane leads with the human-readable record, current state, relevant risk or scope, and
+   the next human action. Question and assumption details now separate context, consequences,
+   authority, metadata, options, and resolution controls instead of concatenating those fields.
+3. Secondary configuration is progressively disclosed. Repository linking, ownership creation,
+   project rules, organization membership, analytics filters, audit filters and export formats, and
+   lifecycle actions no longer dominate the initial page. Protected policy floors remain visible as
+   a three-number summary, with the complete immutable list available on demand.
+4. Dense operational content now uses bounded, full-width data surfaces with stable table headers,
+   restrained metric summaries, and grouped notification rows. Specification Markdown continues to
+   render as readable document structure; raw source remains an explicit secondary view.
+5. Mobile navigation closes the administration drawer after selecting a destination, and every
+   navigation change resets document scroll so a new page starts at its heading. Browser review
+   covered all fourteen project and administration destinations plus Notifications at 1440 by 1000
+   and 390 by 844 pixels; every route remained within the viewport without horizontal overflow.
+
+Deliberate boundaries:
+
+- The redesign changes presentation, navigation ergonomics, and information hierarchy only. It does
+  not change REST contracts, persisted records, authorization, policy evaluation, or approval rules.
+- Human approval boundaries remain explicit in question, specification, decision, and run views;
+  compacting a form never delegates that authority to an agent.
+- No schema change, migration, production database command, external provider call, or mandatory MCP
+  dependency was introduced.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2553,7 +2702,7 @@ Deliberate boundaries:
 - Directory group tenant-composite constraint migration: `packages/database/drizzle/0045_short_mercury.sql`
 - Codex automatic-continuation migration: `packages/database/drizzle/0046_new_thunderball.sql`
 - Indexed question-match migration: `packages/database/drizzle/0047_early_juggernaut.sql`
-- Demo fixtures: `packages/test-support/src/index.ts`
+- Demo fixtures: `packages/test-support/src/index.ts`, `packages/test-support/src/showcase.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
 - MCP tools: `apps/mcp/src/bridge-server.ts`
@@ -2561,6 +2710,7 @@ Deliberate boundaries:
 - CLI: `apps/cli/src/index.ts`
 - CLI PKCE, loopback callback, and OS credential stores: `apps/cli/src/auth.ts`
 - Web UI: `apps/web/app/page.tsx`
+- Safe readable specification Markdown: `apps/web/app/markdown-parser.ts`, `apps/web/app/markdown-document.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker outbox cycle/runtime: `apps/worker/src/index.ts`, `apps/worker/src/runtime.ts`
 - Worker Prometheus HTTP surface: `apps/worker/src/metrics-server.ts`
@@ -2607,4 +2757,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, indexed typo-tolerant duplicate-question suggestions with exact policy-safe reuse, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, a safe readable Markdown specification-review workspace, indexed typo-tolerant duplicate-question suggestions with exact policy-safe reuse, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics, a Slack Incoming Webhook notification adapter, and a deployable maintenance-role Slack outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, broader policy/assignment audit coverage, richer connector diagnostics, MCP-side token issuance, broader DLP, live email provider/deployment validation, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.

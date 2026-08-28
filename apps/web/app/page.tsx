@@ -2,6 +2,9 @@
 
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { BridgeIcon, type BridgeIconName } from "./bridge-icon";
+import { MarkdownDocument } from "./markdown-document";
+
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
 
@@ -704,6 +707,46 @@ type View =
   | "audit"
   | "support";
 
+interface NavigationItem {
+  readonly view: View;
+  readonly label: string;
+  readonly icon: BridgeIconName;
+  readonly access?: "project-admin" | "organization-admin";
+}
+
+const primaryNavigation: readonly NavigationItem[] = [
+  { view: "inbox", label: "Inbox", icon: "inbox" },
+  { view: "questions", label: "Questions", icon: "questions" },
+  { view: "decisions", label: "Decisions", icon: "decisions" },
+  { view: "specifications", label: "Specifications", icon: "specifications" },
+  { view: "assumptions", label: "Assumptions", icon: "assumptions" },
+  { view: "runs", label: "Agent runs", icon: "runs" },
+];
+
+const administrationNavigation: readonly NavigationItem[] = [
+  { view: "repositories", label: "Repositories", icon: "repositories", access: "project-admin" },
+  { view: "ownership", label: "Ownership", icon: "ownership", access: "project-admin" },
+  { view: "policy", label: "Policy", icon: "policy", access: "project-admin" },
+  { view: "organization", label: "Organization", icon: "organization", access: "organization-admin" },
+  { view: "analytics", label: "Analytics", icon: "analytics" },
+  { view: "audit", label: "Audit", icon: "audit", access: "project-admin" },
+  { view: "support", label: "Support", icon: "support", access: "project-admin" },
+];
+
+function displayInitials(value: string | undefined): string {
+  const parts = (value ?? "Bridge member").trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "B";
+}
+
+function displayIdentityName(identifier: string, principals: readonly Principal[]): string {
+  const principal = principals.find((candidate) => candidate.id === identifier);
+  if (principal) return principal.displayName;
+  const [prefix, ...parts] = identifier.split("_");
+  const readable: readonly string[] = parts.length > 0 ? parts : [prefix ?? identifier];
+  const name = readable.map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
+  return prefix === "agt" ? `${name} agent` : name;
+}
+
 async function bridgeFetch<T>(
   path: string,
   init?: RequestInit,
@@ -798,6 +841,7 @@ function normalizedRole(value: string): string {
 export default function Home() {
   const requestedDecisionIdRef = useRef<string | undefined>(undefined);
   const [view, setView] = useState<View>("inbox");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [principals, setPrincipals] = useState<readonly Principal[]>([]);
   const [authentication, setAuthentication] = useState<AuthenticationConfiguration>();
   const [authenticationReady, setAuthenticationReady] = useState(false);
@@ -1790,6 +1834,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [view]);
+
+  useEffect(() => {
     if (!inboxFiltersReady) return;
     const url = new URL(window.location.href);
     const parameterNames: Record<InboxFilterKey, string> = {
@@ -2497,6 +2546,22 @@ export default function Home() {
     ["draft", "in_review"].includes(currentVersion(artifact)?.status ?? ""),
   ).length;
   const pendingNotifications = notifications.filter((notification) => !notification.readAt).length;
+  const navigationCounts: Partial<Record<View, number>> = {
+    inbox: pendingQuestions,
+    specifications: pendingSpecifications,
+  };
+  const visibleAdministrationNavigation = administrationNavigation.filter((item) => {
+    if (item.access === "organization-admin") return isOrganizationAdmin;
+    if (item.access === "project-admin") return isOrganizationAdmin || isProjectAdmin;
+    return true;
+  });
+  const isAdministrationView = visibleAdministrationNavigation.some((item) => item.view === view);
+  const navigateTo = (destination: View) => {
+    setView(destination);
+    if (!administrationNavigation.some((item) => item.view === destination) || window.matchMedia("(max-width: 640px)").matches) {
+      setSettingsOpen(false);
+    }
+  };
 
   const openNotification = async (notification: Notification) => {
     setError(undefined);
@@ -2558,9 +2623,12 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><span>B</span> Bridge</div>
+        <div className="brand">
+          <span className="brand-mark"><BridgeIcon name="bridge" size={19} /></span>
+          <span className="brand-wordmark"><strong>Bridge</strong><small>Decision control plane</small></span>
+        </div>
         <div className="project">
-          <label htmlFor="bridge-project"><small>Project</small></label>
+          <label htmlFor="bridge-project"><BridgeIcon name="repositories" size={15} /><small>Current project</small></label>
           <select
             id="bridge-project"
             value={selectedProjectId ?? ""}
@@ -2573,119 +2641,76 @@ export default function Home() {
             ))}
           </select>
         </div>
-        {authentication?.mode === "development" ? (
-          <div className="reviewer">
-            <label htmlFor="bridge-reviewer"><small>Reviewing as</small></label>
-            <select
-              id="bridge-reviewer"
-              value={activePrincipalId}
-              disabled={principalsLoading || principals.length === 0}
-              onChange={(event) => setActivePrincipalId(event.target.value)}
-            >
-              {principals.length === 0 ? <option value="">No reviewers</option> : null}
-              {principals.map((principal) => (
-                <option key={principal.id} value={principal.id}>{principal.displayName}</option>
-              ))}
-            </select>
-            <small>{activeRoles.join(" · ") || "Loading reviewer roles…"}</small>
-          </div>
-        ) : null}
         <nav aria-label="Bridge navigation">
-          <div className="nav-group">
-            <span className="nav-label">Work</span>
-            <button
-              type="button"
-              aria-current={view === "inbox" ? "page" : undefined}
-              onClick={() => setView("inbox")}
-            >Inbox <span>{pendingQuestions}</span></button>
-            <button
-              type="button"
-              aria-current={view === "questions" ? "page" : undefined}
-              onClick={() => setView("questions")}
-            >Questions</button>
-            <button
-              type="button"
-              aria-current={view === "notifications" ? "page" : undefined}
-              onClick={() => setView("notifications")}
-            >Notifications <span>{pendingNotifications}</span></button>
+          <span className="nav-label">Workspace</span>
+          <div className="nav-group nav-primary">
+            {primaryNavigation.map((item) => (
+              <button
+                key={item.view}
+                type="button"
+                aria-label={
+                  navigationCounts[item.view] !== undefined
+                    ? `${item.label}, ${navigationCounts[item.view]} pending`
+                    : item.label
+                }
+                aria-current={view === item.view ? "page" : undefined}
+                onClick={() => navigateTo(item.view)}
+              >
+                <BridgeIcon name={item.icon} />
+                <span className="nav-copy">{item.label}</span>
+                {navigationCounts[item.view] !== undefined ? <span className="nav-badge">{navigationCounts[item.view]}</span> : null}
+              </button>
+            ))}
           </div>
-          <div className="nav-group">
-            <span className="nav-label">Knowledge</span>
-            <button
-              type="button"
-              aria-current={view === "decisions" ? "page" : undefined}
-              onClick={() => setView("decisions")}
-            >Decisions</button>
-            <button
-              type="button"
-              aria-current={view === "specifications" ? "page" : undefined}
-              onClick={() => setView("specifications")}
-            >Specifications <span>{pendingSpecifications}</span></button>
-            <button
-              type="button"
-              aria-current={view === "assumptions" ? "page" : undefined}
-              onClick={() => setView("assumptions")}
-            >Assumptions</button>
-            <button
-              type="button"
-              aria-current={view === "runs" ? "page" : undefined}
-              onClick={() => setView("runs")}
-            >Agent runs</button>
-          </div>
-          <div className="nav-group nav-group-admin">
-            <span className="nav-label">Admin</span>
-            {isOrganizationAdmin || isProjectAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "repositories" ? "page" : undefined}
-                onClick={() => setView("repositories")}
-              >Repositories</button>
-            ) : null}
-            {isOrganizationAdmin || isProjectAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "ownership" ? "page" : undefined}
-                onClick={() => setView("ownership")}
-              >Ownership</button>
-            ) : null}
-            {isOrganizationAdmin || isProjectAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "policy" ? "page" : undefined}
-                onClick={() => setView("policy")}
-              >Policy</button>
-            ) : null}
-            {isOrganizationAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "organization" ? "page" : undefined}
-                onClick={() => setView("organization")}
-              >Organization</button>
-            ) : null}
-            <button
-              type="button"
-              aria-current={view === "analytics" ? "page" : undefined}
-              onClick={() => setView("analytics")}
-            >Analytics</button>
-            {isOrganizationAdmin || isProjectAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "audit" ? "page" : undefined}
-                onClick={() => setView("audit")}
-              >Audit</button>
-            ) : null}
-            {isOrganizationAdmin || isProjectAdmin ? (
-              <button
-                type="button"
-                aria-current={view === "support" ? "page" : undefined}
-                onClick={() => setView("support")}
-              >Support</button>
-            ) : null}
-          </div>
+
+          <details
+            className="nav-settings"
+            open={settingsOpen}
+            onToggle={(event) => setSettingsOpen(event.currentTarget.open)}
+          >
+            <summary aria-label="Admin and settings">
+              <BridgeIcon name="settings" />
+              <span className="nav-copy">Admin & settings</span>
+              <BridgeIcon name="chevron" size={15} className="nav-chevron" />
+            </summary>
+            <div className="nav-group nav-group-admin">
+              {visibleAdministrationNavigation.map((item) => (
+                <button
+                  key={item.view}
+                  type="button"
+                  aria-label={item.label}
+                  aria-current={view === item.view ? "page" : undefined}
+                  onClick={() => navigateTo(item.view)}
+                >
+                  <BridgeIcon name={item.icon} />
+                  <span className="nav-copy">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </details>
         </nav>
         <div className="identity">
-          <strong>{activePrincipal?.displayName ?? "Bridge member"}</strong>
-          <small>{authentication?.mode === "oidc" ? "Authenticated member" : "Development identity"}</small>
+          <div className="identity-summary">
+            <span className="avatar">{displayInitials(activePrincipal?.displayName)}</span>
+            <span><strong>{activePrincipal?.displayName ?? "Bridge member"}</strong><small>{authentication?.mode === "oidc" ? "Authenticated member" : "Development identity"}</small></span>
+          </div>
+          {authentication?.mode === "development" ? (
+            <div className="reviewer">
+              <label htmlFor="bridge-reviewer"><small>Preview authority as</small></label>
+              <select
+                id="bridge-reviewer"
+                value={activePrincipalId}
+                disabled={principalsLoading || principals.length === 0}
+                onChange={(event) => setActivePrincipalId(event.target.value)}
+              >
+                {principals.length === 0 ? <option value="">No reviewers</option> : null}
+                {principals.map((principal) => (
+                  <option key={principal.id} value={principal.id}>{principal.displayName}</option>
+                ))}
+              </select>
+              <small title={activeRoles.join(" · ")}>{activeRoles.length} active role{activeRoles.length === 1 ? "" : "s"}</small>
+            </div>
+          ) : null}
           {authentication?.mode === "oidc" && authentication.logoutUrl ? (
             <a href={authentication.logoutUrl}>Sign out</a>
           ) : null}
@@ -2694,14 +2719,30 @@ export default function Home() {
 
       <section className="workspace">
         <header className="topbar">
-          <strong>{viewTitle[view]}</strong>
-          <span>{view === "organization"
-            ? "Member access and roles"
-            : view === "support"
-              ? "Pilot health and operator signals"
-            : view === "audit" && auditScope === "organization"
-              ? "Organization metadata events"
-              : selectedProject?.name ?? "Select a project"}</span>
+          <div className="topbar-title">
+            <small>{isAdministrationView ? "Administration" : "Workspace"}</small>
+            <strong>{viewTitle[view]}</strong>
+          </div>
+          <div className="topbar-actions">
+            <span className="topbar-project"><BridgeIcon name="bridge" size={15} />{view === "organization"
+              ? "Member access and roles"
+              : view === "support"
+                ? "Pilot health and operator signals"
+              : view === "audit" && auditScope === "organization"
+                ? "Organization metadata events"
+                : selectedProject?.name ?? "Select a project"}</span>
+            <button
+              className="topbar-icon-button"
+              type="button"
+              aria-label={`Notifications${pendingNotifications > 0 ? `, ${pendingNotifications} unread` : ""}`}
+              aria-current={view === "notifications" ? "page" : undefined}
+              onClick={() => navigateTo("notifications")}
+            >
+              <BridgeIcon name="bell" size={19} />
+              {pendingNotifications > 0 ? <span>{pendingNotifications}</span> : null}
+            </button>
+            <span className="topbar-avatar" title={activePrincipal?.displayName}>{displayInitials(activePrincipal?.displayName)}</span>
+          </div>
         </header>
         <div className="content">
           {error ? <div className="error" role="alert">{error}</div> : null}
@@ -2791,7 +2832,7 @@ export default function Home() {
                             }}
                           >
                             <span className="risk risk-protected" aria-hidden="true" />
-                            <span><strong>{decision.category} decision</strong><small>Owner {decision.ownerId} · review due {new Date(decision.reviewAt).toLocaleDateString()}</small></span>
+                            <span><strong>{decision.category} decision</strong><small>Owner {displayIdentityName(decision.ownerId, principals)} · review due {new Date(decision.reviewAt).toLocaleDateString()}</small></span>
                             <span className="status status-rejected">overdue</span>
                           </button>
                         ))}
@@ -2818,7 +2859,7 @@ export default function Home() {
                             }}
                           >
                             <span className={assumption.overdue ? "risk risk-protected" : "risk"} aria-hidden="true" />
-                            <span><strong>{assumption.category} assumption</strong><small>{assumption.overdue ? "overdue" : `expires ${new Date(assumption.expiresAt).toLocaleDateString()}`} · {assumption.confidence} confidence · created by {assumption.createdById}</small></span>
+                            <span><strong>{assumption.category} assumption</strong><small>{assumption.overdue ? "overdue" : `expires ${new Date(assumption.expiresAt).toLocaleDateString()}`} · {assumption.confidence} confidence · created by {displayIdentityName(assumption.createdById, principals)}</small></span>
                             <span className={assumption.overdue ? "status status-rejected" : "status"}>{assumption.overdue ? "overdue" : "expiring"}</span>
                           </button>
                         ))}
@@ -2844,7 +2885,7 @@ export default function Home() {
                             }}
                           >
                             <span className="risk" aria-hidden="true" />
-                            <span><strong>{run.id}</strong><small>{run.client} · {run.capability} · {run.remainingBlockingQuestionCount} blocking question{run.remainingBlockingQuestionCount === 1 ? "" : "s"} · updated {new Date(run.updatedAt).toLocaleDateString()}</small></span>
+                            <span><strong>Agent run</strong><small title={run.id}>{run.client.replaceAll("_", " ")} · {run.capability.replaceAll("_", " ")} · {run.remainingBlockingQuestionCount} blocking question{run.remainingBlockingQuestionCount === 1 ? "" : "s"} · updated {new Date(run.updatedAt).toLocaleDateString()}</small></span>
                             <span className="status">waiting</span>
                           </button>
                         ))}
@@ -2933,27 +2974,27 @@ export default function Home() {
                 </div>
                 <button className="secondary" type="button" disabled={repositoriesLoading} onClick={() => void loadRepositories()}>Refresh</button>
               </div>
-              <form
-                className="organization-panel member-create-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void linkRepository();
-                }}
-              >
-                <div className="organization-panel-heading">
-                  <div><h2>Link a repository</h2><p>Repository linking is restricted to project or organization administrators.</p></div>
-                </div>
-                <div className="member-form-grid">
-                  <label>Provider<input value={repositoryProvider} onChange={(event) => setRepositoryProvider(event.target.value)} placeholder="github" required /></label>
-                  <label>Owner<input value={repositoryOwner} onChange={(event) => setRepositoryOwner(event.target.value)} placeholder="bridge-org" required /></label>
-                  <label>Repository name<input value={repositoryName} onChange={(event) => setRepositoryName(event.target.value)} placeholder="bridge" required /></label>
-                  <label>Canonical URL<input type="url" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/bridge-org/bridge" required /></label>
-                </div>
-                <div className="member-form-actions">
-                  <small>Provider connectivity and source synchronization remain outside this metadata-only workflow.</small>
-                  <button className="primary" type="submit" disabled={submitting || !selectedProjectId}>Link repository</button>
-                </div>
-              </form>
+              <details className="panel-disclosure">
+                <summary><span><strong>Link a repository</strong><small>Add canonical metadata without fetching source.</small></span><em>Administrator action</em></summary>
+                <form
+                  className="panel-disclosure-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void linkRepository();
+                  }}
+                >
+                  <div className="member-form-grid">
+                    <label>Provider<input value={repositoryProvider} onChange={(event) => setRepositoryProvider(event.target.value)} placeholder="github" required /></label>
+                    <label>Owner<input value={repositoryOwner} onChange={(event) => setRepositoryOwner(event.target.value)} placeholder="bridge-org" required /></label>
+                    <label>Repository name<input value={repositoryName} onChange={(event) => setRepositoryName(event.target.value)} placeholder="bridge" required /></label>
+                    <label>Canonical URL<input type="url" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/bridge-org/bridge" required /></label>
+                  </div>
+                  <div className="member-form-actions">
+                    <small>Provider connectivity and source synchronization remain outside this metadata-only workflow.</small>
+                    <button className="primary" type="submit" disabled={submitting || !selectedProjectId}>Link repository</button>
+                  </div>
+                </form>
+              </details>
               <section className="organization-panel">
                 <div className="organization-panel-heading">
                   <div><h2>Linked repositories</h2><p>Repository identity is unique within the organization and provider scope.</p></div>
@@ -3003,11 +3044,14 @@ export default function Home() {
                       <div><h2>Role definitions</h2><p>Role names are normalized when saved. Member assignment remains in Organization access.</p></div>
                       <small>{ownershipDraft.roles.length} roles</small>
                     </div>
-                    <form className="member-form-grid" onSubmit={addOwnershipRole}>
-                      <label>Role name<input name="roleName" placeholder="QA Lead" required minLength={2} /></label>
-                      <label>Description<input name="roleDescription" placeholder="Owns quality and release-readiness decisions" required minLength={2} /></label>
-                      <div className="member-form-actions"><span /><button className="secondary" type="submit">Add role</button></div>
-                    </form>
+                    <details className="inline-create-disclosure">
+                      <summary>Add role definition</summary>
+                      <form className="member-form-grid" onSubmit={addOwnershipRole}>
+                        <label>Role name<input name="roleName" placeholder="QA Lead" required minLength={2} /></label>
+                        <label>Description<input name="roleDescription" placeholder="Owns quality and release-readiness decisions" required minLength={2} /></label>
+                        <div className="member-form-actions"><span /><button className="secondary" type="submit">Add role</button></div>
+                      </form>
+                    </details>
                     {ownershipDraft.roles.length === 0 ? <div className="empty">No custom project roles are defined.</div> : (
                       <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Role</th><th>Description</th><th /></tr></thead><tbody>
                         {ownershipDraft.roles.map((role) => <tr key={role.name}><td><strong>{role.name}</strong></td><td>{role.description}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, roles: ownershipDraft.roles.filter((candidate) => candidate !== role) })}>Remove</button></td></tr>)}
@@ -3020,12 +3064,15 @@ export default function Home() {
                       <div><h2>Human teams</h2><p>Teams contain active human members with access to this project; agents cannot satisfy human ownership.</p></div>
                       <small>{ownershipDraft.teams.length} teams</small>
                     </div>
-                    <form className="member-form-grid" onSubmit={addOwnershipTeam}>
-                      <label>Team key<input name="teamKey" placeholder="quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
-                      <label>Team name<input name="teamName" placeholder="Quality" required /></label>
-                      <label>Member IDs<input name="teamMembers" placeholder="usr_qa_lead, usr_architect" required /></label>
-                      <div className="member-form-actions"><small>Available humans: {principals.map((principal) => principal.id).join(", ") || "none"}</small><button className="secondary" type="submit">Add team</button></div>
-                    </form>
+                    <details className="inline-create-disclosure">
+                      <summary>Add human team</summary>
+                      <form className="member-form-grid" onSubmit={addOwnershipTeam}>
+                        <label>Team key<input name="teamKey" placeholder="quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
+                        <label>Team name<input name="teamName" placeholder="Quality" required /></label>
+                        <label>Member IDs<input name="teamMembers" placeholder="usr_qa_lead, usr_architect" required /></label>
+                        <div className="member-form-actions"><small>Available humans: {principals.map((principal) => principal.id).join(", ") || "none"}</small><button className="secondary" type="submit">Add team</button></div>
+                      </form>
+                    </details>
                     {ownershipDraft.teams.length === 0 ? <div className="empty">No project teams are configured.</div> : (
                       <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Team</th><th>Members</th><th /></tr></thead><tbody>
                         {ownershipDraft.teams.map((team) => <tr key={team.key}><td><strong>{team.name}</strong><small>{team.key}</small></td><td>{team.memberIds.join(", ")}</td><td><button className="secondary" type="button" onClick={() => setOwnershipDraft({ ...ownershipDraft, teams: ownershipDraft.teams.filter((candidate) => candidate !== team) })}>Remove</button></td></tr>)}
@@ -3038,6 +3085,8 @@ export default function Home() {
                       <div><h2>Ownership rules</h2><p>An empty match applies project-wide. Equal-priority overlapping owner or reviewer rules are rejected.</p></div>
                       <small>{ownershipDraft.rules.length} rules</small>
                     </div>
+                    <details className="inline-create-disclosure">
+                      <summary>Add ownership rule</summary>
                     <form className="member-form-grid" onSubmit={addOwnershipRule}>
                       <label>Rule key<input name="ruleKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
                       <label>Rule name<input name="ruleName" placeholder="Transfer quality ownership" required /></label>
@@ -3053,6 +3102,7 @@ export default function Home() {
                       <label>Reviewer team keys<input name="reviewerTeamKeys" placeholder="architecture" /></label>
                       <div className="member-form-actions"><small>Use comma-separated values. Configure at least one owner or reviewer target.</small><button className="secondary" type="submit">Add rule</button></div>
                     </form>
+                    </details>
                     {ownershipDraft.rules.length === 0 ? <div className="empty">No ownership rules are configured; project defaults remain unchanged.</div> : (
                       <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Owners</th><th>Reviewers</th><th /></tr></thead><tbody>
                         {ownershipDraft.rules.map((rule) => <tr key={rule.key}>
@@ -3102,6 +3152,13 @@ export default function Home() {
                       <div><h2>Pilot safety floors</h2><p>These protected categories always block and retain their required human authority. Custom rules may only add stricter requirements.</p></div>
                       <small>{policyDraft.defaultRules.length} defaults</small>
                     </div>
+                    <div className="policy-floor-summary" aria-label="Pilot safety floor summary">
+                      <div><strong>{policyDraft.defaultRules.length}</strong><span>enforced categories</span></div>
+                      <div><strong>{new Set(policyDraft.defaultRules.flatMap((rule) => rule.requiredOwnerRoles)).size}</strong><span>accountable owner roles</span></div>
+                      <div><strong>{new Set(policyDraft.defaultRules.flatMap((rule) => rule.requiredReviewerRoles)).size}</strong><span>required reviewer roles</span></div>
+                    </div>
+                    <details className="inline-table-disclosure">
+                      <summary>View every enforced floor <span>{policyDraft.defaultRules.length}</span></summary>
                     <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Category</th><th>Action</th><th>Owners</th><th>Reviewers</th></tr></thead><tbody>
                       {policyDraft.defaultRules.map((rule) => <tr key={rule.key}>
                         <td><strong>{rule.category}</strong><small>{rule.key}</small></td>
@@ -3110,6 +3167,7 @@ export default function Home() {
                         <td>{[...rule.requiredReviewerRoles, ...Object.entries(rule.reviewerQuorum ?? {}).map(([role, count]) => `${role} ×${count}`)].join(", ") || "No separate reviewer"}</td>
                       </tr>)}
                     </tbody></table></div>
+                    </details>
                   </section>
 
                   <section className="organization-panel">
@@ -3117,6 +3175,8 @@ export default function Home() {
                       <div><h2>Project rules</h2><p>Lower priority numbers win. Empty category/scope fields match broadly; equal-priority overlaps are rejected.</p></div>
                       <small>{policyDraft.rules.length} custom rules</small>
                     </div>
+                    <details className="inline-create-disclosure">
+                      <summary>Add project rule</summary>
                     <form className="member-form-grid" onSubmit={addPolicyRule}>
                       <label>Rule key<input name="policyKey" placeholder="transfer-quality" required pattern="[a-z0-9][a-z0-9-]*" /></label>
                       <label>Rule name<input name="policyName" placeholder="Block transfer quality changes" required /></label>
@@ -3134,6 +3194,7 @@ export default function Home() {
                       <label>Reviewer quorum<input name="policyReviewerQuorum" placeholder="security-reviewer=2" /></label>
                       <div className="member-form-actions"><small>Use comma-separated normalized role names. Quorum uses role=count pairs and is valid only for required reviewer roles on protected approval rules.</small><button className="secondary" type="submit">Add rule</button></div>
                     </form>
+                    </details>
                     {policyDraft.rules.length === 0 ? <div className="empty">No custom rules are configured; Bridge defaults remain active.</div> : (
                       <div className="analytics-table-wrap"><table className="analytics-table"><thead><tr><th>Rule</th><th>Match</th><th>Effect</th><th>Authority</th><th /></tr></thead><tbody>
                         {policyDraft.rules.map((rule) => <tr key={rule.key}>
@@ -3165,16 +3226,16 @@ export default function Home() {
               {organizationMembersLoading ? <div className="empty">Loading organization members…</div> : null}
               {!organizationMembersLoading ? (
                 <div className="organization-stack">
+                  <details className="panel-disclosure">
+                    <summary><span><strong>Add an OIDC member</strong><small>Provision a human identity and bounded project access.</small></span><em>Organization administrator</em></summary>
                   <form
-                    className="organization-panel member-create-form"
+                    className="panel-disclosure-form member-create-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void createOrganizationMember();
                     }}
                   >
-                    <div className="organization-panel-heading">
-                      <div><h2>Add an OIDC member</h2><p>The subject must match the configured identity provider exactly.</p></div>
-                    </div>
+                    <p className="panel-form-intro">The subject must match the configured identity provider exactly.</p>
                     <div className="member-form-grid">
                       <label>Display name<input value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} required minLength={2} /></label>
                       <label>OIDC subject<input value={newMemberSubject} onChange={(event) => setNewMemberSubject(event.target.value)} required placeholder="auth0|user-id" /></label>
@@ -3193,6 +3254,7 @@ export default function Home() {
                       <button className="primary" type="submit" disabled={memberSubmitting || !newMemberName.trim() || !newMemberSubject.trim()}>Add member</button>
                     </div>
                   </form>
+                  </details>
 
                   <section className="organization-panel">
                     <div className="organization-panel-heading">
@@ -3223,7 +3285,7 @@ export default function Home() {
                             }}
                           >
                             <div className="member-editor-heading">
-                              <div><h3>{selectedOrganizationMember.displayName}</h3><small>{selectedOrganizationMember.oidcSubject}</small></div>
+                              <div><h3>{selectedOrganizationMember.displayName}</h3><small>OIDC subject · {selectedOrganizationMember.oidcSubject}</small></div>
                               <small>Version {selectedOrganizationMember.version}</small>
                             </div>
                             <label>Status
@@ -3336,22 +3398,26 @@ export default function Home() {
                   <p>Permission-restricted operational metadata. Record bodies, prompts, answers, credentials, and private reasoning are excluded.</p>
                 </div>
                 <div className="audit-actions">
-                  {auditScope === "project" && isProjectAdmin ? (
-                    <button
-                      className="secondary"
-                      type="button"
-                      disabled={projectDataExporting}
-                      title="Downloads bounded decision and specification content plus project audit records."
-                      onClick={() => void exportProjectData()}
-                    >
-                      Export project data
-                    </button>
-                  ) : null}
-                  <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("json")}>Export JSON</button>
-                  <button className="secondary" type="button" disabled={auditExporting} onClick={() => void exportAudit("csv")}>Export CSV</button>
+                  <details className="action-menu">
+                    <summary>Export</summary>
+                    <div>
+                      {auditScope === "project" && isProjectAdmin ? (
+                        <button
+                          type="button"
+                          disabled={projectDataExporting}
+                          title="Downloads bounded decision and specification content plus project audit records."
+                          onClick={() => void exportProjectData()}
+                        >Export project data</button>
+                      ) : null}
+                      <button type="button" disabled={auditExporting} onClick={() => void exportAudit("json")}>Audit as JSON</button>
+                      <button type="button" disabled={auditExporting} onClick={() => void exportAudit("csv")}>Audit as CSV</button>
+                    </div>
+                  </details>
                   <button className="secondary" type="button" disabled={auditLoading} onClick={() => void loadAudit(0)}>Refresh</button>
                 </div>
               </div>
+              <details className="filter-disclosure">
+                <summary>Filter audit events <span>Optional</span></summary>
               <div className="audit-filter-panel" aria-label="Audit filters">
                 <label>Scope
                   <select
@@ -3373,6 +3439,7 @@ export default function Home() {
                 <label>Created from<input type="date" value={auditFilters.createdFrom ?? ""} onChange={(event) => updateAuditFilter("createdFrom", event.target.value)} /></label>
                 <label>Created to<input type="date" value={auditFilters.createdTo ?? ""} onChange={(event) => updateAuditFilter("createdTo", event.target.value)} /></label>
               </div>
+              </details>
               {auditLoading ? <div className="empty">Loading audit metadata…</div> : null}
               {!auditLoading && auditPage?.items.length === 0 ? <div className="empty">No audit events match these filters.</div> : null}
               {!auditLoading && auditPage && auditPage.items.length > 0 ? (
@@ -3413,6 +3480,8 @@ export default function Home() {
                 </div>
                 <button className="secondary" type="button" onClick={() => void loadAnalytics()}>Refresh</button>
               </div>
+              <details className="filter-disclosure">
+                <summary>Filter analytics cohort <span>Optional</span></summary>
               <div className="filter-bar" aria-label="Analytics cohort filters">
                 <label htmlFor="analytics-client">Agent client</label>
                 <select
@@ -3441,6 +3510,7 @@ export default function Home() {
                 />
                 <button className="secondary" type="button" onClick={() => setAnalyticsFilters({})}>Clear filters</button>
               </div>
+              </details>
               {analyticsLoading ? <div className="empty">Calculating project analytics…</div> : null}
               {!analyticsLoading && analytics ? (
                 <div className="analytics-stack">
@@ -3677,26 +3747,54 @@ export default function Home() {
                       <button
                         type="button"
                         key={decision.id}
-                        className={decision.id === selectedDecision?.id ? "question-row selected" : "question-row"}
+                        className={decision.id === selectedDecision?.id ? "question-row record-row selected" : "question-row record-row"}
                         onClick={() => setSelectedDecisionId(decision.id)}
                       >
-                        <span className="document-mark" aria-hidden="true">✓</span>
-                        <span><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}{decisionConflicts.some((conflict) => conflict.left.id === decision.id || conflict.right.id === decision.id) ? " · potential conflict" : ""}</small></span>
+                        <span className="document-mark" aria-hidden="true"><BridgeIcon name="decisions" size={16} /></span>
+                        <span className="record-row-copy"><strong>{decision.answer}</strong><small>{decision.category} · {decision.scope.component ?? "project"}{decisionConflicts.some((conflict) => conflict.left.id === decision.id || conflict.right.id === decision.id) ? " · potential conflict" : ""}</small></span>
                         <span className={`status status-${decision.status}`}>{decision.status}</span>
                       </button>
                     ))}
                   </div>
                   {selectedDecision ? (
-                    <article className="question-detail">
-                      <div className="detail-heading">
-                        <div><small>{selectedDecision.id} · {selectedDecision.category}</small><h2>{selectedDecision.answer}</h2></div>
+                    <article className="question-detail record-detail">
+                      <header className="record-detail-header">
+                        <div className="record-title-block">
+                          <span className="record-eyebrow">Project decision · {selectedDecision.category.replaceAll("_", " ")}</span>
+                          <h2>{selectedDecision.answer}</h2>
+                          <div className="record-chip-row" aria-label="Decision scope">
+                            {Object.entries(selectedDecision.scope).length > 0
+                              ? Object.entries(selectedDecision.scope).map(([key, value]) => <span className="record-chip" key={key}>{key}: {value}</span>)
+                              : <span className="record-chip">Project-wide scope</span>}
+                          </div>
+                        </div>
                         <span className={`status status-${selectedDecision.status}`}>{selectedDecision.status}</span>
-                      </div>
-                      <section><h3>Decision rationale</h3><p>{selectedDecision.rationale}</p></section>
+                      </header>
+                      <div className="record-detail-body">
+                      <section className="record-section record-summary-section">
+                        <div className="record-section-heading">
+                          <div><span>Why this was accepted</span><h3>Decision rationale</h3></div>
+                        </div>
+                        <p className="record-lead">{selectedDecision.rationale}</p>
+                      </section>
+                      <section className="record-section">
+                        <div className="record-section-heading">
+                          <div><span>Human authority</span><h3>Ownership and review</h3></div>
+                        </div>
+                        <dl className="record-meta-grid">
+                          <div><dt>Accepted by</dt><dd title={selectedDecision.ownerId}>{displayIdentityName(selectedDecision.ownerId, principals)}</dd></div>
+                          <div><dt>Accepted at</dt><dd>{new Date(selectedDecision.createdAt).toLocaleString()}</dd></div>
+                          <div><dt>Review due</dt><dd>{new Date(selectedDecision.reviewAt).toLocaleDateString()}</dd></div>
+                          <div><dt>Decision version</dt><dd>Version {selectedDecision.version}</dd></div>
+                        </dl>
+                      </section>
                       {selectedDecisionConflicts.length > 0 ? (
-                        <section>
-                          <h3>Potential active conflicts</h3>
-                          <p className="muted-copy">Advisory signals only. A human owner must inspect the scope and rationale before changing either decision.</p>
+                        <section className="record-section">
+                          <div className="record-section-heading">
+                            <div><span>Advisory signal</span><h3>Potential active conflicts</h3></div>
+                            <small>{selectedDecisionConflicts.length} found</small>
+                          </div>
+                          <p className="muted-copy">A human owner must inspect the scope and rationale before changing either decision.</p>
                           <div className="conflict-list">
                             {selectedDecisionConflicts.map((conflict) => {
                               const other = conflict.left.id === selectedDecision.id ? conflict.right : conflict.left;
@@ -3718,31 +3816,30 @@ export default function Home() {
                           </div>
                         </section>
                       ) : null}
-                      <section>
-                        <h3>Authority and review</h3>
-                        <div className="spec-meta">
-                          <span>Accepted by {selectedDecision.ownerId}</span>
-                          <span>Accepted {new Date(selectedDecision.createdAt).toLocaleString()}</span>
-                          <span>Review by {new Date(selectedDecision.reviewAt).toLocaleDateString()}</span>
-                        </div>
-                      </section>
                       {selectedDecision.lifecycleChangedAt ? (
-                        <section>
-                          <h3>Lifecycle history</h3>
-                          <p>{selectedDecision.lifecycleRationale}</p>
-                          <div className="spec-meta">
-                            <span>Changed by {selectedDecision.lifecycleChangedById}</span>
-                            <span>{new Date(selectedDecision.lifecycleChangedAt).toLocaleString()}</span>
-                            {selectedDecision.replacementDecisionId ? <span>Replacement {selectedDecision.replacementDecisionId}</span> : null}
+                        <section className="record-section">
+                          <div className="record-section-heading"><div><span>Recorded evidence</span><h3>Lifecycle history</h3></div></div>
+                          <div className="record-evidence">
+                            <p>{selectedDecision.lifecycleRationale}</p>
+                            <dl className="record-meta-grid">
+                              <div><dt>Changed by</dt><dd title={selectedDecision.lifecycleChangedById}>{displayIdentityName(selectedDecision.lifecycleChangedById ?? "Bridge worker", principals)}</dd></div>
+                              <div><dt>Changed at</dt><dd>{new Date(selectedDecision.lifecycleChangedAt).toLocaleString()}</dd></div>
+                              {selectedDecision.replacementDecisionId ? <div><dt>Replacement</dt><dd title={selectedDecision.replacementDecisionId}>Linked decision</dd></div> : null}
+                            </dl>
                           </div>
                         </section>
                       ) : null}
-                      <section>
-                        <h3>Change impact</h3>
-                        <p className="muted-copy">Preview direct and transitive records that may need review before changing this decision. Analysis does not alter authority.</p>
-                        <button className="secondary" type="button" disabled={decisionImpactLoading} onClick={() => void loadDecisionImpact()}>
-                          {decisionImpactLoading ? "Analyzing…" : "Analyze impact"}
-                        </button>
+                      <section className="record-section">
+                        <div className="record-action-panel">
+                          <div>
+                            <span>Before making a change</span>
+                            <h3>Understand downstream impact</h3>
+                            <p>Preview direct and transitive records that may need review. Analysis is read-only and does not alter human authority.</p>
+                          </div>
+                          <button className="secondary" type="button" disabled={decisionImpactLoading} onClick={() => void loadDecisionImpact()}>
+                            {decisionImpactLoading ? "Analyzing…" : "Analyze impact"}
+                          </button>
+                        </div>
                         {decisionLifecycleImpact ? (
                           <div className="impact-analysis" aria-live="polite">
                             <p className="impact">
@@ -3763,8 +3860,10 @@ export default function Home() {
                         ) : null}
                       </section>
                       {selectedDecision.status === "active" ? (
-                        <section className="response-form">
-                          <h3>Retire this decision</h3>
+                        <details className="detail-disclosure lifecycle-disclosure">
+                          <summary><span>Lifecycle controls</span><small>Revoke, expire, or supersede</small></summary>
+                          <div className="response-form lifecycle-form">
+                          <p>These actions remove this decision from active authoritative context. A human rationale is always required.</p>
                           <label htmlFor="decision-lifecycle-status">Lifecycle action</label>
                           <select
                             id="decision-lifecycle-status"
@@ -3803,14 +3902,17 @@ export default function Home() {
                             onChange={(event) => setDecisionLifecycleRationale(event.target.value)}
                           />
                           <button
-                            className="primary"
+                            className="secondary lifecycle-action"
                             type="button"
                             disabled={submitting || decisionLifecycleRationale.trim().length < 10 || (decisionLifecycleStatus === "superseded" && !replacementDecisionId)}
                             onClick={() => void changeDecisionLifecycle()}
                           >Apply lifecycle change</button>
-                        </section>
+                          </div>
+                        </details>
                       ) : null}
-                      {selectedDecision.questionId ? (
+                      <footer className="record-footer">
+                        <span>{selectedDecision.questionId ? "Trace this decision back to the human-reviewed question." : "Created from a human-confirmed assumption."}</span>
+                        {selectedDecision.questionId ? (
                         <button
                           className="secondary"
                           type="button"
@@ -3819,9 +3921,9 @@ export default function Home() {
                             setView("questions");
                           }}
                         >Open source question</button>
-                      ) : (
-                        <p className="impact">Created from a human-confirmed assumption.</p>
-                      )}
+                        ) : null}
+                      </footer>
+                      </div>
                     </article>
                   ) : null}
                 </div>
@@ -3863,42 +3965,56 @@ export default function Home() {
                     ))}
                   </div>
                   {selectedAssumption ? (
-                    <article className="question-detail">
-                      <div className="detail-heading">
-                        <div><small>{selectedAssumption.id} · version {selectedAssumption.version}</small><h2>{selectedAssumption.statement}</h2></div>
-                        <span className={`status status-${selectedAssumption.status}`}>{selectedAssumption.status}</span>
-                      </div>
-                      <section><h3>Rationale</h3><p>{selectedAssumption.rationale}</p></section>
-                      <section>
-                        <h3>Risk and reversibility</h3>
-                        <div className="impact"><strong>Reversal cost:</strong> {selectedAssumption.reversalCost}</div>
-                        <div className="spec-meta">
-                          <span>Risk: {selectedAssumption.risk}</span>
-                          <span>Confidence: {selectedAssumption.confidence}</span>
-                          <span>Expires: {new Date(selectedAssumption.expiresAt).toLocaleString()}</span>
-                          <span>Created by {selectedAssumption.createdById}</span>
+                    <article className="question-detail record-detail">
+                      <header className="record-detail-header">
+                        <div className="record-title-block">
+                          <span className="record-eyebrow">Project assumption · version {selectedAssumption.version}</span>
+                          <h2>{selectedAssumption.statement}</h2>
+                          <div className="record-chip-row" aria-label="Assumption attributes">
+                            <span className="record-chip">{selectedAssumption.category.replaceAll("_", " ")}</span>
+                            <span className="record-chip">{selectedAssumption.risk} risk</span>
+                            <span className="record-chip">{selectedAssumption.confidence} confidence</span>
+                            <span className="record-chip">{selectedAssumption.reversible ? "Reversible" : "Not reversible"}</span>
+                          </div>
                         </div>
+                        <span className={`status status-${selectedAssumption.status}`}>{selectedAssumption.status}</span>
+                      </header>
+                      <div className="record-detail-body">
+                      <section className="record-section record-summary-section">
+                        <div className="record-section-heading"><div><span>Temporary premise</span><h3>Why the team is using this assumption</h3></div></div>
+                        <p className="record-lead">{selectedAssumption.rationale}</p>
+                      </section>
+                      <section className="record-section">
+                        <div className="record-section-heading"><div><span>Risk boundary</span><h3>Expiry and reversibility</h3></div></div>
+                        <div className="assumption-cost"><span>Reversal cost</span><strong>{selectedAssumption.reversalCost}</strong></div>
+                        <dl className="record-meta-grid">
+                          <div><dt>Risk</dt><dd>{selectedAssumption.risk}</dd></div>
+                          <div><dt>Confidence</dt><dd>{selectedAssumption.confidence}</dd></div>
+                          <div><dt>Expires</dt><dd>{new Date(selectedAssumption.expiresAt).toLocaleString()}</dd></div>
+                          <div><dt>Created by</dt><dd title={selectedAssumption.createdById}>{displayIdentityName(selectedAssumption.createdById, principals)}</dd></div>
+                          <div><dt>Scope</dt><dd>{Object.entries(selectedAssumption.scope).map(([key, value]) => `${key}: ${value}`).join(" · ") || "Project-wide"}</dd></div>
+                        </dl>
                       </section>
                       {selectedAssumption.sourceLinks.length > 0 ? (
-                        <section><h3>Directly linked work</h3><div className="link-list">{selectedAssumption.sourceLinks.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}</div></section>
+                        <section className="record-section"><div className="record-section-heading"><div><span>Evidence</span><h3>Directly linked work</h3></div></div><div className="record-link-list">{selectedAssumption.sourceLinks.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}</div></section>
                       ) : null}
                       {selectedAssumption.resolutionRationale ? (
-                        <section><h3>Resolution</h3><p>{selectedAssumption.resolutionRationale}</p><div className="spec-meta"><span>Resolved by {selectedAssumption.resolvedById ?? "Bridge worker"}</span>{selectedAssumption.confirmedDecisionId ? <span>Decision {selectedAssumption.confirmedDecisionId}</span> : null}</div></section>
-                      ) : null}
-                      {selectedAssumption.confirmedDecisionId ? (
-                        <button
-                          className="secondary"
-                          type="button"
-                          onClick={() => {
-                            setSelectedDecisionId(selectedAssumption.confirmedDecisionId);
-                            setDecisionFilters({ includeHistory: true });
-                            setView("decisions");
-                          }}
-                        >Open confirmed decision</button>
+                        <section className="record-section">
+                          <div className="record-section-heading"><div><span>Human outcome</span><h3>Resolution</h3></div></div>
+                          <div className="record-evidence">
+                            <p>{selectedAssumption.resolutionRationale}</p>
+                            <dl className="record-meta-grid">
+                              <div><dt>Resolved by</dt><dd title={selectedAssumption.resolvedById}>{displayIdentityName(selectedAssumption.resolvedById ?? "Bridge worker", principals)}</dd></div>
+                              {selectedAssumption.confirmedDecisionId ? <div><dt>Authoritative decision</dt><dd>Linked and active</dd></div> : null}
+                            </dl>
+                          </div>
+                        </section>
                       ) : null}
                       {canResolveSelectedAssumption && selectedAssumption.status === "active" ? (
-                        <section className="response-form">
-                          <h3>Resolve assumption</h3>
+                        <details className="detail-disclosure assumption-resolution-disclosure">
+                          <summary><span>Resolve this assumption</span><small>Human action</small></summary>
+                          <div className="response-form assumption-resolution-form">
+                          <p className="muted-copy">Confirm, reject, or expire this temporary premise. Only confirmation can create an authoritative decision.</p>
                           <label htmlFor="assumption-resolution-status">Resolution</label>
                           <select
                             id="assumption-resolution-status"
@@ -3929,18 +4045,23 @@ export default function Home() {
                             disabled={submitting || assumptionResolutionRationale.trim().length < 10}
                             onClick={() => void resolveAssumption()}
                           >Apply resolution</button>
-                        </section>
+                          </div>
+                        </details>
                       ) : null}
-                      {selectedAssumption.runId ? (
-                        <button
-                          className="secondary"
-                          type="button"
-                          onClick={() => {
-                            setSelectedRunId(selectedAssumption.runId);
-                            setView("runs");
-                          }}
-                        >Open source run</button>
+                      {(selectedAssumption.runId || selectedAssumption.confirmedDecisionId) ? (
+                        <footer className="record-footer">
+                          <span>Trace this assumption to its originating run or accepted decision.</span>
+                          <div className="record-footer-actions">
+                            {selectedAssumption.runId ? (
+                              <button className="secondary" type="button" onClick={() => { setSelectedRunId(selectedAssumption.runId); setView("runs"); }}>Open source run</button>
+                            ) : null}
+                            {selectedAssumption.confirmedDecisionId ? (
+                              <button className="secondary" type="button" onClick={() => { setSelectedDecisionId(selectedAssumption.confirmedDecisionId); setDecisionFilters({ includeHistory: true }); setView("decisions"); }}>Open confirmed decision</button>
+                            ) : null}
+                          </div>
+                        </footer>
                       ) : null}
+                      </div>
                     </article>
                   ) : null}
                 </div>
@@ -3961,51 +4082,83 @@ export default function Home() {
                       <button
                         type="button"
                         key={run.id}
-                        className={run.id === selectedRun?.id ? "question-row selected" : "question-row"}
+                        className={run.id === selectedRun?.id ? "question-row record-row selected" : "question-row record-row"}
                         onClick={() => setSelectedRunId(run.id)}
                       >
-                        <span className="document-mark" aria-hidden="true">↻</span>
-                        <span><strong>{run.taskSummary}</strong><small>{run.client} · {run.capability} · {run.continuationMode} continuation · version {run.version}</small></span>
+                        <span className="document-mark" aria-hidden="true"><BridgeIcon name="runs" size={16} /></span>
+                        <span className="record-row-copy"><strong>{run.taskSummary}</strong><small>{run.client.replaceAll("_", " ")} · {run.capability.replaceAll("_", " ")} · {run.continuationMode} continuation · version {run.version}</small></span>
                         <span className={`status status-${run.status}`}>{run.status.replaceAll("_", " ")}</span>
                       </button>
                     ))}
                   </div>
                   {selectedRun ? (
-                    <article className="question-detail">
-                      <div className="detail-heading">
-                        <div><small>{selectedRun.id} · {selectedRun.client}</small><h2>{selectedRun.taskSummary}</h2></div>
+                    <article className="question-detail record-detail">
+                      <header className="record-detail-header">
+                        <div className="record-title-block">
+                          <span className="record-eyebrow">Agent run · version {selectedRun.version}</span>
+                          <h2>{selectedRun.taskSummary}</h2>
+                          <div className="record-chip-row" aria-label="Run attributes">
+                            <span className="record-chip">{selectedRun.client.replaceAll("_", " ")}</span>
+                            <span className="record-chip">{selectedRun.capability.replaceAll("_", " ")}</span>
+                            <span className="record-chip">{selectedRun.continuationMode} continuation</span>
+                          </div>
+                        </div>
                         <span className={`status status-${selectedRun.status}`}>{selectedRun.status.replaceAll("_", " ")}</span>
-                      </div>
-                      <section>
-                        <h3>Run provenance</h3>
-                        <div className="spec-meta">
-                          <span>Agent: {selectedRun.agentId}</span>
-                          <span>Capability: {selectedRun.capability}</span>
-                          <span>Continuation: {selectedRun.continuationMode}</span>
-                          <span>Started: {new Date(selectedRun.startedAt).toLocaleString()}</span>
-                          <span>Updated: {new Date(selectedRun.updatedAt).toLocaleString()}</span>
+                      </header>
+                      <div className="record-detail-body">
+                      <section className={`record-state record-state-${selectedRun.status}`}>
+                        <span className="record-state-icon"><BridgeIcon name={selectedRun.status === "waiting_for_human" ? "questions" : "runs"} size={20} /></span>
+                        <div>
+                          <strong>{selectedRun.status === "waiting_for_human" ? "Waiting for a human decision" : selectedRun.status === "running" ? "Work is in progress" : selectedRun.status === "completed" ? "Run completed" : selectedRun.status === "failed" ? "Run needs investigation" : "Run was cancelled"}</strong>
+                          <p>{selectedRun.status === "waiting_for_human"
+                            ? "Bridge has paused continuation at the human-approval boundary. The agent cannot approve or answer on the reviewer’s behalf."
+                            : selectedRun.status === "running"
+                              ? "The agent can continue within the approved context and policy boundaries."
+                              : selectedRun.summary ?? "The durable run record preserves this outcome for later handoff."}</p>
                         </div>
                       </section>
-                      <section>
-                        <h3>Linked records</h3>
-                        <div className="spec-meta">
-                          <span>{selectedRun.contextSnapshotIds.length} context snapshots</span>
-                          <span>{selectedRun.questionIds.length} questions</span>
-                          <span>{selectedRun.assumptionIds.length} assumptions</span>
-                          <span>{selectedRun.artifactVersionIds.length} specification versions</span>
+                      <section className="record-section">
+                        <div className="record-section-heading"><div><span>Traceability</span><h3>Run provenance</h3></div></div>
+                        <dl className="record-meta-grid">
+                          <div><dt>Agent</dt><dd title={selectedRun.agentId}>{displayIdentityName(selectedRun.agentId, principals)}</dd></div>
+                          <div><dt>Started</dt><dd>{new Date(selectedRun.startedAt).toLocaleString()}</dd></div>
+                          <div><dt>Last update</dt><dd>{new Date(selectedRun.updatedAt).toLocaleString()}</dd></div>
+                          <div><dt>Scope</dt><dd>{Object.entries(selectedRun.scope).map(([key, value]) => `${key}: ${value}`).join(" · ") || "Project-wide"}</dd></div>
+                          {selectedRun.endedAt ? <div><dt>Ended</dt><dd>{new Date(selectedRun.endedAt).toLocaleString()}</dd></div> : null}
+                          {selectedRun.continuesRunId ? <div><dt>Continues run</dt><dd title={selectedRun.continuesRunId}>Linked predecessor</dd></div> : null}
+                        </dl>
+                      </section>
+                      <section className="record-section">
+                        <div className="record-section-heading"><div><span>Durable handoff</span><h3>Linked records</h3></div><small>Select a question to review it</small></div>
+                        <div className="record-stat-grid">
+                          <div className="record-stat"><strong>{selectedRun.contextSnapshotIds.length}</strong><span>Context snapshots</span></div>
+                          {selectedRun.questionIds[0] ? (
+                            <button
+                              className="record-stat record-stat-button"
+                              type="button"
+                              onClick={() => {
+                                setSelectedId(selectedRun.questionIds[0]);
+                                setView("questions");
+                              }}
+                            ><strong>{selectedRun.questionIds.length}</strong><span>Questions</span><small>Open first question →</small></button>
+                          ) : <div className="record-stat"><strong>0</strong><span>Questions</span></div>}
+                          <div className="record-stat"><strong>{selectedRun.assumptionIds.length}</strong><span>Assumptions</span></div>
+                          <div className="record-stat"><strong>{selectedRun.artifactVersionIds.length}</strong><span>Specification versions</span></div>
                         </div>
                       </section>
-                      {selectedRun.summary ? <section><h3>Outcome</h3><p>{selectedRun.summary}</p></section> : null}
-                      {selectedRun.questionIds[0] ? (
-                        <button
-                          className="secondary"
-                          type="button"
-                          onClick={() => {
-                            setSelectedId(selectedRun.questionIds[0]);
-                            setView("questions");
-                          }}
-                        >Open linked question</button>
+                      {selectedRun.summary ? (
+                        <section className="record-section">
+                          <div className="record-section-heading"><div><span>Recorded handoff</span><h3>Outcome summary</h3></div></div>
+                          <p className="record-lead">{selectedRun.summary}</p>
+                        </section>
                       ) : null}
+                      {selectedRun.resultLinks.length > 0 ? (
+                        <section className="record-section">
+                          <div className="record-section-heading"><div><span>External evidence</span><h3>Result links</h3></div></div>
+                          <div className="record-link-list">{selectedRun.resultLinks.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}</div>
+                        </section>
+                      ) : null}
+                      </div>
                     </article>
                   ) : null}
                 </div>
@@ -4125,12 +4278,19 @@ export default function Home() {
 
               {questionsLoading ? <div className="empty">Loading Bridge questions…</div> : null}
               {!questionsLoading && visibleQuestions.length === 0 ? (
-                <div className="empty">
-                  {view === "inbox"
+                <div className="empty empty-state">
+                  <span className="empty-icon"><BridgeIcon name={view === "inbox" ? "sparkle" : "questions"} size={23} /></span>
+                  <h2>{view === "inbox"
+                    ? hasInboxFilters ? "Nothing matches these filters" : "Your queue is clear"
+                    : "No project questions yet"}</h2>
+                  <p>{view === "inbox"
                     ? hasInboxFilters
-                      ? "No questions match these inbox filters. Clear a filter or open Questions to browse the shared project queue."
-                      : "No questions need your authority right now. Open Questions to browse the shared project queue."
-                    : "No questions have been raised for this project."}
+                      ? "Clear a filter or browse the shared project queue to widen the view."
+                      : "No question currently needs your authority. Shared work remains available in Questions."
+                    : "Questions raised by agents and teammates will appear here with owner, risk, and approval context."}</p>
+                  {view === "inbox" ? (
+                    <button className="secondary" type="button" onClick={() => navigateTo("questions")}>Browse all questions</button>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -4152,30 +4312,39 @@ export default function Home() {
                   </div>
 
                   {selectedQuestion ? (
-                    <article className="question-detail">
-                      <div className="detail-heading">
-                        <div><small>{selectedQuestion.id} · {selectedQuestion.category}</small><h2>{selectedQuestion.title}</h2></div>
+                    <article className="question-detail record-detail question-workspace-detail">
+                      <header className="record-detail-header">
+                        <div className="record-title-block">
+                          <span className="record-eyebrow">Governed question · {selectedQuestion.category.replaceAll("_", " ")}</span>
+                          <h2>{selectedQuestion.title}</h2>
+                          <div className="record-chip-row" aria-label="Question attributes">
+                            <span className="record-chip">{selectedQuestion.risk} risk</span>
+                            <span className="record-chip">{selectedQuestion.scope.component ?? "Project-wide"}</span>
+                            <span className="record-chip">{selectedQuestion.policyAction.replaceAll("_", " ")}</span>
+                          </div>
+                        </div>
                         <span className={`status status-${selectedQuestion.status}`}>{selectedQuestion.status}</span>
-                      </div>
-
-                      <section>
-                        <h3>Context and impact</h3>
-                        <p>{selectedQuestion.context}</p>
-                        <div className="impact"><strong>Why it matters:</strong> {selectedQuestion.whyItMatters}</div>
-                        {selectedQuestion.dueAt ? <div className="owner-routing"><strong>Due:</strong> {new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</div> : null}
-                        {selectedQuestion.blockingEscalatedAt ? <div className="owner-routing"><strong>Escalated:</strong> {new Date(selectedQuestion.blockingEscalatedAt).toLocaleString()}</div> : null}
-                        {selectedQuestion.ownerRoles.length > 0 ? (
-                          <div className="owner-routing"><strong>Assigned roles:</strong> {selectedQuestion.ownerRoles.join(", ")}</div>
-                        ) : null}
-                        {selectedQuestion.requiredOwnerRoles.length > 0 ? <div className="owner-routing"><strong>Required owner roles:</strong> {selectedQuestion.requiredOwnerRoles.join(", ")}</div> : null}
-                        {selectedQuestion.reviewerIds.length + selectedQuestion.reviewerRoles.length > 0 ? <div className="owner-routing"><strong>Review lane:</strong> {[...selectedQuestion.reviewerIds, ...selectedQuestion.reviewerRoles].join(", ")}</div> : null}
-                        <div className="owner-routing"><strong>Policy:</strong> {selectedQuestion.policyRuleKey} · version {selectedQuestion.policyVersion} · {selectedQuestion.policyAction.replaceAll("_", " ")}</div>
-                        {selectedQuestion.requiredReviewerRoles.length > 0 ? <div className="owner-routing"><strong>Required reviewer roles:</strong> {selectedQuestion.requiredReviewerRoles.join(", ")}</div> : null}
+                      </header>
+                      <div className="record-detail-body">
+                      <section className="record-section question-context-section">
+                        <div className="record-section-heading"><div><span>Decision context</span><h3>What needs to be resolved</h3></div></div>
+                        <p className="record-lead">{selectedQuestion.context}</p>
+                        <div className="question-impact-panel"><span>Why it matters</span><p>{selectedQuestion.whyItMatters}</p></div>
+                        <dl className="record-meta-grid question-authority-grid">
+                          <div><dt>Accountable owner</dt><dd>{[...selectedQuestion.ownerIds.map((id) => displayIdentityName(id, principals)), ...selectedQuestion.ownerRoles].join(" · ") || "Project administrator"}</dd></div>
+                          <div><dt>Review lane</dt><dd>{[...selectedQuestion.reviewerIds.map((id) => displayIdentityName(id, principals)), ...selectedQuestion.reviewerRoles].join(" · ") || "No separate reviewer"}</dd></div>
+                          <div><dt>Policy</dt><dd title={selectedQuestion.policyRuleKey}>{selectedQuestion.policyAction.replaceAll("_", " ")} · version {selectedQuestion.policyVersion}</dd></div>
+                          <div><dt>Scope</dt><dd>{Object.entries(selectedQuestion.scope).map(([field, value]) => `${field}: ${value}`).join(" · ") || "Project-wide"}</dd></div>
+                          {selectedQuestion.dueAt ? <div><dt>Due</dt><dd>{new Date(selectedQuestion.dueAt).toLocaleString()} · {selectedQuestion.dueStatus.replaceAll("_", " ")}</dd></div> : null}
+                          {selectedQuestion.blockingEscalatedAt ? <div><dt>Escalated</dt><dd>{new Date(selectedQuestion.blockingEscalatedAt).toLocaleString()}</dd></div> : null}
+                        </dl>
                         {selectedQuestion.approvalStatus.requirements.length > 0 ? (
-                          <div className="owner-routing">
-                            <strong>Approval status:</strong>{" "}
+                          <div className="question-approval-progress">
+                            <span>Human approval progress</span>
+                            <strong>
                             {selectedQuestion.approvalStatus.requirements.map((requirement) =>
                               `${requirement.role} ${requirement.approvedCount}/${requirement.requiredCount} ${requirement.status}`).join(" · ")}
+                            </strong>
                           </div>
                         ) : null}
                         {view === "inbox" && selectedQuestion.inboxReasons?.length ? (
@@ -4186,7 +4355,10 @@ export default function Home() {
                         ) : null}
                       </section>
 
-                      <details className="detail-disclosure">
+                      <details className="detail-disclosure detail-toolbox">
+                        <summary>Context, provenance & routing <span className="section-count">{selectedQuestion.canRequestClarification || selectedQuestion.canReopen ? "4 tools" : "3 tools"}</span></summary>
+                        <div className="detail-tool-grid">
+                      <details className="nested-tool">
                         <summary>Explain for my role</summary>
                         <div className="audience-controls">
                           <label htmlFor="question-audience-role">Audience role
@@ -4223,7 +4395,7 @@ export default function Home() {
                         ) : null}
                       </details>
 
-                      <details className="detail-disclosure">
+                      <details className="nested-tool">
                         <summary>Provenance <span className="section-count">{selectedQuestion.runId ? "linked" : "direct"}</span></summary>
                         <div className="owner-routing"><strong>Scope:</strong> {Object.entries(selectedQuestion.scope).map(([field, value]) => `${field} ${value}`).join(" · ") || "Project-wide"}</div>
                         {selectedQuestion.runId ? (
@@ -4256,7 +4428,7 @@ export default function Home() {
                       </details>
 
                       {selectedQuestion.canRequestClarification || selectedQuestion.canReopen ? (
-                        <details className="detail-disclosure">
+                        <details className="nested-tool">
                           <summary>Discussion controls</summary>
                           {selectedQuestion.canRequestClarification ? (
                             <div className="response-form">
@@ -4293,7 +4465,7 @@ export default function Home() {
                         </details>
                       ) : null}
 
-                      <details className="detail-disclosure">
+                      <details className="nested-tool">
                         <summary>Assignment routing <span className="section-count">{selectedQuestion.assignmentHistory.length}</span></summary>
                         <div className="owner-routing"><strong>Current route:</strong> owner via {selectedQuestion.routing.ownerSource.replaceAll("_", " ")}{selectedQuestion.routing.ownerRuleKey ? ` (${selectedQuestion.routing.ownerRuleKey})` : ""} · reviewer via {selectedQuestion.routing.reviewerSource.replaceAll("_", " ")}{selectedQuestion.routing.reviewerRuleKey ? ` (${selectedQuestion.routing.reviewerRuleKey})` : ""} · ownership v{selectedQuestion.routing.ownershipVersion} · policy v{selectedQuestion.routing.policyVersion}</div>
                         <div className="response-list">
@@ -4318,9 +4490,11 @@ export default function Home() {
                           </form>
                         ) : null}
                       </details>
+                        </div>
+                      </details>
 
-                      <section>
-                        <h3>Options</h3>
+                      <section className="record-section question-options-section">
+                        <div className="record-section-heading"><div><span>Available paths</span><h3>Compare options</h3></div><small>The recommendation remains advisory</small></div>
                         <div className="options">
                           {selectedQuestion.options.map((option) => (
                             <button
@@ -4613,14 +4787,19 @@ export default function Home() {
                       ) : !selectedQuestion.canAccept ? (
                         <div className="owner-routing"><strong>Shared review only.</strong> Add a response here; the configured owner or required security reviewer must accept the decision from My Inbox.</div>
                       ) : (
-                        <section>
-                          <label htmlFor="rationale"><h3>Required decision rationale</h3></label>
+                        <section className="approval-panel">
+                          <div className="approval-heading">
+                            <span><BridgeIcon name="decisions" size={20} /></span>
+                            <div><h3>Human approval</h3><p>Accepting creates the authoritative Bridge decision. The agent recommendation remains advisory.</p></div>
+                          </div>
+                          <label htmlFor="rationale">Required decision rationale</label>
                           <textarea id="rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} />
                           <button className="primary" type="button" disabled={submitting || !selectedOption} onClick={() => void acceptDecision()}>
                             {submitting ? "Creating decision…" : "Accept selected answer"}
                           </button>
                         </section>
                       )}
+                      </div>
                     </article>
                   ) : null}
                 </div>
@@ -4629,7 +4808,7 @@ export default function Home() {
           ) : (
             <>
               <div className="title-row">
-                <div><h1>Review agent-generated specifications</h1><p>Draft bodies are immutable; approval applies to one explicit version.</p></div>
+                <div><span className="page-eyebrow">Governed documents</span><h1>Specification reviews</h1><p>Read agent-published drafts as clear documents, then review or approve one immutable version.</p></div>
                 <button className="secondary" type="button" onClick={() => void Promise.all([loadArtifacts(), loadNotifications()])}>Refresh</button>
               </div>
 
@@ -4637,8 +4816,8 @@ export default function Home() {
               {!artifactsLoading && artifacts.length === 0 ? <div className="empty">No specifications have been published.</div> : null}
 
               {!artifactsLoading && artifacts.length > 0 ? (
-                <div className="decision-layout">
-                  <div className="question-list" aria-label="Specification reviews">
+                <div className="decision-layout specification-layout">
+                  <div className="question-list specification-list" aria-label="Specification reviews">
                     {artifacts.map((artifact) => {
                       const version = currentVersion(artifact);
                       const displayedStatus = displayedArtifactStatus(version);
@@ -4646,10 +4825,10 @@ export default function Home() {
                         <button
                           type="button"
                           key={artifact.id}
-                          className={artifact.id === selectedArtifactId ? "question-row selected" : "question-row"}
+                          className={artifact.id === selectedArtifactId ? "question-row specification-row selected" : "question-row specification-row"}
                           onClick={() => setSelectedArtifactId(artifact.id)}
                         >
-                          <span className="document-mark" aria-hidden="true">§</span>
+                          <span className="document-mark" aria-hidden="true"><BridgeIcon name="specifications" size={16} /></span>
                           <span><strong>{artifact.title}</strong><small>{artifact.type.replaceAll("_", " ")} · version {version?.version ?? "?"}</small></span>
                           <span className={`status status-${displayedStatus}`}>{displayedStatus.replaceAll("_", " ")}</span>
                         </button>
@@ -4659,26 +4838,54 @@ export default function Home() {
 
                   {selectedArtifact && selectedArtifactVersion ? (
                     <article className="question-detail specification-detail">
-                      <div className="detail-heading">
-                        <div><small>{selectedArtifact.id} · {selectedArtifact.type.replaceAll("_", " ")} · version {selectedArtifactVersion.version}</small><h2>{selectedArtifact.title}</h2></div>
-                        <span className={`status status-${displayedArtifactStatus(selectedArtifactVersion)}`}>{displayedArtifactStatus(selectedArtifactVersion).replaceAll("_", " ")}</span>
-                      </div>
-
-                      <section>
-                        <h3>Version summary</h3>
-                        <p>{selectedArtifactVersion.summary}</p>
-                        <div className="spec-meta">
-                          <span>Published by {selectedArtifactVersion.createdById}</span>
-                          <span>Reviewers: {selectedArtifact.reviewerIds.join(", ")}</span>
-                          <span>Approvals: {selectedArtifactVersion.approvalStatus.approvedCount}/{selectedArtifactVersion.approvalStatus.requiredCount}</span>
-                          <span>Scope: {selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "project"}</span>
+                      <header className="specification-header">
+                        <div className="specification-title-block">
+                          <span className="specification-type"><BridgeIcon name="specifications" size={15} />{selectedArtifact.type.replaceAll("_", " ")}</span>
+                          <h2>{selectedArtifact.title}</h2>
+                          <small title={selectedArtifact.id}>Immutable governed record · published {new Date(selectedArtifactVersion.createdAt).toLocaleDateString()}</small>
                         </div>
+                        <div className="specification-state">
+                          <span className={`status status-${displayedArtifactStatus(selectedArtifactVersion)}`}>{displayedArtifactStatus(selectedArtifactVersion).replaceAll("_", " ")}</span>
+                          <span>Version {selectedArtifactVersion.version}</span>
+                        </div>
+                      </header>
+
+                      <section className="specification-overview" aria-labelledby="review-brief-title">
+                        <div className="spec-brief">
+                          <div className="spec-brief-copy">
+                            <span>Review brief</span>
+                            <h3 id="review-brief-title">Agent summary</h3>
+                            <p>{selectedArtifactVersion.summary}</p>
+                          </div>
+                          <div className="spec-approval-meter">
+                            <span>Human approval</span>
+                            <strong>{selectedArtifactVersion.approvalStatus.approvedCount}<small> / {selectedArtifactVersion.approvalStatus.requiredCount}</small></strong>
+                            <div aria-hidden="true"><span style={{ width: `${Math.min(100, (selectedArtifactVersion.approvalStatus.approvedCount / Math.max(1, selectedArtifactVersion.approvalStatus.requiredCount)) * 100)}%` }} /></div>
+                            <small>{selectedArtifactVersion.approvalStatus.remainingCount === 0 ? "Quorum complete" : `${selectedArtifactVersion.approvalStatus.remainingCount} remaining`}</small>
+                          </div>
+                        </div>
+                        <dl className="spec-meta-line">
+                          <div><dt>Publisher</dt><dd title={selectedArtifactVersion.createdById}>{displayIdentityName(selectedArtifactVersion.createdById, principals)}</dd></div>
+                          <div><dt>Human reviewers</dt><dd title={selectedArtifact.reviewerIds.join(", ")}>{selectedArtifact.reviewerIds.map((reviewerId) => displayIdentityName(reviewerId, principals)).join(", ") || "Not assigned"}</dd></div>
+                          <div><dt>Scope</dt><dd>{selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "Project"}</dd></div>
+                          <div><dt>Version</dt><dd>{selectedArtifactVersion.version}</dd></div>
+                        </dl>
                       </section>
 
-                      <section>
-                        <h3>Specification body</h3>
-                        <pre className="spec-body">{selectedArtifactVersion.body}</pre>
+                      <section className="specification-reader" aria-labelledby="specification-document-title">
+                        <div className="spec-reader-heading">
+                          <span className="reader-mark"><BridgeIcon name="specifications" size={18} /></span>
+                          <div><span>Readable document</span><h3 id="specification-document-title">Specification content</h3></div>
+                          <span className="reader-mode">Rendered Markdown</span>
+                        </div>
+                        <div className="spec-paper"><MarkdownDocument headingLevelOffset={1} omitLeadingHeading source={selectedArtifactVersion.body} /></div>
+                        <details className="spec-source-disclosure">
+                          <summary>View immutable Markdown source <span>Technical view</span></summary>
+                          <pre className="spec-source">{selectedArtifactVersion.body}</pre>
+                        </details>
                       </section>
+
+                      <div className="specification-controls">
 
                       <details className="detail-disclosure">
                         <summary>Review feedback <span className="section-count">{selectedArtifactVersion.reviews.length}</span></summary>
@@ -4845,8 +5052,12 @@ export default function Home() {
                           <strong>Your approval is recorded.</strong> {selectedArtifactVersion.approvalStatus.remainingCount} more distinct human approval{selectedArtifactVersion.approvalStatus.remainingCount === 1 ? " is" : "s are"} required.
                         </div>
                       ) : canReviewSelectedArtifact ? (
-                        <section>
-                          <label htmlFor="approval-rationale"><h3>Required approval rationale</h3></label>
+                        <section className="approval-panel specification-approval-panel">
+                          <div className="approval-heading">
+                            <span><BridgeIcon name="decisions" size={20} /></span>
+                            <div><h3>Human specification approval</h3><p>Your approval applies only to immutable version {selectedArtifactVersion.version}. Agent publication does not grant approval authority.</p></div>
+                          </div>
+                          <label htmlFor="approval-rationale">Required approval rationale</label>
                           <textarea
                             id="approval-rationale"
                             value={approvalRationale}
@@ -4864,6 +5075,7 @@ export default function Home() {
                       ) : (
                         <div className="owner-routing"><strong>Shared review only.</strong> A configured specification reviewer or project administrator must approve this version.</div>
                       )}
+                      </div>
                     </article>
                   ) : null}
                 </div>
