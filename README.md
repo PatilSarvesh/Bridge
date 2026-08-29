@@ -61,8 +61,9 @@ pnpm dev
 `pnpm services:down` stops the containers and preserves their volumes. To intentionally delete only
 this Compose project's local database and object-storage data, run
 `pnpm services:reset -- --confirm`. The reset guard is required because it is irreversible for
-these local volumes. Override the documented ports or local-only credentials with the matching
-`BRIDGE_*` values in `.env.example` when a host service already occupies a default port.
+these local volumes. The PostgreSQL database, bootstrap user, and local role names are fixed to
+match the init script; override only the documented ports or local-only object-storage credentials
+with the matching `BRIDGE_*` values in `.env.example` when needed.
 
 The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, mapped least-privilege resource scopes for non-human REST/MCP access, bounded provider-group membership synchronization, the CLI can use public-client Authorization Code + PKCE with operating-system credential storage, and standalone MCP can validate bearer tokens against a dedicated OIDC audience. Successful human web sign-in and logout append tenant-scoped metadata-only organization audit events; failed or untrusted authentication attempts are never attributed to a tenant. Full MCP authorization-server provisioning, external token scope issuance, provider-backed invitations, SCIM protocol hosting, and live identity-provider validation remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
 

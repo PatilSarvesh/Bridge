@@ -54,4 +54,8 @@ test("compose declares durable local dependencies and health gating", async () =
   assert.match(contents, /bridge-postgres-data/);
   assert.match(contents, /bridge-object-storage-data/);
   assert.match(contents, /pg_isready/);
+  assert.match(contents, /POSTGRES_DB: bridge/);
+  assert.match(contents, /POSTGRES_USER: bridge/);
+  assert.match(contents, /POSTGRES_PASSWORD: bridge/);
+  assert.doesNotMatch(contents, /BRIDGE_POSTGRES_(DB|USER|PASSWORD)/);
 });

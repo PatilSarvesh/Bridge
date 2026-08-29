@@ -4,9 +4,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${BRIDGE_POSTGRES_DB:-bridge}
-      POSTGRES_USER: ${BRIDGE_POSTGRES_USER:-bridge}
-      POSTGRES_PASSWORD: ${BRIDGE_POSTGRES_PASSWORD:-bridge}
+      POSTGRES_DB: bridge
+      POSTGRES_USER: bridge
+      POSTGRES_PASSWORD: bridge
     ports:
       - "${BRIDGE_POSTGRES_PORT:-5433}:5432"
     volumes:
