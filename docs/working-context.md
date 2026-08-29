@@ -7,7 +7,7 @@
 | Last updated | 2026-08-29, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Latest implementation slice | BRG-100 immutable audit version lineage for administrative changes; implemented on feature branch `codex/brg-100-audit-lineage` and pending review |
+| Latest implementation slice | BRG-101 bounded REST/MCP request rate limiting; implemented on feature branch `codex/brg-101-rate-limits` and pending review |
 | Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
@@ -2821,6 +2821,31 @@ Deliberate boundaries:
 - Version fields are metadata only and do not replace optimistic concurrency checks, authorization,
   human approval, or REST-canonical/MCP-optional boundaries.
 
+### 20.101 Added bounded REST/MCP request rate limiting (BRG-101)
+
+Implemented and locally verified:
+
+1. The API applies fixed-window limits to `/v1` authentication, read, and write routes. Keys are
+   hashed from the untrusted network source, credential/principal hint, method, and route so the
+   process-local state never stores raw bearer tokens, cookies, or customer content. Health and
+   metrics probes remain available for operations.
+2. The standalone MCP process applies a transport limit before authentication and a second
+   authenticated organization/principal/tool limit inside the MCP server. Both paths use the
+   shared bounded limiter and return sanitized retryable errors; MCP remains optional.
+3. Allowed responses expose standard limit/reset headers, rejected API/MCP HTTP requests return
+   `429` with `Retry-After`, and rate-limit denials are counted through the existing bounded
+   Prometheus registry without high-cardinality or tenant labels.
+4. Observability, API, MCP transport, and MCP tool tests cover window reset, bounded key eviction,
+   health-path exemption, sanitized errors, headers, and denial metrics.
+
+Deliberate boundaries:
+
+- This is a process-local abuse safeguard, not a distributed limiter, tenant billing quota, or
+  replacement for a production API gateway. Deployment must enforce organization/principal quotas
+  across instances and calibrate the defaults from pilot traffic.
+- Rate limiting does not change authorization, human approval authority, REST canonicality, or
+  MCP optionality, and no production database command was run.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2911,6 +2936,8 @@ Deliberate boundaries:
 - Slack pilot notification handler and Incoming Webhook sender: `apps/worker/src/slack.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
+- Bounded transport rate limiter and privacy-safe rate-limit keys: `packages/observability/src/rate-limit.ts`
+- MCP HTTP rate-limit boundary: `apps/mcp/src/http-rate-limit.ts`, `apps/mcp/src/server.ts`
 - Observability behavior and boundaries: `docs/observability.md`
 - Product analytics definitions and privacy boundary: `docs/product-analytics.md`
 - Pilot readiness manifest, reports, local evidence runner, and runbook: `config/pilot-readiness.json`, `scripts/pilot-readiness.mjs`, `scripts/pilot-readiness-local.mjs`, `docs/runbooks/pilot-readiness.md`

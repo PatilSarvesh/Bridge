@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
+export * from "./rate-limit.js";
 export * from "./metrics.js";
 
 export const correlationIdHeader = "x-bridge-correlation-id";

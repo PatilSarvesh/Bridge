@@ -1,7 +1,7 @@
 import { BridgeService, InMemoryBridgeRepository } from "@bridge/application";
 import type { AuthenticationProvider } from "@bridge/auth";
 import { BridgeError, type Principal, type Project } from "@bridge/domain";
-import { BridgeMetrics } from "@bridge/observability";
+import { BridgeMetrics, BridgeRateLimiter } from "@bridge/observability";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -163,6 +163,49 @@ describe("Bridge API vertical slice", () => {
     expect(writeOnlyQuestion.json()).toMatchObject({
       details: { requiredScope: "bridge:questions:read" },
     });
+  });
+
+  it("enforces bounded route limits while leaving health probes available", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    const app = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      metrics,
+      rateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: { read: { maxRequests: 1, windowMs: 60_000 } },
+      }),
+    });
+    apps.push(app);
+
+    const headers = { "x-bridge-principal-id": demoPrincipals.architect.id };
+    const first = await app.inject({ method: "GET", url: "/v1/projects", headers });
+    const second = await app.inject({ method: "GET", url: "/v1/projects", headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers).toMatchObject({
+      "ratelimit-limit": "1",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "60",
+    });
+    expect(second.statusCode).toBe(429);
+    expect(second.headers).toMatchObject({
+      "ratelimit-limit": "1",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "60",
+      "retry-after": "60",
+    });
+    expect(second.json()).toEqual({
+      code: "RATE_LIMITED",
+      message: "Too many requests. Retry later.",
+      details: { retryAfterSeconds: 60 },
+    });
+
+    const live = await app.inject({ method: "GET", url: "/health/live" });
+    expect(live.statusCode).toBe(200);
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_rate_limit_denials_total{bucket="read",service="api"} 1',
+    );
   });
 
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {

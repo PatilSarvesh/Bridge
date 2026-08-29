@@ -67,11 +67,15 @@ import {
 import type { BridgeService, ProjectSupportView } from "@bridge/application";
 import {
   BridgeMetrics,
+  BridgeRateLimiter,
   correlationIdHeader,
   createSafeLogger,
+  hashRateLimitKey,
+  rateLimitHeaders,
   resolveCorrelationId,
   runWithCorrelationContext,
 } from "@bridge/observability";
+import type { BridgeRateLimitBucket } from "@bridge/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -83,6 +87,7 @@ export interface BuildAppOptions {
   readonly corsOrigin?: string;
   readonly logger?: boolean;
   readonly metrics?: BridgeMetrics;
+  readonly rateLimiter?: BridgeRateLimiter;
 }
 
 async function resolvePrincipal(
@@ -268,6 +273,27 @@ function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefin
     : bridgeScopes.write;
 }
 
+function apiRateLimitBucket(request: FastifyRequest): BridgeRateLimitBucket | undefined {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (!route.startsWith("/v1/")) return undefined;
+  if (route.startsWith("/v1/auth/")) return "auth";
+  return request.method === "GET" || request.method === "HEAD" ? "read" : "write";
+}
+
+function apiRateLimitKey(request: FastifyRequest): string {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "unknown";
+  const source = request.raw.socket.remoteAddress ?? request.ip ?? "unknown";
+  const principalHeader = request.headers["x-bridge-principal-id"];
+  const identityHint = typeof principalHeader === "string"
+    ? `principal:${principalHeader}`
+    : typeof request.headers.authorization === "string"
+    ? `authorization:${request.headers.authorization}`
+    : typeof request.headers.cookie === "string"
+    ? `cookie:${request.headers.cookie}`
+    : "anonymous";
+  return hashRateLimitKey("api", source, identityHint, request.method, route);
+}
+
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const developmentPrincipalHeaderAllowed = options.allowDevelopmentPrincipalHeader ??
     process.env.NODE_ENV !== "production";
@@ -279,6 +305,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const app = Fastify({ logger: false });
   const metrics = options.metrics ?? new BridgeMetrics();
+  const rateLimiter = options.rateLimiter ?? new BridgeRateLimiter();
   const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
   await app.register(cors, {
@@ -286,7 +313,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
     allowedHeaders: ["authorization", "content-type", "x-bridge-principal-id", correlationIdHeader],
-    exposedHeaders: [correlationIdHeader],
+    exposedHeaders: [
+      correlationIdHeader,
+      "RateLimit-Limit",
+      "RateLimit-Remaining",
+      "RateLimit-Reset",
+      "Retry-After",
+    ],
   });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -294,6 +327,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const correlationId = resolveCorrelationId(typeof supplied === "string" ? supplied : undefined);
     reply.header(correlationIdHeader, correlationId);
     requestStartedAt.set(request, performance.now());
+    const bucket = apiRateLimitBucket(request);
+    if (bucket) {
+      const decision = rateLimiter.check(apiRateLimitKey(request), bucket);
+      for (const [name, value] of Object.entries(rateLimitHeaders(decision))) reply.header(name, value);
+      if (!decision.allowed) {
+        metrics.recordRateLimitDenial({ service: "api", bucket });
+        reply.header("Retry-After", decision.retryAfterSeconds.toString());
+        runWithCorrelationContext(
+          { correlationId, source: "api" },
+          () => done(new BridgeError(
+            "RATE_LIMITED",
+            "Too many requests. Retry later.",
+            429,
+            { retryAfterSeconds: decision.retryAfterSeconds },
+          )),
+        );
+        return;
+      }
+    }
     runWithCorrelationContext({ correlationId, source: "api" }, done);
   });
 

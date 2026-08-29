@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createDemoRuntime, demoPrincipals, demoProject } from "@bridge/test-support";
-import { BridgeMetrics } from "@bridge/observability";
+import { BridgeMetrics, BridgeRateLimiter } from "@bridge/observability";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createBridgeMcpServer } from "./bridge-server.js";
@@ -502,5 +502,40 @@ describe("Bridge MCP tools", () => {
       }),
     ]));
     expect(metrics.renderPrometheus()).not.toContain("This argument must never become a metric label");
+  });
+
+  it("limits repeated tool calls by hashed principal key without exposing request data", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    const rateLimiter = new BridgeRateLimiter({
+      now: () => 0,
+      policies: { mcp: { maxRequests: 1, windowMs: 1_000 } },
+    });
+    const readOnlyAgent = { ...demoPrincipals.agent, scopes: ["bridge:read"] } as const;
+    const server = createBridgeMcpServer(runtime.service, readOnlyAgent, { metrics, rateLimiter });
+    const client = new Client({ name: "mcp-rate-limit-test-client", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup.push(async () => {
+      await client.close();
+      await server.close();
+    });
+
+    const first = await client.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    const second = await client.callTool({
+      name: "bridge_list_artifacts",
+      arguments: { projectId: demoProject.id },
+    });
+    expect(first.isError).not.toBe(true);
+    expect(second.isError).toBe(true);
+    expect((second.content as Array<{ readonly text?: string }>)[0]?.text).toContain("RATE_LIMITED");
+    expect((second.content as Array<{ readonly text?: string }>)[0]?.text).not.toContain(demoProject.id);
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_rate_limit_denials_total{bucket="mcp",service="mcp"} 1',
+    );
   });
 });

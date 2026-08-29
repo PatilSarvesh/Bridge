@@ -1026,7 +1026,7 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 - CSRF protection for cookie-backed web commands.
 - Content Security Policy and output encoding in the web UI.
 - Input size limits and schema validation on every transport.
-- Rate limits by organization, principal, endpoint, and tool.
+- Bounded transport rate limits by hashed source/credential, endpoint, and MCP tool; distributed organization/principal quotas remain a deployment control.
 - High-confidence secret blocking at the shared application boundary for durable text writes; broader DLP and malware scanning remain deployment/content-pipeline controls.
 - Signed webhook verification and replay protection.
 - SSRF protection for integration and external-link fetchers.
@@ -1036,6 +1036,16 @@ Avoid placing full sensitive content in the audit log. Use immutable record IDs 
 - Break-glass administration that is time-bound, justified, and audited.
 
 The implemented secret policy rejects recognized Bridge/service-provider tokens, private-key headers, bearer credentials, credential-bearing connection URLs, and long secret URL parameters before persistence. It deliberately does not mutate immutable questions, decisions, assumptions, runs, or specification versions. Errors expose only a controlled content type, detector type, and field path. The operational counter uses those bounded labels and never includes organization, project, principal, record, or matched content. Detection is an accidental-leak guardrail rather than a claim of entropy-based scanning, comprehensive DLP, or malware inspection.
+
+The API applies a bounded process-local fixed-window safeguard to `/v1` routes using a hashed
+source/credential key plus route, method, and auth/read/write bucket. The standalone MCP process
+applies the same bounded policy at the `/mcp` HTTP transport and again by authenticated
+organization/principal/tool inside the MCP server. Allowed responses expose `RateLimit-Limit`,
+`RateLimit-Remaining`, and `RateLimit-Reset`; rejected requests return `429` with `Retry-After`
+and a sanitized `RATE_LIMITED` error. These controls prevent an unbounded local flood without
+storing credentials or customer content, but they are not a distributed gateway limiter or a
+tenant billing quota; production must add those deployment controls and calibrate them from pilot
+traffic.
 
 ### 20.3 Agent-specific threats
 
