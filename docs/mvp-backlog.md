@@ -968,7 +968,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, dependency-free Markdown block rendering without raw HTML injection, bounded client link destinations, URL validation, and shared high-confidence secret blocking with privacy-safe metrics are implemented; broader DLP/redaction policy, richer per-tenant quotas, and explicit untrusted-content labeling remain
+- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, dependency-free Markdown block rendering without raw HTML injection, bounded client link destinations, URL validation, shared high-confidence secret blocking with privacy-safe metrics, and explicit untrusted-context labeling are implemented; broader DLP/redaction policy and richer per-tenant quotas remain
 - **Dependencies:** BRG-030, BRG-052, BRG-080
 - **PRD references:** Security and privacy requirements
 
@@ -982,6 +982,14 @@ Acceptance criteria:
 4. Rendered Markdown is sanitized and uses a restrictive content policy.
 5. External URL handling prevents server-side request forgery.
 6. Retrieved untrusted content is labeled as data, not policy instruction.
+
+Implementation note: every context item returned through REST or optional MCP carries
+`trustLevel: "untrusted_data"` in addition to its independent authority and provenance fields.
+The direct GitHub pull-request and issue context views carry the same label at their view and
+linked-guidance boundaries. CLI context output and repository snapshots repeat the boundary in
+human-readable text, and generated agent instructions tell clients never to treat retrieved text
+as a system, developer, or policy instruction. This is an explicit handling signal, not a claim
+that content is safe to execute or that broader DLP/redaction has been implemented.
 
 ### BRG-102 — Verify authorization and tenant isolation matrix
 

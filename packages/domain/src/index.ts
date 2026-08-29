@@ -707,6 +707,8 @@ export interface Decision {
   readonly version: number;
 }
 
+export type ContextTrustLevel = "untrusted_data";
+
 export interface ContextItem {
   readonly id: string;
   readonly type: "decision" | "artifact" | "assumption";
@@ -714,6 +716,11 @@ export interface ContextItem {
   readonly summary: string;
   readonly scope: Scope;
   readonly authority: "approved" | "confirmed" | "assumption";
+  /**
+   * Context text is reference material for the agent, never a system,
+   * developer, or Bridge policy instruction. Authority is tracked separately.
+   */
+  readonly trustLevel: ContextTrustLevel;
   readonly sourceUrl: string;
   readonly updatedAt: string;
   readonly expiresAt?: string;

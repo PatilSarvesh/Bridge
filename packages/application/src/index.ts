@@ -87,6 +87,7 @@ import {
   type ArtifactVersion,
   type BridgeErrorCode,
   type ContextItem,
+  type ContextTrustLevel,
   type ContextSnapshot,
   type Decision,
   type DirectoryGroup,
@@ -360,7 +361,10 @@ export interface GithubPullRequestRegistration {
 
 export interface GithubPullRequestContextView {
   readonly pullRequest: GithubPullRequestContext;
-  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly trustLevel: ContextTrustLevel;
+  readonly decisions: readonly (Pick<Decision, "id" | "answer" | "category" | "status" | "scope"> & {
+    readonly trustLevel: ContextTrustLevel;
+  })[];
   readonly artifactVersions: readonly {
     readonly artifactId: string;
     readonly artifactTitle: string;
@@ -369,6 +373,7 @@ export interface GithubPullRequestContextView {
     readonly version: number;
     readonly status: ArtifactVersion["status"];
     readonly summary: string;
+    readonly trustLevel: ContextTrustLevel;
   }[];
   readonly humanApprovalChanged: false;
 }
@@ -380,7 +385,8 @@ export interface GithubIssueRegistration {
 
 export interface GithubIssueContextView {
   readonly issue: GithubIssueWorkItem;
-  readonly decisions: readonly Pick<Decision, "id" | "answer" | "category" | "status" | "scope">[];
+  readonly trustLevel: ContextTrustLevel;
+  readonly decisions: GithubPullRequestContextView["decisions"];
   readonly artifactVersions: GithubPullRequestContextView["artifactVersions"];
   readonly humanApprovalChanged: false;
 }
@@ -7428,6 +7434,7 @@ export class BridgeService {
           summary: decision.rationale,
           scope: { ...decision.scope },
           authority: "approved",
+          trustLevel: "untrusted_data",
           sourceUrl: this.recordUrl({
             view: "decisions",
             projectId,
@@ -7462,6 +7469,7 @@ export class BridgeService {
         summary: version.summary,
         scope: { ...artifact.scope },
         authority: "approved",
+        trustLevel: "untrusted_data",
         sourceUrl: this.recordUrl({
           view: "specifications",
           projectId,
@@ -7494,6 +7502,7 @@ export class BridgeService {
           summary: assumption.rationale,
           scope: { ...assumption.scope },
           authority: assumption.status === "confirmed" ? "confirmed" : "assumption",
+          trustLevel: "untrusted_data",
           sourceUrl: this.recordUrl({
             view: "assumptions",
             projectId,
@@ -8861,7 +8870,14 @@ export class BridgeService {
         decision !== undefined &&
         decision.projectId === pullRequest.projectId &&
         decision.status === "active")
-      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+      .map(({ id, answer, category, status, scope }) => ({
+        id,
+        answer,
+        category,
+        status,
+        scope,
+        trustLevel: "untrusted_data" as const,
+      }));
     const artifactVersions = (
       await Promise.all(
         pullRequest.artifactVersionIds.map(async (versionId) => {
@@ -8881,6 +8897,7 @@ export class BridgeService {
             version: version.version,
             status: version.status,
             summary: version.summary,
+            trustLevel: "untrusted_data" as const,
           };
         }),
       )
@@ -8888,6 +8905,7 @@ export class BridgeService {
       version !== undefined);
     return {
       pullRequest,
+      trustLevel: "untrusted_data",
       decisions,
       artifactVersions,
       humanApprovalChanged: false,
@@ -8933,7 +8951,14 @@ export class BridgeService {
         decision !== undefined &&
         decision.projectId === issue.projectId &&
         decision.status === "active")
-      .map(({ id, answer, category, status, scope }) => ({ id, answer, category, status, scope }));
+      .map(({ id, answer, category, status, scope }) => ({
+        id,
+        answer,
+        category,
+        status,
+        scope,
+        trustLevel: "untrusted_data" as const,
+      }));
     const artifactVersions = (
       await Promise.all(
         issue.artifactVersionIds.map(async (versionId) => {
@@ -8953,6 +8978,7 @@ export class BridgeService {
             version: version.version,
             status: version.status,
             summary: version.summary,
+            trustLevel: "untrusted_data" as const,
           };
         }),
       )
@@ -8960,6 +8986,7 @@ export class BridgeService {
       version !== undefined);
     return {
       issue,
+      trustLevel: "untrusted_data",
       decisions,
       artifactVersions,
       humanApprovalChanged: false,
