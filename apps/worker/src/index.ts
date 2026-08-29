@@ -10,9 +10,10 @@ import {
 
 import { startWorkerMetricsServer } from "./metrics-server.js";
 
-export * from "./email.js";
 export * from "./codex.js";
+export * from "./email.js";
 export * from "./metrics-server.js";
+export * from "./ses.js";
 export * from "./slack.js";
 
 export interface ReviewableDecision {
@@ -30,12 +31,7 @@ export interface ExpirableAssumption {
 export interface OutboxStore {
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
   completeOutboxEvent(eventId: string, processedAt: string): Promise<void>;
-  failOutboxEvent(
-    eventId: string,
-    lastError: string,
-    availableAt: string,
-    deadLetter: boolean,
-  ): Promise<void>;
+  failOutboxEvent(eventId: string, lastError: string, availableAt: string, deadLetter: boolean): Promise<void>;
 }
 
 export type OutboxHandler = (event: OutboxEvent) => Promise<void>;
@@ -110,62 +106,51 @@ export async function runOutboxCycle(
   const retryJitterRatio = options.retryJitterRatio ?? 0.25;
   retryDelayMs(1, baseBackoffMs, maxBackoffMs, retryJitterRatio, () => 1);
   const events = await store.claimOutboxEvents(currentTime.toISOString(), options.batchSize ?? 25);
-  const oldestClaimedAgeMs = events.length === 0
-    ? 0
-    : Math.max(
-        0,
-        currentTime.getTime() - Math.min(...events.map((event) => new Date(event.createdAt).getTime())),
-      );
+  const oldestClaimedAgeMs =
+    events.length === 0
+      ? 0
+      : Math.max(0, currentTime.getTime() - Math.min(...events.map((event) => new Date(event.createdAt).getTime())));
   let processed = 0;
   let retried = 0;
   let deadLettered = 0;
 
   for (const event of events) {
-    await runWithCorrelationContext(
-      { correlationId: event.correlationId, source: "worker" },
-      async () => {
-        try {
-          await handler(event);
-          await store.completeOutboxEvent(event.id, now().toISOString());
-          options.logger?.info("outbox.processed", {
-            eventId: event.id,
-            projectId: event.projectId,
-            type: event.type,
-            attempts: event.attempts,
-            status: "processed",
-          });
-          processed += 1;
-        } catch (error) {
-          const lastError = error instanceof Error ? error.message : String(error);
-          const deadLetter = event.attempts >= maxAttempts;
-          const delay = deadLetter
-            ? 0
-            : retryDelayMs(
-                event.attempts,
-                baseBackoffMs,
-                maxBackoffMs,
-                retryJitterRatio,
-                options.random,
-              );
-          await store.failOutboxEvent(
-            event.id,
-            lastError,
-            new Date(currentTime.getTime() + delay).toISOString(),
-            deadLetter,
-          );
-          options.logger?.error("outbox.failed", {
-            eventId: event.id,
-            projectId: event.projectId,
-            type: event.type,
-            attempts: event.attempts,
-            status: deadLetter ? "dead_letter" : "retry_scheduled",
-            error,
-          });
-          if (deadLetter) deadLettered += 1;
-          else retried += 1;
-        }
-      },
-    );
+    await runWithCorrelationContext({ correlationId: event.correlationId, source: "worker" }, async () => {
+      try {
+        await handler(event);
+        await store.completeOutboxEvent(event.id, now().toISOString());
+        options.logger?.info("outbox.processed", {
+          eventId: event.id,
+          projectId: event.projectId,
+          type: event.type,
+          attempts: event.attempts,
+          status: "processed",
+        });
+        processed += 1;
+      } catch (error) {
+        const lastError = error instanceof Error ? error.message : String(error);
+        const deadLetter = event.attempts >= maxAttempts;
+        const delay = deadLetter
+          ? 0
+          : retryDelayMs(event.attempts, baseBackoffMs, maxBackoffMs, retryJitterRatio, options.random);
+        await store.failOutboxEvent(
+          event.id,
+          lastError,
+          new Date(currentTime.getTime() + delay).toISOString(),
+          deadLetter,
+        );
+        options.logger?.error("outbox.failed", {
+          eventId: event.id,
+          projectId: event.projectId,
+          type: event.type,
+          attempts: event.attempts,
+          status: deadLetter ? "dead_letter" : "retry_scheduled",
+          error,
+        });
+        if (deadLetter) deadLettered += 1;
+        else retried += 1;
+      }
+    });
   }
 
   const result = { claimed: events.length, processed, retried, deadLettered };
@@ -193,8 +178,7 @@ export function assumptionsDueForExpiry(
 ): readonly ExpirableAssumption[] {
   const nowTime = now.getTime();
   return assumptions.filter(
-    (assumption) =>
-      assumption.status === "active" && new Date(assumption.expiresAt).getTime() <= nowTime,
+    (assumption) => assumption.status === "active" && new Date(assumption.expiresAt).getTime() <= nowTime,
   );
 }
 
@@ -251,6 +235,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           assumptionExpiryIntervalMs: configuration.assumptionExpiryIntervalMs,
           blockingQuestionEscalationCycle: runtime.blockingQuestionEscalationCycle,
           blockingQuestionEscalationIntervalMs: configuration.blockingQuestionEscalationIntervalMs,
+          ...(runtime.emailDigestCycle ? { emailDigestCycle: runtime.emailDigestCycle } : {}),
           emailDigestIntervalMs: configuration.emailDigestIntervalMs,
           metrics: runtime.metrics,
           signal: controller.signal,

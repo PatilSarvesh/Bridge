@@ -1,12 +1,12 @@
 import type { OutboxEvent } from "@bridge/domain";
 import { describe, expect, it } from "vitest";
-
-import {
-  loadWorkerConfiguration,
-  runOutboxWorker,
-  type OutboxWorkerOptions,
-} from "./runtime.js";
 import type { OutboxStore } from "./index.js";
+import {
+  composeOutboxHandlers,
+  loadWorkerConfiguration,
+  type OutboxWorkerOptions,
+  runOutboxWorker,
+} from "./runtime.js";
 
 function event(): OutboxEvent {
   return {
@@ -54,9 +54,11 @@ class RuntimeStore implements OutboxStore {
 
 describe("worker runtime", () => {
   it("loads a maintenance-database Slack configuration with bounded defaults", () => {
-    expect(loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker:password@example.test/bridge",
-    })).toEqual({
+    expect(
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker:password@example.test/bridge",
+      }),
+    ).toEqual({
       databaseUrl: "postgresql://worker:password@example.test/bridge",
       publicWebUrl: "http://127.0.0.1:3000/",
       channel: "slack",
@@ -77,31 +79,69 @@ describe("worker runtime", () => {
   });
 
   it("rejects unsupported channels and unsafe public URLs", () => {
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_WORKER_CHANNEL: "email",
-    })).toThrow("BRIDGE_WORKER_CHANNEL currently supports only `slack`.");
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_PUBLIC_WEB_URL: "file:///tmp/bridge",
-    })).toThrow("BRIDGE_PUBLIC_WEB_URL must use HTTP or HTTPS.");
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_WORKER_RETRY_JITTER_PERCENT: "101",
-    })).toThrow("BRIDGE_WORKER_RETRY_JITTER_PERCENT must be between 0 and 100.");
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_WORKER_BASE_BACKOFF_MS: "5000",
-      BRIDGE_WORKER_MAX_BACKOFF_MS: "1000",
-    })).toThrow("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_WORKER_METRICS_HOST: "http://example.test",
-    })).toThrow("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
-    expect(() => loadWorkerConfiguration({
-      BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
-      BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS: "999",
-    })).toThrow("BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS must be between 1000 and 3600000.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_CHANNEL: "sms",
+      }),
+    ).toThrow("BRIDGE_WORKER_CHANNEL must be `slack`, `email`, or `all`.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_PUBLIC_WEB_URL: "file:///tmp/bridge",
+      }),
+    ).toThrow("BRIDGE_PUBLIC_WEB_URL must use HTTP or HTTPS.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_RETRY_JITTER_PERCENT: "101",
+      }),
+    ).toThrow("BRIDGE_WORKER_RETRY_JITTER_PERCENT must be between 0 and 100.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_BASE_BACKOFF_MS: "5000",
+        BRIDGE_WORKER_MAX_BACKOFF_MS: "1000",
+      }),
+    ).toThrow("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_METRICS_HOST: "http://example.test",
+      }),
+    ).toThrow("BRIDGE_WORKER_METRICS_HOST must be a hostname or IP address without a URL scheme.");
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS: "999",
+      }),
+    ).toThrow("BRIDGE_CODEX_CONTINUATION_TIMEOUT_MS must be between 1000 and 3600000.");
+  });
+
+  it("requires and loads SES configuration only when email delivery is enabled", () => {
+    expect(() =>
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_CHANNEL: "email",
+      }),
+    ).toThrow("BRIDGE_SES_REGION is required when worker email delivery is enabled.");
+
+    expect(
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_CHANNEL: "all",
+        BRIDGE_SES_REGION: "ap-south-1",
+        BRIDGE_SES_FROM_ADDRESS: "bridge@example.test",
+        BRIDGE_EMAIL_RECIPIENTS: JSON.stringify({ usr_owner: "owner@example.test" }),
+      }),
+    ).toMatchObject({
+      channel: "all",
+      email: {
+        region: "ap-south-1",
+        fromAddress: "bridge@example.test",
+        recipients: { usr_owner: "owner@example.test" },
+      },
+    });
   });
 
   it("processes a cycle and stops cleanly when the worker is aborted", async () => {
@@ -126,6 +166,22 @@ describe("worker runtime", () => {
     expect(store.completed).toBe(1);
     expect(store.failed).toBe(0);
     expect(logs).toContain("worker.cycle_completed");
+  });
+
+  it("attempts every configured channel while preserving retry on one failure", async () => {
+    const attempts: string[] = [];
+    const handler = composeOutboxHandlers([
+      async () => {
+        attempts.push("slack");
+        throw new Error("Slack delivery failed.");
+      },
+      async () => {
+        attempts.push("email");
+      },
+    ]);
+
+    await expect(handler(event())).rejects.toThrow("Slack delivery failed.");
+    expect(attempts).toEqual(["slack", "email"]);
   });
 
   it("runs the scheduled assumption expiry cycle before delivery work", async () => {
@@ -172,10 +228,12 @@ describe("worker runtime", () => {
   });
 
   it("validates the polling interval before opening a worker loop", async () => {
-    await expect(runOutboxWorker({
-      store: new RuntimeStore(),
-      handler: async () => undefined,
-      pollIntervalMs: 100,
-    })).rejects.toThrow("Worker poll interval must be between 250 and 60000 milliseconds.");
+    await expect(
+      runOutboxWorker({
+        store: new RuntimeStore(),
+        handler: async () => undefined,
+        pollIntervalMs: 100,
+      }),
+    ).rejects.toThrow("Worker poll interval must be between 250 and 60000 milliseconds.");
   });
 });

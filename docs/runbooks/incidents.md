@@ -63,7 +63,7 @@ In-app notifications and durable outbox intents remain canonical when an email/t
 5. After provider recovery, resume the worker gradually and use existing stable idempotency keys. Replay only failed/dead-letter work after inspection.
 6. Validate delivery receipts and queue age without marking successful records manually.
 
-The current repository includes provider-neutral immediate/digest email seams and a deployable Slack outbox worker, but no live email sender/recipient directory, configured digest runtime composition, Slack workspace installation, or production provider credentials. Deployment owners must extend this procedure with the selected maintenance connection, secret provisioning, workspace evidence, and provider failure-window results.
+The current repository includes provider-neutral immediate/digest email seams, a deployable AWS SES v2 sender with a secret-managed recipient directory, and Slack/SES worker composition. It does not configure a live SES account or verified identity, bounce/complaint processing, Slack workspace installation, production credentials, or provider failure-window evidence. Deployment owners must extend this procedure with the selected maintenance connection, IAM/task-role and secret provisioning, SES/Slack evidence, and provider failure-window results. See [`email-delivery.md`](./email-delivery.md).
 
 ## Closeout
 
