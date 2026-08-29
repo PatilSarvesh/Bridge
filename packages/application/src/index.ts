@@ -134,6 +134,7 @@ import {
   type BridgeIdempotencyOutcome,
   type BridgeMetrics,
   createCorrelationId,
+  currentCorrelationContext,
   currentCorrelationId,
   runWithCorrelationContextIfAbsent,
 } from "@bridge/observability";
@@ -664,16 +665,25 @@ export interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly source?: AuditEvent["source"];
   readonly reason?: string;
   readonly policyVersion?: number;
+  readonly policyRuleKey?: string;
+  readonly assignmentId?: string;
+  readonly ownerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: QuestionRouteSource;
   readonly beforeVersion?: number;
   readonly afterVersion?: number;
   readonly createdAt: string;
 }
 
-interface AuditVersionTransition {
+interface AuditMetadata {
   readonly beforeVersion?: number;
   readonly afterVersion?: number;
+  readonly policyRuleKey?: string;
+  readonly assignmentId?: string;
+  readonly ownerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: QuestionRouteSource;
 }
 
 export interface AuditPage {
@@ -4679,6 +4689,8 @@ export class BridgeService {
       assumption.id,
       timestamp,
       policy.policyVersion,
+      undefined,
+      { policyRuleKey: policy.policyRuleKey },
     );
     this.recordIdempotency("assumption_record", "created");
     return assumption;
@@ -4780,6 +4792,8 @@ export class BridgeService {
               question.id,
               escalatedAt,
               question.policyVersion,
+              undefined,
+              { policyRuleKey: question.policyRuleKey },
             );
             await this.notify(
               repository,
@@ -5065,6 +5079,8 @@ export class BridgeService {
         reusable.id,
         timestamp,
         policy.policyVersion,
+        undefined,
+        { policyRuleKey: policy.policyRuleKey },
       );
       const submissionDisposition = reusable.status === "accepted" ? "reused_accepted" : "reused_pending";
       this.recordIdempotency("question_submit", submissionDisposition);
@@ -5144,6 +5160,13 @@ export class BridgeService {
       question.id,
       timestamp,
       question.policyVersion,
+      undefined,
+      {
+        policyRuleKey: question.policyRuleKey,
+        assignmentId: initialAssignment.id,
+        ownerRouteSource: question.routing.ownerSource,
+        reviewerRouteSource: question.routing.reviewerSource,
+      },
     );
     await this.notify(repository, principal, projectId, [...question.ownerIds, ...question.reviewerIds], {
       type: "question_assigned",
@@ -5326,6 +5349,8 @@ export class BridgeService {
         run.id,
         timestamp,
         question.policyVersion,
+        undefined,
+        { policyRuleKey: question.policyRuleKey },
       );
     }
   }
@@ -5636,6 +5661,7 @@ export class BridgeService {
         timestamp,
         question.policyVersion,
         input.reason,
+        { policyRuleKey: question.policyRuleKey },
       );
       await this.notify(
         repository,
@@ -5705,6 +5731,7 @@ export class BridgeService {
         timestamp,
         question.policyVersion,
         input.reason,
+        { policyRuleKey: question.policyRuleKey },
       );
       await this.notify(
         repository,
@@ -5838,7 +5865,14 @@ export class BridgeService {
         timestamp,
         question.policyVersion,
         input.reason,
-        { beforeVersion: question.version, afterVersion: updated.version },
+        {
+          beforeVersion: question.version,
+          afterVersion: updated.version,
+          policyRuleKey: question.policyRuleKey,
+          assignmentId: assignment.id,
+          ownerRouteSource: assignment.route.ownerSource,
+          reviewerRouteSource: assignment.route.reviewerSource,
+        },
       );
       await repository.saveOutboxEvent({
         id: `evt_${this.id()}`,
@@ -5967,6 +6001,8 @@ export class BridgeService {
       question.id,
       timestamp,
       question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(repository, principal, question.projectId, [...question.ownerIds, question.createdById], {
       type: "question_review",
@@ -6041,7 +6077,7 @@ export class BridgeService {
     });
     await this.audit(
       repository, principal, question.projectId, "question.comment_added", "question", question.id, timestamp,
-      question.policyVersion,
+      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6169,7 +6205,7 @@ export class BridgeService {
     });
     await this.audit(
       repository, principal, question.projectId, "response.proposed", "response", response.id, timestamp,
-      question.policyVersion,
+      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(repository, principal, question.projectId, [
       ...question.ownerIds,
@@ -6281,6 +6317,8 @@ export class BridgeService {
       response.id,
       timestamp,
       question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6390,6 +6428,8 @@ export class BridgeService {
       question.id,
       timestamp,
       question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6539,11 +6579,12 @@ export class BridgeService {
         timestamp,
         question.policyVersion,
         override.reason,
+        { policyRuleKey: question.policyRuleKey },
       );
     }
     await this.audit(
       repository, principal, question.projectId, "decision.accepted", "decision", decision.id, timestamp,
-      question.policyVersion,
+      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6791,6 +6832,8 @@ export class BridgeService {
       decision.id,
       timestamp,
       sourceQuestion?.policyVersion,
+      undefined,
+      sourceQuestion ? { policyRuleKey: sourceQuestion.policyRuleKey } : {},
     );
     await repository.saveOutboxEvent({
       id: `evt_${this.id()}`,
@@ -8088,12 +8131,13 @@ export class BridgeService {
 
   private filterAuditRecords(
     records: readonly AuditRecord[],
-    query: Pick<AuditListQuery, "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
+    query: Pick<AuditListQuery, "action" | "actorId" | "source" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
   ): readonly AuditRecord[] {
     return records
       .filter((event) =>
         (!query.action || event.action === query.action) &&
         (!query.actorId || event.actorId === query.actorId) &&
+        (!query.source || event.source === query.source) &&
         (!query.subjectType || event.subjectType === query.subjectType) &&
         (!query.subjectId || event.subjectId === query.subjectId) &&
         (!query.correlationId || event.correlationId === query.correlationId) &&
@@ -8137,7 +8181,8 @@ export class BridgeService {
     }
     const fields: readonly (keyof AuditRecord)[] = [
       "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
-      "action", "subjectType", "subjectId", "reason", "policyVersion", "beforeVersion", "afterVersion", "createdAt",
+      "source", "action", "subjectType", "subjectId", "reason", "policyVersion", "policyRuleKey",
+      "assignmentId", "ownerRouteSource", "reviewerRouteSource", "beforeVersion", "afterVersion", "createdAt",
     ];
     const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const body = [
@@ -8760,7 +8805,7 @@ export class BridgeService {
     action: OrganizationAuditEvent["action"],
     memberId: string,
     createdAt: string,
-    versionTransition: AuditVersionTransition = {},
+    versionTransition: AuditMetadata = {},
   ): Promise<void> {
     return this.auditOrganizationEvent(
       repository,
@@ -8780,7 +8825,7 @@ export class BridgeService {
     subjectId: string,
     createdAt: string,
     subjectType: OrganizationAuditEvent["subjectType"],
-    versionTransition: AuditVersionTransition = {},
+    versionTransition: AuditMetadata = {},
   ): Promise<void> {
     await repository.saveOrganizationAuditEvent({
       id: `oaud_${this.id()}`,
@@ -8791,6 +8836,7 @@ export class BridgeService {
       action,
       subjectType,
       subjectId,
+      source: currentCorrelationContext()?.source ?? "application",
       ...(versionTransition.beforeVersion === undefined ? {} : { beforeVersion: versionTransition.beforeVersion }),
       ...(versionTransition.afterVersion === undefined ? {} : { afterVersion: versionTransition.afterVersion }),
       createdAt,
@@ -9028,7 +9074,7 @@ export class BridgeService {
     createdAt: string,
     policyVersion?: number,
     reason?: string,
-    versionTransition: AuditVersionTransition = {},
+    metadata: AuditMetadata = {},
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
@@ -9040,10 +9086,17 @@ export class BridgeService {
       action,
       subjectType,
       subjectId,
+      source: currentCorrelationContext()?.source ?? "application",
       ...(reason ? { reason } : {}),
       ...(policyVersion === undefined ? {} : { policyVersion }),
-      ...(versionTransition.beforeVersion === undefined ? {} : { beforeVersion: versionTransition.beforeVersion }),
-      ...(versionTransition.afterVersion === undefined ? {} : { afterVersion: versionTransition.afterVersion }),
+      ...(metadata.policyRuleKey === undefined ? {} : { policyRuleKey: metadata.policyRuleKey }),
+      ...(metadata.assignmentId === undefined ? {} : { assignmentId: metadata.assignmentId }),
+      ...(metadata.ownerRouteSource === undefined ? {} : { ownerRouteSource: metadata.ownerRouteSource }),
+      ...(metadata.reviewerRouteSource === undefined
+        ? {}
+        : { reviewerRouteSource: metadata.reviewerRouteSource }),
+      ...(metadata.beforeVersion === undefined ? {} : { beforeVersion: metadata.beforeVersion }),
+      ...(metadata.afterVersion === undefined ? {} : { afterVersion: metadata.afterVersion }),
       createdAt,
     });
   }

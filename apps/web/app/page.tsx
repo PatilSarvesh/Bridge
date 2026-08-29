@@ -678,8 +678,13 @@ interface AuditRecord {
   readonly action: string;
   readonly subjectType: string;
   readonly subjectId: string;
+  readonly source?: "web" | "api" | "cli" | "mcp" | "application" | "worker" | "integration";
   readonly reason?: string;
   readonly policyVersion?: number;
+  readonly policyRuleKey?: string;
+  readonly assignmentId?: string;
+  readonly ownerRouteSource?: string;
+  readonly reviewerRouteSource?: string;
   readonly beforeVersion?: number;
   readonly afterVersion?: number;
   readonly createdAt: string;
@@ -693,7 +698,7 @@ interface AuditPage {
   readonly nextOffset?: number;
 }
 
-type AuditFilterKey = "action" | "actorId" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo";
+type AuditFilterKey = "action" | "actorId" | "source" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo";
 type AuditFilters = Partial<Record<AuditFilterKey, string>>;
 
 type View =
@@ -1614,7 +1619,7 @@ export default function Home() {
 
   const auditParameters = useCallback((offset?: number): URLSearchParams => {
     const parameters = new URLSearchParams();
-    for (const key of ["action", "actorId", "subjectType", "subjectId", "correlationId"] as const) {
+    for (const key of ["action", "actorId", "source", "subjectType", "subjectId", "correlationId"] as const) {
       if (auditFilters[key]) parameters.set(key, auditFilters[key]);
     }
     if (auditFilters.createdFrom) parameters.set("createdFrom", `${auditFilters.createdFrom}T00:00:00.000Z`);
@@ -1658,7 +1663,7 @@ export default function Home() {
     setError(undefined);
     try {
       const filterBody: Record<string, string | number> = { format, maxItems: 1_000 };
-      for (const key of ["action", "actorId", "subjectType", "subjectId", "correlationId"] as const) {
+      for (const key of ["action", "actorId", "source", "subjectType", "subjectId", "correlationId"] as const) {
         if (auditFilters[key]) filterBody[key] = auditFilters[key];
       }
       if (auditFilters.createdFrom) filterBody.createdFrom = `${auditFilters.createdFrom}T00:00:00.000Z`;
@@ -3463,6 +3468,18 @@ export default function Home() {
                 </label>
                 <label>Action<input value={auditFilters.action ?? ""} onChange={(event) => updateAuditFilter("action", event.target.value)} placeholder="question.created" /></label>
                 <label>Actor ID<input value={auditFilters.actorId ?? ""} onChange={(event) => updateAuditFilter("actorId", event.target.value)} /></label>
+                <label>Source
+                  <select value={auditFilters.source ?? ""} onChange={(event) => updateAuditFilter("source", event.target.value)}>
+                    <option value="">Any source</option>
+                    <option value="web">Web</option>
+                    <option value="api">REST API</option>
+                    <option value="cli">CLI</option>
+                    <option value="mcp">MCP</option>
+                    <option value="application">Application</option>
+                    <option value="worker">Worker</option>
+                    <option value="integration">Integration</option>
+                  </select>
+                </label>
                 <label>Subject type<input value={auditFilters.subjectType ?? ""} onChange={(event) => updateAuditFilter("subjectType", event.target.value)} placeholder="artifact_version" /></label>
                 <label>Subject ID<input value={auditFilters.subjectId ?? ""} onChange={(event) => updateAuditFilter("subjectId", event.target.value)} /></label>
                 <label>Correlation ID<input value={auditFilters.correlationId ?? ""} onChange={(event) => updateAuditFilter("correlationId", event.target.value)} /></label>
@@ -3484,8 +3501,27 @@ export default function Home() {
                       <tbody>{auditPage.items.map((event) => (
                         <tr key={event.id}>
                           <td>{new Date(event.createdAt).toLocaleString()}</td>
-                          <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}{event.beforeVersion === undefined && event.afterVersion === undefined ? "" : ` · v${event.beforeVersion ?? 0} → v${event.afterVersion ?? "?"}`}</small></td>
-                          <td><code>{event.actorId}</code></td>
+                          <td>
+                            <strong>{event.action}</strong>
+                            {event.policyVersion !== undefined || event.policyRuleKey || event.beforeVersion !== undefined || event.afterVersion !== undefined ? (
+                              <small>
+                                {event.policyVersion === undefined ? "" : `policy v${event.policyVersion}`}
+                                {event.policyRuleKey ? ` · rule ${event.policyRuleKey}` : ""}
+                                {event.beforeVersion === undefined && event.afterVersion === undefined ? "" : ` · v${event.beforeVersion ?? 0} → v${event.afterVersion ?? "?"}`}
+                              </small>
+                            ) : null}
+                            {event.assignmentId ? (
+                              <>
+                                <code title={`Assignment ${event.assignmentId}`}>{event.assignmentId}</code>
+                                <small>
+                                  assignment
+                                  {event.ownerRouteSource ? ` · owner via ${event.ownerRouteSource.replaceAll("_", " ")}` : ""}
+                                  {event.reviewerRouteSource ? ` · reviewer via ${event.reviewerRouteSource.replaceAll("_", " ")}` : ""}
+                                </small>
+                              </>
+                            ) : null}
+                          </td>
+                          <td><code>{event.actorId}</code><small>{event.actorType}{event.source ? ` · ${event.source}` : " · legacy source unavailable"}</small></td>
                           <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
                           <td>{event.reason ?? "—"}</td>
                           <td><code>{event.correlationId}</code></td>

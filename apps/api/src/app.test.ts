@@ -435,6 +435,12 @@ describe("Bridge API vertical slice", () => {
       action: "question.created",
       subjectType: "question",
       subjectId: "que_api_audit_view",
+      source: "api",
+      policyVersion: 3,
+      policyRuleKey: "protected-release",
+      assignmentId: "qas_api_audit_view",
+      ownerRouteSource: "policy",
+      reviewerRouteSource: "scoped_ownership",
       beforeVersion: 1,
       afterVersion: 2,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -456,13 +462,16 @@ describe("Bridge API vertical slice", () => {
 
     const projectView = await app.inject({
       method: "GET",
-      url: `/v1/admin/projects/${demoProject.id}/audit?subjectId=que_api_audit_view&limit=1&offset=0`,
+      url: `/v1/admin/projects/${demoProject.id}/audit?source=api&subjectId=que_api_audit_view&limit=1&offset=0`,
       headers: adminHeader,
     });
     expect(projectView.statusCode).toBe(200);
     expect(projectView.json()).toMatchObject({ offset: 0, limit: 1, items: [expect.objectContaining({
       scope: "project",
       projectId: demoProject.id,
+      source: "api",
+      policyRuleKey: "protected-release",
+      assignmentId: "qas_api_audit_view",
       beforeVersion: 1,
       afterVersion: 2,
     })] });
@@ -502,6 +511,8 @@ describe("Bridge API vertical slice", () => {
     expect(jsonExport.body).toContain('"scope": "project"');
     expect(jsonExport.body).toContain('"beforeVersion": 1');
     expect(jsonExport.body).toContain('"afterVersion": 2');
+    expect(jsonExport.body).toContain('"policyRuleKey": "protected-release"');
+    expect(jsonExport.body).toContain('"assignmentId": "qas_api_audit_view"');
     if (question) {
       expect(jsonExport.body).not.toContain(question.title);
       expect(jsonExport.body).not.toContain(question.context);
@@ -548,6 +559,7 @@ describe("Bridge API vertical slice", () => {
       items: [expect.objectContaining({
         scope: "organization",
         action: "organization_member.created",
+        source: "api",
         beforeVersion: 0,
         afterVersion: 1,
       })],
@@ -568,6 +580,7 @@ describe("Bridge API vertical slice", () => {
     expect(csvExport.statusCode).toBe(200);
     expect(csvExport.headers["content-type"]).toContain("text/csv");
     expect(csvExport.body).toContain('"action"');
+    expect(csvExport.body).toContain('"source"');
     expect(csvExport.body).toContain('"beforeVersion"');
     expect(csvExport.body).toContain('"organization_member.created"');
     await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
@@ -722,6 +735,11 @@ describe("Bridge API vertical slice", () => {
           subjectId: question.id,
           action: "question.created",
           correlationId: "cli_question-001",
+          source: "api",
+          policyRuleKey: expect.any(String),
+          assignmentId: expect.stringMatching(/^qas_/),
+          ownerRouteSource: "explicit_owner",
+          reviewerRouteSource: "none",
         }),
       ]),
     );

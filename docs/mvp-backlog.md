@@ -956,7 +956,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, and immutable before/after version lineage for administrative changes are implemented; broader policy/assignment coverage, failed/unknown authentication attribution, and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, immutable before/after version lineage for administrative changes, trusted request-source attribution, matched question-policy rule provenance, and immutable initial/reassignment route references are implemented; non-question reviewer-assignment lineage, failed/unknown authentication attribution, and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
@@ -974,6 +974,12 @@ Implementation note: versioned ownership and policy configuration, question reas
 membership, directory-group, and service-identity mutations record the committed `beforeVersion` and
 `afterVersion` transition in the audit envelope. The fields are optional for events that do not change
 a versioned aggregate, remain metadata-only, and are carried through REST/web reads and bounded exports.
+
+Implementation note: new project and organization events record the trusted Bridge execution
+boundary. Policy-governed question events also retain the bounded matched rule key; question create
+and reassign events reference the immutable assignment-history ID and controlled owner/reviewer route
+sources. These fields are nullable for historical rows, source-filterable through REST/web, and never
+copy owners, reviewer names, question content, credentials, or private reasoning into the audit log.
 
 ### BRG-101 — Add input, content, and abuse controls
 

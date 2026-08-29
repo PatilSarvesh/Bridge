@@ -145,6 +145,13 @@ Human project administrators can open the web **Analytics** view or call `GET /v
 
 Human project administrators can browse their project's immutable metadata events in the web **Audit** view or through `GET /v1/admin/projects/:projectId/audit`; organization administrators can switch to the organization administration stream or call `GET /v1/admin/organization/audit`. Both views support exact action, actor, subject, correlation, and inclusive timestamp filters with bounded offset pagination. Audited `POST .../audit/export` commands return a bounded JSON or CSV download, including supplied administrative reasons without storing protected question bodies or private reasoning. Audit results contain identifiers, controlled action/type metadata, timestamps, and correlation IDs—not question/specification bodies, credentials, prompts, answers, or private reasoning.
 
+New audit events also retain the trusted Bridge request boundary (`api`, `mcp`, `worker`,
+`integration`, or the in-process application boundary). Policy-governed question events retain the
+matched rule key, while initial assignment and reassignment events reference the immutable
+assignment-history entry and controlled owner/reviewer route sources. The Audit view and JSON/CSV
+exports expose this bounded provenance and can filter by source; legacy rows remain readable with
+the new fields absent.
+
 Human project administrators can separately download a bounded governed-data archive through the web **Audit** view or `POST /v1/admin/projects/:projectId/export`. This audited JSON export intentionally includes full decision and specification-version records, including specification bodies and review content, plus project audit metadata. Protect the downloaded file as project data. Independent offsets and limits make larger projects resumable; each export records `project.exported` and never changes a decision or specification approval.
 
 ## Operational health and recovery

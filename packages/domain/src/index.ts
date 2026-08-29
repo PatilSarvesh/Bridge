@@ -7,6 +7,7 @@ import type {
   AgentRunClient,
   AgentRunContinuationMode,
   AgentRunStatus,
+  AuditSource,
   AssumptionConfidence,
   AssumptionStatus,
   ArtifactType,
@@ -30,6 +31,7 @@ import type {
 } from "@bridge/contracts";
 
 export type {
+  AuditSource,
   DeliveryChannel,
   NotificationDeliveryPreference,
   OutboxDeliveryStatus,
@@ -197,6 +199,8 @@ export interface OrganizationAuditEvent {
     | "principal_identity"
     | "directory_group";
   readonly subjectId: string;
+  /** The trusted Bridge transport/application boundary that produced this event. */
+  readonly source?: AuditSource;
   /** The previous immutable version, when this event records a state transition. */
   readonly beforeVersion?: number;
   /** The committed immutable version, when this event records a state transition. */
@@ -838,8 +842,16 @@ export interface AuditEvent {
   readonly action: string;
   readonly subjectType: "project" | "repository" | "pull_request_context" | "work_item" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export" | "project_export";
   readonly subjectId: string;
+  /** The trusted Bridge transport/application boundary that produced this event. */
+  readonly source?: AuditSource;
   readonly reason?: string;
   readonly policyVersion?: number;
+  /** The bounded policy rule key evaluated for the material action, when applicable. */
+  readonly policyRuleKey?: string;
+  /** The immutable assignment-history entry associated with the action, when applicable. */
+  readonly assignmentId?: string;
+  readonly ownerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: QuestionRouteSource;
   /** The previous immutable version, when this event records a state transition. */
   readonly beforeVersion?: number;
   /** The committed immutable version, when this event records a state transition. */
