@@ -42,6 +42,7 @@ Current explicit founder directives:
 7. The founder requested a UI refresh on 2026-08-16 after finding the first pilot dashboard too clustered and dated. The active direction is a minimal workbench: warm neutral surfaces with a restrained teal action accent, grouped Work / Knowledge / Admin navigation, calmer spacing, and progressive disclosure for filters, discussion, review, comparison, and history. Each screen should foreground one primary task and keep secondary context available without presenting it all at once. This is a visual information-architecture change only; existing approval boundaries and workflows remain unchanged.
 8. Maintain this file as durable context for future sessions.
 9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
+10. All repository changes must be developed on a `codex/*` feature branch and reach `main` only through a pull request. Do not commit or push directly to `main`.
 
 The founder's 2026-08-10 request supersedes the earlier authentication/onboarding prohibition. The selected Auth0/OIDC design is active, while enterprise provisioning and unrelated identity expansion still require their own scoped tasks.
 
