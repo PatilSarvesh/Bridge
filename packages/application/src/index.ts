@@ -638,6 +638,9 @@ export interface ProjectSupportView {
       readonly name: string;
       readonly status: "pass" | "fail";
     }[];
+    readonly checkCount: number;
+    readonly passedCheckCount: number;
+    readonly failingCheckNames: readonly string[];
     readonly observedAt: string;
   }[];
 }
@@ -3988,14 +3991,22 @@ export class BridgeService {
             : adapterDiagnostics.length > 0 ? "observed_from_doctor" : "not_reported",
           note: "Capabilities are derived from recorded runs; the latest bounded `bridge doctor` report is shown separately.",
         },
-        diagnostics: adapterDiagnostics.map((diagnostic) => ({
-          client: diagnostic.client,
-          status: diagnostic.status,
-          capabilities: diagnostic.capabilities,
-          mcpStatus: diagnostic.mcpStatus,
-          checks: diagnostic.checks,
-          observedAt: diagnostic.observedAt,
-        })),
+        diagnostics: adapterDiagnostics.map((diagnostic) => {
+          const failingCheckNames = diagnostic.checks
+            .filter((check) => check.status === "fail")
+            .map((check) => check.name);
+          return {
+            client: diagnostic.client,
+            status: diagnostic.status,
+            capabilities: diagnostic.capabilities,
+            mcpStatus: diagnostic.mcpStatus,
+            checks: diagnostic.checks,
+            checkCount: diagnostic.checks.length,
+            passedCheckCount: diagnostic.checks.length - failingCheckNames.length,
+            failingCheckNames,
+            observedAt: diagnostic.observedAt,
+          };
+        }),
       };
     });
   }

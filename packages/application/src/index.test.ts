@@ -3471,6 +3471,15 @@ describe("Bridge decision workflow", () => {
         { name: "mcp", status: "pass" },
       ],
     });
+    await service.recordAdapterDiagnostic(agent, project.id, {
+      client: "claude_code",
+      capabilities: ["cli"],
+      mcpStatus: "failed",
+      checks: [
+        { name: "api", status: "pass" },
+        { name: "mcp", status: "fail" },
+      ],
+    });
     const [pending] = await repository.listOutboxEvents(project.id);
     expect(pending).toBeDefined();
     await repository.claimOutboxEvents(pending!.availableAt, 1);
@@ -3505,7 +3514,7 @@ describe("Bridge decision workflow", () => {
       expect.objectContaining({ client: "claude_code", capabilities: ["cli"] }),
     ]));
     expect(support.adapters.mcpDiagnostics).toBe("observed_from_runs");
-    expect(support.diagnostics).toEqual([
+    expect(support.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({
         client: "codex",
         status: "pass",
@@ -3516,8 +3525,18 @@ describe("Bridge decision workflow", () => {
           { name: "project-config", status: "pass" },
           { name: "mcp", status: "pass" },
         ],
+        checkCount: 3,
+        passedCheckCount: 3,
+        failingCheckNames: [],
       }),
-    ]);
+      expect.objectContaining({
+        client: "claude_code",
+        status: "fail",
+        checkCount: 2,
+        passedCheckCount: 1,
+        failingCheckNames: ["mcp"],
+      }),
+    ]));
     expect(JSON.stringify(support)).not.toContain("provider unavailable");
     expect(JSON.stringify(support)).not.toContain(expiringAssumption.statement);
     await expect(service.getProjectSupport(contributor, project.id))
