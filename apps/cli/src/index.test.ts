@@ -21,8 +21,11 @@ interface MockState {
   rejectProjectReads?: boolean;
   run?: Record<string, unknown>;
   mcpAvailable?: boolean;
+  mcpAuthenticationRequired?: boolean;
+  mcpMetadata?: "valid" | "malformed" | "unavailable";
   mcpMalformed?: boolean;
   diagnosticPersistenceAvailable?: boolean;
+  mcpReceivedAuthorization?: string | null;
   requestedPaths?: string[];
 }
 
@@ -30,8 +33,11 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
   return async (input, init) => {
     const url = new URL(String(input));
     state.requestedPaths = [...(state.requestedPaths ?? []), url.pathname];
-    const json = (value: unknown, status = 200) =>
-      new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+    const json = (value: unknown, status = 200, headers: Record<string, string> = {}) =>
+      new Response(JSON.stringify(value), {
+        status,
+        headers: { "content-type": "application/json", ...headers },
+      });
     if (url.pathname === "/health") return json({ status: "ok", service: "bridge-api" });
     if (url.pathname === "/health/ready") {
       return json({
@@ -83,7 +89,31 @@ function mockBridge(state: MockState): CliRuntime["fetch"] {
       const current = state.serviceIdentities?.[0] ?? { id: "scr_cli_1", version: 1 };
       return json({ ...current, version: 3, revokedAt: "2026-08-11T00:02:00.000Z" });
     }
+    if (url.hostname === "mcp.test" && url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+      if (state.mcpMetadata === "valid") {
+        return json({
+          resource: "http://mcp.test/mcp",
+          authorization_servers: ["https://issuer.test"],
+          scopes_supported: ["bridge:read"],
+          bearer_methods_supported: ["header"],
+        });
+      }
+      if (state.mcpMetadata === "malformed") {
+        return json({ resource: "http://other.test/mcp" });
+      }
+      return json({ error: "metadata unavailable" }, 404);
+    }
     if (url.hostname === "mcp.test" && url.pathname === "/mcp") {
+      state.mcpReceivedAuthorization = new Headers(init?.headers).get("authorization");
+      if (state.mcpAuthenticationRequired) {
+        return json(
+          { jsonrpc: "2.0", error: { code: -32001, message: "Authentication required" } },
+          401,
+          {
+            "www-authenticate": 'Bearer resource_metadata="http://mcp.test/.well-known/oauth-protected-resource/mcp", scope="bridge:read"',
+          },
+        );
+      }
       if (!state.mcpAvailable) {
         return json({ jsonrpc: "2.0", error: { code: -32000, message: "MCP unavailable" } }, 503);
       }
@@ -725,6 +755,64 @@ describe("Bridge CLI fallback adapter", () => {
     state.mcpMalformed = true;
     expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
     expect(stdout.at(-1)).toContain('"mcp": "failed"');
+  });
+
+  it("reports MCP authentication challenges and verifies protected-resource metadata without handling tokens", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bridge-cli-mcp-auth-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const state: MockState = {
+      question: {},
+      artifacts: [],
+      assumptions: [],
+      mcpAvailable: true,
+      mcpAuthenticationRequired: true,
+      mcpMetadata: "valid",
+    };
+    const runtime: Partial<CliRuntime> = {
+      cwd,
+      fetch: mockBridge(state),
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+      environment: {},
+    };
+
+    await runCli([
+      "init",
+      "prj_payments",
+      "--api-url",
+      "http://bridge.test",
+      "--mcp-url",
+      "http://mcp.test/mcp",
+    ], runtime);
+
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
+    const report = JSON.parse(stdout.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(report).toMatchObject({
+      capabilityLevel: "instructions+mcp-failed",
+      mcpDiagnostics: {
+        authentication: "required",
+        challenge: "bearer",
+        protectedResourceMetadata: {
+          status: "verified",
+          url: "http://mcp.test/.well-known/oauth-protected-resource/mcp",
+        },
+      },
+    });
+    expect(JSON.stringify(report)).toContain("Complete authentication in the configured MCP client");
+    expect(JSON.stringify(report)).toContain("Bridge doctor does not issue or store MCP tokens");
+    expect(state.mcpReceivedAuthorization).toBeNull();
+    expect(stderr.at(-1)).toContain('"code":"DOCTOR_FAILED"');
+
+    state.mcpMetadata = "malformed";
+    expect(await runCli(["doctor"], runtime)).toBe(cliExitCodes.configuration);
+    const invalidMetadataReport = JSON.parse(stdout.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(invalidMetadataReport).toMatchObject({
+      mcpDiagnostics: {
+        authentication: "required",
+        protectedResourceMetadata: { status: "invalid" },
+      },
+    });
   });
 
   it("generates and safely merges the Claude project MCP configuration", async () => {

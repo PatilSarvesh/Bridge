@@ -2683,6 +2683,40 @@ Deliberate boundaries:
   lockfile provenance, and hosted collector evidence remain outside this slice.
 - No REST or MCP authority path changed, and MCP remains optional.
 
+### 20.96 Added authentication-aware MCP doctor diagnostics (BRG-062)
+
+Implemented and locally verified:
+
+1. `bridge doctor` continues to perform an unauthenticated, bounded MCP `initialize`
+   probe only when an explicit `mcp_url` or `BRIDGE_MCP_URL` is configured. The
+   probe never forwards the CLI's REST bearer session to the MCP endpoint.
+2. HTTP `401` and `403` responses are classified as `authentication=required` or
+   `authentication=insufficient`; doctor also reports whether the response carried
+   a usable Bearer challenge. The existing persisted `mcpStatus` vocabulary remains
+   `ready`, `failed`, or `not_configured` for compatibility with the support view.
+3. On an authentication challenge, doctor requests the derived
+   `/.well-known/oauth-protected-resource/mcp` document with a five-second timeout
+   and a 32 KiB response limit. It verifies the configured MCP resource and at least
+   one bounded HTTP(S) authorization-server URL, while keeping metadata bodies and
+   provider details out of output and persistence.
+4. CLI output now includes non-secret `mcpDiagnostics` metadata and an actionable
+   instruction to authenticate in the selected MCP client for the dedicated MCP
+   audience/scopes. MCP token issuance, refresh, external-provider validation, and
+   vendor-native auth configuration remain outside this slice; REST, CLI, and
+   instruction adapters remain usable when MCP authentication fails.
+5. CLI regression coverage exercises successful optional MCP initialization, an
+   authenticated endpoint challenge with valid metadata, malformed metadata, and
+   the no-MCP/CLI-only fallback. No REST contract or database migration was needed.
+
+Deliberate boundaries:
+
+- This is diagnostic classification and metadata validation, not MCP authentication
+  or authorization-server implementation. Bridge still relies on the configured
+  external OIDC provider to issue MCP-audience tokens.
+- Doctor does not echo `WWW-Authenticate` values, metadata bodies, bearer tokens,
+  CLI sessions, or arbitrary provider error text. A failed MCP probe cannot disable
+  the canonical REST workflow.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
