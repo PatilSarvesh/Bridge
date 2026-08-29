@@ -61,11 +61,7 @@ export interface NotificationEmailStore {
 
 export interface EmailDigestStore extends NotificationEmailStore {
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
-  claimDeferredEmailDeliveries(
-    now: string,
-    limit: number,
-    leaseMs?: number,
-  ): Promise<readonly OutboxDelivery[]>;
+  claimDeferredEmailDeliveries(now: string, limit: number, leaseMs?: number): Promise<readonly OutboxDelivery[]>;
 }
 
 export interface NotificationEmailHandlerOptions {
@@ -111,11 +107,18 @@ const TEMPLATE_LABELS: Readonly<Record<EssentialEmailTemplateKind, string>> = {
 };
 
 function safeLine(value: string, limit: number): string {
-  return value.replace(/[\r\n\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
+  return value
+    .replace(/[\r\n\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function safeContext(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim().slice(0, 800);
+  return value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, 800);
 }
 
 export function renderEssentialEmailTemplate(input: EssentialEmailTemplateInput): RenderedEmailTemplate {
@@ -168,14 +171,16 @@ export function renderNotificationDigest(
 
 export function sanitizeDeliveryError(error: unknown, fallback = "Notification delivery failed."): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
-    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[redacted-access-key]")
-    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
-    .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
-    .replace(/[\r\n\u0000-\u001f\u007f]+/g, " ")
-    .trim()
-    .slice(0, 1_000) || fallback;
+  return (
+    message
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+      .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[redacted-access-key]")
+      .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+      .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+      .replace(/[\r\n\u0000-\u001f\u007f]+/g, " ")
+      .trim()
+      .slice(0, 1_000) || fallback
+  );
 }
 
 function templateKind(notification: Notification): EssentialEmailTemplateKind {
@@ -197,12 +202,24 @@ function notificationUrl(publicBaseUrl: string, notification: Notification): str
   return url.toString();
 }
 
-function normalizeAddress(address: string): string {
+export function normalizeEmailAddress(address: string): string {
   const normalized = address.trim().toLocaleLowerCase("en");
+  const separator = normalized.lastIndexOf("@");
+  const localPart = separator > 0 ? normalized.slice(0, separator) : "";
+  const domain = separator > 0 ? normalized.slice(separator + 1) : "";
+  const domainLabels = domain.split(".");
   if (
     normalized.length > 320 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ||
-    /[\r\n]/.test(normalized)
+    localPart.length === 0 ||
+    localPart.length > 64 ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..") ||
+    !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localPart) ||
+    domain.length === 0 ||
+    domain.length > 253 ||
+    domainLabels.length < 2 ||
+    domainLabels.some((label) => !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label))
   ) {
     throw new Error("The resolved email destination is invalid.");
   }
@@ -267,7 +284,7 @@ export function createNotificationEmailHandler(
         "email",
       );
       const preference = storedPreference?.preference ?? recipient.preference;
-      const address = normalizeAddress(recipient.address);
+      const address = normalizeEmailAddress(recipient.address);
       const hashedDestination = destinationHash(event.organizationId, address);
       if (existing && existing.destinationHash !== hashedDestination) {
         throw new Error("The email destination changed after a failed attempt; operator review is required.");
@@ -291,10 +308,12 @@ export function createNotificationEmailHandler(
         await options.store.saveOutboxDelivery({
           ...baseDelivery,
           status: outcome,
-          ...(preference === "digest" ? {
-            attemptCount: existing?.attemptCount ?? 0,
-            digestAvailableAt: new Date(Date.parse(timestamp) + digestDelayMs).toISOString(),
-          } : {}),
+          ...(preference === "digest"
+            ? {
+                attemptCount: existing?.attemptCount ?? 0,
+                digestAvailableAt: new Date(Date.parse(timestamp) + digestDelayMs).toISOString(),
+              }
+            : {}),
         });
         return;
       }
@@ -345,7 +364,9 @@ interface DigestCandidate {
   readonly address: string;
 }
 
-function withoutDeliveryResult(delivery: OutboxDelivery): Omit<OutboxDelivery, "providerMessageId" | "lastError" | "digestLeaseUntil"> {
+function withoutDeliveryResult(
+  delivery: OutboxDelivery,
+): Omit<OutboxDelivery, "providerMessageId" | "lastError" | "digestLeaseUntil"> {
   const {
     providerMessageId: _providerMessageId,
     lastError: _lastError,
@@ -355,9 +376,7 @@ function withoutDeliveryResult(delivery: OutboxDelivery): Omit<OutboxDelivery, "
   return base;
 }
 
-export async function runEmailDigestCycle(
-  options: EmailDigestCycleOptions,
-): Promise<EmailDigestCycleResult> {
+export async function runEmailDigestCycle(options: EmailDigestCycleOptions): Promise<EmailDigestCycleResult> {
   const now = options.now ?? (() => new Date());
   const currentTime = now();
   const batchSize = options.batchSize ?? 100;
@@ -377,11 +396,7 @@ export async function runEmailDigestCycle(
     throw new Error("Email digest lease must be between one second and one hour.");
   }
 
-  const claimed = await options.store.claimDeferredEmailDeliveries(
-    currentTime.toISOString(),
-    batchSize,
-    leaseMs,
-  );
+  const claimed = await options.store.claimDeferredEmailDeliveries(currentTime.toISOString(), batchSize, leaseMs);
   let digestsSent = 0;
   let delivered = 0;
   let suppressed = 0;
@@ -436,15 +451,11 @@ export async function runEmailDigestCycle(
         suppressed += 1;
         continue;
       }
-      const address = normalizeAddress(recipient.address);
+      const address = normalizeEmailAddress(recipient.address);
       if (destinationHash(delivery.organizationId, address) !== delivery.destinationHash) {
         throw new Error("The email destination changed after digest deferral; operator review is required.");
       }
-      const recipientGroup = [
-        delivery.organizationId,
-        delivery.projectId,
-        notification.recipientId,
-      ].join(":");
+      const recipientGroup = [delivery.organizationId, delivery.projectId, notification.recipientId].join(":");
       const key = delivery.dedupeKey ? `batch:${delivery.dedupeKey}` : `recipient:${recipientGroup}`;
       groups.set(key, [...(groups.get(key) ?? []), { delivery, event, notification, address }]);
     } catch (error) {
@@ -455,17 +466,28 @@ export async function runEmailDigestCycle(
   for (const candidates of groups.values()) {
     const startedAt = performance.now();
     let outcome: BridgeNotificationOutcome = "failed";
-    const ordered = [...candidates].sort((left, right) =>
-      left.notification.createdAt.localeCompare(right.notification.createdAt) ||
-      left.delivery.id.localeCompare(right.delivery.id));
+    const ordered = [...candidates].sort(
+      (left, right) =>
+        left.notification.createdAt.localeCompare(right.notification.createdAt) ||
+        left.delivery.id.localeCompare(right.delivery.id),
+    );
     const existingBatchKey = ordered[0]?.delivery.dedupeKey;
-    const batchKey = existingBatchKey ?? `edg_${createHash("sha256")
-      .update(ordered.map((candidate) => candidate.delivery.id).sort().join(":"))
-      .digest("hex")}`;
-    const batched = ordered.map((candidate): DigestCandidate => ({
-      ...candidate,
-      delivery: { ...candidate.delivery, dedupeKey: batchKey },
-    }));
+    const batchKey =
+      existingBatchKey ??
+      `edg_${createHash("sha256")
+        .update(
+          ordered
+            .map((candidate) => candidate.delivery.id)
+            .sort()
+            .join(":"),
+        )
+        .digest("hex")}`;
+    const batched = ordered.map(
+      (candidate): DigestCandidate => ({
+        ...candidate,
+        delivery: { ...candidate.delivery, dedupeKey: batchKey },
+      }),
+    );
     try {
       for (const candidate of batched) {
         if (

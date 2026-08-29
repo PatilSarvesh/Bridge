@@ -873,7 +873,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack delivery, destination idempotency, scheduled assumption expiry/blocker escalation, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; live email delivery and deployment validation remain
+- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack and SES delivery, destination idempotency, scheduled assumption expiry/blocker escalation/email digest cycles, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; live provider and deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -910,7 +910,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, recipient/preference and sender contracts, idempotent immediate delivery, durable privacy-minimized delivery receipts, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; a live SES sender/directory and authenticated deployment link remain
+- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, a bounded secret-managed recipient directory, official AWS SES v2 sender, deployable immediate/digest worker composition, stable opaque provider tags, durable privacy-minimized delivery receipts, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; live SES account/identity, authenticated-link, bounce/complaint, and failure-window validation remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -923,6 +923,12 @@ Acceptance criteria:
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
 4. Ordinary events honor notification preferences. **Human-owned immediate, muted, and digest email preferences persist through the canonical REST/application path and override the injected directory default. Digest receipts receive a durable due time and recoverable lease, group only same-recipient/project titles under a stable batch key, and retry without persisting addresses; protected review mail bypasses muting.**
 5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations.**
+
+Implementation note: the controlled-pilot worker accepts `email` or `all` channel mode, resolves exact
+Bridge principal IDs through a bounded deployment-secret JSON mapping, and sends through AWS SES v2
+using the standard AWS credential chain. Addresses and credentials are never copied into Bridge
+persistence or safe logs. SES verified identities, production access, feedback handling, IAM policy,
+hosted links, and live failure-window evidence remain deployment-owner responsibilities.
 
 ### BRG-093 — Integrate one pilot team channel
 

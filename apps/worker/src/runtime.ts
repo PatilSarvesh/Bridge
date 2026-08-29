@@ -1,23 +1,28 @@
 import { BridgeService } from "@bridge/application";
 import { createPostgresBridgeStore, type PostgresBridgeStore } from "@bridge/database";
-import {
-  BridgeMetrics,
-  createSafeLogger,
-  type SafeLogger,
-} from "@bridge/observability";
+import { BridgeMetrics, createSafeLogger, type SafeLogger } from "@bridge/observability";
 
 import {
+  type AssumptionExpiryCycle,
+  type BlockingQuestionEscalationCycle,
   createCodexCliSessionResumer,
   createCodexContinuationHandler,
   createCodexWorkspaceDirectoryFromEnvironment,
-  runOutboxCycle,
-  type AssumptionExpiryCycle,
-  type BlockingQuestionEscalationCycle,
+  createNotificationEmailHandler,
   type EmailDigestCycleResult,
   type OutboxCycleOptions,
   type OutboxHandler,
   type OutboxStore,
+  runEmailDigestCycle,
+  runOutboxCycle,
 } from "./index.js";
+import {
+  createEmailRecipientDirectory,
+  createSesEmailSender,
+  loadSesEmailConfiguration,
+  type SesEmailConfiguration,
+  type SesEmailEnvironment,
+} from "./ses.js";
 import {
   createNotificationSlackHandler,
   createSlackChannelDirectoryFromEnvironment,
@@ -29,7 +34,8 @@ const defaultPublicWebUrl = "http://127.0.0.1:3000";
 export interface WorkerConfiguration {
   readonly databaseUrl: string;
   readonly publicWebUrl: string;
-  readonly channel: "slack";
+  readonly channel: "slack" | "email" | "all";
+  readonly email?: SesEmailConfiguration;
   readonly pollIntervalMs: number;
   readonly batchSize: number;
   readonly assumptionExpiryIntervalMs: number;
@@ -46,7 +52,7 @@ export interface WorkerConfiguration {
   readonly metricsPort: number;
 }
 
-export interface WorkerEnvironment {
+export interface WorkerEnvironment extends SesEmailEnvironment {
   readonly BRIDGE_WORKER_DATABASE_URL?: string;
   readonly BRIDGE_PUBLIC_WEB_URL?: string;
   readonly BRIDGE_WORKER_CHANNEL?: string;
@@ -74,6 +80,7 @@ export interface ConfiguredWorker {
   readonly blockingQuestionEscalationCycle: BlockingQuestionEscalationCycle;
   readonly metrics: BridgeMetrics;
   readonly close: () => Promise<void>;
+  readonly emailDigestCycle?: () => Promise<EmailDigestCycleResult>;
 }
 
 export interface WorkerSleep {
@@ -136,31 +143,16 @@ function validateMetricsHost(value: string): string {
   return host;
 }
 
-export function loadWorkerConfiguration(
-  environment: WorkerEnvironment = process.env,
-): WorkerConfiguration {
+export function loadWorkerConfiguration(environment: WorkerEnvironment = process.env): WorkerConfiguration {
   const databaseUrl = requiredEnvironment(environment, "BRIDGE_WORKER_DATABASE_URL");
-  const publicWebUrl = validatePublicWebUrl(
-    environment.BRIDGE_PUBLIC_WEB_URL?.trim() || defaultPublicWebUrl,
-  );
+  const publicWebUrl = validatePublicWebUrl(environment.BRIDGE_PUBLIC_WEB_URL?.trim() || defaultPublicWebUrl);
   const channel = environment.BRIDGE_WORKER_CHANNEL?.trim() || "slack";
-  if (channel !== "slack") {
-    throw new Error("BRIDGE_WORKER_CHANNEL currently supports only `slack`.");
+  if (channel !== "slack" && channel !== "email" && channel !== "all") {
+    throw new Error("BRIDGE_WORKER_CHANNEL must be `slack`, `email`, or `all`.");
   }
-  const baseBackoffMs = positiveInteger(
-    environment,
-    "BRIDGE_WORKER_BASE_BACKOFF_MS",
-    1_000,
-    100,
-    60_000,
-  );
-  const maxBackoffMs = positiveInteger(
-    environment,
-    "BRIDGE_WORKER_MAX_BACKOFF_MS",
-    15 * 60 * 1_000,
-    1_000,
-    86_400_000,
-  );
+  const email = channel === "email" || channel === "all" ? loadSesEmailConfiguration(environment) : undefined;
+  const baseBackoffMs = positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000);
+  const maxBackoffMs = positiveInteger(environment, "BRIDGE_WORKER_MAX_BACKOFF_MS", 15 * 60 * 1_000, 1_000, 86_400_000);
   if (maxBackoffMs < baseBackoffMs) {
     throw new Error("BRIDGE_WORKER_MAX_BACKOFF_MS must be at least BRIDGE_WORKER_BASE_BACKOFF_MS.");
   }
@@ -168,6 +160,7 @@ export function loadWorkerConfiguration(
     databaseUrl,
     publicWebUrl,
     channel,
+    ...(email ? { email } : {}),
     pollIntervalMs: positiveInteger(environment, "BRIDGE_WORKER_POLL_INTERVAL_MS", 1_000, 250, 60_000),
     batchSize: positiveInteger(environment, "BRIDGE_WORKER_BATCH_SIZE", 25, 1, 100),
     assumptionExpiryIntervalMs: positiveInteger(
@@ -194,13 +187,7 @@ export function loadWorkerConfiguration(
     maxAttempts: positiveInteger(environment, "BRIDGE_WORKER_MAX_ATTEMPTS", 5, 1, 20),
     baseBackoffMs,
     maxBackoffMs,
-    retryJitterRatio: positiveInteger(
-      environment,
-      "BRIDGE_WORKER_RETRY_JITTER_PERCENT",
-      25,
-      0,
-      100,
-    ) / 100,
+    retryJitterRatio: positiveInteger(environment, "BRIDGE_WORKER_RETRY_JITTER_PERCENT", 25, 0, 100) / 100,
     codexExecutable: environment.BRIDGE_CODEX_EXECUTABLE?.trim() || "codex",
     ...(environment.BRIDGE_CODEX_PROJECT_WORKSPACES?.trim()
       ? { codexProjectWorkspaces: environment.BRIDGE_CODEX_PROJECT_WORKSPACES.trim() }
@@ -221,17 +208,57 @@ export function createConfiguredWorker(
   configuration: WorkerConfiguration,
   metrics = new BridgeMetrics(),
 ): ConfiguredWorker {
+  const emailConfiguration =
+    configuration.channel === "email" || configuration.channel === "all" ? configuration.email : undefined;
+  if ((configuration.channel === "email" || configuration.channel === "all") && !emailConfiguration) {
+    throw new Error("Worker email configuration is required when email delivery is enabled.");
+  }
   const store = createPostgresBridgeStore(configuration.databaseUrl, {
     mode: "maintenance",
     metrics,
   });
-  const notificationHandler = createNotificationSlackHandler({
-    store: store.repository,
-    channels: createSlackChannelDirectoryFromEnvironment(),
-    sender: createSlackWebhookSender(),
-    publicBaseUrl: configuration.publicWebUrl,
-    metrics,
-  });
+  const notificationHandlers: OutboxHandler[] = [];
+  if (configuration.channel === "slack" || configuration.channel === "all") {
+    notificationHandlers.push(
+      createNotificationSlackHandler({
+        store: store.repository,
+        channels: createSlackChannelDirectoryFromEnvironment(),
+        sender: createSlackWebhookSender(),
+        publicBaseUrl: configuration.publicWebUrl,
+        metrics,
+      }),
+    );
+  }
+  let emailDigestCycle: (() => Promise<EmailDigestCycleResult>) | undefined;
+  if (emailConfiguration) {
+    const directory = createEmailRecipientDirectory(emailConfiguration.recipients);
+    const sender = createSesEmailSender({
+      region: emailConfiguration.region,
+      fromAddress: emailConfiguration.fromAddress,
+      ...(emailConfiguration.configurationSetName
+        ? { configurationSetName: emailConfiguration.configurationSetName }
+        : {}),
+    });
+    notificationHandlers.push(
+      createNotificationEmailHandler({
+        store: store.repository,
+        directory,
+        sender,
+        publicBaseUrl: configuration.publicWebUrl,
+        metrics,
+      }),
+    );
+    emailDigestCycle = () =>
+      runEmailDigestCycle({
+        store: store.repository,
+        directory,
+        sender,
+        publicBaseUrl: configuration.publicWebUrl,
+        maxAttempts: configuration.maxAttempts,
+        baseBackoffMs: Math.max(1_000, configuration.baseBackoffMs),
+        metrics,
+      });
+  }
   const continuationHandler = createCodexContinuationHandler({
     workspaces: createCodexWorkspaceDirectoryFromEnvironment(configuration.codexProjectWorkspaces),
     resumer: createCodexCliSessionResumer({
@@ -239,6 +266,7 @@ export function createConfiguredWorker(
       timeoutMs: configuration.codexContinuationTimeoutMs,
     }),
   });
+  const notificationHandler = composeOutboxHandlers(notificationHandlers);
   const handler: OutboxHandler = async (event) => {
     if (event.type === "run.continuation_ready") {
       await continuationHandler(event);
@@ -253,8 +281,19 @@ export function createConfiguredWorker(
     handler,
     assumptionExpiryCycle: () => service.expireDueAssumptions(),
     blockingQuestionEscalationCycle: () => service.escalateDueBlockingQuestions(),
+    ...(emailDigestCycle ? { emailDigestCycle } : {}),
     metrics,
     close: store.close,
+  };
+}
+
+export function composeOutboxHandlers(handlers: readonly OutboxHandler[]): OutboxHandler {
+  return async (event) => {
+    const results = await Promise.allSettled(handlers.map((handler) => handler(event)));
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (!failure) return;
+    if (failure.reason instanceof Error) throw failure.reason;
+    throw new Error("A configured worker delivery handler failed.");
   };
 }
 
@@ -262,10 +301,14 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -318,10 +361,7 @@ export async function runOutboxWorker(options: OutboxWorkerOptions): Promise<voi
       }
       nextAssumptionExpiryAt = Date.now() + assumptionExpiryIntervalMs;
     }
-    if (
-      options.blockingQuestionEscalationCycle &&
-      Date.now() >= nextBlockingQuestionEscalationAt
-    ) {
+    if (options.blockingQuestionEscalationCycle && Date.now() >= nextBlockingQuestionEscalationAt) {
       try {
         const result = await options.blockingQuestionEscalationCycle();
         logger.info("blocking_question_escalation.cycle_completed", {
