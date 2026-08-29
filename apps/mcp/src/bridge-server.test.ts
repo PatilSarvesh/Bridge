@@ -199,8 +199,11 @@ describe("Bridge MCP tools", () => {
         maxItems: 20,
       },
     });
-    const context = contextResult.structuredContent as { items: Array<{ title: string }> };
+    const context = contextResult.structuredContent as {
+      items: Array<{ title: string; trustLevel: string }>;
+    };
     expect(context.items[0]?.title).toBe("Retry transient failures only");
+    expect(context.items[0]?.trustLevel).toBe("untrusted_data");
 
     const publishResult = await client.callTool({
       name: "bridge_publish_artifact",

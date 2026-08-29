@@ -658,6 +658,12 @@ The first source-control integration adds canonical REST synchronization and rea
 
 GitHub Issues use the same canonical integration boundary and authorization model. Bridge persists only repository/issue identity, title/state, canonical URL, labels, provider timestamp, and explicit guidance links; GitHub remains authoritative and Bridge performs no provider mutation. Each item exposes a deterministic `github:owner/repository#number` reference. Exact matches against `ContextQuery.scope.workItem`—or the canonical issue URL—add a bounded ranking boost to linked active decisions and the currently approved linked specification without excluding normal context candidates. The direct issue context read can also show a linked superseded specification as provenance. No issue body, comments, assignees, source, or provider credentials are retained.
 
+The direct pull-request and issue context views also carry `trustLevel: "untrusted_data"` at the
+view boundary and on their linked decision/specification guidance records. Provider-supplied
+titles, labels, and URLs therefore remain data for the consuming agent, while the linked Bridge
+authority and human-approval state stay separate and cannot be promoted into instructions by the
+integration adapter.
+
 Project ownership configuration is managed through canonical administrator REST endpoints and the web **Ownership** view. The application validates active human team membership and direct targets, normalizes role/team/rule keys, detects equal-priority overlap per responsibility lane, performs an optimistic aggregate-version write, and appends the project audit event in one transaction. Question creation resolves each owner lane in this order: explicit owner, repository/component-scoped rule, category rule, project-wide rule or configured project decision owner, then an empty administrator-visible fallback. Required policy roles are always retained. Reviewer targets resolve independently through scoped, category, project-wide, then policy routes so reviewer visibility never becomes owner acceptance authority. The question records the selected source, rule keys, and ownership/policy versions.
 
 Only a human project administrator may replace the owner/reviewer assignment on an unresolved question through canonical `POST /v1/questions/:questionId/assignments`. Direct targets must be active human project members, policy-required roles cannot be removed, and optimistic concurrency prevents stale reassignment. The aggregate update, append-only assignment-history entry, `question.reassigned` audit, typed outbox event, and directory-resolved notifications share one transaction. MCP exposes neither ownership management nor reassignment, remains optional, and gains no separate authority path.
@@ -794,6 +800,12 @@ Active approved decisions receive the highest authority weight. Active assumptio
 ### 14.2 Context snapshots
 
 Persist the IDs and versions returned to an agent run. This makes it possible to explain which context was available without storing or replaying the model's hidden reasoning.
+
+Every returned `ContextItem` also carries `trustLevel: "untrusted_data"`. This label is separate
+from `authority`: an approved decision remains authoritative project knowledge, while its text
+and every other retrieved record remain reference data rather than system, developer, or Bridge
+policy instructions. REST is the canonical representation; the optional MCP response and CLI
+repository snapshots preserve the same field and repeat the boundary in their guidance.
 
 ## 15. Search and duplicate detection
 
@@ -1025,7 +1037,7 @@ The implemented secret policy rejects recognized Bridge/service-provider tokens,
 | Prompt injection requests protected action | Protected policy always requires authorized human approval |
 | Agent leaks retrieved tenant context | Project-scoped tokens, minimal context, output guidance, and audit |
 | Agent floods questions | Tool rate limits, per-run budgets, batching policy, and quality metrics |
-| Malicious artifact becomes instruction | Trust labels and separation of data content from server instructions |
+| Malicious artifact becomes instruction | `trustLevel: "untrusted_data"`, explicit CLI/MCP guidance, and separation of data content from server instructions |
 | Forged provenance | Server assigns actor and timestamps; clients cannot supply authoritative values |
 
 ## 21. Privacy and retention

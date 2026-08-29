@@ -1005,17 +1005,19 @@ describe("Bridge decision workflow", () => {
     })).resolves.toEqual([
       expect.objectContaining({
         pullRequest: expect.objectContaining({ number: 42, state: "merged" }),
+        trustLevel: "untrusted_data",
         decisions: [expect.objectContaining({ id: decision.id, status: "active" })],
         artifactVersions: [expect.objectContaining({
           versionId: publication.version.id,
           status: "approved",
+          trustLevel: "untrusted_data",
         })],
         humanApprovalChanged: false,
       }),
     ]);
     await expect(service.getGithubPullRequestContext(agent, project.id, 42, {
       repositoryId: linked.repository.id,
-    })).resolves.toMatchObject({ pullRequest: { number: 42 } });
+    })).resolves.toMatchObject({ pullRequest: { number: 42 }, trustLevel: "untrusted_data" });
     await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({
         action: "integration.pull_request_synced",
@@ -1087,14 +1089,15 @@ describe("Bridge decision workflow", () => {
     })).resolves.toEqual([
       expect.objectContaining({
         issue: expect.objectContaining({ number: 77 }),
-        decisions: [expect.objectContaining({ id: decision.id })],
-        artifactVersions: [expect.objectContaining({ versionId: publication.version.id })],
+        trustLevel: "untrusted_data",
+        decisions: [expect.objectContaining({ id: decision.id, trustLevel: "untrusted_data" })],
+        artifactVersions: [expect.objectContaining({ versionId: publication.version.id, trustLevel: "untrusted_data" })],
         humanApprovalChanged: false,
       }),
     ]);
     await expect(service.getGithubIssueContext(agent, project.id, 77, {
       repositoryId: linked.repository.id,
-    })).resolves.toMatchObject({ issue: { reference: created.issue.reference } });
+    })).resolves.toMatchObject({ issue: { reference: created.issue.reference }, trustLevel: "untrusted_data" });
 
     const context = await service.getContext(agent, project.id, {
       task: "Implement the selected work item",
@@ -1827,6 +1830,7 @@ describe("Bridge decision workflow", () => {
         id: assumption.id,
         type: "assumption",
         authority: "assumption",
+        trustLevel: "untrusted_data",
         expiresAt: assumption.expiresAt,
       }),
     ]);
@@ -2615,7 +2619,9 @@ describe("Bridge decision workflow", () => {
     });
 
     expect(decision.reviewAt).toBe("2026-06-30T00:00:00.000Z");
-    expect(context.items.map((item) => item.id)).toEqual([decision.id]);
+    expect(context.items).toEqual([
+      expect.objectContaining({ id: decision.id, type: "decision", trustLevel: "untrusted_data" }),
+    ]);
     const decisionUrl = new URL(context.items[0]!.sourceUrl);
     expect(decisionUrl.pathname).toBe("/review");
     expect(Object.fromEntries(decisionUrl.searchParams)).toMatchObject({
@@ -4026,7 +4032,12 @@ describe("Bridge decision workflow", () => {
       maxItems: 20,
     });
     expect(firstContext.items).toEqual([
-      expect.objectContaining({ id: first.version.id, type: "artifact", authority: "approved" }),
+      expect.objectContaining({
+        id: first.version.id,
+        type: "artifact",
+        authority: "approved",
+        trustLevel: "untrusted_data",
+      }),
     ]);
     expect(Object.fromEntries(new URL(firstContext.items[0]!.sourceUrl).searchParams)).toMatchObject({
       view: "specifications",

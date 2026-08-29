@@ -1353,6 +1353,7 @@ describe("Bridge API vertical slice", () => {
     expect(pullRequestContext.statusCode).toBe(200);
     expect(pullRequestContext.json()).toMatchObject({
       pullRequest: { number: 10, canonicalUrl: pullRequestPayload.canonicalUrl },
+      trustLevel: "untrusted_data",
       decisions: [],
       artifactVersions: [],
       humanApprovalChanged: false,
@@ -1389,6 +1390,7 @@ describe("Bridge API vertical slice", () => {
     expect(issueContext.statusCode).toBe(200);
     expect(issueContext.json()).toMatchObject({
       issue: { canonicalUrl: issuePayload.canonicalUrl, labels: ["integration"] },
+      trustLevel: "untrusted_data",
       humanApprovalChanged: false,
     });
   });
@@ -2130,9 +2132,9 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/projects/${demoProject.id}/context?task=instrument%20retry%20metrics&categories=observability&component=transfers`,
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
-    expect(context.json<{ items: Array<{ id: string; authority: string }> }>().items).toEqual([
-      expect.objectContaining({ id: confirmedBody.confirmedDecisionId, authority: "approved" }),
-      expect.objectContaining({ id: assumption.id, authority: "confirmed" }),
+    expect(context.json<{ items: Array<{ id: string; authority: string; trustLevel: string }> }>().items).toEqual([
+      expect.objectContaining({ id: confirmedBody.confirmedDecisionId, authority: "approved", trustLevel: "untrusted_data" }),
+      expect.objectContaining({ id: assumption.id, authority: "confirmed", trustLevel: "untrusted_data" }),
     ]);
   });
 
@@ -2301,9 +2303,10 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
     expect(contextResponse.statusCode).toBe(200);
-    expect(contextResponse.json<{ items: Array<{ title: string }> }>().items[0]?.title).toBe(
+    expect(contextResponse.json<{ items: Array<{ title: string; trustLevel: string }> }>().items[0]?.title).toBe(
       "Retry transient failures",
     );
+    expect(contextResponse.json<{ items: Array<{ trustLevel: string }> }>().items[0]?.trustLevel).toBe("untrusted_data");
   });
 
   it("records threaded clarification comments with optimistic version checks", async () => {
