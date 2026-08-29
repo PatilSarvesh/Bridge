@@ -129,6 +129,8 @@ import {
 } from "@bridge/domain";
 import {
   type BridgeSecretContentType,
+  type BridgeIdempotencyOperation,
+  type BridgeIdempotencyOutcome,
   type BridgeMetrics,
   createCorrelationId,
   currentCorrelationId,
@@ -2108,7 +2110,21 @@ export class BridgeService {
     principal: Principal,
     work: (repository: BridgeRepository) => Promise<T>,
   ): Promise<T> {
-    return this.repository.transaction(work, { organizationId: principal.organizationId });
+    return this.repository
+      .transaction(work, { organizationId: principal.organizationId })
+      .catch((error: unknown) => {
+        if (error instanceof BridgeError && error.code === "CONFLICT") {
+          this.metrics?.recordConflict();
+        }
+        throw error;
+      });
+  }
+
+  private recordIdempotency(
+    operation: BridgeIdempotencyOperation,
+    outcome: BridgeIdempotencyOutcome,
+  ): void {
+    this.metrics?.recordIdempotency({ operation, outcome });
   }
 
   private recordUrl(parameters: Readonly<Record<string, string>>): string {
@@ -2198,12 +2214,14 @@ export class BridgeService {
           existing.name === input.name &&
           JSON.stringify(existing.decisionOwnerIds) === JSON.stringify(ownerIds);
         if (!sameRequest) {
+          this.recordIdempotency("project_registration", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "The project registration key was reused with different project details.",
             409,
           );
         }
+        this.recordIdempotency("project_registration", "replayed");
         return { project: existing, disposition: "idempotent_replay" };
       }
 
@@ -2223,6 +2241,7 @@ export class BridgeService {
         project.id,
         this.now().toISOString(),
       );
+      this.recordIdempotency("project_registration", "created");
       return { project, disposition: "created" };
     });
   }
@@ -2267,12 +2286,14 @@ export class BridgeService {
           existing.name === name &&
           existing.canonicalUrl === canonicalUrl;
         if (!sameRequest) {
+          this.recordIdempotency("repository_link", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "This repository is already linked with different project or metadata.",
             409,
           );
         }
+        this.recordIdempotency("repository_link", "replayed");
         return { repository: existing, disposition: "idempotent_replay" };
       }
       const linked: RepositoryRecord = {
@@ -2295,6 +2316,7 @@ export class BridgeService {
         linked.id,
         linked.createdAt,
       );
+      this.recordIdempotency("repository_link", "created");
       return { repository: linked, disposition: "created" };
     });
   }
@@ -2390,6 +2412,7 @@ export class BridgeService {
         const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
         const same = this.githubPullRequestMatches(existing, normalized);
         if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          this.recordIdempotency("github_pull_request_sync", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "The GitHub pull-request update is stale or conflicts with the stored provider version.",
@@ -2397,7 +2420,10 @@ export class BridgeService {
             { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
           );
         }
-        if (same) return { pullRequest: existing, disposition: "idempotent_replay" };
+        if (same) {
+          this.recordIdempotency("github_pull_request_sync", "replayed");
+          return { pullRequest: existing, disposition: "idempotent_replay" };
+        }
         const updated: GithubPullRequestContext = {
           ...existing,
           ...normalized,
@@ -2405,6 +2431,7 @@ export class BridgeService {
           version: existing.version + 1,
         };
         if (!await repository.saveGithubPullRequest(updated, existing.version)) {
+          this.recordIdempotency("github_pull_request_sync", "conflict");
           throw new BridgeError("CONFLICT", "The pull-request context changed during synchronization.", 409);
         }
         await this.audit(
@@ -2416,6 +2443,7 @@ export class BridgeService {
           updated.id,
           timestamp,
         );
+        this.recordIdempotency("github_pull_request_sync", "updated");
         return { pullRequest: updated, disposition: "updated" };
       }
       const created: GithubPullRequestContext = {
@@ -2428,6 +2456,7 @@ export class BridgeService {
         version: 1,
       };
       if (!await repository.saveGithubPullRequest(created)) {
+        this.recordIdempotency("github_pull_request_sync", "conflict");
         throw new BridgeError("CONFLICT", "The pull-request context was created concurrently.", 409);
       }
       await this.audit(
@@ -2439,6 +2468,7 @@ export class BridgeService {
         created.id,
         timestamp,
       );
+      this.recordIdempotency("github_pull_request_sync", "created");
       return { pullRequest: created, disposition: "created" };
     });
   }
@@ -2558,6 +2588,7 @@ export class BridgeService {
         const sourceOrder = normalized.sourceUpdatedAt.localeCompare(existing.sourceUpdatedAt);
         const same = this.githubIssueMatches(existing, normalized);
         if (sourceOrder < 0 || (sourceOrder === 0 && !same)) {
+          this.recordIdempotency("github_issue_sync", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "The GitHub issue update is stale or conflicts with the stored provider version.",
@@ -2565,7 +2596,10 @@ export class BridgeService {
             { currentVersion: existing.version, sourceUpdatedAt: existing.sourceUpdatedAt },
           );
         }
-        if (same) return { issue: existing, disposition: "idempotent_replay" };
+        if (same) {
+          this.recordIdempotency("github_issue_sync", "replayed");
+          return { issue: existing, disposition: "idempotent_replay" };
+        }
         const updated: GithubIssueWorkItem = {
           ...existing,
           ...normalized,
@@ -2573,6 +2607,7 @@ export class BridgeService {
           version: existing.version + 1,
         };
         if (!await repository.saveGithubIssue(updated, existing.version)) {
+          this.recordIdempotency("github_issue_sync", "conflict");
           throw new BridgeError("CONFLICT", "The work item changed during synchronization.", 409);
         }
         await this.audit(
@@ -2584,6 +2619,7 @@ export class BridgeService {
           updated.id,
           timestamp,
         );
+        this.recordIdempotency("github_issue_sync", "updated");
         return { issue: updated, disposition: "updated" };
       }
       const created: GithubIssueWorkItem = {
@@ -2596,6 +2632,7 @@ export class BridgeService {
         version: 1,
       };
       if (!await repository.saveGithubIssue(created)) {
+        this.recordIdempotency("github_issue_sync", "conflict");
         throw new BridgeError("CONFLICT", "The work item was created concurrently.", 409);
       }
       await this.audit(
@@ -2607,6 +2644,7 @@ export class BridgeService {
         created.id,
         timestamp,
       );
+      this.recordIdempotency("github_issue_sync", "created");
       return { issue: created, disposition: "created" };
     });
   }
@@ -2890,8 +2928,10 @@ export class BridgeService {
           existing.externalGroupId === externalGroupId &&
           existing.displayName === input.displayName.trim();
         if (!exactReplay) {
+          this.recordIdempotency("directory_group_create", "conflict");
           throw new BridgeError("CONFLICT", "This directory group has different configuration.", 409);
         }
+        this.recordIdempotency("directory_group_create", "replayed");
         return {
           group: existing,
           members: await repository.listDirectoryGroupMembers(existing.id),
@@ -2912,6 +2952,7 @@ export class BridgeService {
         version: 1,
       };
       if (!await repository.saveDirectoryGroup(group)) {
+        this.recordIdempotency("directory_group_create", "conflict");
         throw new BridgeError("CONFLICT", "The directory group was created concurrently.", 409);
       }
       await this.auditOrganizationEvent(
@@ -2955,6 +2996,7 @@ export class BridgeService {
         const sameSnapshot = group.status === input.status &&
           JSON.stringify(activeSnapshot) === JSON.stringify(normalizedMembers);
         if (sourceOrder < 0 || (sourceOrder === 0 && !sameSnapshot)) {
+          this.recordIdempotency("directory_group_sync", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "The directory group event is stale or conflicts with the stored provider version.",
@@ -2963,6 +3005,7 @@ export class BridgeService {
           );
         }
         if (sourceOrder === 0 && sameSnapshot) {
+          this.recordIdempotency("directory_group_sync", "replayed");
           return {
             group,
             members: existingMembers,
@@ -2973,6 +3016,7 @@ export class BridgeService {
         }
       }
       if (group.version !== input.expectedVersion) {
+        this.recordIdempotency("directory_group_sync", "conflict");
         throw new BridgeError("CONFLICT", "The directory group changed after it was read.", 409, {
           expectedVersion: input.expectedVersion,
           currentVersion: group.version,
@@ -3116,6 +3160,7 @@ export class BridgeService {
         version: group.version + 1,
       };
       if (!await repository.saveDirectoryGroup(updatedGroup, group.version)) {
+        this.recordIdempotency("directory_group_sync", "conflict");
         throw new BridgeError("CONFLICT", "The directory group changed during synchronization.", 409);
       }
       await this.auditOrganizationEvent(
@@ -3126,6 +3171,7 @@ export class BridgeService {
         timestamp,
         "directory_group",
       );
+      this.recordIdempotency("directory_group_sync", "updated");
       return {
         group: updatedGroup,
         members: await repository.listDirectoryGroupMembers(group.id),
@@ -3397,12 +3443,14 @@ export class BridgeService {
           this.sameRoles(existing.roles, roles) &&
           this.sameProjectMembershipConfiguration(existingProjects, configuredProjects);
         if (!exactReplay) {
+          this.recordIdempotency("organization_member_create", "conflict");
           throw new BridgeError(
             "CONFLICT",
             "This identity already has an organization membership with different configuration.",
             409,
           );
         }
+        this.recordIdempotency("organization_member_create", "replayed");
         return {
           member: this.organizationMember(identity, existing, existingProjects),
           disposition: "idempotent_replay",
@@ -3442,6 +3490,7 @@ export class BridgeService {
         identity.id,
         timestamp,
       );
+      this.recordIdempotency("organization_member_create", "created");
       return {
         member: this.organizationMember(identity, membership, projectMembershipRecords),
         disposition: "created",
@@ -4242,12 +4291,15 @@ export class BridgeService {
     if (existing) {
       const existingHash = await repository.getIdempotentRunRequestHash(idempotencyKey);
       if (existingHash !== requestHash) {
+        this.recordIdempotency("run_start", "conflict");
         throw new BridgeError("CONFLICT", "The idempotency key was reused with a different request.", 409);
       }
       const existingKey = await repository.getRunContinuationKey(existing.id);
       if (!existingKey) {
+        this.recordIdempotency("run_start", "conflict");
         throw new BridgeError("CONFLICT", "The run continuation locator is no longer available.", 409);
       }
+      this.recordIdempotency("run_start", "replayed");
       return { run: existing, resumeContextKey: existingKey };
     }
 
@@ -4300,6 +4352,7 @@ export class BridgeService {
     await repository.saveRunContinuationKey(run.id, resumeContextKey, input.vendorSessionId);
     await repository.saveIdempotentRun(idempotencyKey, run.id, requestHash);
     await this.audit(repository, principal, projectId, "run.started", "run", run.id, timestamp);
+    this.recordIdempotency("run_start", "created");
     return { run, resumeContextKey };
   }
 
@@ -4481,8 +4534,10 @@ export class BridgeService {
     if (existing) {
       const existingHash = await repository.getIdempotentAssumptionRequestHash(idempotencyKey);
       if (existingHash !== requestHash) {
+        this.recordIdempotency("assumption_record", "conflict");
         throw new BridgeError("CONFLICT", "The idempotency key was reused with a different request.", 409);
       }
+      this.recordIdempotency("assumption_record", "replayed");
       return existing;
     }
 
@@ -4589,6 +4644,7 @@ export class BridgeService {
       timestamp,
       policy.policyVersion,
     );
+    this.recordIdempotency("assumption_record", "created");
     return assumption;
   }
 
@@ -4915,8 +4971,10 @@ export class BridgeService {
     if (existing) {
       const existingHash = await repository.getIdempotentRequestHash(idempotencyKey);
       if (existingHash !== requestHash) {
+        this.recordIdempotency("question_submit", "conflict");
         throw new BridgeError("CONFLICT", "The idempotency key was reused with a different request.", 409);
       }
+      this.recordIdempotency("question_submit", "replayed");
       return { ...existing, submissionDisposition: "idempotent_replay" };
     }
 
@@ -4972,10 +5030,9 @@ export class BridgeService {
         timestamp,
         policy.policyVersion,
       );
-      return {
-        ...reusable,
-        submissionDisposition: reusable.status === "accepted" ? "reused_accepted" : "reused_pending",
-      };
+      const submissionDisposition = reusable.status === "accepted" ? "reused_accepted" : "reused_pending";
+      this.recordIdempotency("question_submit", submissionDisposition);
+      return { ...reusable, submissionDisposition };
     }
 
     const questionId = `qst_${this.id()}`;
@@ -5066,6 +5123,7 @@ export class BridgeService {
         ownerIds: question.ownerIds,
       },
     });
+    this.recordIdempotency("question_submit", "created");
     return { ...question, submissionDisposition: "created" };
   }
 
@@ -6775,13 +6833,16 @@ export class BridgeService {
     if (existingVersionId) {
       const existingHash = await repository.getIdempotentArtifactRequestHash(idempotencyKey);
       if (existingHash !== requestHash) {
+        this.recordIdempotency("artifact_publish", "conflict");
         throw new BridgeError("CONFLICT", "The idempotency key was reused with a different request.", 409);
       }
       const existingArtifact = await repository.getArtifactByVersionId(existingVersionId);
       const existingVersion = existingArtifact?.versions.find((version) => version.id === existingVersionId);
       if (!existingArtifact || !existingVersion) {
+        this.recordIdempotency("artifact_publish", "conflict");
         throw new BridgeError("CONFLICT", "The idempotent specification version is no longer available.", 409);
       }
+      this.recordIdempotency("artifact_publish", "replayed");
       return { artifact: existingArtifact, version: existingVersion };
     }
 
@@ -6905,6 +6966,7 @@ export class BridgeService {
         targetId: version.id,
       });
     }
+    this.recordIdempotency("artifact_publish", "created");
     return { artifact, version };
   }
 

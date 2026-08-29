@@ -9,6 +9,25 @@ export type BridgeNotificationOutcome =
   | "suppressed"
   | "deferred"
   | "skipped";
+export type BridgeIdempotencyOperation =
+  | "project_registration"
+  | "repository_link"
+  | "github_pull_request_sync"
+  | "github_issue_sync"
+  | "directory_group_create"
+  | "directory_group_sync"
+  | "organization_member_create"
+  | "run_start"
+  | "assumption_record"
+  | "question_submit"
+  | "artifact_publish";
+export type BridgeIdempotencyOutcome =
+  | "created"
+  | "updated"
+  | "replayed"
+  | "reused_pending"
+  | "reused_accepted"
+  | "conflict";
 export type BridgeDetectedSecretType =
   | "bridge_service_token"
   | "github_token"
@@ -128,6 +147,11 @@ export interface ContentSecretDetectionMetric {
   readonly secretType: BridgeDetectedSecretType;
 }
 
+export interface IdempotencyMetric {
+  readonly operation: BridgeIdempotencyOperation;
+  readonly outcome: BridgeIdempotencyOutcome;
+}
+
 const secondsBuckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] as const;
 const countBuckets = [0, 1, 2, 5, 10, 20, 50, 100, 250] as const;
 const maxOperationLabels = 128;
@@ -173,6 +197,14 @@ const definitions = {
     name: "bridge_database_transaction_duration_seconds",
     help: "Bridge repository transaction duration in seconds.",
     buckets: secondsBuckets,
+  },
+  idempotencyOperations: {
+    name: "bridge_idempotency_operations_total",
+    help: "Bridge idempotent write outcomes by bounded operation and outcome.",
+  },
+  conflicts: {
+    name: "bridge_conflicts_total",
+    help: "Bridge application operations rejected because their state was stale or conflicting.",
   },
   outboxEvents: {
     name: "bridge_outbox_events_total",
@@ -332,6 +364,17 @@ export class BridgeMetrics {
       labels,
       finiteNonNegative(metric.durationMs) / 1_000,
     );
+  }
+
+  recordIdempotency(metric: IdempotencyMetric): void {
+    this.increment(definitions.idempotencyOperations, {
+      operation: metric.operation,
+      outcome: metric.outcome,
+    });
+  }
+
+  recordConflict(): void {
+    this.increment(definitions.conflicts, {});
   }
 
   recordOutboxCycle(metric: OutboxCycleMetric): void {

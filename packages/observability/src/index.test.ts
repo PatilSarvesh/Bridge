@@ -83,7 +83,7 @@ describe("Bridge observability primitives", () => {
     });
   });
 
-  it("renders bounded request, context, database, outbox, delivery, and MCP metrics", () => {
+  it("renders bounded request, idempotency, conflict, context, database, outbox, delivery, and MCP metrics", () => {
     const metrics = new BridgeMetrics();
     metrics.recordHttpRequest({
       service: "api",
@@ -98,6 +98,9 @@ describe("Bridge observability primitives", () => {
       candidateCount: 12,
     });
     metrics.recordDatabaseTransaction({ backend: "postgresql", outcome: "success", durationMs: 20 });
+    metrics.recordIdempotency({ operation: "question_submit", outcome: "created" });
+    metrics.recordIdempotency({ operation: "question_submit", outcome: "reused_accepted" });
+    metrics.recordConflict();
     metrics.recordOutboxCycle({
       claimed: 3,
       processed: 1,
@@ -142,6 +145,21 @@ describe("Bridge observability primitives", () => {
         value: 1,
       }),
       expect.objectContaining({
+        name: "bridge_idempotency_operations_total",
+        labels: { operation: "question_submit", outcome: "created" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_idempotency_operations_total",
+        labels: { operation: "question_submit", outcome: "reused_accepted" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_conflicts_total",
+        labels: {},
+        value: 1,
+      }),
+      expect.objectContaining({
         name: "bridge_mcp_sessions_total",
         labels: { outcome: "initialized" },
         value: 1,
@@ -172,6 +190,8 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain('bridge_http_requests_total{operation="/v1/projects/:projectId/context",outcome="client_error",service="api"} 1');
     expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
     expect(rendered).toContain('bridge_content_secret_detections_total{content_type="artifact",secret_type="private_key"} 1');
+    expect(rendered).toContain('bridge_idempotency_operations_total{operation="question_submit",outcome="created"} 1');
+    expect(rendered).toContain('bridge_conflicts_total 1');
     expect(rendered).toContain('bridge_mcp_sessions_total{outcome="failed"} 1');
     expect(rendered).toContain('bridge_mcp_tool_duration_seconds_bucket{le="+Inf",tool="bridge_get_context"} 1');
     expect(rendered).not.toContain("ignored=true");

@@ -1025,7 +1025,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
@@ -1039,7 +1039,7 @@ Acceptance criteria:
 4. Alerts cover sustained API failure, MCP failure, database exhaustion, and outbox backlog.
 5. Initial service objectives and alert thresholds are documented.
 
-Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
+Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. Idempotent write outcomes and application conflicts are emitted with fixed labels through the existing process-local metrics surfaces. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
 
 ## 19. E11 — Pilot operations and analytics
 
@@ -1087,7 +1087,7 @@ Implementation note: the support read model returns bounded operator metadata on
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — the repository-side readiness manifest, bounded report, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
+- **Status:** Partial — the repository-side readiness manifest, bounded report, guarded local evidence command, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
 - **Dependencies:** All P0 pilot stories
 - **PRD references:** MVP acceptance criteria, pilot plan
 

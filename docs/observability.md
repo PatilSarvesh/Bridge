@@ -62,6 +62,7 @@ The registry records:
 - email and Slack delivery/policy outcome and handler duration.
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
 - MCP initialize outcomes and tool-call success/error/duration by bounded tool name, without request arguments, session identifiers, tenant, project, principal, record, or content labels.
+- idempotent write outcomes by a fixed operation/outcome vocabulary, plus application conflict totals without record, tenant, project, principal, or error-message labels.
 
 API, MCP, and worker metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. Repository, `runOutboxCycle`, and Slack delivery instrumentation share the exported worker registry; an email-enabled deployment must pass the same registry to its provider-neutral email handler and digest composition.
 

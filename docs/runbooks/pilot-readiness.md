@@ -19,6 +19,20 @@ pnpm pilot:readiness -- --strict
 
 Strict mode returns exit code `10` while any criterion still requires external evidence. The command reads one repository file, performs no network calls, never opens a database connection, never starts a worker, and never changes repository state. `repository_verified` means repeatable local/CI evidence; it is not equivalent to `complete` when a criterion also requires external evidence.
 
+## Repeatable local evidence
+
+Run the guarded local sequence when Docker PostgreSQL is available. It requires explicit loopback targets so a local readiness run cannot accidentally use a shared or production database:
+
+```bash
+export BRIDGE_TEST_DATABASE_URL='postgresql://bridge:bridge@127.0.0.1:5433/bridge_test'
+export BRIDGE_RESTORE_DATABASE_URL='postgresql://bridge:bridge@127.0.0.1:5433/bridge_restore'
+pnpm pilot:readiness:local
+```
+
+The command runs the PostgreSQL integration suite (including tenant-isolation and role checks), the read-only restore verifier, and the packaged fresh-project CLI smoke test. It requires two different database names and refuses a restore target that matches `DATABASE_URL`. Its bounded report contains only host/port/database metadata and check status, not connection strings.
+
+The local `bridge_restore` target must contain a separately restored copy to count as a recovery exercise. Running the verifier against a freshly migrated local database proves schema and verifier behavior only; it does not satisfy BRG-103's dated isolated restore evidence. Do not use `services:reset` or any destructive database command as part of a readiness review.
+
 ## Review order
 
 Run the repository checks first, then attach deployment evidence in the same order as the manifest:
