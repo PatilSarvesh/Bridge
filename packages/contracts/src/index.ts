@@ -57,6 +57,15 @@ export const outboxEventStatusSchema = z.enum([
 ]);
 export const deliveryChannelSchema = z.enum(["email", "slack"]);
 export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
+export const auditSourceSchema = z.enum([
+  "web",
+  "api",
+  "cli",
+  "mcp",
+  "application",
+  "worker",
+  "integration",
+]);
 export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest", "muted"]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
@@ -792,6 +801,7 @@ export const projectAnalyticsQuerySchema = z
 const auditFilterFields = {
   action: z.string().trim().min(1).max(200).optional(),
   actorId: z.string().trim().min(1).max(100).optional(),
+  source: auditSourceSchema.optional(),
   subjectType: z.string().trim().min(1).max(100).optional(),
   subjectId: z.string().trim().min(1).max(100).optional(),
   correlationId: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
@@ -1055,6 +1065,7 @@ export type OutboxEventType = z.infer<typeof outboxEventTypeSchema>;
 export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
 export type DeliveryChannel = z.infer<typeof deliveryChannelSchema>;
 export type OutboxDeliveryStatus = z.infer<typeof outboxDeliveryStatusSchema>;
+export type AuditSource = z.infer<typeof auditSourceSchema>;
 export type NotificationDeliveryPreference = z.infer<typeof notificationDeliveryPreferenceSchema>;
 export type AdapterDiagnosticMcpStatus = z.infer<typeof adapterDiagnosticMcpStatusSchema>;
 export type AdapterDiagnosticCheckName = z.infer<typeof adapterDiagnosticCheckNameSchema>;

@@ -453,6 +453,15 @@ describe("Bridge decision workflow", () => {
       risk: "medium",
       blocking: false,
     }));
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "question.created" && event.subjectId === question.id)).toMatchObject({
+      source: "application",
+      policyVersion: question.policyVersion,
+      policyRuleKey: question.policyRuleKey,
+      assignmentId: question.assignmentHistory[0]?.id,
+      ownerRouteSource: question.routing.ownerSource,
+      reviewerRouteSource: question.routing.reviewerSource,
+    });
     await expect(service.reassignQuestion(agent, question.id, {
       expectedVersion: question.version,
       ownerIds: [owner.id],
@@ -513,6 +522,11 @@ describe("Bridge decision workflow", () => {
     expect(qaInbox.find((item) => item.id === question.id)?.inboxReasons).toContain("direct_reviewer");
     expect((await repository.listAuditEvents(project.id)).find((event) =>
       event.action === "question.reassigned" && event.subjectId === question.id)).toMatchObject({
+      source: "application",
+      policyRuleKey: question.policyRuleKey,
+      assignmentId: reassigned.assignmentHistory[1]?.id,
+      ownerRouteSource: "reassignment",
+      reviewerRouteSource: "reassignment",
       beforeVersion: question.version,
       afterVersion: reassigned.version,
     });
@@ -1411,6 +1425,7 @@ describe("Bridge decision workflow", () => {
 
     const projectPage = await service.listProjectAudit(owner, project.id, {
       action: "question.created",
+      source: "application",
       offset: 0,
       limit: 1,
     });
@@ -1418,7 +1433,14 @@ describe("Bridge decision workflow", () => {
       totalMatching: 1,
       offset: 0,
       limit: 1,
-      items: [{ scope: "project", subjectId: createdQuestion.id, action: "question.created" }],
+      items: [{
+        scope: "project",
+        subjectId: createdQuestion.id,
+        action: "question.created",
+        source: "application",
+        policyRuleKey: createdQuestion.policyRuleKey,
+        assignmentId: createdQuestion.assignmentHistory[0]?.id,
+      }],
     });
     await expect(service.listProjectAudit(contributor, project.id, { offset: 0, limit: 50 }))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -1431,6 +1453,8 @@ describe("Bridge decision workflow", () => {
     });
     expect(projectExport).toMatchObject({ itemCount: 1, contentType: "application/json; charset=utf-8" });
     expect(projectExport.body).toContain("question.created");
+    expect(projectExport.body).toContain(createdQuestion.policyRuleKey);
+    expect(projectExport.body).toContain(createdQuestion.assignmentHistory[0]?.id ?? "missing-assignment");
     expect(projectExport.body).not.toContain(createdQuestion.title);
     expect(projectExport.body).not.toContain(createdQuestion.context);
     await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([

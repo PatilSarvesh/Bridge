@@ -507,6 +507,7 @@ describe("PostgreSQL domain mappings", () => {
       action: "organization_member.updated",
       subjectType: "organization_membership",
       subjectId: identity.id,
+      source: "api",
       beforeVersion: 1,
       afterVersion: 2,
       createdAt: organization.createdAt,
@@ -520,6 +521,7 @@ describe("PostgreSQL domain mappings", () => {
       action: "authentication.succeeded",
       subjectType: "principal_identity",
       subjectId: identity.id,
+      source: "web",
       createdAt: organization.createdAt,
     };
     const directoryGroup: DirectoryGroup = {
@@ -678,13 +680,33 @@ describe("PostgreSQL domain mappings", () => {
       action: "question.approval_overridden",
       subjectType: "question",
       subjectId: question.id,
+      source: "api",
       reason: "The configured reviewer was unavailable during the release window.",
       policyVersion: 1,
+      policyRuleKey: "protected-transfer-review",
+      assignmentId: "qas_mapping",
+      ownerRouteSource: "policy",
+      reviewerRouteSource: "scoped_ownership",
       beforeVersion: 1,
       afterVersion: 2,
       createdAt: "2026-08-07T10:03:00.000Z",
     };
     expect(auditEventFromRow(auditEventToRow(auditEvent) as AuditEventRow)).toEqual(auditEvent);
+    const legacyAuditEvent: AuditEvent = {
+      id: "aud_legacy_mapping",
+      correlationId: "cor_legacy_mapping",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      actorId: "usr_owner",
+      actorType: "human",
+      action: "question.created",
+      subjectType: "question",
+      subjectId: question.id,
+      createdAt: "2026-08-07T10:02:00.000Z",
+    };
+    expect(auditEventFromRow(auditEventToRow(legacyAuditEvent) as AuditEventRow)).toEqual(
+      legacyAuditEvent,
+    );
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
     expect(adapterDiagnosticFromRow(
       adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
@@ -1112,5 +1134,16 @@ describe("PostgreSQL domain mappings", () => {
     expect(auditLineageMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "after_version" integer');
     expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "before_version" integer');
     expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "after_version" integer');
+
+    const auditProvenanceMigration = readFileSync(
+      new URL("../drizzle/0049_bent_galactus.sql", import.meta.url),
+      "utf8",
+    );
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "source" text');
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "policy_rule_key" text');
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "assignment_id" text');
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "owner_route_source" text');
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "reviewer_route_source" text');
+    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "source" text');
   });
 });

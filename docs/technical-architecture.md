@@ -1005,6 +1005,14 @@ versioned state transition omit both fields. The PostgreSQL columns are nullable
 compatibility, and the REST/web read model plus JSON/CSV exports preserve the values without storing
 state bodies or sensitive content.
 
+New events additionally persist the trusted correlation-context source rather than accepting an
+arbitrary client label. Policy-governed question events carry the matched bounded rule key. Initial
+question assignment and reassignment events reference the immutable assignment-history entry plus
+the controlled owner/reviewer route-source enums; they do not duplicate principal lists, question
+content, or routing configuration bodies. These additive PostgreSQL fields remain nullable so
+historical rows are valid. REST and the web Audit view support exact source filtering, and bounded
+JSON/CSV/project exports preserve the same provenance.
+
 Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Override/reassignment reasons are bounded operational explanations, not prompts, answers, raw transcripts, or private reasoning. Exports are themselves audited.
 
 ## 20. Security design

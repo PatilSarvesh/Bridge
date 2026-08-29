@@ -399,6 +399,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         action: "organization_member.updated",
         subjectType: "organization_membership",
         subjectId: owner.id,
+        source: "api",
         createdAt: "2026-01-02T00:00:00.000Z",
         }));
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
@@ -428,7 +429,11 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       await expect(inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.listOrganizationAuditEvents(project.organizationId)))
         .resolves.toEqual(expect.arrayContaining([
-          expect.objectContaining({ subjectId: owner.id, action: "organization_member.updated" }),
+          expect.objectContaining({
+            subjectId: owner.id,
+            action: "organization_member.updated",
+            source: "api",
+          }),
           expect.objectContaining({ subjectId: `aex_${suffix}`, action: "audit.exported" }),
           expect.objectContaining({ subjectId: owner.id, action: "authentication.succeeded" }),
         ]));
@@ -671,7 +676,14 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       const questionAudit = (await inTenant(secondStore.repository, project.organizationId, (repository) =>
         repository.listAuditEvents(project.id)))
         .find((event) => event.action === "question.created" && event.subjectId === questionId);
-      expect(questionAudit?.correlationId).toMatch(/^cor_[0-9a-f]{32}$/);
+      expect(questionAudit).toMatchObject({
+        correlationId: expect.stringMatching(/^cor_[0-9a-f]{32}$/),
+        source: "application",
+        policyRuleKey: expect.any(String),
+        assignmentId: expect.stringMatching(/^qas_/),
+        ownerRouteSource: expect.any(String),
+        reviewerRouteSource: expect.any(String),
+      });
       expect(questionEvent?.correlationId).toBe(questionAudit?.correlationId);
       expect(await inTenant(secondStore.repository, project.organizationId, (repository) =>
         repository.listOutboxDeliveries(project.id))).toEqual([

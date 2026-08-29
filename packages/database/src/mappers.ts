@@ -264,11 +264,12 @@ export function organizationAuditEventToRow(
 export function organizationAuditEventFromRow(
   row: OrganizationAuditEventRow,
 ): OrganizationAuditEvent {
-  const { beforeVersion, afterVersion, ...event } = row;
+  const { source, beforeVersion, afterVersion, ...event } = row;
   return {
     ...event,
     action: row.action as OrganizationAuditEvent["action"],
     subjectType: row.subjectType as OrganizationAuditEvent["subjectType"],
+    ...(source === null ? {} : { source }),
     ...(beforeVersion === null ? {} : { beforeVersion }),
     ...(afterVersion === null ? {} : { afterVersion }),
   };
@@ -900,8 +901,13 @@ export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferIns
     action: event.action,
     subjectType: event.subjectType,
     subjectId: event.subjectId,
+    source: event.source ?? null,
     ...(event.reason === undefined ? {} : { reason: event.reason }),
     policyVersion: event.policyVersion ?? null,
+    policyRuleKey: event.policyRuleKey ?? null,
+    assignmentId: event.assignmentId ?? null,
+    ownerRouteSource: event.ownerRouteSource ?? null,
+    reviewerRouteSource: event.reviewerRouteSource ?? null,
     beforeVersion: event.beforeVersion ?? null,
     afterVersion: event.afterVersion ?? null,
     createdAt: event.createdAt,
@@ -919,8 +925,13 @@ export function auditEventFromRow(row: AuditEventRow): AuditEvent {
     action: row.action,
     subjectType: row.subjectType as AuditEvent["subjectType"],
     subjectId: row.subjectId,
+    ...(row.source === null ? {} : { source: row.source }),
     ...(row.reason === null ? {} : { reason: row.reason }),
     ...(row.policyVersion === null ? {} : { policyVersion: row.policyVersion }),
+    ...(row.policyRuleKey === null ? {} : { policyRuleKey: row.policyRuleKey }),
+    ...(row.assignmentId === null ? {} : { assignmentId: row.assignmentId }),
+    ...(row.ownerRouteSource === null ? {} : { ownerRouteSource: row.ownerRouteSource }),
+    ...(row.reviewerRouteSource === null ? {} : { reviewerRouteSource: row.reviewerRouteSource }),
     ...(row.beforeVersion === null ? {} : { beforeVersion: row.beforeVersion }),
     ...(row.afterVersion === null ? {} : { afterVersion: row.afterVersion }),
     createdAt: row.createdAt,

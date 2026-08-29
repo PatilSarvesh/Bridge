@@ -493,10 +493,11 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
 .audit-filter-panel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: none; }
 .audit-filter-panel label { display: grid; gap: 6px; color: var(--muted); font-size: .78rem; }
 .audit-panel { display: grid; gap: 14px; }
-.audit-table th, .audit-table td { text-align: left; vertical-align: top; }
+.audit-table { min-width: 920px; }
+.audit-table th, .audit-table td { text-align: left; vertical-align: top; white-space: normal; line-height: 1.4; }
 .audit-table td strong, .audit-table td code, .audit-table td small { display: block; }
-.audit-table td small { margin-top: 3px; color: var(--muted); }
-.audit-table td code { max-width: 260px; overflow: hidden; color: var(--muted); font-size: .76rem; text-overflow: ellipsis; }
+.audit-table td small { margin-top: 3px; overflow-wrap: anywhere; color: var(--muted); }
+.audit-table td code { width: min(260px, 100%); overflow: hidden; color: var(--muted); font-size: .76rem; white-space: nowrap; text-overflow: ellipsis; }
 .audit-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .audit-pagination span { color: var(--muted); font-size: .82rem; }
 .privacy-panel { border-color: #cfe2fa; background: #f3f7ff; }

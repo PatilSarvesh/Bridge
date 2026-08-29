@@ -1641,19 +1641,19 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
     }
 
     const auditEvents: readonly AuditEvent[] = [
-      ["aud_showcase_run", "run.started", "run", r.running, agent, -1],
-      ["aud_showcase_question", "question.created", "question", q.protected, agent, -2],
-      ["aud_showcase_response", "question.response_proposed", "response", "qrs_showcase_discussion_response", contributor, -5],
-      ["aud_showcase_comment", "question.comment_added", "question", q.discussion, qaLead, -4],
-      ["aud_showcase_accept", "question.accepted", "decision", d.retention, businessAnalyst, -13],
-      ["aud_showcase_decision", "decision.revoked", "decision", d.revoked, architect, -40],
-      ["aud_showcase_assumption", "assumption.recorded", "assumption", s.expiring, agent, -4],
-      ["aud_showcase_artifact", "artifact.version_published", "artifact_version", "av_showcase_adr_v1", agent, -2],
-      ["aud_showcase_review", "artifact.version_commented", "artifact_version", "av_showcase_adr_v1", qaLead, -1],
-      ["aud_showcase_approve", "artifact.version_approved", "artifact_version", "av_showcase_prd_v2", architect, -12],
-      ["aud_showcase_repository", "repository.linked", "repository", "repo_showcase_bridge", architect, -48],
-      ["aud_showcase_policy", "project.policy_updated", "policy_configuration", project.id, architect, -10],
-    ].map(([id, action, subjectType, subjectId, actor, days], index) => ({
+      ["aud_showcase_run", "run.started", "run", r.running, agent, -1, "api"],
+      ["aud_showcase_question", "question.created", "question", q.protected, agent, -2, "mcp"],
+      ["aud_showcase_response", "question.response_proposed", "response", "qrs_showcase_discussion_response", contributor, -5, "api"],
+      ["aud_showcase_comment", "question.comment_added", "question", q.discussion, qaLead, -4, "web"],
+      ["aud_showcase_accept", "question.accepted", "decision", d.retention, businessAnalyst, -13, "web"],
+      ["aud_showcase_decision", "decision.revoked", "decision", d.revoked, architect, -40, "web"],
+      ["aud_showcase_assumption", "assumption.recorded", "assumption", s.expiring, agent, -4, "mcp"],
+      ["aud_showcase_artifact", "artifact.version_published", "artifact_version", "av_showcase_adr_v1", agent, -2, "api"],
+      ["aud_showcase_review", "artifact.version_commented", "artifact_version", "av_showcase_adr_v1", qaLead, -1, "web"],
+      ["aud_showcase_approve", "artifact.version_approved", "artifact_version", "av_showcase_prd_v2", architect, -12, "web"],
+      ["aud_showcase_repository", "repository.linked", "repository", "repo_showcase_bridge", architect, -48, "api"],
+      ["aud_showcase_policy", "project.policy_updated", "policy_configuration", project.id, architect, -10, "api"],
+    ].map(([id, action, subjectType, subjectId, actor, days, source], index) => ({
       id: String(id),
       correlationId: `demo_audit_${String(index + 1).padStart(2, "0")}`,
       organizationId: project.organizationId,
@@ -1663,6 +1663,18 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
       action: String(action),
       subjectType: subjectType as AuditEvent["subjectType"],
       subjectId: String(subjectId),
+      source: source as NonNullable<AuditEvent["source"]>,
+      ...(id === "aud_showcase_question" ? {
+        policyVersion: 1,
+        policyRuleKey: "production-release",
+        assignmentId: "qas_showcase_protected_initial",
+        ownerRouteSource: "scoped_ownership" as const,
+        reviewerRouteSource: "policy" as const,
+      } : {}),
+      ...(id === "aud_showcase_assumption" ? {
+        policyVersion: 0,
+        policyRuleKey: "bridge-assumption-default",
+      } : {}),
       createdAt: shiftedIso(anchor, Number(days)),
     }));
     const existingAuditIds = new Set((await scopedRepository.listAuditEvents(project.id)).map((event) => event.id));

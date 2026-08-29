@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceSha256": "7eda5760f28302e981236f1fb285d89878f885430bd90a911481e909f32a4309",
-  "schemaCount": 101,
+  "sourceSha256": "e0a9be62058a182a1c4d6ca5ddb0be81e3446687de0161a9143b5a080821fff8",
+  "schemaCount": 102,
   "schemas": {
     "acceptAnswerInputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -250,6 +250,18 @@
           "minLength": 1,
           "maxLength": 100
         },
+        "source": {
+          "type": "string",
+          "enum": [
+            "web",
+            "api",
+            "cli",
+            "mcp",
+            "application",
+            "worker",
+            "integration"
+          ]
+        },
         "subjectType": {
           "type": "string",
           "minLength": 1,
@@ -309,6 +321,18 @@
           "minLength": 1,
           "maxLength": 100
         },
+        "source": {
+          "type": "string",
+          "enum": [
+            "web",
+            "api",
+            "cli",
+            "mcp",
+            "application",
+            "worker",
+            "integration"
+          ]
+        },
         "subjectType": {
           "type": "string",
           "minLength": 1,
@@ -351,6 +375,19 @@
         "limit"
       ],
       "additionalProperties": false
+    },
+    "auditSourceSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "web",
+        "api",
+        "cli",
+        "mcp",
+        "application",
+        "worker",
+        "integration"
+      ]
     },
     "bridgeCapabilityScopeSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
