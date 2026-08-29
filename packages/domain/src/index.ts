@@ -750,10 +750,32 @@ export interface ArtifactVersion {
   readonly reviews: readonly ArtifactReview[];
   readonly requiredApprovals: number;
   readonly approvalStatus: ArtifactApprovalStatus;
+  /** Immutable reviewer resolution captured when this version was published. */
+  readonly reviewerAssignment?: ArtifactReviewerAssignment;
   readonly runId?: string;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+export type ArtifactReviewerRouteSource =
+  | "explicit_reviewer"
+  | "retained_reviewers"
+  | "scoped_ownership"
+  | "project_default"
+  | "decision_owner_fallback";
+
+export interface ArtifactReviewerAssignment {
+  readonly id: string;
+  readonly reviewerIds: readonly string[];
+  readonly routeSource: ArtifactReviewerRouteSource;
+  readonly ownershipVersion: number;
+  readonly ownershipRuleKey?: string;
+  readonly sourceAssignmentId?: string;
+  readonly requestedReviewerIds: readonly string[];
+  readonly requestedReviewerRoles: readonly string[];
+  readonly requestedReviewerTeamKeys: readonly string[];
+  readonly createdAt: string;
 }
 
 export interface ArtifactApprovalStatus {
@@ -851,13 +873,15 @@ export interface AuditEvent {
   /** The immutable assignment-history entry associated with the action, when applicable. */
   readonly assignmentId?: string;
   readonly ownerRouteSource?: QuestionRouteSource;
-  readonly reviewerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: ReviewerRouteSource;
   /** The previous immutable version, when this event records a state transition. */
   readonly beforeVersion?: number;
   /** The committed immutable version, when this event records a state transition. */
   readonly afterVersion?: number;
   readonly createdAt: string;
 }
+
+export type ReviewerRouteSource = QuestionRouteSource | ArtifactReviewerRouteSource;
 
 export function assertProjectAccess(principal: Principal, project: Project): void {
   if (
@@ -1132,9 +1156,11 @@ export function assertCanApproveArtifact(
   principal: Principal,
   artifact: Artifact,
   projectDecisionOwnerIds: readonly string[] = [],
+  version?: ArtifactVersion,
 ): void {
   assertHuman(principal, "Approving a specification");
-  const isReviewer = artifact.reviewerIds.includes(principal.id);
+  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)
+    .includes(principal.id);
   const isDecisionOwner = projectDecisionOwnerIds.includes(principal.id);
   const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isDecisionOwner && !isProjectAdmin) {
@@ -1146,9 +1172,14 @@ export function assertCanApproveArtifact(
   }
 }
 
-export function assertCanReviewArtifact(principal: Principal, artifact: Artifact): void {
+export function assertCanReviewArtifact(
+  principal: Principal,
+  artifact: Artifact,
+  version?: ArtifactVersion,
+): void {
   assertHuman(principal, "Reviewing a specification");
-  const isReviewer = artifact.reviewerIds.includes(principal.id);
+  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)
+    .includes(principal.id);
   const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isProjectAdmin) {
     throw new BridgeError(

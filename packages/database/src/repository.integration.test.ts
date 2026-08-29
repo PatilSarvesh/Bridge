@@ -655,6 +655,11 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       expect(await service.getArtifact(owner, artifactId)).toMatchObject({
         versions: [expect.objectContaining({
           id: artifactVersionId,
+          reviewerAssignment: expect.objectContaining({
+            id: expect.stringMatching(/^ara_/),
+            reviewerIds: [owner.id],
+            routeSource: "explicit_reviewer",
+          }),
           reviews: expect.arrayContaining([
             expect.objectContaining({ status: "commented", reviewerId: owner.id }),
           ]),

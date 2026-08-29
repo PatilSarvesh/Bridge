@@ -808,6 +808,7 @@ export function artifactVersionToRow(
     createdAt: version.createdAt,
     reviews: version.reviews,
     requiredApprovals: version.requiredApprovals,
+    reviewerAssignment: version.reviewerAssignment ?? null,
     runId: version.runId ?? null,
     approvedById: version.approvedById ?? null,
     approvalRationale: version.approvalRationale ?? null,
@@ -830,6 +831,9 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
     createdAt: row.createdAt,
     reviews: row.reviews,
     requiredApprovals: row.requiredApprovals,
+    ...(row.reviewerAssignment === null
+      ? {}
+      : { reviewerAssignment: row.reviewerAssignment }),
     ...(row.runId === null ? {} : { runId: row.runId }),
     ...(row.approvedById === null ? {} : { approvedById: row.approvedById }),
     ...(row.approvalRationale === null ? {} : { approvalRationale: row.approvalRationale }),

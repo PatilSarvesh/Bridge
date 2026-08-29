@@ -2,6 +2,7 @@ import type { PolicyAction, Scope } from "@bridge/contracts";
 import type {
   AdapterDiagnostic,
   AgentRun,
+  ArtifactReviewerAssignment,
   AuditEvent,
   AuditSource,
   DirectoryGroup,
@@ -20,6 +21,7 @@ import type {
   QuestionResponseRevision,
   QuestionRoutingExplanation,
   QuestionRouteSource,
+  ReviewerRouteSource,
   RepositoryRecord,
   GithubPullRequestContext,
   GithubIssueWorkItem,
@@ -889,6 +891,7 @@ export const artifactVersions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     reviews: jsonb("reviews").$type<readonly ArtifactReview[]>().default([]).notNull(),
     requiredApprovals: integer("required_approvals").default(1).notNull(),
+    reviewerAssignment: jsonb("reviewer_assignment").$type<ArtifactReviewerAssignment>(),
     runId: text("run_id").references(() => agentRuns.id, { onDelete: "restrict" }),
     approvedById: text("approved_by_id"),
     approvalRationale: text("approval_rationale"),
@@ -900,6 +903,16 @@ export const artifactVersions = pgTable(
     check(
       "bridge_artifact_versions_required_approvals_check",
       sql`${table.requiredApprovals} between 1 and 20`,
+    ),
+    check(
+      "bridge_artifact_versions_reviewer_assignment_shape_check",
+      sql`${table.reviewerAssignment} is null or (
+        jsonb_typeof(${table.reviewerAssignment}) = 'object'
+        and jsonb_typeof(${table.reviewerAssignment}->'reviewerIds') = 'array'
+        and jsonb_typeof(${table.reviewerAssignment}->'requestedReviewerIds') = 'array'
+        and jsonb_typeof(${table.reviewerAssignment}->'requestedReviewerRoles') = 'array'
+        and jsonb_typeof(${table.reviewerAssignment}->'requestedReviewerTeamKeys') = 'array'
+      )`,
     ),
     relatedTenantPolicy(
       "bridge_artifact_versions_tenant",
@@ -952,7 +965,7 @@ export const auditEvents = pgTable(
     policyRuleKey: text("policy_rule_key"),
     assignmentId: text("assignment_id"),
     ownerRouteSource: text("owner_route_source").$type<QuestionRouteSource>(),
-    reviewerRouteSource: text("reviewer_route_source").$type<QuestionRouteSource>(),
+    reviewerRouteSource: text("reviewer_route_source").$type<ReviewerRouteSource>(),
     beforeVersion: integer("before_version"),
     afterVersion: integer("after_version"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),

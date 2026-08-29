@@ -335,9 +335,23 @@ interface ArtifactVersion {
   readonly reviews: readonly ArtifactReview[];
   readonly requiredApprovals: number;
   readonly approvalStatus: ArtifactApprovalStatus;
+  readonly reviewerAssignment?: ArtifactReviewerAssignment;
   readonly approvedById?: string;
   readonly approvalRationale?: string;
   readonly approvedAt?: string;
+}
+
+interface ArtifactReviewerAssignment {
+  readonly id: string;
+  readonly reviewerIds: readonly string[];
+  readonly routeSource: "explicit_reviewer" | "retained_reviewers" | "scoped_ownership" | "project_default" | "decision_owner_fallback";
+  readonly ownershipVersion: number;
+  readonly ownershipRuleKey?: string;
+  readonly sourceAssignmentId?: string;
+  readonly requestedReviewerIds: readonly string[];
+  readonly requestedReviewerRoles: readonly string[];
+  readonly requestedReviewerTeamKeys: readonly string[];
+  readonly createdAt: string;
 }
 
 interface ArtifactReview {
@@ -1998,9 +2012,11 @@ export default function Home() {
     [artifacts, selectedArtifactId],
   );
   const selectedArtifactVersion = currentVersion(selectedArtifact);
+  const selectedArtifactReviewerIds = selectedArtifactVersion?.reviewerAssignment?.reviewerIds ??
+    selectedArtifact?.reviewerIds ?? [];
   const canReviewSelectedArtifact = Boolean(
     selectedArtifact && activePrincipal &&
-    (selectedArtifact.reviewerIds.includes(activePrincipalId) || activeRoles.includes("project-admin")),
+    (selectedArtifactReviewerIds.includes(activePrincipalId) || activeRoles.includes("project-admin")),
   );
   const selectedArtifactHasChangesRequested = Boolean(
     selectedArtifactVersion?.reviews.some((review) => review.status === "changes_requested"),
@@ -4932,10 +4948,26 @@ export default function Home() {
                         </div>
                         <dl className="spec-meta-line">
                           <div><dt>Publisher</dt><dd title={selectedArtifactVersion.createdById}>{displayIdentityName(selectedArtifactVersion.createdById, principals)}</dd></div>
-                          <div><dt>Human reviewers</dt><dd title={selectedArtifact.reviewerIds.join(", ")}>{selectedArtifact.reviewerIds.map((reviewerId) => displayIdentityName(reviewerId, principals)).join(", ") || "Not assigned"}</dd></div>
+                          <div><dt>Human reviewers</dt><dd title={selectedArtifactReviewerIds.join(", ")}>{selectedArtifactReviewerIds.map((reviewerId) => displayIdentityName(reviewerId, principals)).join(", ") || "Not assigned"}</dd></div>
                           <div><dt>Scope</dt><dd>{selectedArtifact.scope.component ?? selectedArtifact.scope.repository ?? "Project"}</dd></div>
                           <div><dt>Version</dt><dd>{selectedArtifactVersion.version}</dd></div>
                         </dl>
+                        <details className="spec-routing-disclosure">
+                          <summary>
+                            <span>Reviewer assignment</span>
+                            <small>{selectedArtifactVersion.reviewerAssignment?.routeSource.replaceAll("_", " ") ?? "Legacy record"}</small>
+                          </summary>
+                          {selectedArtifactVersion.reviewerAssignment ? (
+                            <dl>
+                              <div><dt>Route</dt><dd className="routing-source">{selectedArtifactVersion.reviewerAssignment.routeSource.replaceAll("_", " ")}</dd></div>
+                              <div><dt>Ownership version</dt><dd>{selectedArtifactVersion.reviewerAssignment.ownershipVersion}</dd></div>
+                              <div><dt>Route detail</dt><dd title={selectedArtifactVersion.reviewerAssignment.sourceAssignmentId ?? selectedArtifactVersion.reviewerAssignment.ownershipRuleKey}>{selectedArtifactVersion.reviewerAssignment.sourceAssignmentId ?? selectedArtifactVersion.reviewerAssignment.ownershipRuleKey ?? "Direct or fallback"}</dd></div>
+                              <div><dt>Assignment</dt><dd title={selectedArtifactVersion.reviewerAssignment.id}>{selectedArtifactVersion.reviewerAssignment.id}</dd></div>
+                            </dl>
+                          ) : (
+                            <p>This version predates immutable reviewer routing. Bridge is showing the artifact's current reviewer list as a compatibility fallback.</p>
+                          )}
+                        </details>
                       </section>
 
                       <section className="specification-reader" aria-labelledby="specification-document-title">

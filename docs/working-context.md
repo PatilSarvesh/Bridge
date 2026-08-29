@@ -2162,7 +2162,9 @@ Implemented and locally verified:
 Deliberate boundaries:
 
 - Routing resolves a review audience; it does not grant acceptance or approval authority to agents. Existing server-side human reviewer, decision-owner, and administrator checks remain authoritative.
-- Reviewer IDs remain artifact-level in the current model, so a new version may explicitly replace the audience for the logical artifact. The version's required approval count and accumulated approvals are immutable-version state. REST remains canonical and MCP remains optional.
+- The artifact still keeps the latest audience for list/read compatibility. Section 20.104 adds an
+  immutable assignment to each new version so an explicit later reroute cannot rewrite historical
+  authorization or provenance. REST remains canonical and MCP remains optional.
 
 ### 20.69 Implemented distinct-human artifact approval quorum
 
@@ -2898,10 +2900,50 @@ Deliberate boundaries:
   copy owner lists, reviewer names, question bodies, policy bodies, credentials, or private
   reasoning into the audit stream.
 - Failed or malformed authentication attempts still lack trusted tenant context and remain in safe
-  operational logs. Non-question reviewer-assignment lineage and production retention controls
-  remain explicit BRG-100 follow-up work.
+  operational logs. Specification reviewer-assignment lineage is completed in section 20.104;
+  failed/unknown authentication attribution and production retention controls remain explicit
+  BRG-100 follow-up work.
 - REST remains canonical, MCP remains optional, and no agent gains decision-acceptance,
   specification-approval, assignment, or policy authority from this metadata.
+
+### 20.104 Added immutable specification reviewer-assignment lineage (BRG-100)
+
+Implemented and locally verified:
+
+1. Every newly published specification version now stores one immutable reviewer assignment with a
+   generated assignment ID, the exact resolved human reviewer IDs, controlled route source,
+   ownership-configuration version, optional matched ownership rule or retained-source assignment
+   pointer, normalized requested direct, role, and team selectors, and publication timestamp.
+2. Explicit targets, retained reviewers, scoped/project ownership rules, and project decision-owner
+   fallback produce distinct controlled route sources. A later version may intentionally reroute the
+   logical artifact, but review and approval authorization now uses the target version's frozen
+   assignment instead of the latest artifact audience.
+3. Specification publication, review-comment, change-request, partial-approval, and final-approval
+   audit events reference the immutable assignment ID and route source without copying reviewer
+   lists or selectors into the metadata-only audit stream. Notifications use the same version-bound
+   audience.
+4. Forward-only migration `0050_natural_miek.sql` adds nullable assignment JSON plus a reviewed
+   shape constraint. Legacy rows remain readable and use the artifact audience only as an explicit
+   compatibility fallback; repository updates never overwrite an existing assignment.
+5. Canonical REST responses expose the additive version field. The Specifications workspace shows
+   the correct version reviewer names and keeps routing details in a compact disclosure so the
+   readable document remains primary.
+6. Domain, application, REST, mapper, migration-shape, opt-in PostgreSQL integration, and web
+   type/build coverage verify immutable routing, audit references, legacy compatibility, and the
+   preserved human-only approval boundary. Desktop, 375-pixel portrait, and 812×375 landscape
+   browser checks verified disclosure interaction and no horizontal overflow. No database command
+   was run; PostgreSQL integration remains gated by an explicitly isolated
+   `BRIDGE_TEST_DATABASE_URL`.
+
+Deliberate boundaries:
+
+- The assignment is provenance for a resolved human review audience, not a new policy engine or a
+  grant to an agent. Project decision-owner and administrator approval paths remain unchanged, and
+  only humans can review or approve.
+- Historical rows are not backfilled with guessed routing evidence. The UI labels their fallback,
+  while every new publication records complete repository-owned lineage.
+- BRG-100 remains partial only for failed/unknown authentication attribution and production
+  retention controls. REST remains canonical and MCP remains optional.
 
 ## 21. Important implementation files
 
@@ -2980,6 +3022,7 @@ Deliberate boundaries:
 - Indexed question-match migration: `packages/database/drizzle/0047_early_juggernaut.sql`
 - Audit version-lineage migration: `packages/database/drizzle/0048_lovely_ultimo.sql`
 - Trusted audit policy/assignment provenance migration: `packages/database/drizzle/0049_bent_galactus.sql`
+- Immutable specification reviewer-assignment migration: `packages/database/drizzle/0050_natural_miek.sql`
 - Demo fixtures: `packages/test-support/src/index.ts`, `packages/test-support/src/showcase.ts`
 - REST API: `apps/api/src/app.ts`
 - API bootstrap: `apps/api/src/server.ts`
@@ -3037,4 +3080,4 @@ Before continuing work:
 
 ## 24. One-sentence current state
 
-Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, a safe readable Markdown specification-review workspace, indexed typo-tolerant duplicate-question suggestions with exact policy-safe reuse, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching and deployable AWS SES delivery, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, explicit untrusted-context labeling, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics and derived health summaries, Slack Incoming Webhook and AWS SES notification adapters, and a deployable maintenance-role outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, non-question reviewer-assignment audit lineage, richer connector diagnostics, MCP-side token issuance, broader DLP, live SES/Slack account and deployment validation, provider feedback handling, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.
+Bridge is a contributor-ready governed-agent MVP with installable CLI bootstrap, shared question/decision/specification workflows, a safe readable Markdown specification-review workspace, indexed typo-tolerant duplicate-question suggestions with exact policy-safe reuse, read-only selected-role question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, read-only GitHub pull-request and issue metadata with explicit decision/specification context and work-item ranking, bounded provider-group membership lifecycle synchronization with zero-role provisioning and manual-access precedence, configured direct/role/team artifact reviewer routing with immutable per-version assignment lineage and distinct-human approval quorum, completed human assumption confirmation and scheduled expiry notification, one-time overdue blocking-question escalation, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, durable optional PostgreSQL/MCP paths, explicit human-gated Codex CLI automatic continuation with universal manual fallback, a reproducible synthetic retrieval benchmark that does not justify vector infrastructure, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable pilot floors, configurable protected reviewer quorum with approval summaries and audited administrator override, explainable owner/reviewer routing and administrator-only versioned reassignment, role-directory fanout for human in-app notifications, durable human-owned email notification preferences with scheduled title-only digest batching and deployable AWS SES delivery, question run/scope provenance, privacy-conscious analytics/observability, bounded MCP session/tool telemetry, REST-canonical project repository records with administrator web/CLI management, Auth0-compatible OIDC web/API with durable trusted-human sign-in/logout audit events, interactive CLI PKCE, audited organization/project membership administration, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, revocable scoped service identities with mapped least-privilege capability scopes, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, pre-persistence high-confidence secret blocking, explicit untrusted-context labeling, forced transaction-scoped RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with latest bounded adapter diagnostics and derived health summaries, Slack Incoming Webhook and AWS SES notification adapters, and a deployable maintenance-role outbox worker with capped jittered retries and a loopback-default Prometheus endpoint, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack; failed/unknown authentication attribution, external scope issuance, richer connector diagnostics, MCP-side token issuance, broader DLP, live SES/Slack account and deployment validation, provider feedback handling, provider invitations/SCIM hosting, live GitHub and identity-provider validation, cross-vendor conformance, privacy-reviewed pilot retrieval labels, and recovery evidence remain pending.

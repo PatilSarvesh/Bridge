@@ -4089,7 +4089,7 @@ describe("Bridge decision workflow", () => {
   });
 
   it("versions specifications, requires human approval, and returns only approved versions as context", async () => {
-    const { service } = await runtime();
+    const { repository, service } = await runtime();
     const first = await service.publishArtifact(agent, project.id, artifactInput());
     const replay = await service.publishArtifact(agent, project.id, artifactInput());
     expect(replay.version.id).toBe(first.version.id);
@@ -4173,6 +4173,14 @@ describe("Bridge decision workflow", () => {
         body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
       }),
     ]);
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "artifact.version_commented",
+        subjectId: first.version.id,
+        assignmentId: first.version.reviewerAssignment?.id,
+        reviewerRouteSource: "explicit_reviewer",
+      }),
+    ]));
   });
 
   it("resolves specification reviewers from direct users, roles, teams, and scoped ownership", async () => {
@@ -4211,6 +4219,16 @@ describe("Bridge decision workflow", () => {
       owner.id,
       qaLead.id,
     ].sort((left, right) => left.localeCompare(right)));
+    expect(explicit.version.reviewerAssignment).toEqual({
+      id: expect.stringMatching(/^ara_/),
+      reviewerIds: explicit.artifact.reviewerIds,
+      routeSource: "explicit_reviewer",
+      ownershipVersion: 1,
+      requestedReviewerIds: [owner.id],
+      requestedReviewerRoles: ["qa-lead"],
+      requestedReviewerTeamKeys: ["architecture"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
 
     const routed = await service.publishArtifact(agent, project.id, artifactInput({
       idempotencyKey: "artifact-review-routing-rule",
@@ -4221,10 +4239,51 @@ describe("Bridge decision workflow", () => {
       architectureReviewer.id,
       qaLead.id,
     ].sort((left, right) => left.localeCompare(right)));
+    expect(routed.version.reviewerAssignment).toMatchObject({
+      id: expect.stringMatching(/^ara_/),
+      reviewerIds: routed.artifact.reviewerIds,
+      routeSource: "scoped_ownership",
+      ownershipVersion: 1,
+      ownershipRuleKey: "transfer-specification-review",
+      requestedReviewerIds: [],
+      requestedReviewerRoles: [],
+      requestedReviewerTeamKeys: [],
+    });
     expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id))
       .toHaveLength(2);
     expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id))
       .toHaveLength(2);
+
+    const retained = await service.publishArtifact(agent, project.id, artifactInput({
+      artifactId: explicit.artifact.id,
+      idempotencyKey: "artifact-review-routing-retained",
+      intendedReviewerIds: [],
+    }));
+    expect(retained.version.reviewerAssignment).toMatchObject({
+      id: expect.stringMatching(/^ara_/),
+      reviewerIds: explicit.artifact.reviewerIds,
+      routeSource: "retained_reviewers",
+      ownershipVersion: 1,
+      sourceAssignmentId: explicit.version.reviewerAssignment?.id,
+    });
+    expect(retained.version.reviewerAssignment?.id)
+      .not.toBe(explicit.version.reviewerAssignment?.id);
+
+    const auditEvents = await repository.listAuditEvents(project.id);
+    expect(auditEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "artifact.version_published",
+        subjectId: explicit.version.id,
+        assignmentId: explicit.version.reviewerAssignment?.id,
+        reviewerRouteSource: "explicit_reviewer",
+      }),
+      expect.objectContaining({
+        action: "artifact.version_published",
+        subjectId: routed.version.id,
+        assignmentId: routed.version.reviewerAssignment?.id,
+        reviewerRouteSource: "scoped_ownership",
+      }),
+    ]));
   });
 
   it("requires a distinct human approval quorum before a specification becomes authoritative", async () => {
@@ -4294,8 +4353,18 @@ describe("Bridge decision workflow", () => {
       maxItems: 20,
     })).items).toEqual([expect.objectContaining({ id: publication.version.id, authority: "approved" })]);
     expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "artifact.version_approval_recorded", actorId: owner.id }),
-      expect.objectContaining({ action: "artifact.version_approved", actorId: qaLead.id }),
+      expect.objectContaining({
+        action: "artifact.version_approval_recorded",
+        actorId: owner.id,
+        assignmentId: publication.version.reviewerAssignment?.id,
+        reviewerRouteSource: "explicit_reviewer",
+      }),
+      expect.objectContaining({
+        action: "artifact.version_approved",
+        actorId: qaLead.id,
+        assignmentId: publication.version.reviewerAssignment?.id,
+        reviewerRouteSource: "explicit_reviewer",
+      }),
     ]));
   });
 

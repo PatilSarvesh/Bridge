@@ -84,6 +84,8 @@ import {
   type AuditEvent,
   type Artifact,
   type ArtifactReview,
+  type ArtifactReviewerAssignment,
+  type ArtifactReviewerRouteSource,
   type ArtifactVersion,
   type BridgeErrorCode,
   type ContextItem,
@@ -125,6 +127,7 @@ import {
   type ProjectRoleDefinition,
   type ProjectTeam,
   type RepositoryRecord,
+  type ReviewerRouteSource,
   type ServiceCredential,
   type ServiceTokenResolution,
 } from "@bridge/domain";
@@ -671,7 +674,7 @@ export interface AuditRecord {
   readonly policyRuleKey?: string;
   readonly assignmentId?: string;
   readonly ownerRouteSource?: QuestionRouteSource;
-  readonly reviewerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: ReviewerRouteSource;
   readonly beforeVersion?: number;
   readonly afterVersion?: number;
   readonly createdAt: string;
@@ -683,7 +686,7 @@ interface AuditMetadata {
   readonly policyRuleKey?: string;
   readonly assignmentId?: string;
   readonly ownerRouteSource?: QuestionRouteSource;
-  readonly reviewerRouteSource?: QuestionRouteSource;
+  readonly reviewerRouteSource?: ReviewerRouteSource;
 }
 
 export interface AuditPage {
@@ -1033,6 +1036,17 @@ interface RoutingResolution {
   readonly reviewerIds: readonly string[];
   readonly reviewerRoles: readonly string[];
   readonly explanation: QuestionRoutingExplanation;
+}
+
+interface ArtifactReviewerResolution {
+  readonly reviewerIds: readonly string[];
+  readonly routeSource: ArtifactReviewerRouteSource;
+  readonly ownershipVersion: number;
+  readonly ownershipRuleKey?: string;
+  readonly sourceAssignmentId?: string;
+  readonly requestedReviewerIds: readonly string[];
+  readonly requestedReviewerRoles: readonly string[];
+  readonly requestedReviewerTeamKeys: readonly string[];
 }
 
 export type QuestionSubmission = Question & {
@@ -6957,12 +6971,13 @@ export class BridgeService {
       ? await this.requireLinkableRun(principal, input.runId, repository)
       : undefined;
     const artifactId = existingArtifact?.id ?? `art_${this.id()}`;
-    const reviewerIds = await this.resolveArtifactReviewers(
+    const reviewerResolution = await this.resolveArtifactReviewers(
       repository,
       project,
       input,
       existingArtifact,
     );
+    const reviewerIds = reviewerResolution.reviewerIds;
     if (input.requiredApprovals > reviewerIds.length) {
       throw new BridgeError(
         "VALIDATION_FAILED",
@@ -6971,6 +6986,11 @@ export class BridgeService {
         { requiredApprovals: input.requiredApprovals, resolvedReviewerCount: reviewerIds.length },
       );
     }
+    const reviewerAssignment: ArtifactReviewerAssignment = {
+      id: `ara_${this.id()}`,
+      ...reviewerResolution,
+      createdAt: timestamp,
+    };
     const versionState: Omit<ArtifactVersion, "approvalStatus"> = {
       id: `av_${this.id()}`,
       artifactId,
@@ -6985,6 +7005,7 @@ export class BridgeService {
       createdAt: timestamp,
       reviews: [],
       requiredApprovals: input.requiredApprovals,
+      reviewerAssignment,
       ...(input.runId ? { runId: input.runId } : {}),
     };
     const version: ArtifactVersion = {
@@ -7036,6 +7057,12 @@ export class BridgeService {
       "artifact_version",
       version.id,
       timestamp,
+      undefined,
+      undefined,
+      {
+        assignmentId: reviewerAssignment.id,
+        reviewerRouteSource: reviewerAssignment.routeSource,
+      },
     );
     if (version.status === "in_review") {
       await this.notify(repository, principal, projectId, artifact.reviewerIds, {
@@ -7055,7 +7082,7 @@ export class BridgeService {
     project: Project,
     input: PublishArtifactInput,
     existingArtifact?: Artifact,
-  ): Promise<readonly string[]> {
+  ): Promise<ArtifactReviewerResolution> {
     const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
       organizationId: project.organizationId,
       projectId: project.id,
@@ -7075,12 +7102,28 @@ export class BridgeService {
         }
       });
     const activeHumans = new Map(directory.map((candidate) => [candidate.id, candidate]));
-    const explicitIds = [...new Set(input.intendedReviewerIds)];
+    const explicitIds = [...new Set(input.intendedReviewerIds)]
+      .sort((left, right) => left.localeCompare(right));
     const explicitRoles = this.normalizedRoles(input.intendedReviewerRoles ?? []);
     const explicitTeamKeys = [...new Set(
       (input.intendedReviewerTeamKeys ?? []).map(normalizeRoleName).filter(Boolean),
-    )];
+    )].sort((left, right) => left.localeCompare(right));
     const hasExplicitTargets = explicitIds.length + explicitRoles.length + explicitTeamKeys.length > 0;
+    const resolution = (
+      reviewerIds: readonly string[],
+      routeSource: ArtifactReviewerRouteSource,
+      ownershipRuleKey?: string,
+      sourceAssignmentId?: string,
+    ): ArtifactReviewerResolution => ({
+      reviewerIds: [...new Set(reviewerIds)].sort((left, right) => left.localeCompare(right)),
+      routeSource,
+      ownershipVersion: ownership.version,
+      ...(ownershipRuleKey ? { ownershipRuleKey } : {}),
+      ...(sourceAssignmentId ? { sourceAssignmentId } : {}),
+      requestedReviewerIds: explicitIds,
+      requestedReviewerRoles: explicitRoles,
+      requestedReviewerTeamKeys: explicitTeamKeys,
+    });
 
     if (activeHumans.size > 0) {
       for (const reviewerId of explicitIds) {
@@ -7130,14 +7173,24 @@ export class BridgeService {
       if (resolved.length === 0) {
         throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
       }
-      return [...resolved].sort((left, right) => left.localeCompare(right));
+      return resolution(resolved, "explicit_reviewer");
     }
 
     if (existingArtifact) {
       const current = activeHumans.size === 0
         ? existingArtifact.reviewerIds
         : existingArtifact.reviewerIds.filter((reviewerId) => activeHumans.has(reviewerId));
-      if (current.length > 0) return [...new Set(current)].sort((left, right) => left.localeCompare(right));
+      if (current.length > 0) {
+        const currentVersion = existingArtifact.versions.find(
+          (version) => version.id === existingArtifact.currentVersionId,
+        );
+        return resolution(
+          current,
+          "retained_reviewers",
+          undefined,
+          currentVersion?.reviewerAssignment?.id,
+        );
+      }
     }
 
     const matchingRules = ownership.rules
@@ -7153,14 +7206,22 @@ export class BridgeService {
         reviewerRule.reviewers.roles,
         reviewerRule.reviewers.teamKeys,
       );
-      if (resolved.length > 0) return [...resolved].sort((left, right) => left.localeCompare(right));
+      if (resolved.length > 0) {
+        return resolution(
+          resolved,
+          this.ownershipRouteSource(reviewerRule) === "scoped_ownership"
+            ? "scoped_ownership"
+            : "project_default",
+          reviewerRule.key,
+        );
+      }
     }
 
     const fallback = resolveTargets(project.decisionOwnerIds, [], []);
     if (fallback.length === 0) {
       throw new BridgeError("POLICY_BLOCKED", "No active human specification reviewer can be resolved.", 422);
     }
-    return [...fallback].sort((left, right) => left.localeCompare(right));
+    return resolution(fallback, "decision_owner_fallback");
   }
 
   async listArtifacts(principal: Principal, projectId: string): Promise<readonly Artifact[]> {
@@ -7237,10 +7298,10 @@ export class BridgeService {
       "ARTIFACT_NOT_FOUND",
       "Specification version not found.",
     );
-    assertCanReviewArtifact(principal, artifact);
-    this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    assertCanReviewArtifact(principal, artifact, target);
+    this.assertSecretSafe("artifact", input);
     if (artifact.currentVersionId !== versionId) {
       throw new BridgeError("CONFLICT", "Review feedback can be added only to the current specification version.", 409);
     }
@@ -7279,12 +7340,23 @@ export class BridgeService {
       "artifact_version",
       versionId,
       timestamp,
+      undefined,
+      undefined,
+      target.reviewerAssignment
+        ? {
+            assignmentId: target.reviewerAssignment.id,
+            reviewerRouteSource: target.reviewerAssignment.routeSource,
+          }
+        : {},
     );
     await this.notify(
       repository,
       principal,
       artifact.projectId,
-      [artifact.createdById, ...artifact.reviewerIds],
+      [
+        artifact.createdById,
+        ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
+      ],
       {
         type: "artifact_review_feedback",
         title: input.status === "changes_requested" ? "Specification changes requested" : "Specification review comment",
@@ -7321,10 +7393,10 @@ export class BridgeService {
       "ARTIFACT_NOT_FOUND",
       "Specification version not found.",
     );
-    assertCanApproveArtifact(principal, artifact, project.decisionOwnerIds);
-    this.assertSecretSafe("artifact", input);
     const target = artifact.versions.find((version) => version.id === versionId);
     if (!target) throw new BridgeError("ARTIFACT_NOT_FOUND", "Specification version not found.", 404);
+    assertCanApproveArtifact(principal, artifact, project.decisionOwnerIds, target);
+    this.assertSecretSafe("artifact", input);
     if (artifact.currentVersionId !== versionId) {
       throw new BridgeError("CONFLICT", "Only the current specification version can be approved.", 409);
     }
@@ -7374,8 +7446,19 @@ export class BridgeService {
         "artifact_version",
         versionId,
         timestamp,
+        undefined,
+        undefined,
+        target.reviewerAssignment
+          ? {
+              assignmentId: target.reviewerAssignment.id,
+              reviewerRouteSource: target.reviewerAssignment.routeSource,
+            }
+          : {},
       );
-      await this.notify(repository, principal, artifact.projectId, [artifact.createdById, ...artifact.reviewerIds], {
+      await this.notify(repository, principal, artifact.projectId, [
+        artifact.createdById,
+        ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
+      ], {
         type: "artifact_review_feedback",
         title: "Specification approval recorded",
         body: `${principal.displayName} approved “${artifact.title}”; ${approvalStatus.remainingCount} more approval${approvalStatus.remainingCount === 1 ? " is" : "s are"} required.`,
@@ -7408,8 +7491,19 @@ export class BridgeService {
       "artifact_version",
       versionId,
       timestamp,
+      undefined,
+      undefined,
+      target.reviewerAssignment
+        ? {
+            assignmentId: target.reviewerAssignment.id,
+            reviewerRouteSource: target.reviewerAssignment.routeSource,
+          }
+        : {},
     );
-    await this.notify(repository, principal, artifact.projectId, [artifact.createdById, ...artifact.reviewerIds], {
+    await this.notify(repository, principal, artifact.projectId, [
+      artifact.createdById,
+      ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
+    ], {
       type: "artifact_approved",
       title: "Specification approved",
       body: `${principal.displayName} approved “${artifact.title}”.`,
