@@ -678,6 +678,16 @@ Project policy configuration is managed through canonical administrator REST end
 - Enforce shorter read timeouts and bounded write timeouts.
 - Return URLs for human review but never require the agent to scrape the web UI.
 
+The repository adapter's `bridge doctor` performs an unauthenticated, bounded MCP
+`initialize` probe only for an explicitly configured endpoint. A `401` or `403`
+is reported as an authentication-required/insufficient-credentials condition,
+not as an opaque protocol failure; the doctor recognizes a Bearer challenge and
+then checks the endpoint's protected-resource metadata for the configured resource
+and at least one authorization server. Metadata bodies, credentials, and provider
+responses are never persisted or printed. Doctor does not issue MCP tokens or
+replace the external authorization server, and a configured MCP authentication
+failure leaves the REST/CLI/instruction adapter available.
+
 ### 13.2 Tool-to-application mapping
 
 | MCP tool | Application operation |
@@ -1057,7 +1067,7 @@ Initial technical metrics:
 
 `@bridge/observability` now implements a dependency-free, process-local metrics registry with fixed recording methods and Prometheus text rendering. Standalone API/MCP runtimes share one registry with the application and PostgreSQL repository and expose `GET /metrics`; the worker exposes its injected registry from a separate loopback-default HTTP listener. In-memory test/runtime paths use the same transaction instrumentation. Outbox, email, and Slack handlers accept the registry explicitly, preserving the worker/integration boundary. Labels exclude tenant, project, principal, record, and content dimensions; HTTP operations are bounded route names, unmatched paths collapse to one label, and a 128-operation process budget collapses excess values to `overflow`.
 
-The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, bounded MCP initialize and tool-call outcome/duration, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, and email/Slack handling outcomes/duration. Database pool utilization and idempotency/conflict counters remain follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
+The implemented portable subset covers HTTP request/outcome/duration and `401`/`403` denials, bounded MCP initialize and tool-call outcome/duration, repository transaction outcome/duration, context outcome/duration/candidate/result counts, outbox processing/retry/dead-letter and oldest-claimed age, email/Slack handling outcomes/duration, fixed-vocabulary idempotent write outcomes, and application conflict totals. Database pool utilization remains follow-up instrumentation. The selected PostgreSQL/deployment provider must supply pool-saturation telemetry rather than relying on unstable driver internals.
 
 Provider-neutral operational assets are `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`, and `docs/service-objectives.md`. They are initial definitions requiring a real metrics backend, rule evaluator, notification route, and pilot calibration; repository presence is not evidence that production monitoring is active.
 

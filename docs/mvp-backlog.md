@@ -681,7 +681,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, project-scoped Codex/Claude MCP configuration generation, readiness-aware API/project/versioned-instruction doctor checks, actionable loopback-sandbox recovery, opt-in MCP endpoint initialization probes, and bounded REST persistence of doctor status/check metadata are implemented; MCP authentication, Cursor/Copilot vendor configuration, hooks, and expanded integration diagnostics remain
+- **Status:** Partial — Codex/Claude Code/Cursor/Copilot native instruction paths, safe managed-block merging, adapter-only `bridge install`, dry-run previews, project-scoped Codex/Claude MCP configuration generation, readiness-aware API/project/versioned-instruction doctor checks, actionable loopback-sandbox recovery, opt-in MCP endpoint initialization probes, authentication-challenge classification, protected-resource metadata validation, and bounded REST persistence of doctor status/check metadata are implemented; MCP token issuance/provider validation, Cursor/Copilot vendor configuration, hooks, and broader integration diagnostics remain
 - **Dependencies:** BRG-001, BRG-052, BRG-061
 - **PRD references:** MCP and CLI design
 
@@ -693,7 +693,7 @@ Acceptance criteria:
 2. Generated content includes a version marker and source ownership. **Implemented for the generated workflow and native managed blocks; doctor detects stale generated workflow instructions and points to `bridge install` for repair.**
 3. Existing unrelated configuration is preserved. **Implemented with managed TOML markers/JSON ownership metadata and conflict refusal for an unrelated `bridge` server.**
 4. Dry-run displays file changes. **Implemented through `bridge init --dry-run` and `bridge install --dry-run`.**
-5. Doctor verifies endpoint reachability, project mapping, and required instructions. **Implemented against `/health/ready`, including repository readiness, project mapping, versioned instructions, and actionable loopback-sandbox recovery; when `mcp_url` is configured, doctor also verifies an MCP JSON-RPC `initialize` response. Authentication and vendor discovery are intentionally not claimed.**
+5. Doctor verifies endpoint reachability, project mapping, and required instructions. **Implemented against `/health/ready`, including repository readiness, project mapping, versioned instructions, and actionable loopback-sandbox recovery; when `mcp_url` is configured, doctor also verifies an MCP JSON-RPC `initialize` response, distinguishes `401/403` authentication failures from protocol failures, recognizes a Bearer challenge, and validates bounded protected-resource metadata. It does not issue MCP tokens or claim external provider validation.**
 6. Capability level is reported accurately. **Implemented for instructions/CLI plus `instructions+mcp`, `instructions+mcp-failed`, and `not_configured` MCP states; hooks remain unconfigured.**
 
 ### BRG-063 — Add essential human CLI commands
@@ -1025,7 +1025,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
@@ -1039,7 +1039,7 @@ Acceptance criteria:
 4. Alerts cover sustained API failure, MCP failure, database exhaustion, and outbox backlog.
 5. Initial service objectives and alert thresholds are documented.
 
-Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
+Implementation note: acceptance criteria 1, 3, and the repository-portable portions of 2, 4, and 5 are covered. Idempotent write outcomes and application conflicts are emitted with fixed labels through the existing process-local metrics surfaces. The dashboard/rules/objectives are importable definitions, not a claim that a hosted collector, paging route, database-provider saturation exporter, or calibrated pilot SLO is active.
 
 ## 19. E11 — Pilot operations and analytics
 
@@ -1087,7 +1087,7 @@ Implementation note: the support read model returns bounded operator metadata on
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — the repository-side readiness manifest, bounded report, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
+- **Status:** Partial — the repository-side readiness manifest, bounded report, guarded local evidence command, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
 - **Dependencies:** All P0 pilot stories
 - **PRD references:** MVP acceptance criteria, pilot plan
 

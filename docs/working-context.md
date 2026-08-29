@@ -7,7 +7,7 @@
 | Last updated | 2026-08-29, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -42,6 +42,7 @@ Current explicit founder directives:
 7. The founder requested a UI refresh on 2026-08-16 after finding the first pilot dashboard too clustered and dated. The active direction is a minimal workbench: warm neutral surfaces with a restrained teal action accent, grouped Work / Knowledge / Admin navigation, calmer spacing, and progressive disclosure for filters, discussion, review, comparison, and history. Each screen should foreground one primary task and keep secondary context available without presenting it all at once. This is a visual information-architecture change only; existing approval boundaries and workflows remain unchanged.
 8. Maintain this file as durable context for future sessions.
 9. The MVP acceptance test is a fresh repository where the user initializes Bridge, gives an agent a normal build request, and then sees that repository's structured questions and generated specifications in the Bridge UI without manually editing Bridge JSON or prompting each Bridge command.
+10. All repository changes must be developed on a `codex/*` feature branch and reach `main` only through a pull request. Do not commit or push directly to `main`.
 
 The founder's 2026-08-10 request supersedes the earlier authentication/onboarding prohibition. The selected Auth0/OIDC design is active, while enterprise provisioning and unrelated identity expansion still require their own scoped tasks.
 
@@ -2683,7 +2684,88 @@ Deliberate boundaries:
   lockfile provenance, and hosted collector evidence remain outside this slice.
 - No REST or MCP authority path changed, and MCP remains optional.
 
-### 20.95 Added actionable support diagnostics (BRG-111)
+### 20.95 Added guarded local pilot-readiness evidence
+
+1. `scripts/pilot-readiness-local.mjs` provides a repeatable local evidence command. It requires
+   explicit `BRIDGE_TEST_DATABASE_URL` and `BRIDGE_RESTORE_DATABASE_URL` values, accepts only
+   loopback PostgreSQL targets, requires separate databases, and refuses a restore target that
+   matches `DATABASE_URL`.
+2. The command runs the live PostgreSQL integration suite (including tenant-isolation and role
+   checks), the read-only restore verifier, and the packaged fresh-project CLI smoke test. Its
+   bounded report excludes connection strings and the command never updates the BRG-112 manifest.
+3. `scripts/pilot-readiness-local.test.mjs` covers missing/remote/shared-target protection and
+   the new `pilot:readiness:local` command is documented in the README and pilot runbook.
+4. On 2026-08-29, the isolated local `bridge_test` and `bridge_restore` targets passed 21
+   PostgreSQL tests, the read-only restore verifier, and the packaged CLI smoke test. The fresh
+   migrated restore target proves verifier/schema behavior only; it is not a backup/restore
+   exercise or external pilot evidence.
+
+Deliberate boundaries:
+
+- The local runner is a safety and reproducibility tool, not a production deployment validator;
+  non-loopback staging and production evidence remains private deployment-owner work.
+- Creating or migrating local databases is still an explicit operator action. The runner does not
+  create databases, reset volumes, or run destructive SQL.
+- BRG-112 remains externally gated for staging, live tenant/security review, actual restore,
+  provider failure-window, onboarding acknowledgement, and named pilot ownership evidence.
+
+### 20.96 Added idempotency and conflict observability
+
+1. `@bridge/observability` now exposes `bridge_idempotency_operations_total` for the fixed
+   operation vocabulary covering project/repository registration, provider synchronization,
+   directory membership writes, run/assumption/question/artifact writes, and the outcomes
+   `created`, `updated`, `replayed`, `reused_pending`, `reused_accepted`, and `conflict`.
+2. `BridgeService` records one `bridge_conflicts_total` counter for application `CONFLICT`
+   failures at the tenant transaction boundary. This covers optimistic-version, stale-provider,
+   concurrency, and idempotency conflicts without using error messages or record identifiers as
+   labels. Idempotency outcomes are recorded before successful returns or key-reuse conflicts.
+3. Existing API, optional MCP, and worker metrics endpoints expose the same process-local registry;
+   no REST contract, MCP requirement, human-approval rule, tenant check, or persistence schema
+   changed. Regression coverage exercises Prometheus rendering and an application replay/conflict
+   flow.
+
+Deliberate boundaries:
+
+- The counters are process-local and reset on restart; hosted aggregation, alert routing, and
+  PostgreSQL pool saturation remain deployment-owned BRG-104 work.
+- Labels are intentionally fixed and omit tenant, project, principal, record, request content,
+  and error text. The counters do not turn a conflict into an automatic retry or approval.
+
+### 20.97 Added authentication-aware MCP doctor diagnostics (BRG-062)
+
+Implemented and locally verified:
+
+1. `bridge doctor` continues to perform an unauthenticated, bounded MCP `initialize`
+   probe only when an explicit `mcp_url` or `BRIDGE_MCP_URL` is configured. The
+   probe never forwards the CLI's REST bearer session to the MCP endpoint.
+2. HTTP `401` and `403` responses are classified as `authentication=required` or
+   `authentication=insufficient`; doctor also reports whether the response carried
+   a usable Bearer challenge. The existing persisted `mcpStatus` vocabulary remains
+   `ready`, `failed`, or `not_configured` for compatibility with the support view.
+3. On an authentication challenge, doctor requests the derived
+   `/.well-known/oauth-protected-resource/mcp` document with a five-second timeout
+   and a 32 KiB response limit. It verifies the configured MCP resource and at least
+   one bounded HTTP(S) authorization-server URL, while keeping metadata bodies and
+   provider details out of output and persistence.
+4. CLI output now includes non-secret `mcpDiagnostics` metadata and an actionable
+   instruction to authenticate in the selected MCP client for the dedicated MCP
+   audience/scopes. MCP token issuance, refresh, external-provider validation, and
+   vendor-native auth configuration remain outside this slice; REST, CLI, and
+   instruction adapters remain usable when MCP authentication fails.
+5. CLI regression coverage exercises successful optional MCP initialization, an
+   authenticated endpoint challenge with valid metadata, malformed metadata, and
+   the no-MCP/CLI-only fallback. No REST contract or database migration was needed.
+
+Deliberate boundaries:
+
+- This is diagnostic classification and metadata validation, not MCP authentication
+  or authorization-server implementation. Bridge still relies on the configured
+  external OIDC provider to issue MCP-audience tokens.
+- Doctor does not echo `WWW-Authenticate` values, metadata bodies, bearer tokens,
+  CLI sessions, or arbitrary provider error text. A failed MCP probe cannot disable
+  the canonical REST workflow.
+
+### 20.98 Added actionable support diagnostics (BRG-111)
 
 1. `ProjectSupportView.diagnostics` now derives bounded `checkCount`, `passedCheckCount`, and `failingCheckNames` values from the persisted adapter doctor checks. The response preserves the existing check list for compatibility and does not add a migration or store check details, URLs, errors, repository content, or approval data.
 2. The web **Support** view presents each latest adapter observation as a responsive card with explicit health text, MCP state, check totals, failed-check names, capabilities, and observation time. This keeps the actionable failure signal readable on narrow screens without relying on color or horizontal table scrolling.
@@ -2781,7 +2863,7 @@ Deliberate boundaries:
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
 - Observability behavior and boundaries: `docs/observability.md`
 - Product analytics definitions and privacy boundary: `docs/product-analytics.md`
-- Pilot readiness manifest and runbook: `config/pilot-readiness.json`, `scripts/pilot-readiness.mjs`, `docs/runbooks/pilot-readiness.md`
+- Pilot readiness manifest, reports, local evidence runner, and runbook: `config/pilot-readiness.json`, `scripts/pilot-readiness.mjs`, `scripts/pilot-readiness-local.mjs`, `docs/runbooks/pilot-readiness.md`
 - Pilot service objectives: `docs/service-objectives.md`
 - Portable dashboard and alert definitions: `config/observability/bridge-pilot-dashboard.json`, `config/observability/bridge-pilot-alerts.yml`
 - Read-only restore verifier: `packages/database/src/verify-restore.ts`

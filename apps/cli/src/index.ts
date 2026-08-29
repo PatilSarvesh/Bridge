@@ -2462,9 +2462,25 @@ interface DoctorCheck {
   readonly path?: string;
 }
 
+type McpAuthenticationStatus = "not_observed" | "required" | "insufficient";
+type McpChallengeStatus = "not_applicable" | "bearer" | "missing";
+type McpProtectedResourceMetadataStatus = "verified" | "not_checked" | "unavailable" | "invalid";
+const maximumMcpMetadataBytes = 32_768;
+const maximumMcpMetadataUrlLength = 2_048;
+
+interface McpProtectedResourceMetadataProbe {
+  readonly status: McpProtectedResourceMetadataStatus;
+  readonly url?: string;
+  readonly detail?: string;
+}
+
 interface McpProbeResult {
   readonly status: "ready" | "failed";
+  readonly authentication: McpAuthenticationStatus;
+  readonly challenge: McpChallengeStatus;
+  readonly protectedResourceMetadata: McpProtectedResourceMetadataProbe;
   readonly detail: string;
+  readonly remediation?: string;
 }
 
 function isMcpInitializeResult(value: unknown): boolean {
@@ -2494,6 +2510,114 @@ function containsMcpInitializeResult(responseText: string): boolean {
   });
 }
 
+function normalizedHttpUrl(value: string): string | undefined {
+  try {
+    if (value.length > maximumMcpMetadataUrlLength) return undefined;
+    const parsed = new URL(value);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) {
+      return undefined;
+    }
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function protectedResourceMetadataUrl(endpointUrl: string): string {
+  const endpoint = new URL(endpointUrl);
+  const endpointPath = endpoint.pathname.replace(/\/+$/, "");
+  endpoint.pathname = `/.well-known/oauth-protected-resource${endpointPath}`;
+  endpoint.search = "";
+  endpoint.hash = "";
+  return endpoint.toString();
+}
+
+function isProtectedResourceMetadata(value: unknown, endpointUrl: string): boolean {
+  const metadata = asRecord(value);
+  const resource = typeof metadata?.resource === "string"
+    ? normalizedHttpUrl(metadata.resource)
+    : undefined;
+  const endpoint = normalizedHttpUrl(endpointUrl);
+  const authorizationServers = metadata?.authorization_servers;
+  return Boolean(
+    resource &&
+    endpoint &&
+    resource === endpoint &&
+    Array.isArray(authorizationServers) &&
+    authorizationServers.length > 0 &&
+    authorizationServers.length <= 10 &&
+    authorizationServers.every((server) =>
+      typeof server === "string" && server.length <= maximumMcpMetadataUrlLength && Boolean(normalizedHttpUrl(server))
+    ),
+  );
+}
+
+async function probeProtectedResourceMetadata(
+  metadataUrl: string,
+  endpointUrl: string,
+  runtime: CliRuntime,
+): Promise<McpProtectedResourceMetadataProbe> {
+  try {
+    const response = await runtime.fetch(metadataUrl, {
+      method: "GET",
+      signal: AbortSignal.timeout(5_000),
+      headers: {
+        accept: "application/json",
+        "x-bridge-correlation-id": `cli_${randomUUID().replaceAll("-", "")}`,
+      },
+    });
+    if (!response.ok) {
+      return {
+        status: "unavailable",
+        url: metadataUrl,
+        detail: `Protected-resource metadata returned HTTP ${response.status}.`,
+      };
+    }
+    const bodyText = await response.text();
+    if (Buffer.byteLength(bodyText, "utf8") > maximumMcpMetadataBytes) {
+      return {
+        status: "invalid",
+        url: metadataUrl,
+        detail: "Protected-resource metadata exceeded the 32 KiB diagnostic limit.",
+      };
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      return {
+        status: "invalid",
+        url: metadataUrl,
+        detail: "Protected-resource metadata was not valid JSON.",
+      };
+    }
+    if (!isProtectedResourceMetadata(body, endpointUrl)) {
+      return {
+        status: "invalid",
+        url: metadataUrl,
+        detail: "Protected-resource metadata is missing the configured resource or authorization server.",
+      };
+    }
+    return {
+      status: "verified",
+      url: metadataUrl,
+      detail: "Protected-resource metadata identifies the configured MCP resource and an authorization server.",
+    };
+  } catch (error) {
+    const timedOut = error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
+    return {
+      status: "unavailable",
+      url: metadataUrl,
+      detail: timedOut
+        ? "Protected-resource metadata probe timed out after 5 seconds."
+        : "Protected-resource metadata could not be reached.",
+    };
+  }
+}
+
 async function probeMcpEndpoint(url: string, runtime: CliRuntime): Promise<McpProbeResult> {
   try {
     const response = await runtime.fetch(url, {
@@ -2517,20 +2641,55 @@ async function probeMcpEndpoint(url: string, runtime: CliRuntime): Promise<McpPr
       }),
     });
     const responseText = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      const authentication = response.status === 401 ? "required" : "insufficient";
+      const challengeHeader = response.headers.get("www-authenticate") ?? "";
+      const challenge: McpChallengeStatus = /^Bearer(?:\s|$)/i.test(challengeHeader.trim())
+        ? "bearer"
+        : "missing";
+      const metadata = await probeProtectedResourceMetadata(
+        protectedResourceMetadataUrl(url),
+        url,
+        runtime,
+      );
+      const authenticationDetail = response.status === 401
+        ? "MCP endpoint requires authentication (HTTP 401)."
+        : "MCP endpoint rejected the doctor request (HTTP 403); the supplied MCP credentials may be insufficient.";
+      const challengeDetail = challenge === "bearer"
+        ? "The endpoint returned a Bearer authentication challenge."
+        : "The endpoint did not return a usable Bearer authentication challenge.";
+      return {
+        status: "failed",
+        authentication,
+        challenge,
+        protectedResourceMetadata: metadata,
+        detail: `${authenticationDetail} ${challengeDetail} ${metadata.detail ?? "Protected-resource metadata was not verified."}`,
+        remediation: "Complete authentication in the configured MCP client for Bridge's dedicated MCP audience and required scopes. Bridge doctor does not issue or store MCP tokens; REST/CLI operation remains available.",
+      };
+    }
     if (!response.ok || !containsMcpInitializeResult(responseText)) {
       return {
         status: "failed",
+        authentication: "not_observed",
+        challenge: "not_applicable",
+        protectedResourceMetadata: { status: "not_checked" },
         detail: `MCP initialize probe returned HTTP ${response.status} without a valid initialize result.`,
       };
     }
     return {
       status: "ready",
+      authentication: "not_observed",
+      challenge: "not_applicable",
+      protectedResourceMetadata: { status: "not_checked" },
       detail: `MCP endpoint completed protocol initialization at ${url}.`,
     };
   } catch (error) {
     const timedOut = error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
     return {
       status: "failed",
+      authentication: "not_observed",
+      challenge: "not_applicable",
+      protectedResourceMetadata: { status: "not_checked" },
       detail: timedOut
         ? "MCP initialize probe timed out after 5 seconds."
         : error instanceof Error
@@ -2605,6 +2764,10 @@ async function runDoctor(
   const rawMcpUrl = runtime.environment.BRIDGE_MCP_URL ?? config.mcpUrl;
   let configuredMcpUrl: string | undefined;
   let mcpStatus: "ready" | "failed" | "not_configured" = "not_configured";
+  let mcpAuthentication: McpAuthenticationStatus = "not_observed";
+  let mcpChallenge: McpChallengeStatus = "not_applicable";
+  let mcpProtectedResourceMetadata: McpProtectedResourceMetadataProbe = { status: "not_checked" };
+  let mcpRemediation: string | undefined;
   if (rawMcpUrl) {
     try {
       const validatedMcpUrl = optionalHttpUrl(
@@ -2615,6 +2778,10 @@ async function runDoctor(
       configuredMcpUrl = validatedMcpUrl;
       const probe = await probeMcpEndpoint(validatedMcpUrl, runtime);
       mcpStatus = probe.status;
+      mcpAuthentication = probe.authentication;
+      mcpChallenge = probe.challenge;
+      mcpProtectedResourceMetadata = probe.protectedResourceMetadata;
+      mcpRemediation = probe.remediation;
       checks.push({ name: "mcp", status: probe.status === "ready" ? "pass" : "fail", detail: probe.detail });
     } catch (error) {
       mcpStatus = "failed";
@@ -2728,6 +2895,12 @@ async function runDoctor(
     client: config.client,
     mcpUrl: configuredMcpUrl ?? null,
     capabilityLevel,
+    mcpDiagnostics: {
+      authentication: mcpAuthentication,
+      challenge: mcpChallenge,
+      protectedResourceMetadata: mcpProtectedResourceMetadata,
+      ...(mcpRemediation ? { remediation: mcpRemediation } : {}),
+    },
     diagnosticPersisted,
     capabilities: {
       instructions: instructionReady,

@@ -25,6 +25,16 @@ pnpm dev
 
 For the repository-side controlled pilot readiness review, run `pnpm pilot:readiness` for a bounded report or `pnpm pilot:readiness -- --strict` as a deployment gate after the private staging, security, recovery, provider, and ownership evidence has been attached. The command is read-only and does not connect to PostgreSQL; strict mode returns exit code `10` while external evidence is missing. See [`docs/runbooks/pilot-readiness.md`](docs/runbooks/pilot-readiness.md).
 
+For repeatable local evidence, provide two explicit loopback PostgreSQL targets and run the guarded sequence below. It runs the live PostgreSQL integration/RLS tests, the read-only restore verifier, and the packaged fresh-project CLI smoke test. It rejects remote targets, requires different test and restore databases, keeps connection strings out of its bounded report, and does not mark deployment evidence complete:
+
+```bash
+export BRIDGE_TEST_DATABASE_URL='postgresql://bridge:bridge@127.0.0.1:5433/bridge_test'
+export BRIDGE_RESTORE_DATABASE_URL='postgresql://bridge:bridge@127.0.0.1:5433/bridge_restore'
+pnpm pilot:readiness:local
+```
+
+The restore target must be a separately restored isolated database for real recovery evidence. A freshly migrated local database only verifies the repository verifier and schema; it is not a backup/restore exercise.
+
 Run `pnpm retrieval:evaluate` to reproduce the BRG-130 context-quality benchmark. The checked-in synthetic dataset compares the current weighted lexical proxy with a sparse TF-IDF vector candidate using Recall@5, MRR, and nDCG@5. Both reach `1.0000` Recall@5, so the candidate's zero gain is below the predeclared `0.10` material-gain threshold and Bridge does not add vector infrastructure yet. The command is read-only, offline, and part of `pnpm check`; see [`docs/retrieval-evaluation.md`](docs/retrieval-evaluation.md).
 
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below plus the worker's explicit maintenance connection.
