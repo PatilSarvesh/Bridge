@@ -3062,7 +3062,20 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(publishResponse.statusCode).toBe(201);
-    const publication = publishResponse.json<{ artifact: { id: string }; version: { id: string } }>();
+    expect(publishResponse.json()).toMatchObject({
+      version: {
+        reviewerAssignment: {
+          id: expect.stringMatching(/^ara_/),
+          reviewerIds: [demoPrincipals.architect.id, demoPrincipals.qaLead.id].sort(),
+          routeSource: "explicit_reviewer",
+          requestedReviewerIds: [demoPrincipals.architect.id, demoPrincipals.qaLead.id].sort(),
+        },
+      },
+    });
+    const publication = publishResponse.json<{
+      artifact: { id: string };
+      version: { id: string; reviewerAssignment: { id: string } };
+    }>();
 
     const deniedResponse = await app.inject({
       method: "POST",
@@ -3143,7 +3156,20 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(replacementResponse.statusCode).toBe(201);
-    const replacement = replacementResponse.json<{ version: { id: string } }>();
+    expect(replacementResponse.json()).toMatchObject({
+      version: {
+        reviewerAssignment: {
+          id: expect.stringMatching(/^ara_/),
+          reviewerIds: [demoPrincipals.architect.id],
+          routeSource: "explicit_reviewer",
+        },
+      },
+    });
+    const replacement = replacementResponse.json<{
+      version: { id: string; reviewerAssignment: { id: string } };
+    }>();
+    expect(replacement.version.reviewerAssignment.id)
+      .not.toBe(publication.version.reviewerAssignment.id);
 
     const diffResponse = await app.inject({
       method: "GET",

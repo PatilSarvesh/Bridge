@@ -7,6 +7,8 @@ import {
   type AgentRun,
   type Artifact,
   type ArtifactReview,
+  type ArtifactReviewerAssignment,
+  type ArtifactReviewerRouteSource,
   type ArtifactVersion,
   type Assumption,
   type AuditEvent,
@@ -52,6 +54,31 @@ function artifactVersion(
 ): ArtifactVersion {
   const version = { ...input, contentSha256: contentHash(input.body) };
   return { ...version, approvalStatus: artifactApprovalStatus(version) };
+}
+
+function reviewerAssignment(
+  id: string,
+  reviewerIds: readonly string[],
+  routeSource: ArtifactReviewerRouteSource,
+  createdAt: string,
+  options: {
+    readonly ownershipRuleKey?: string;
+    readonly requestedReviewerIds?: readonly string[];
+    readonly requestedReviewerRoles?: readonly string[];
+    readonly requestedReviewerTeamKeys?: readonly string[];
+  } = {},
+): ArtifactReviewerAssignment {
+  return {
+    id,
+    reviewerIds,
+    routeSource,
+    ownershipVersion: 1,
+    ...(options.ownershipRuleKey ? { ownershipRuleKey: options.ownershipRuleKey } : {}),
+    requestedReviewerIds: options.requestedReviewerIds ?? [],
+    requestedReviewerRoles: options.requestedReviewerRoles ?? [],
+    requestedReviewerTeamKeys: options.requestedReviewerTeamKeys ?? [],
+    createdAt,
+  };
 }
 
 function routing(
@@ -1115,6 +1142,13 @@ export async function seedShowcaseData(options: ShowcaseSeedOptions): Promise<vo
         createdAt: shiftedIso(anchor, -16, 2),
       }],
       requiredApprovals: 1,
+      reviewerAssignment: reviewerAssignment(
+        "ara_showcase_prd_v1",
+        [businessAnalyst.id],
+        "explicit_reviewer",
+        shiftedIso(anchor, -17),
+        { requestedReviewerIds: [businessAnalyst.id] },
+      ),
       runId: r.completed,
     });
     const prdV2 = artifactVersion({
@@ -1166,6 +1200,13 @@ Customer delivery events remain queryable for **one year**, then the governed re
         createdAt: shiftedIso(anchor, -12),
       }],
       requiredApprovals: 1,
+      reviewerAssignment: reviewerAssignment(
+        "ara_showcase_prd_v2",
+        [architect.id, businessAnalyst.id],
+        "scoped_ownership",
+        shiftedIso(anchor, -13),
+        { ownershipRuleKey: "product-requirements-review" },
+      ),
       runId: r.completed,
       approvedById: architect.id,
       approvalRationale: "The product, privacy, and operational boundaries are explicit and traceable.",
@@ -1221,6 +1262,13 @@ pause rollout when duplicate_delivery_rate > 0.1%
         createdAt: shiftedIso(anchor, -1),
       }],
       requiredApprovals: 2,
+      reviewerAssignment: reviewerAssignment(
+        "ara_showcase_adr_v1",
+        [architect.id, qaLead.id, securityReviewer.id],
+        "scoped_ownership",
+        shiftedIso(anchor, -2),
+        { ownershipRuleKey: "webhook-architecture-review" },
+      ),
       runId: r.blocked,
     });
     const apiV1 = artifactVersion({
@@ -1264,6 +1312,13 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
         createdAt: shiftedIso(anchor, -6),
       }],
       requiredApprovals: 1,
+      reviewerAssignment: reviewerAssignment(
+        "ara_showcase_api_v1",
+        [securityReviewer.id],
+        "explicit_reviewer",
+        shiftedIso(anchor, -7),
+        { requestedReviewerRoles: ["security-reviewer"] },
+      ),
     });
     const testV1 = artifactVersion({
       id: "av_showcase_tests_v1",
@@ -1293,6 +1348,13 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
       createdAt: shiftedIso(anchor, -5),
       reviews: [],
       requiredApprovals: 1,
+      reviewerAssignment: reviewerAssignment(
+        "ara_showcase_tests_v1",
+        [qaLead.id],
+        "project_default",
+        shiftedIso(anchor, -5),
+        { ownershipRuleKey: "project-quality-review" },
+      ),
     });
     const artifacts: readonly Artifact[] = [
       {

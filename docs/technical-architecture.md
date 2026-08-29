@@ -403,6 +403,8 @@ Questions keep related work links as bounded typed metadata (`repository`, `work
 - A decision is immutable except for lifecycle metadata; replacement content creates a superseding decision.
 - Only one artifact version can be current and approved for the same artifact and exact scope.
 - Artifact bodies are content-addressed to prevent accidental duplicate storage.
+- Every newly published artifact version freezes its resolved human reviewer assignment and routing
+  provenance; later publication cannot change authorization or reviewer history for that version.
 - Agent identities cannot appear as human approvers.
 - A response used as an accepted answer must belong to the same organization and question.
 - A Decision is sourced either from an accepted question response or from an explicit human confirmation of an assumption; assumption-sourced decisions have no question/response pointers and remain linked from the confirmed assumption.
@@ -471,6 +473,13 @@ ArchiveArtifact
 ```
 
 The API returns `409 Conflict` when an expected version or state no longer matches.
+
+`PublishArtifactVersion` resolves active human reviewers through explicit direct/role/team targets,
+the existing artifact audience, scoped/project ownership, or project decision-owner fallback. It
+stores the concrete reviewer IDs with the controlled route source, ownership version, optional rule
+key or retained-source assignment pointer, normalized requested selectors, assignment ID, and publication timestamp on that immutable
+version. Review and approval commands authorize against that version assignment and use the
+artifact-level audience only for historical rows that predate assignment capture.
 
 ## 11. Critical transaction flows
 
@@ -1012,6 +1021,12 @@ the controlled owner/reviewer route-source enums; they do not duplicate principa
 content, or routing configuration bodies. These additive PostgreSQL fields remain nullable so
 historical rows are valid. REST and the web Audit view support exact source filtering, and bounded
 JSON/CSV/project exports preserve the same provenance.
+
+Specification publication, review-feedback, partial-approval, and final-approval events likewise
+reference the immutable reviewer-assignment ID and controlled route source stored on the exact
+artifact version. The audit envelope does not copy reviewer lists or requested selectors; authorized
+artifact reads and governed project-data exports contain the assignment record when that detail is
+required.
 
 Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Override/reassignment reasons are bounded operational explanations, not prompts, answers, raw transcripts, or private reasoning. Exports are themselves audited.
 

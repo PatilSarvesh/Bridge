@@ -71,5 +71,8 @@ describe("demo runtime seeding", () => {
       .toEqual(["adr", "api_contract", "prd", "test_plan"]);
     expect(artifacts.flatMap((artifact) => artifact.versions).map((version) => version.status))
       .toEqual(expect.arrayContaining(["draft", "in_review", "approved", "superseded"]));
+    expect(artifacts.flatMap((artifact) => artifact.versions)
+      .every((version) => version.reviewerAssignment?.id.startsWith("ara_showcase_")))
+      .toBe(true);
   });
 });

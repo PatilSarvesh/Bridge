@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertCanApproveArtifact,
+  assertCanReviewArtifact,
   artifactApprovalStatus,
   assertProjectAccess,
   bridgeScopes,
@@ -9,6 +10,7 @@ import {
   principalHasScope,
   reviewDateFor,
   type Artifact,
+  type ArtifactVersion,
   type Principal,
   type Project,
 } from "./index.js";
@@ -118,6 +120,72 @@ describe("project-scoped roles", () => {
 
     expect(() => assertCanApproveArtifact(decisionOwner, artifact, [decisionOwner.id])).not.toThrow();
     expect(() => assertCanApproveArtifact(publishingAgent, artifact, [publishingAgent.id])).toThrowError(
+      expect.objectContaining({ code: "FORBIDDEN" }),
+    );
+  });
+
+  it("authorizes review against the immutable version assignment", () => {
+    const version: ArtifactVersion = {
+      id: "av_assigned",
+      artifactId: "art_assigned",
+      version: 1,
+      summary: "Preserve the reviewers assigned to this version.",
+      body: "# Review assignment",
+      contentSha256: "a".repeat(64),
+      citedDecisionIds: [],
+      status: "in_review",
+      createdById: "agt_one",
+      createdByType: "agent",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      reviews: [],
+      requiredApprovals: 1,
+      approvalStatus: {
+        requiredCount: 1,
+        approvedCount: 0,
+        remainingCount: 1,
+        status: "pending",
+        satisfied: false,
+        reviewerIds: [],
+      },
+      reviewerAssignment: {
+        id: "ara_assigned",
+        reviewerIds: ["usr_version_reviewer"],
+        routeSource: "explicit_reviewer",
+        ownershipVersion: 1,
+        requestedReviewerIds: ["usr_version_reviewer"],
+        requestedReviewerRoles: [],
+        requestedReviewerTeamKeys: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+    const artifact: Artifact = {
+      id: version.artifactId,
+      organizationId: principal.organizationId,
+      projectId: "prj_one",
+      title: "Review assignment",
+      type: "adr",
+      scope: {},
+      reviewerIds: ["usr_latest_reviewer"],
+      createdById: "agt_one",
+      createdByType: "agent",
+      createdAt: version.createdAt,
+      currentVersionId: version.id,
+      versions: [version],
+    };
+    const versionReviewer: Principal = {
+      ...principal,
+      id: "usr_version_reviewer",
+      roles: ["contributor"],
+      projectRoles: {},
+    };
+    const latestReviewer: Principal = {
+      ...versionReviewer,
+      id: "usr_latest_reviewer",
+    };
+
+    expect(() => assertCanReviewArtifact(versionReviewer, artifact, version)).not.toThrow();
+    expect(() => assertCanApproveArtifact(versionReviewer, artifact, [], version)).not.toThrow();
+    expect(() => assertCanReviewArtifact(latestReviewer, artifact, version)).toThrowError(
       expect.objectContaining({ code: "FORBIDDEN" }),
     );
   });

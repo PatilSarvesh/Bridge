@@ -39,6 +39,7 @@ import {
   assumptionFromRow,
   assumptionToRow,
   artifactToRow,
+  artifactVersionFromRow,
   artifactVersionToRow,
   decisionFromRow,
   decisionToRow,
@@ -367,6 +368,17 @@ const artifact: Artifact = {
         status: "satisfied",
         satisfied: true,
         reviewerIds: ["usr_owner"],
+      },
+      reviewerAssignment: {
+        id: "ara_mapping",
+        reviewerIds: ["usr_owner"],
+        routeSource: "scoped_ownership",
+        ownershipVersion: 2,
+        ownershipRuleKey: "persistence-review",
+        requestedReviewerIds: [],
+        requestedReviewerRoles: [],
+        requestedReviewerTeamKeys: [],
+        createdAt: "2026-08-07T10:02:00.000Z",
       },
       approvedById: "usr_owner",
       approvalRationale: "This provides the required durability and atomicity.",
@@ -741,6 +753,10 @@ describe("PostgreSQL domain mappings", () => {
     const artifactRow = artifactToRow(artifact) as ArtifactRow;
     const versionRows = artifact.versions.map(artifactVersionToRow) as ArtifactVersionRow[];
     expect(artifactFromRows(artifactRow, versionRows)).toEqual(artifact);
+    expect(artifactVersionFromRow({
+      ...versionRows[0]!,
+      reviewerAssignment: null,
+    })).not.toHaveProperty("reviewerAssignment");
 
     expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
     expect(notificationPreferenceFromRow(
@@ -1145,5 +1161,14 @@ describe("PostgreSQL domain mappings", () => {
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "owner_route_source" text');
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "reviewer_route_source" text');
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "source" text');
+
+    const artifactReviewerAssignmentMigration = readFileSync(
+      new URL("../drizzle/0050_natural_miek.sql", import.meta.url),
+      "utf8",
+    );
+    expect(artifactReviewerAssignmentMigration)
+      .toContain('ALTER TABLE "bridge_artifact_versions" ADD COLUMN "reviewer_assignment" jsonb');
+    expect(artifactReviewerAssignmentMigration)
+      .toContain("bridge_artifact_versions_reviewer_assignment_shape_check");
   });
 });

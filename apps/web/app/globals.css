@@ -356,6 +356,18 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
 .spec-meta-line > div:last-child { padding-right: 0; border-right: 0; }
 .spec-meta-line dt { color: var(--muted); font-size: .65rem; }
 .spec-meta-line dd { overflow: hidden; margin: 0; color: var(--text); font-size: .78rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.spec-routing-disclosure { margin-top: 12px; border-top: 1px solid var(--border); }
+.spec-routing-disclosure > summary { display: flex; align-items: center; gap: 8px; padding: 11px 0; cursor: pointer; list-style: none; color: var(--muted); font-size: .72rem; font-weight: 680; }
+.spec-routing-disclosure > summary::-webkit-details-marker { display: none; }
+.spec-routing-disclosure > summary::after { margin-left: auto; content: "+"; font-size: .9rem; font-weight: 500; }
+.spec-routing-disclosure[open] > summary::after { content: "−"; }
+.spec-routing-disclosure > summary small { padding: 3px 7px; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-size: .64rem; font-weight: 650; text-transform: capitalize; }
+.spec-routing-disclosure > dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 11px 0 0; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--border); }
+.spec-routing-disclosure > dl > div { display: grid; min-width: 0; gap: 3px; padding: 10px; background: var(--surface-subtle); }
+.spec-routing-disclosure dt { color: var(--muted); font-size: .62rem; }
+.spec-routing-disclosure dd { overflow: hidden; margin: 0; color: var(--text); font-size: .72rem; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.spec-routing-disclosure .routing-source { text-transform: capitalize; }
+.spec-routing-disclosure > p { margin: 11px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.5; }
 .specification-reader { padding: 22px clamp(24px, 3vw, 34px) 30px !important; }
 .spec-reader-heading { display: flex; align-items: start; gap: 12px; }
 .spec-reader-heading > div { min-width: 0; }
@@ -653,6 +665,7 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
   .spec-meta-line > div { padding: 0 10px; }
   .spec-meta-line > div:nth-child(2) { padding-right: 0; border-right: 0; }
   .spec-meta-line > div:nth-child(3) { padding-left: 0; }
+  .spec-routing-disclosure > dl { grid-template-columns: 1fr 1fr; }
   .spec-reader-heading { align-items: center; }
   .reader-mode { display: none; }
   .spec-paper { padding: 28px 20px; }

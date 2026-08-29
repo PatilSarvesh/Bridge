@@ -956,7 +956,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, immutable before/after version lineage for administrative changes, trusted request-source attribution, matched question-policy rule provenance, and immutable initial/reassignment route references are implemented; non-question reviewer-assignment lineage, failed/unknown authentication attribution, and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, immutable before/after version lineage for administrative changes, trusted request-source attribution, matched question-policy rule provenance, immutable question assignment references, and immutable per-version specification reviewer-assignment lineage are implemented; failed/unknown authentication attribution and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
@@ -980,6 +980,12 @@ boundary. Policy-governed question events also retain the bounded matched rule k
 and reassign events reference the immutable assignment-history ID and controlled owner/reviewer route
 sources. These fields are nullable for historical rows, source-filterable through REST/web, and never
 copy owners, reviewer names, question content, credentials, or private reasoning into the audit log.
+
+Implementation note: every newly published specification version freezes its concrete human reviewer
+IDs, controlled routing source, ownership-configuration version, optional matched ownership rule, and
+normalized requested selectors in an immutable assignment record. Publication, review, and approval
+audit events reference only that assignment ID and route source; historical versions without the new
+record remain readable through an explicit legacy fallback.
 
 ### BRG-101 — Add input, content, and abuse controls
 
