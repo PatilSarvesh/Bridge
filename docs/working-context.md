@@ -2709,6 +2709,28 @@ Deliberate boundaries:
 - BRG-112 remains externally gated for staging, live tenant/security review, actual restore,
   provider failure-window, onboarding acknowledgement, and named pilot ownership evidence.
 
+### 20.96 Added idempotency and conflict observability
+
+1. `@bridge/observability` now exposes `bridge_idempotency_operations_total` for the fixed
+   operation vocabulary covering project/repository registration, provider synchronization,
+   directory membership writes, run/assumption/question/artifact writes, and the outcomes
+   `created`, `updated`, `replayed`, `reused_pending`, `reused_accepted`, and `conflict`.
+2. `BridgeService` records one `bridge_conflicts_total` counter for application `CONFLICT`
+   failures at the tenant transaction boundary. This covers optimistic-version, stale-provider,
+   concurrency, and idempotency conflicts without using error messages or record identifiers as
+   labels. Idempotency outcomes are recorded before successful returns or key-reuse conflicts.
+3. Existing API, optional MCP, and worker metrics endpoints expose the same process-local registry;
+   no REST contract, MCP requirement, human-approval rule, tenant check, or persistence schema
+   changed. Regression coverage exercises Prometheus rendering and an application replay/conflict
+   flow.
+
+Deliberate boundaries:
+
+- The counters are process-local and reset on restart; hosted aggregation, alert routing, and
+  PostgreSQL pool saturation remain deployment-owned BRG-104 work.
+- Labels are intentionally fixed and omit tenant, project, principal, record, request content,
+  and error text. The counters do not turn a conflict into an automatic retry or approval.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`

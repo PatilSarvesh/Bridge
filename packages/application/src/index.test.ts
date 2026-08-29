@@ -2335,7 +2335,8 @@ describe("Bridge decision workflow", () => {
   });
 
   it("replays an identical idempotent question and rejects key reuse with different input", async () => {
-    const { service } = await runtime();
+    const metrics = new BridgeMetrics();
+    const { service } = await runtime(metrics);
     const first = await service.createQuestion(agent, project.id, questionInput());
     const replay = await service.createQuestion(agent, project.id, questionInput());
     expect(replay.id).toBe(first.id);
@@ -2345,6 +2346,25 @@ describe("Bridge decision workflow", () => {
     await expect(
       service.createQuestion(agent, project.id, questionInput({ title: "A different question using the same key" })),
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+
+    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "bridge_idempotency_operations_total",
+        labels: { operation: "question_submit", outcome: "created" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_idempotency_operations_total",
+        labels: { operation: "question_submit", outcome: "replayed" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_idempotency_operations_total",
+        labels: { operation: "question_submit", outcome: "conflict" },
+        value: 1,
+      }),
+      expect.objectContaining({ name: "bridge_conflicts_total", labels: {}, value: 1 }),
+    ]));
   });
 
   it("suggests related questions and reuses exact questions across agent runs", async () => {
