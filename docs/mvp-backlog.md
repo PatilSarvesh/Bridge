@@ -1087,7 +1087,7 @@ Implementation note: the support read model returns bounded operator metadata on
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — the repository-side readiness manifest, bounded report, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
+- **Status:** Partial — the repository-side readiness manifest, bounded report, guarded local evidence command, onboarding guidance, rollback boundary, and evidence runbook are implemented; staging, live tenant/security validation, isolated restore, provider failure-window, and named pilot-owner evidence remain external gates
 - **Dependencies:** All P0 pilot stories
 - **PRD references:** MVP acceptance criteria, pilot plan
 

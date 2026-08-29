@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "reviewId": "BRG-112",
-  "lastReviewed": "2026-08-20",
+  "lastReviewed": "2026-08-29",
   "decision": "not_ready_for_external_pilot_evidence",
   "boundary": "This manifest records repository evidence and names deployment-owner evidence that must be attached outside the repository.",
   "checks": [
