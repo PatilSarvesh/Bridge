@@ -950,7 +950,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, and durable human web sign-in/logout events are implemented; broader policy/assignment coverage, failed/unknown authentication attribution, and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, and immutable before/after version lineage for administrative changes are implemented; broader policy/assignment coverage, failed/unknown authentication attribution, and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
@@ -963,6 +963,11 @@ Acceptance criteria:
 3. Ordinary application APIs cannot update or delete audit events.
 4. Audit view is permission-restricted and tenant-scoped.
 5. Sensitive content and credentials are excluded.
+
+Implementation note: versioned ownership and policy configuration, question reassignment, organization
+membership, directory-group, and service-identity mutations record the committed `beforeVersion` and
+`afterVersion` transition in the audit envelope. The fields are optional for events that do not change
+a versioned aggregate, remain metadata-only, and are carried through REST/web reads and bounded exports.
 
 ### BRG-101 — Add input, content, and abuse controls
 

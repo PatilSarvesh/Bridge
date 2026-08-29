@@ -507,6 +507,8 @@ describe("PostgreSQL domain mappings", () => {
       action: "organization_member.updated",
       subjectType: "organization_membership",
       subjectId: identity.id,
+      beforeVersion: 1,
+      afterVersion: 2,
       createdAt: organization.createdAt,
     };
     const authenticationAuditEvent: OrganizationAuditEvent = {
@@ -678,6 +680,8 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: question.id,
       reason: "The configured reviewer was unavailable during the release window.",
       policyVersion: 1,
+      beforeVersion: 1,
+      afterVersion: 2,
       createdAt: "2026-08-07T10:03:00.000Z",
     };
     expect(auditEventFromRow(auditEventToRow(auditEvent) as AuditEventRow)).toEqual(auditEvent);
@@ -1099,5 +1103,14 @@ describe("PostgreSQL domain mappings", () => {
     expect(questionSearchMigration).toContain("gin_trgm_ops");
     expect(questionSearchMigration).toContain("coalesce(\"project_id\", '')");
     expect(questionSearchMigration).toContain("lower(\"project_id\" || ':' || \"title\")");
+
+    const auditLineageMigration = readFileSync(
+      new URL("../drizzle/0048_lovely_ultimo.sql", import.meta.url),
+      "utf8",
+    );
+    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "before_version" integer');
+    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "after_version" integer');
+    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "before_version" integer');
+    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "after_version" integer');
   });
 });

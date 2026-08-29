@@ -392,6 +392,8 @@ describe("Bridge API vertical slice", () => {
       action: "question.created",
       subjectType: "question",
       subjectId: "que_api_audit_view",
+      beforeVersion: 1,
+      afterVersion: 2,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -411,13 +413,15 @@ describe("Bridge API vertical slice", () => {
 
     const projectView = await app.inject({
       method: "GET",
-      url: `/v1/admin/projects/${demoProject.id}/audit?limit=1&offset=0`,
+      url: `/v1/admin/projects/${demoProject.id}/audit?subjectId=que_api_audit_view&limit=1&offset=0`,
       headers: adminHeader,
     });
     expect(projectView.statusCode).toBe(200);
     expect(projectView.json()).toMatchObject({ offset: 0, limit: 1, items: [expect.objectContaining({
       scope: "project",
       projectId: demoProject.id,
+      beforeVersion: 1,
+      afterVersion: 2,
     })] });
 
     const contributorDenied = await app.inject({
@@ -453,6 +457,8 @@ describe("Bridge API vertical slice", () => {
     expect(jsonExport.headers["content-disposition"]).toContain("bridge-project-audit-");
     expect(jsonExport.headers["content-type"]).toContain("application/json");
     expect(jsonExport.body).toContain('"scope": "project"');
+    expect(jsonExport.body).toContain('"beforeVersion": 1');
+    expect(jsonExport.body).toContain('"afterVersion": 2');
     if (question) {
       expect(jsonExport.body).not.toContain(question.title);
       expect(jsonExport.body).not.toContain(question.context);
@@ -496,7 +502,12 @@ describe("Bridge API vertical slice", () => {
     expect(organizationView.statusCode).toBe(200);
     expect(organizationView.json()).toMatchObject({
       totalMatching: 1,
-      items: [expect.objectContaining({ scope: "organization", action: "organization_member.created" })],
+      items: [expect.objectContaining({
+        scope: "organization",
+        action: "organization_member.created",
+        beforeVersion: 0,
+        afterVersion: 1,
+      })],
     });
     const organizationDenied = await app.inject({
       method: "GET",
@@ -514,6 +525,7 @@ describe("Bridge API vertical slice", () => {
     expect(csvExport.statusCode).toBe(200);
     expect(csvExport.headers["content-type"]).toContain("text/csv");
     expect(csvExport.body).toContain('"action"');
+    expect(csvExport.body).toContain('"beforeVersion"');
     expect(csvExport.body).toContain('"organization_member.created"');
     await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
       expect.arrayContaining([

@@ -945,6 +945,8 @@ export const auditEvents = pgTable(
     subjectId: text("subject_id").notNull(),
     reason: text("reason"),
     policyVersion: integer("policy_version"),
+    beforeVersion: integer("before_version"),
+    afterVersion: integer("after_version"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
@@ -967,6 +969,8 @@ export const organizationAuditEvents = pgTable(
     action: text("action").$type<OrganizationAuditEvent["action"]>().notNull(),
     subjectType: text("subject_type").$type<OrganizationAuditEvent["subjectType"]>().notNull(),
     subjectId: text("subject_id").notNull(),
+    beforeVersion: integer("before_version"),
+    afterVersion: integer("after_version"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [

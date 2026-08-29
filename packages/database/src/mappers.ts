@@ -264,10 +264,13 @@ export function organizationAuditEventToRow(
 export function organizationAuditEventFromRow(
   row: OrganizationAuditEventRow,
 ): OrganizationAuditEvent {
+  const { beforeVersion, afterVersion, ...event } = row;
   return {
-    ...row,
+    ...event,
     action: row.action as OrganizationAuditEvent["action"],
     subjectType: row.subjectType as OrganizationAuditEvent["subjectType"],
+    ...(beforeVersion === null ? {} : { beforeVersion }),
+    ...(afterVersion === null ? {} : { afterVersion }),
   };
 }
 
@@ -899,6 +902,8 @@ export function auditEventToRow(event: AuditEvent): typeof auditEvents.$inferIns
     subjectId: event.subjectId,
     ...(event.reason === undefined ? {} : { reason: event.reason }),
     policyVersion: event.policyVersion ?? null,
+    beforeVersion: event.beforeVersion ?? null,
+    afterVersion: event.afterVersion ?? null,
     createdAt: event.createdAt,
   };
 }
@@ -916,6 +921,8 @@ export function auditEventFromRow(row: AuditEventRow): AuditEvent {
     subjectId: row.subjectId,
     ...(row.reason === null ? {} : { reason: row.reason }),
     ...(row.policyVersion === null ? {} : { policyVersion: row.policyVersion }),
+    ...(row.beforeVersion === null ? {} : { beforeVersion: row.beforeVersion }),
+    ...(row.afterVersion === null ? {} : { afterVersion: row.afterVersion }),
     createdAt: row.createdAt,
   };
 }

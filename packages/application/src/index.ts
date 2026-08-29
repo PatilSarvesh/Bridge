@@ -666,7 +666,14 @@ export interface AuditRecord {
   readonly subjectId: string;
   readonly reason?: string;
   readonly policyVersion?: number;
+  readonly beforeVersion?: number;
+  readonly afterVersion?: number;
   readonly createdAt: string;
+}
+
+interface AuditVersionTransition {
+  readonly beforeVersion?: number;
+  readonly afterVersion?: number;
 }
 
 export interface AuditPage {
@@ -2767,6 +2774,9 @@ export class BridgeService {
         "ownership_configuration",
         projectId,
         configuration.updatedAt!,
+        undefined,
+        undefined,
+        { beforeVersion: currentVersion, afterVersion: configuration.version },
       );
       return configuration;
     });
@@ -2833,6 +2843,8 @@ export class BridgeService {
         projectId,
         timestamp,
         configuration.version,
+        undefined,
+        { beforeVersion: currentVersion, afterVersion: configuration.version },
       );
       return { ...configuration, defaultRules: DEFAULT_PROTECTED_POLICY_RULES };
     });
@@ -2971,6 +2983,7 @@ export class BridgeService {
         group.id,
         timestamp,
         "directory_group",
+        { beforeVersion: 0, afterVersion: group.version },
       );
       return { group, members: [], disposition: "created" };
     });
@@ -3179,6 +3192,7 @@ export class BridgeService {
         group.id,
         timestamp,
         "directory_group",
+        { beforeVersion: group.version, afterVersion: updatedGroup.version },
       );
       this.recordIdempotency("directory_group_sync", "updated");
       return {
@@ -3293,6 +3307,7 @@ export class BridgeService {
         credential.id,
         timestamp,
         "service_credential",
+        { beforeVersion: 0, afterVersion: credential.version },
       );
       return {
         serviceIdentity: this.serviceIdentity(credential, identity, membership, projectMembershipRecords),
@@ -3335,6 +3350,7 @@ export class BridgeService {
         credential.id,
         revokedAt,
         "service_credential",
+        { beforeVersion: credential.version, afterVersion: revoked.version },
       );
       return this.serviceIdentity(
         revoked,
@@ -3396,6 +3412,7 @@ export class BridgeService {
         credential.id,
         timestamp,
         "service_credential",
+        { beforeVersion: credential.version, afterVersion: rotated.version },
       );
       return {
         serviceIdentity: this.serviceIdentity(rotated, identity, membership, projectMemberships),
@@ -3498,6 +3515,7 @@ export class BridgeService {
         "organization_member.created",
         identity.id,
         timestamp,
+        { beforeVersion: 0, afterVersion: membership.version },
       );
       this.recordIdempotency("organization_member_create", "created");
       return {
@@ -3600,6 +3618,7 @@ export class BridgeService {
         "organization_member.updated",
         memberId,
         timestamp,
+        { beforeVersion: current.version, afterVersion: updatedMembership.version },
       );
       return this.organizationMember(identity, updatedMembership, savedProjects);
     });
@@ -5819,6 +5838,7 @@ export class BridgeService {
         timestamp,
         question.policyVersion,
         input.reason,
+        { beforeVersion: question.version, afterVersion: updated.version },
       );
       await repository.saveOutboxEvent({
         id: `evt_${this.id()}`,
@@ -8117,7 +8137,7 @@ export class BridgeService {
     }
     const fields: readonly (keyof AuditRecord)[] = [
       "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
-      "action", "subjectType", "subjectId", "reason", "policyVersion", "createdAt",
+      "action", "subjectType", "subjectId", "reason", "policyVersion", "beforeVersion", "afterVersion", "createdAt",
     ];
     const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const body = [
@@ -8740,6 +8760,7 @@ export class BridgeService {
     action: OrganizationAuditEvent["action"],
     memberId: string,
     createdAt: string,
+    versionTransition: AuditVersionTransition = {},
   ): Promise<void> {
     return this.auditOrganizationEvent(
       repository,
@@ -8748,6 +8769,7 @@ export class BridgeService {
       memberId,
       createdAt,
       "organization_membership",
+      versionTransition,
     );
   }
 
@@ -8758,6 +8780,7 @@ export class BridgeService {
     subjectId: string,
     createdAt: string,
     subjectType: OrganizationAuditEvent["subjectType"],
+    versionTransition: AuditVersionTransition = {},
   ): Promise<void> {
     await repository.saveOrganizationAuditEvent({
       id: `oaud_${this.id()}`,
@@ -8768,6 +8791,8 @@ export class BridgeService {
       action,
       subjectType,
       subjectId,
+      ...(versionTransition.beforeVersion === undefined ? {} : { beforeVersion: versionTransition.beforeVersion }),
+      ...(versionTransition.afterVersion === undefined ? {} : { afterVersion: versionTransition.afterVersion }),
       createdAt,
     });
   }
@@ -9003,6 +9028,7 @@ export class BridgeService {
     createdAt: string,
     policyVersion?: number,
     reason?: string,
+    versionTransition: AuditVersionTransition = {},
   ): Promise<void> {
     await repository.saveAuditEvent({
       id: `aud_${this.id()}`,
@@ -9016,6 +9042,8 @@ export class BridgeService {
       subjectId,
       ...(reason ? { reason } : {}),
       ...(policyVersion === undefined ? {} : { policyVersion }),
+      ...(versionTransition.beforeVersion === undefined ? {} : { beforeVersion: versionTransition.beforeVersion }),
+      ...(versionTransition.afterVersion === undefined ? {} : { afterVersion: versionTransition.afterVersion }),
       createdAt,
     });
   }

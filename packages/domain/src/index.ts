@@ -196,6 +196,10 @@ export interface OrganizationAuditEvent {
     | "principal_identity"
     | "directory_group";
   readonly subjectId: string;
+  /** The previous immutable version, when this event records a state transition. */
+  readonly beforeVersion?: number;
+  /** The committed immutable version, when this event records a state transition. */
+  readonly afterVersion?: number;
   readonly createdAt: string;
 }
 
@@ -835,6 +839,10 @@ export interface AuditEvent {
   readonly subjectId: string;
   readonly reason?: string;
   readonly policyVersion?: number;
+  /** The previous immutable version, when this event records a state transition. */
+  readonly beforeVersion?: number;
+  /** The committed immutable version, when this event records a state transition. */
+  readonly afterVersion?: number;
   readonly createdAt: string;
 }
 
