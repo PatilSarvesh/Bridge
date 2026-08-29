@@ -646,7 +646,7 @@ Administrative endpoints are separated under `/v1/admin`. Outbox operations and 
 
 Directory-group creation/listing remains human organization-administrator-only. The one lifecycle reconciliation route is an explicit exception for `integration` principals carrying `bridge:directory:sync`; coarse `bridge:write` is deliberately insufficient. A configured group is bound to the application's exact OIDC issuer. Sync accepts at most 1,000 unique subject/display-name pairs plus provider timestamp/status, creates human identities and active organization memberships with `provisioning=directory`, zero roles, no all-project grant, and no project memberships, and records versioned group/member lifecycle rows. Removal disables a directory-provisioned organization membership only after the principal has no active synchronized group membership. Any human administrator update changes provenance to `manual`, so provider removal preserves that access. The operation never assigns a role/project, mutates an approval, or exposes an MCP tool; provider discovery, SCIM hosting, invitations, and live webhook/token validation remain outside this slice.
 
-Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional numeric policy version, timestamp, and correlation metadata.
+Project audit browsing/export requires a human project administrator after tenant/project access checks; organization audit browsing/export requires a human organization administrator. The application maps existing append-only project and organization streams into one metadata-only read model, applies exact controlled filters, sorts newest-first, and caps pages at 200 and exports at 5,000 records. Export is a write command because it appends an `audit.exported` record atomically before returning the file. JSON and CSV contain only audit envelope identifiers, action/type, optional policy/version-transition metadata, timestamp, and correlation metadata.
 
 The separate project-data export is a human-project-administrator-only REST command that returns a versioned JSON archive of canonical decision and artifact aggregates, including artifact version bodies/reviews, plus project audit events. Decisions, artifacts, and audit events have independent bounded offsets and limits and stable oldest-first ordering, so later appends do not shift already-consumed pages. The command appends `project.exported` before reading the audit collection, sets `humanApprovalChanged: false`, and never mutates decision lifecycle or artifact approval state. The archive is sensitive governed project data rather than the metadata-only audit export; MCP has no alternate export path.
 
@@ -996,6 +996,14 @@ Audit events record:
 - Request source: web, API, MCP, CLI, worker, integration
 
 Successful human web sign-in and logout are represented as `authentication.succeeded` and `authentication.logged_out` organization audit actions with `principal_identity` subjects. The callback rejects non-human principals before establishing a browser session. Failed, malformed, expired, or otherwise untrusted authentication attempts are not durably attributed because no trusted tenant/principal context exists; they remain correlation-aware safe operational logs.
+
+Versioned administrative mutations add optional `beforeVersion` and `afterVersion` fields to the
+metadata envelope. The application writes these values in the same transaction as the aggregate
+transition for ownership and policy configuration, question assignment, organization membership,
+directory-group, and service-identity changes. A creation uses `beforeVersion: 0`; events without a
+versioned state transition omit both fields. The PostgreSQL columns are nullable for forward
+compatibility, and the REST/web read model plus JSON/CSV exports preserve the values without storing
+state bodies or sensitive content.
 
 Avoid placing full sensitive content in the audit log. Use immutable record IDs and content hashes. Override/reassignment reasons are bounded operational explanations, not prompts, answers, raw transcripts, or private reasoning. Exports are themselves audited.
 

@@ -7,6 +7,7 @@
 | Last updated | 2026-08-29, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
+| Latest implementation slice | BRG-100 immutable audit version lineage for administrative changes; implemented on feature branch `codex/brg-100-audit-lineage` and pending review |
 | Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
@@ -2794,6 +2795,31 @@ Deliberate boundaries:
   blocking, and human approval gates remain required.
 - REST remains canonical and MCP remains optional; no record, migration, approval authority, or
   context-ranking rule changed.
+
+### 20.100 Added immutable audit version lineage (BRG-100)
+
+Implemented and locally verified:
+
+1. Project and organization audit envelopes now support optional `beforeVersion` and `afterVersion`
+   metadata. Versioned ownership/policy configuration, question reassignment, organization
+   membership, directory-group, and service-identity mutations write the transition atomically
+   with the state change; creates use `beforeVersion: 0`.
+2. PostgreSQL persistence uses forward-only migration `0048_lovely_ultimo.sql`, with nullable
+   columns so historical audit rows remain valid. The in-memory repository and row mappers preserve
+   the same optional shape.
+3. REST audit reads, the web Audit view, JSON exports, CSV exports, and governed project-data
+   exports retain the bounded transition metadata. No record body, credential, or sensitive state
+   is copied into the audit stream.
+4. Application, REST, mapper, migration-shape, and web-facing behavior tests cover version
+   transitions and their propagation.
+
+Deliberate boundaries:
+
+- This slice improves audit traceability; it does not durably attribute failed/unknown
+  authentication without trusted tenant context, add production retention, or claim live database
+  deployment evidence.
+- Version fields are metadata only and do not replace optimistic concurrency checks, authorization,
+  human approval, or REST-canonical/MCP-optional boundaries.
 
 ## 21. Important implementation files
 

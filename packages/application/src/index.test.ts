@@ -511,8 +511,11 @@ describe("Bridge decision workflow", () => {
 
     const qaInbox = await service.listQuestionInbox(qaLead, project.id, {});
     expect(qaInbox.find((item) => item.id === question.id)?.inboxReasons).toContain("direct_reviewer");
-    expect((await repository.listAuditEvents(project.id)).some((event) =>
-      event.action === "question.reassigned" && event.subjectId === question.id)).toBe(true);
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "question.reassigned" && event.subjectId === question.id)).toMatchObject({
+      beforeVersion: question.version,
+      afterVersion: reassigned.version,
+    });
     expect((await repository.listOutboxEvents(project.id)).some((event) =>
       event.type === "question.reassigned" && "assignmentId" in event.payload)).toBe(true);
     expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id)).some((notification) =>
@@ -531,10 +534,13 @@ describe("Bridge decision workflow", () => {
       reviewerIds: [owner.id],
       version: reassigned.version + 1,
     });
-    expect((await repository.listAuditEvents(project.id)).some((event) =>
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
       event.action === "question.review_reassigned" &&
       event.subjectId === question.id &&
-      event.reason === "A second human reviewer now owns the independent architecture review lane.")).toBe(true);
+      event.reason === "A second human reviewer now owns the independent architecture review lane.")).toMatchObject({
+      beforeVersion: reassigned.version,
+      afterVersion: reviewReassigned.version,
+    });
   });
 
   it("rolls back a reassignment when its audit record cannot be written", async () => {
@@ -721,6 +727,9 @@ describe("Bridge decision workflow", () => {
     expect((await repository.listAuditEvents(project.id)).find((event) =>
       event.action === "question.created" && event.subjectId === governed.id))
       .toMatchObject({ policyVersion: 1 });
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "project.policy_configured" && event.subjectId === project.id))
+      .toMatchObject({ policyVersion: 1, beforeVersion: 0, afterVersion: 1 });
 
     await expect(service.replaceProjectPolicyConfiguration(owner, project.id, input))
       .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
@@ -792,9 +801,9 @@ describe("Bridge decision workflow", () => {
       teams: [{ key: "quality", memberIds: [qaLead.id] }],
       rules: [{ key: "transfer-quality", priority: 10 }],
     });
-    expect((await repository.listAuditEvents(project.id)).some((event) =>
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
       event.action === "project.ownership_configured" && event.subjectType === "ownership_configuration"))
-      .toBe(true);
+      .toMatchObject({ beforeVersion: 0, afterVersion: 1 });
 
     await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, input))
       .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
@@ -823,6 +832,9 @@ describe("Bridge decision workflow", () => {
       roles: [...input.roles, { name: "Product Owner", description: "Owns product behavior decisions." }],
     });
     expect(updated.version).toBe(2);
+    expect((await repository.listAuditEvents(project.id)).find((event) =>
+      event.action === "project.ownership_configured" && event.afterVersion === 2))
+      .toMatchObject({ beforeVersion: 1, afterVersion: 2 });
   });
 
   it("rolls back project ownership configuration when its audit write fails", async () => {
@@ -1151,9 +1163,16 @@ describe("Bridge decision workflow", () => {
       disposition: "idempotent_replay",
     });
     await expect(service.listOrganizationMembers(organizationAdmin)).resolves.toHaveLength(2);
-    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
-      { action: "organization_member.created", subjectId: created.member.id },
-    ]);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "organization_member.created",
+          subjectId: created.member.id,
+          beforeVersion: 0,
+          afterVersion: 1,
+        }),
+      ]),
+    );
 
     const updated = await service.updateOrganizationMember(organizationAdmin, created.member.id, {
       expectedVersion: 1,
@@ -1175,10 +1194,17 @@ describe("Bridge decision workflow", () => {
       allProjects: false,
       projectMemberships: [],
     })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 2 } });
-    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
-      { action: "organization_member.updated", subjectId: created.member.id },
-      { action: "organization_member.created", subjectId: created.member.id },
-    ]);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "organization_member.updated",
+          subjectId: created.member.id,
+          beforeVersion: 1,
+          afterVersion: 2,
+        }),
+        expect.objectContaining({ action: "organization_member.created", subjectId: created.member.id }),
+      ]),
+    );
   });
 
   it("provisions bounded directory groups without granting roles or overriding manual access", async () => {
@@ -1296,8 +1322,18 @@ describe("Bridge decision workflow", () => {
     ]);
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ action: "directory_group.created", subjectType: "directory_group" }),
-        expect.objectContaining({ action: "directory_group.synced", subjectType: "directory_group" }),
+        expect.objectContaining({
+          action: "directory_group.created",
+          subjectType: "directory_group",
+          beforeVersion: 0,
+          afterVersion: 1,
+        }),
+        expect.objectContaining({
+          action: "directory_group.synced",
+          subjectType: "directory_group",
+          beforeVersion: 1,
+          afterVersion: 2,
+        }),
       ]),
     );
   });
@@ -1558,10 +1594,22 @@ describe("Bridge decision workflow", () => {
     await expect(repository.resolveServiceToken(
       createHash("sha256").update(rotated.token).digest("hex"),
     )).resolves.toMatchObject({ credential: { version: 2, rotatedAt: expect.any(String) } });
-    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toMatchObject([
-      { action: "service_identity.rotated", subjectId: registration.serviceIdentity.id },
-      { action: "service_identity.created", subjectId: registration.serviceIdentity.id },
-    ]);
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "service_identity.rotated",
+          subjectId: registration.serviceIdentity.id,
+          beforeVersion: 1,
+          afterVersion: 2,
+        }),
+        expect.objectContaining({
+          action: "service_identity.created",
+          subjectId: registration.serviceIdentity.id,
+          beforeVersion: 0,
+          afterVersion: 1,
+        }),
+      ]),
+    );
     await expect(service.rotateServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
       expectedVersion: 1,
     })).rejects.toMatchObject({ code: "CONFLICT" });
@@ -1576,6 +1624,16 @@ describe("Bridge decision workflow", () => {
     await expect(service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
       expectedVersion: 2,
     })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "service_identity.revoked",
+          subjectId: registration.serviceIdentity.id,
+          beforeVersion: 2,
+          afterVersion: 3,
+        }),
+      ]),
+    );
   });
 
   it("rejects high-confidence secrets before durable writes and records only controlled metrics", async () => {

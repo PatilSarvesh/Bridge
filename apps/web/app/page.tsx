@@ -680,6 +680,8 @@ interface AuditRecord {
   readonly subjectId: string;
   readonly reason?: string;
   readonly policyVersion?: number;
+  readonly beforeVersion?: number;
+  readonly afterVersion?: number;
   readonly createdAt: string;
 }
 
@@ -3482,7 +3484,7 @@ export default function Home() {
                       <tbody>{auditPage.items.map((event) => (
                         <tr key={event.id}>
                           <td>{new Date(event.createdAt).toLocaleString()}</td>
-                          <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}</small></td>
+                          <td><strong>{event.action}</strong><small>{event.actorType}{event.policyVersion === undefined ? "" : ` · policy v${event.policyVersion}`}{event.beforeVersion === undefined && event.afterVersion === undefined ? "" : ` · v${event.beforeVersion ?? 0} → v${event.afterVersion ?? "?"}`}</small></td>
                           <td><code>{event.actorId}</code></td>
                           <td><strong>{event.subjectType}</strong><code>{event.subjectId}</code></td>
                           <td>{event.reason ?? "—"}</td>
