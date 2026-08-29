@@ -41,6 +41,8 @@ MCP uses the shared issuer/JWKS verifier and resolves the token subject plus org
 
 Authenticated non-human MCP principals are checked per tool family: run tools use `bridge:runs:read/write`, context uses `bridge:context:read`, question tools use `bridge:questions:read/write`, assumption tools use `bridge:assumptions:read/write`, decision search uses `bridge:decisions:read`, and specification tools use `bridge:artifacts:read/write`. Coarse `bridge:read`/`bridge:write` compatibility grants and the explicit `bridge:admin` wildcard remain supported. Human principals still rely on server-side membership and role policy. Missing bearer credentials return `401` with a `WWW-Authenticate` metadata reference; invalid audience, signature, expiry, membership, or scope claims fail closed. MCP does not issue tokens itself; the configured external OIDC authorization server remains responsible for login and token issuance.
 
+When an endpoint is configured in `.bridge/project.yaml`, `bridge doctor` sends a bounded unauthenticated MCP initialization request. If the endpoint returns `401` or `403`, doctor reports whether it supplied a Bearer challenge and validates the derived `/.well-known/oauth-protected-resource/mcp` document for the configured resource and an authorization server. This is a diagnostic only: it does not send a stored CLI token, issue an MCP token, or validate the external provider. Complete authentication in the selected MCP client; REST and CLI remain the fallback when MCP authentication is unavailable.
+
 ## Auth0 pilot setup
 
 Create an Auth0 Regular Web Application, Native Application, and API. The web and CLI clients must use different client IDs; the CLI is a public client and must never receive the web client secret.

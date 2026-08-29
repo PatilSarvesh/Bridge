@@ -678,6 +678,16 @@ Project policy configuration is managed through canonical administrator REST end
 - Enforce shorter read timeouts and bounded write timeouts.
 - Return URLs for human review but never require the agent to scrape the web UI.
 
+The repository adapter's `bridge doctor` performs an unauthenticated, bounded MCP
+`initialize` probe only for an explicitly configured endpoint. A `401` or `403`
+is reported as an authentication-required/insufficient-credentials condition,
+not as an opaque protocol failure; the doctor recognizes a Bearer challenge and
+then checks the endpoint's protected-resource metadata for the configured resource
+and at least one authorization server. Metadata bodies, credentials, and provider
+responses are never persisted or printed. Doctor does not issue MCP tokens or
+replace the external authorization server, and a configured MCP authentication
+failure leaves the REST/CLI/instruction adapter available.
+
 ### 13.2 Tool-to-application mapping
 
 | MCP tool | Application operation |
