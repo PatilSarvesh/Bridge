@@ -459,6 +459,28 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
 .support-table code { color: var(--muted); font-size: .76rem; }
 .support-note { margin: 0; color: var(--muted); font-size: .84rem; line-height: 1.45; }
 .support-note code { color: var(--text); }
+.support-diagnostic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+.support-diagnostic-card { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); }
+.support-diagnostic-card-pass { border-color: var(--success); }
+.support-diagnostic-card-fail { border-color: var(--danger); }
+.support-diagnostic-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.support-diagnostic-title { display: grid; min-width: 0; gap: 3px; }
+.support-diagnostic-title h3 { margin: 0; overflow-wrap: anywhere; text-transform: capitalize; }
+.support-diagnostic-kicker, .support-diagnostic-meta dt, .support-diagnostic-capabilities > span { color: var(--muted); font-size: .68rem; font-weight: 760; letter-spacing: .07em; text-transform: uppercase; }
+.support-diagnostic-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--border); }
+.support-diagnostic-meta > div { display: grid; min-width: 0; gap: 5px; padding: 10px; background: var(--surface); }
+.support-diagnostic-meta > div:last-child { grid-column: 1 / -1; }
+.support-diagnostic-meta dt, .support-diagnostic-meta dd { margin: 0; }
+.support-diagnostic-meta dd { overflow-wrap: anywhere; font-size: .8rem; font-weight: 680; line-height: 1.35; }
+.support-diagnostic-meta time { color: inherit; }
+.support-diagnostic-checks { display: grid; gap: 8px; min-width: 0; padding: 12px; border-radius: 9px; }
+.support-diagnostic-checks.is-passing { background: var(--success-soft); color: var(--success); }
+.support-diagnostic-checks.is-failing { background: var(--danger-soft); color: var(--danger); }
+.support-diagnostic-checks strong { font-size: .84rem; }
+.support-diagnostic-checks > span { font-size: .76rem; }
+.support-diagnostic-check-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.support-diagnostic-check-list li { padding: 4px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: .72rem; line-height: 1.1; }
+.support-diagnostic-capabilities { display: grid; gap: 4px; min-width: 0; margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
 .audit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .action-menu { position: relative; }
 .action-menu > summary { min-height: 38px; padding: 9px 28px 9px 13px; cursor: pointer; list-style: none; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-weight: 690; }
@@ -643,6 +665,7 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
   .analytics-grid, .analytics-activity-grid, .privacy-columns { grid-template-columns: 1fr; }
   .analytics-panel-heading { display: grid; }
   .analytics-panel-heading small { white-space: normal; }
+  .support-diagnostic-grid { grid-template-columns: 1fr; }
   .member-form-grid, .project-membership-row { grid-template-columns: 1fr; }
   .member-form-actions { align-items: stretch; flex-direction: column; }
   .audit-filter-panel { grid-template-columns: 1fr; }

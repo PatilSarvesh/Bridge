@@ -971,7 +971,13 @@ describe("Bridge API vertical slice", () => {
         items: [expect.objectContaining({ client: "codex", capabilities: ["cli"] })],
         mcpDiagnostics: "observed_from_doctor",
       },
-      diagnostics: [expect.objectContaining({ client: "codex", mcpStatus: "not_configured" })],
+      diagnostics: [expect.objectContaining({
+        client: "codex",
+        mcpStatus: "not_configured",
+        checkCount: 2,
+        passedCheckCount: 2,
+        failingCheckNames: [],
+      })],
     });
 
     const denied = await app.inject({

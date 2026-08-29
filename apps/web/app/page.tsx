@@ -660,6 +660,9 @@ interface ProjectSupport {
       readonly name: string;
       readonly status: "pass" | "fail";
     }[];
+    readonly checkCount: number;
+    readonly passedCheckCount: number;
+    readonly failingCheckNames: readonly string[];
     readonly observedAt: string;
   }[];
 }
@@ -2942,23 +2945,48 @@ export default function Home() {
 
                   <section className="analytics-panel support-panel">
                     <div className="analytics-panel-heading">
-                      <div><h2>Repository diagnostics</h2><p>Latest bounded <code>bridge doctor</code> results are stored per adapter. Bridge keeps check names, statuses, capabilities, and timestamps—not URLs, errors, or repository content.</p></div>
-                      <small>{support.diagnostics.length} adapter{support.diagnostics.length === 1 ? "" : "s"}</small>
+                      <div><h2>Repository diagnostics</h2><p>Latest bounded <code>bridge doctor</code> results are stored per adapter. Review the health summary and failed check names here; Bridge never stores URLs, errors, or repository content.</p></div>
+                      <small>{support.diagnostics.filter((diagnostic) => diagnostic.status === "pass").length} of {support.diagnostics.length} healthy</small>
                     </div>
                     {support.diagnostics.length === 0 ? <div className="empty">No bridge doctor reports are recorded.</div> : (
-                      <div className="analytics-table-wrap">
-                        <table className="analytics-table support-table">
-                          <thead><tr><th>Client</th><th>Status</th><th>MCP</th><th>Checks</th><th>Observed</th></tr></thead>
-                          <tbody>{support.diagnostics.map((diagnostic) => (
-                            <tr key={diagnostic.client}>
-                              <td><strong>{diagnostic.client.replaceAll("_", " ")}</strong><small>{diagnostic.capabilities.join(", ") || "No capabilities"}</small></td>
-                              <td><span className={diagnostic.status === "pass" ? "status status-approved" : "status status-rejected"}>{diagnostic.status}</span></td>
-                              <td>{diagnostic.mcpStatus.replaceAll("_", " ")}</td>
-                              <td>{diagnostic.checks.map((check) => `${check.name}: ${check.status}`).join(" · ")}</td>
-                              <td>{new Date(diagnostic.observedAt).toLocaleString()}</td>
-                            </tr>
-                          ))}</tbody>
-                        </table>
+                      <div className="support-diagnostic-grid" aria-label="Repository diagnostics by adapter">
+                        {support.diagnostics.map((diagnostic) => (
+                          <article className={`support-diagnostic-card support-diagnostic-card-${diagnostic.status}`} key={diagnostic.client}>
+                            <div className="support-diagnostic-heading">
+                              <div className="support-diagnostic-title">
+                                <span className="support-diagnostic-kicker">Adapter</span>
+                                <h3>{diagnostic.client.replaceAll("_", " ")}</h3>
+                              </div>
+                              <span className={diagnostic.status === "pass" ? "status status-approved" : "status status-rejected"}>
+                                {diagnostic.status === "pass" ? "healthy" : "needs attention"}
+                              </span>
+                            </div>
+                            <dl className="support-diagnostic-meta">
+                              <div><dt>MCP</dt><dd>{diagnostic.mcpStatus.replaceAll("_", " ")}</dd></div>
+                              <div><dt>Checks</dt><dd>{diagnostic.passedCheckCount} / {diagnostic.checkCount} passing</dd></div>
+                              <div><dt>Observed</dt><dd><time dateTime={diagnostic.observedAt}>{new Date(diagnostic.observedAt).toLocaleString()}</time></dd></div>
+                            </dl>
+                            <div className={`support-diagnostic-checks ${diagnostic.failingCheckNames.length > 0 ? "is-failing" : "is-passing"}`}>
+                              {diagnostic.failingCheckNames.length > 0 ? (
+                                <>
+                                  <strong>Needs attention</strong>
+                                  <ul className="support-diagnostic-check-list">
+                                    {diagnostic.failingCheckNames.map((name) => <li key={name}>{name.replaceAll("-", " ")}</li>)}
+                                  </ul>
+                                </>
+                              ) : (
+                                <>
+                                  <strong>All recorded checks passed</strong>
+                                  <span>{diagnostic.checkCount} check{diagnostic.checkCount === 1 ? "" : "s"} verified</span>
+                                </>
+                              )}
+                            </div>
+                            <p className="support-diagnostic-capabilities">
+                              <span>Capabilities</span>
+                              {diagnostic.capabilities.map((capability) => capability.replaceAll("_", " ")).join(", ") || "No capabilities reported"}
+                            </p>
+                          </article>
+                        ))}
                       </div>
                     )}
                   </section>
