@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   BridgeMetrics,
+  BridgeRateLimiter,
   correlationIdPattern,
   createSafeLogger,
   currentCorrelationContext,
+  rateLimitHeaders,
   redactLogAttributes,
   resolveCorrelationId,
   runWithCorrelationContext,
@@ -38,6 +40,38 @@ describe("Bridge observability primitives", () => {
       },
     );
     expect(currentCorrelationContext()).toBeUndefined();
+  });
+
+  it("bounds hashed transport keys to a fixed window and evicts stale keys", () => {
+    let now = 0;
+    const limiter = new BridgeRateLimiter({
+      now: () => now,
+      maxKeys: 1,
+      policies: { write: { maxRequests: 2, windowMs: 1_000 } },
+    });
+
+    expect(limiter.check("source-a", "write")).toMatchObject({
+      allowed: true,
+      limit: 2,
+      remaining: 1,
+      retryAfterSeconds: 1,
+    });
+    expect(limiter.check("source-a", "write")).toMatchObject({
+      allowed: true,
+      remaining: 0,
+    });
+    const denied = limiter.check("source-a", "write");
+    expect(denied).toMatchObject({ allowed: false, remaining: 0, retryAfterSeconds: 1 });
+    expect(rateLimitHeaders(denied)).toEqual({
+      "RateLimit-Limit": "2",
+      "RateLimit-Remaining": "0",
+      "RateLimit-Reset": "1",
+    });
+
+    now = 1_000;
+    expect(limiter.check("source-a", "write")).toMatchObject({ allowed: true, remaining: 1 });
+    expect(limiter.check("source-b", "write")).toMatchObject({ allowed: true, remaining: 1 });
+    expect(limiter.check("source-a", "write")).toMatchObject({ allowed: true, remaining: 1 });
   });
 
   it("redacts secrets, artifact content, error messages, and unknown free-form strings", () => {
@@ -114,6 +148,7 @@ describe("Bridge observability primitives", () => {
       contentType: "artifact",
       secretType: "private_key",
     });
+    metrics.recordRateLimitDenial({ service: "api", bucket: "write" });
     metrics.recordMcpSession({ outcome: "initialized" });
     metrics.recordMcpSession({ outcome: "failed" });
     metrics.recordMcpToolCall({
@@ -142,6 +177,11 @@ describe("Bridge observability primitives", () => {
       expect.objectContaining({
         name: "bridge_content_secret_detections_total",
         labels: { content_type: "artifact", secret_type: "private_key" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_rate_limit_denials_total",
+        labels: { bucket: "write", service: "api" },
         value: 1,
       }),
       expect.objectContaining({
@@ -190,6 +230,7 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain('bridge_http_requests_total{operation="/v1/projects/:projectId/context",outcome="client_error",service="api"} 1');
     expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
     expect(rendered).toContain('bridge_content_secret_detections_total{content_type="artifact",secret_type="private_key"} 1');
+    expect(rendered).toContain('bridge_rate_limit_denials_total{bucket="write",service="api"} 1');
     expect(rendered).toContain('bridge_idempotency_operations_total{operation="question_submit",outcome="created"} 1');
     expect(rendered).toContain('bridge_conflicts_total 1');
     expect(rendered).toContain('bridge_mcp_sessions_total{outcome="failed"} 1');

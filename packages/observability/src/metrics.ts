@@ -1,3 +1,5 @@
+import type { BridgeRateLimitBucket } from "./rate-limit.js";
+
 export type BridgeServiceName = "api" | "mcp" | "worker";
 export type BridgeRequestOutcome = "success" | "client_error" | "server_error";
 export type BridgeDatabaseBackend = "memory" | "postgresql";
@@ -152,6 +154,11 @@ export interface IdempotencyMetric {
   readonly outcome: BridgeIdempotencyOutcome;
 }
 
+export interface RateLimitDenialMetric {
+  readonly service: BridgeServiceName;
+  readonly bucket: BridgeRateLimitBucket;
+}
+
 const secondsBuckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] as const;
 const countBuckets = [0, 1, 2, 5, 10, 20, 50, 100, 250] as const;
 const maxOperationLabels = 128;
@@ -234,6 +241,10 @@ const definitions = {
   contentSecretDetections: {
     name: "bridge_content_secret_detections_total",
     help: "Bridge content writes rejected after high-confidence secret detection.",
+  },
+  rateLimitDenials: {
+    name: "bridge_rate_limit_denials_total",
+    help: "Bridge transport requests rejected by the bounded rate limiter.",
   },
   mcpSessions: {
     name: "bridge_mcp_sessions_total",
@@ -410,6 +421,13 @@ export class BridgeMetrics {
     this.increment(definitions.contentSecretDetections, {
       content_type: metric.contentType,
       secret_type: metric.secretType,
+    });
+  }
+
+  recordRateLimitDenial(metric: RateLimitDenialMetric): void {
+    this.increment(definitions.rateLimitDenials, {
+      service: metric.service,
+      bucket: metric.bucket,
     });
   }
 

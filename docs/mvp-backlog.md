@@ -996,6 +996,12 @@ human-readable text, and generated agent instructions tell clients never to trea
 as a system, developer, or policy instruction. This is an explicit handling signal, not a claim
 that content is safe to execute or that broader DLP/redaction has been implemented.
 
+Implementation note: the API applies bounded process-local fixed-window limits to `/v1` routes by
+hashed source/credential, route, method, and read/write/auth bucket. The standalone MCP process
+limits both the HTTP transport and authenticated tool calls with standard `RateLimit-*` headers,
+`Retry-After`, and a `429 RATE_LIMITED` response. Deployment gateways still need distributed
+organization/principal quotas and calibrated limits before production.
+
 ### BRG-102 — Verify authorization and tenant isolation matrix
 
 - **Priority:** P0

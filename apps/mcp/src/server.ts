@@ -1,6 +1,7 @@
 import { createPostgresBridgeStore } from "@bridge/database";
 import { OidcAccessTokenVerifier } from "@bridge/auth";
 import {
+  BridgeRateLimiter,
   BridgeMetrics,
   correlationIdHeader,
   createSafeLogger,
@@ -16,6 +17,7 @@ import type { Request, Response } from "express";
 
 import { resolveMcpPrincipal, sendMcpAuthenticationError } from "./auth.js";
 import { createBridgeMcpServer } from "./bridge-server.js";
+import { enforceMcpRateLimit } from "./http-rate-limit.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -68,6 +70,7 @@ const verifier = configuredOidcIssuer && configuredMcpAudience
   : undefined;
 const app = createMcpExpressApp({ host });
 const logger = createSafeLogger({ service: "bridge-mcp" });
+const rateLimiter = new BridgeRateLimiter();
 const protectedResourceMetadataUrl = oidcEnabled
   ? `${publicMcpUrl.replace(/\/$/, "")}/.well-known/oauth-protected-resource/mcp`
   : undefined;
@@ -101,6 +104,14 @@ app.use((request: Request, response: Response, next) => {
         durationMs,
       });
     });
+    const remoteAddress = request.socket.remoteAddress;
+    const authorization = request.header("authorization");
+    if (!enforceMcpRateLimit({
+      method: request.method,
+      path: request.path,
+      ...(remoteAddress ? { remoteAddress } : {}),
+      ...(authorization ? { authorization } : {}),
+    }, response, { limiter: rateLimiter, metrics })) return;
     next();
   });
 });
@@ -154,7 +165,11 @@ app.post("/mcp", async (request: Request, response: Response) => {
     sendMcpAuthenticationError(response, error, protectedResourceMetadataUrl);
     return;
   }
-  const server = createBridgeMcpServer(runtime.service, principal, { publicWebUrl, metrics });
+  const server = createBridgeMcpServer(runtime.service, principal, {
+    publicWebUrl,
+    metrics,
+    rateLimiter,
+  });
   const transport = new StreamableHTTPServerTransport();
   response.on("close", () => {
     void transport.close();

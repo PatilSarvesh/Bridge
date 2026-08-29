@@ -1,4 +1,8 @@
 import type { BridgeService } from "@bridge/application";
+import {
+  BridgeRateLimiter,
+  hashRateLimitKey,
+} from "@bridge/observability";
 import type { BridgeMetrics } from "@bridge/observability";
 import {
   continuationQuerySchema,
@@ -27,9 +31,24 @@ function result(value: Record<string, unknown>) {
   };
 }
 
+function rateLimitedResult(retryAfterSeconds: number) {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        code: "RATE_LIMITED",
+        message: "Too many requests. Retry later.",
+        details: { retryAfterSeconds },
+      }, null, 2),
+    }],
+    isError: true as const,
+  };
+}
+
 export interface BridgeMcpServerOptions {
   readonly publicWebUrl?: string;
   readonly metrics?: BridgeMetrics;
+  readonly rateLimiter?: BridgeRateLimiter;
 }
 
 export function createBridgeMcpServer(
@@ -55,12 +74,28 @@ export function createBridgeMcpServer(
     },
   );
 
-  if (options.metrics) {
+  if (options.metrics || options.rateLimiter) {
     const registerTool = server.registerTool.bind(server);
     server.registerTool = ((name: string, config: unknown, callback: unknown) => {
       const measuredCallback = async (args: unknown, extra: unknown) => {
         const startedAt = performance.now();
         try {
+          if (options.rateLimiter) {
+            const decision = options.rateLimiter.check(
+              hashRateLimitKey("mcp-tool", principal.organizationId, principal.id, name),
+              "mcp",
+            );
+            if (!decision.allowed) {
+              options.metrics?.recordRateLimitDenial({ service: "mcp", bucket: "mcp" });
+              const response = rateLimitedResult(decision.retryAfterSeconds);
+              options.metrics?.recordMcpToolCall({
+                tool: name,
+                outcome: "error",
+                durationMs: Math.max(0, performance.now() - startedAt),
+              });
+              return response;
+            }
+          }
           const response = await (callback as (args: unknown, extra: unknown) => Promise<unknown>)(args, extra);
           options.metrics?.recordMcpToolCall({
             tool: name,
