@@ -29,6 +29,41 @@ Run `pnpm retrieval:evaluate` to reproduce the BRG-130 context-quality benchmark
 
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below plus the worker's explicit maintenance connection.
 
+### Local Docker services
+
+Bridge includes a loopback-only Docker Compose stack for durable local development. It starts
+PostgreSQL on port `5433` so it does not compete with a PostgreSQL installation already using
+port `5432`, plus an S3-compatible MinIO endpoint on ports `9000` and `9001` for local storage
+experiments. The current artifact implementation still stores specification bodies in PostgreSQL;
+MinIO is a local compatibility service, not a claim that object storage is wired into production.
+
+```bash
+pnpm services:up
+pnpm services:status
+```
+
+The first start creates `bridge` and `bridge_test` databases and fixed local-only runtime,
+migrator, and maintenance roles. Run migrations explicitly, then reconcile the local grants before
+starting the API with its non-superuser runtime role:
+
+```bash
+export DATABASE_URL=postgresql://bridge_runtime:bridge_runtime@127.0.0.1:5433/bridge
+export BRIDGE_DEV_SEED_DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5433/bridge
+DATABASE_URL="$BRIDGE_DEV_SEED_DATABASE_URL" pnpm db:migrate
+psql "$BRIDGE_DEV_SEED_DATABASE_URL" \
+  -v bridge_migrator_role=bridge_migrator \
+  -v bridge_runtime_role=bridge_runtime \
+  -v bridge_maintenance_role=bridge_maintenance \
+  -f scripts/provision-postgres-roles.sql
+pnpm dev
+```
+
+`pnpm services:down` stops the containers and preserves their volumes. To intentionally delete only
+this Compose project's local database and object-storage data, run
+`pnpm services:reset -- --confirm`. The reset guard is required because it is irreversible for
+these local volumes. Override the documented ports or local-only credentials with the matching
+`BRIDGE_*` values in `.env.example` when a host service already occupies a default port.
+
 The dependency-free local vertical slice still uses fixed development principals. The production-shaped web/API path supports configurable OIDC authentication plus durable organization/project memberships, mapped least-privilege resource scopes for non-human REST/MCP access, bounded provider-group membership synchronization, the CLI can use public-client Authorization Code + PKCE with operating-system credential storage, and standalone MCP can validate bearer tokens against a dedicated OIDC audience. Successful human web sign-in and logout append tenant-scoped metadata-only organization audit events; failed or untrusted authentication attempts are never attributed to a tenant. Full MCP authorization-server provisioning, external token scope issuance, provider-backed invitations, SCIM protocol hosting, and live identity-provider validation remain follow-up work. See [`docs/authentication.md`](docs/authentication.md).
 
 Human organization administrators can use the web **Organization** area to provision an exact OIDC subject, disable or reactivate access, assign organization roles, and configure per-project membership roles. Changes use optimistic membership versions, preserve at least one active organization administrator, and create organization-level audit records.
@@ -104,14 +139,16 @@ pnpm restore:verify
 
 The verifier connection must use the separately provisioned maintenance role so it can inspect all tenants. The full safe procedure and evidence requirements are in [`docs/runbooks/backup-restore.md`](docs/runbooks/backup-restore.md). Queue backlog, failed migration, future identity-outage, and notification-outage response is in [`docs/runbooks/incidents.md`](docs/runbooks/incidents.md). Production PITR and an actual isolated restore remain deployment-owner work; this repository does not claim those external controls are configured.
 
-Run the live persistence integration test only against an isolated database:
+Run the live persistence integration test only against the isolated local test database or another
+explicitly isolated target:
 
 ```bash
-export BRIDGE_TEST_DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5432/bridge_test
+export BRIDGE_TEST_DATABASE_URL=postgresql://bridge:bridge@127.0.0.1:5433/bridge_test
 pnpm --filter @bridge/database test
 ```
 
-The test is skipped when `BRIDGE_TEST_DATABASE_URL` is absent. Bridge does not bundle or start PostgreSQL for you.
+The test is skipped when `BRIDGE_TEST_DATABASE_URL` is absent. `pnpm services:reset -- --confirm`
+removes only the local Compose volumes; never point it at a shared or production database.
 
 For the human review flow, start the API and web app in separate terminals:
 

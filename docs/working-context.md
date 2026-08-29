@@ -2629,11 +2629,37 @@ Deliberate boundaries:
 - No schema change, migration, production database command, external provider call, or mandatory MCP
   dependency was introduced.
 
+### 20.93 Reproducible local Docker services
+
+1. BRG-003 now has a checked-in `infra/containers/compose.yaml` that starts PostgreSQL 16 on
+   loopback port `5433` and an S3-compatible MinIO service on loopback ports `9000`/`9001`, keeping
+   the local stack separate from a host PostgreSQL instance on port `5432`.
+2. A PostgreSQL init script creates the local `bridge` development database, isolated `bridge_test`
+   database, and fixed local-only runtime, migrator, and maintenance roles. The existing explicit
+   migration and role-reconciliation steps remain unchanged; the API still uses the non-superuser
+   runtime connection and the seed connection is development-only.
+3. `pnpm services:up`, `services:down`, and `services:status` wrap the checked-in Compose file.
+   `services:reset` requires `--confirm` before removing only the Compose project's local volumes.
+   Argument parsing and destructive-reset safeguards have node test coverage, and the Compose shape
+   is regression-checked without requiring Docker during the repository test suite.
+4. README, architecture, environment-example, and backlog guidance now describe the port choices,
+   explicit migration order, isolated test database, local storage boundary, and reset behavior.
+
+Deliberate boundaries:
+
+- The Compose stack is local development infrastructure only. It contains fixed non-production
+  credentials and must not be reused for hosted or production deployment.
+- MinIO is an S3-compatible local compatibility surface; current artifact bodies remain in
+  PostgreSQL and no object-storage application path was silently introduced.
+- `services:reset` is the only new data-removing command and requires explicit confirmation. No
+  production database command was run.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
 - Contributor/agent rules: `AGENTS.md`, `CLAUDE.md`, and `CONTRIBUTING.md`
 - CI workflow: `.github/workflows/ci.yml`
+- Local development services: `infra/containers/compose.yaml`, `infra/containers/postgres/init/00-local-roles.sql`, and `scripts/local-services.mjs`
 - Workspace dependency policy and security override: `pnpm-workspace.yaml`
 - Repository quality gates: `scripts/repository-gates.mjs`, `scripts/repository-gates.test.mjs`, `config/package-boundaries.json`, and `config/transport-contract-baseline.json`
 - Context retrieval benchmark: `config/context-retrieval-evaluation.json`, `scripts/context-retrieval-eval.mjs`, `scripts/context-retrieval-eval.test.mjs`, and `docs/retrieval-evaluation.md`

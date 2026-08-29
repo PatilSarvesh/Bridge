@@ -169,7 +169,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — explicit migrations, a comprehensive idempotent synthetic showcase for in-memory/PostgreSQL development, and documented startup are implemented; bundled PostgreSQL/object-storage startup and reset automation remain
+- **Status:** Implemented — a checked-in Docker Compose stack starts PostgreSQL and an S3-compatible local storage service, creates isolated development/test databases and local-only service roles, and exposes guarded up/down/status/reset commands; migrations, role reconciliation, and synthetic fixture seeding remain explicit operator steps
 - **Dependencies:** BRG-002
 - **PRD references:** Non-functional requirements
 
