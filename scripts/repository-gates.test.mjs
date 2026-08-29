@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   extractMcpTools,
+  extractRestRouteBlocks,
   extractRestRoutes,
   findSecrets,
   formatViolations,
@@ -30,8 +31,20 @@ test("REST route extraction normalizes methods and supports typed Fastify routes
       "/v1/questions/:questionId",
       handler,
     );
+    app.post(
+      \`/v1/decisions/:decisionId/\${action}\`,
+      handler,
+    );
   `;
-  assert.deepEqual(extractRestRoutes(source), ["GET /health", "POST /v1/questions/:questionId"]);
+  assert.deepEqual(extractRestRoutes(source), [
+    "GET /health",
+    "POST /v1/decisions/:decisionId/:action",
+    "POST /v1/questions/:questionId",
+  ]);
+  assert.equal(
+    extractRestRouteBlocks(source).find((block) => block.name.includes("/decisions/"))?.name,
+    "POST /v1/decisions/:decisionId/:action",
+  );
 });
 
 test("MCP tool extraction returns a stable sorted compatibility list", () => {
@@ -52,8 +65,5 @@ test("secret scan catches realistic credentials but ignores bounded placeholders
       "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "A".repeat(48),
     ].join("\n"),
   );
-  assert.deepEqual(
-    findings.map(({ type }) => type).sort(),
-    ["aws-access-key", "github-token", "private-key"],
-  );
+  assert.deepEqual(findings.map(({ type }) => type).sort(), ["aws-access-key", "github-token", "private-key"]);
 });

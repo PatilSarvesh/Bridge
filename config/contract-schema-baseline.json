@@ -1,0 +1,3872 @@
+{
+  "schemaVersion": 1,
+  "sourceSha256": "7eda5760f28302e981236f1fb285d89878f885430bd90a911481e909f32a4309",
+  "schemaCount": 101,
+  "schemas": {
+    "acceptAnswerInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "optionKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        }
+      },
+      "required": [
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "adapterDiagnosticCheckNameSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "api",
+        "project-config",
+        "project-mapping",
+        "mcp",
+        "bridge-instructions",
+        "client-instructions"
+      ]
+    },
+    "adapterDiagnosticCheckSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "api",
+            "project-config",
+            "project-mapping",
+            "mcp",
+            "bridge-instructions",
+            "client-instructions"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "adapterDiagnosticCheckStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "adapterDiagnosticMcpStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "ready",
+        "failed",
+        "not_configured"
+      ]
+    },
+    "agentRunCapabilitySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "instructions",
+        "cli",
+        "mcp",
+        "hooks",
+        "orchestrated"
+      ]
+    },
+    "agentRunClientSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "codex",
+        "claude_code",
+        "cursor",
+        "copilot",
+        "custom",
+        "unknown"
+      ]
+    },
+    "agentRunContinuationModeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "manual",
+        "automatic"
+      ]
+    },
+    "agentRunStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "running",
+        "waiting_for_human",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "approveArtifactVersionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        }
+      },
+      "required": [
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "artifactReviewInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "commented",
+            "changes_requested"
+          ]
+        },
+        "body": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        }
+      },
+      "required": [
+        "status",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "artifactReviewStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "commented",
+        "changes_requested",
+        "approved"
+      ]
+    },
+    "artifactTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "prd",
+        "adr",
+        "api_contract",
+        "test_plan"
+      ]
+    },
+    "artifactVersionDiffQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "fromVersionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "toVersionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "fromVersionId",
+        "toVersionId"
+      ],
+      "additionalProperties": false
+    },
+    "artifactVersionStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "draft",
+        "in_review",
+        "approved",
+        "superseded"
+      ]
+    },
+    "assumptionConfidenceSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "assumptionStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "active",
+        "confirmed",
+        "rejected",
+        "expired",
+        "superseded"
+      ]
+    },
+    "auditExportInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "subjectType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "subjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "createdFrom": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "createdTo": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "format": {
+          "default": "json",
+          "type": "string",
+          "enum": [
+            "json",
+            "csv"
+          ]
+        },
+        "maxItems": {
+          "default": 1000,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "format",
+        "maxItems"
+      ],
+      "additionalProperties": false
+    },
+    "auditListQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "subjectType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "subjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "createdFrom": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "createdTo": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "offset": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "limit": {
+          "default": 50,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "offset",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "bridgeCapabilityScopeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "bridge:read",
+        "bridge:write",
+        "bridge:admin",
+        "bridge:projects:read",
+        "bridge:projects:write",
+        "bridge:repositories:read",
+        "bridge:repositories:write",
+        "bridge:context:read",
+        "bridge:runs:read",
+        "bridge:runs:write",
+        "bridge:questions:read",
+        "bridge:questions:write",
+        "bridge:assumptions:read",
+        "bridge:assumptions:write",
+        "bridge:decisions:read",
+        "bridge:decisions:write",
+        "bridge:artifacts:read",
+        "bridge:artifacts:write",
+        "bridge:notifications:read",
+        "bridge:notifications:write",
+        "bridge:diagnostics:write",
+        "bridge:directory:sync",
+        "bridge:organization:read",
+        "bridge:organization:admin",
+        "bridge:project:admin"
+      ]
+    },
+    "changeDecisionLifecycleInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "superseded",
+            "expired",
+            "revoked"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        },
+        "replacementDecisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "status",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "contextQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "task": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "categories": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "maxItems": {
+          "default": 20,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [
+        "task",
+        "scope",
+        "categories",
+        "maxItems"
+      ],
+      "additionalProperties": false
+    },
+    "continuationQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "resumeContextKey": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "resumeContextKey"
+      ],
+      "additionalProperties": false
+    },
+    "createDirectoryGroupInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 50,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "issuer": {
+          "type": "string",
+          "maxLength": 2000,
+          "format": "uri"
+        },
+        "externalGroupId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "provider",
+        "issuer",
+        "externalGroupId",
+        "displayName"
+      ],
+      "additionalProperties": false
+    },
+    "createOrganizationMemberInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "roles": {
+              "default": [
+                "organization-member"
+              ],
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              }
+            },
+            "allProjects": {
+              "default": false,
+              "type": "boolean"
+            },
+            "projectMemberships": {
+              "default": [],
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "roles": {
+                    "default": [],
+                    "maxItems": 30,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80
+                    }
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "roles"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "roles",
+            "allProjects",
+            "projectMemberships"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "oidcSubject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "oidcSubject",
+            "displayName"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "createQuestionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "title": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 300
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "information",
+            "decision",
+            "approval",
+            "review",
+            "assumption_challenge",
+            "blocker"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "context": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10000
+        },
+        "whyItMatters": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000
+        },
+        "intendedOwnerIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "intendedOwnerRoles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "protected"
+          ]
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "dueAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "options": {
+          "default": [],
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9_-]*$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "tradeoffs": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "tradeoffs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "recommendationKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relatedLinks": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "repository",
+                  "work_item",
+                  "branch",
+                  "artifact",
+                  "run",
+                  "external"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2000,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "type",
+              "label",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "title",
+        "type",
+        "category",
+        "context",
+        "whyItMatters",
+        "intendedOwnerIds",
+        "intendedOwnerRoles",
+        "risk",
+        "reversible",
+        "blocking",
+        "options",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "createServiceIdentityInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "ci",
+            "integration"
+          ]
+        },
+        "roles": {
+          "default": [],
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "allProjects": {
+          "default": false,
+          "type": "boolean"
+        },
+        "projectMemberships": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "roles": {
+                "default": [],
+                "maxItems": 30,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 80
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "roles"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "scopes": {
+          "minItems": 1,
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bridge:read",
+              "bridge:write",
+              "bridge:admin",
+              "bridge:projects:read",
+              "bridge:projects:write",
+              "bridge:repositories:read",
+              "bridge:repositories:write",
+              "bridge:context:read",
+              "bridge:runs:read",
+              "bridge:runs:write",
+              "bridge:questions:read",
+              "bridge:questions:write",
+              "bridge:assumptions:read",
+              "bridge:assumptions:write",
+              "bridge:decisions:read",
+              "bridge:decisions:write",
+              "bridge:artifacts:read",
+              "bridge:artifacts:write",
+              "bridge:notifications:read",
+              "bridge:notifications:write",
+              "bridge:diagnostics:write",
+              "bridge:directory:sync",
+              "bridge:organization:read",
+              "bridge:organization:admin",
+              "bridge:project:admin"
+            ]
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "roles",
+        "allProjects",
+        "projectMemberships",
+        "scopes"
+      ],
+      "additionalProperties": false
+    },
+    "decisionConflictQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": {
+          "default": 50,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "scope",
+        "maxItems"
+      ],
+      "additionalProperties": false
+    },
+    "decisionImpactQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "maxDepth": {
+          "default": 5,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "maxNodes": {
+          "default": 200,
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 500
+        }
+      },
+      "required": [
+        "maxDepth",
+        "maxNodes"
+      ],
+      "additionalProperties": false
+    },
+    "decisionListQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "includeHistory": {
+          "default": false,
+          "type": "boolean"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "expired",
+            "revoked"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "createdFrom": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "createdTo": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "includeHistory",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "decisionStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "active",
+        "superseded",
+        "expired",
+        "revoked"
+      ]
+    },
+    "deliveryChannelSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "email",
+        "slack"
+      ]
+    },
+    "directoryGroupStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "active",
+        "disabled"
+      ]
+    },
+    "editQuestionCommentInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "body": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "mentionedPrincipalIds": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "editQuestionResponseInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "optionKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "mentionedPrincipalIds": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "answer",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "findQuestionMatchesInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 300
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "information",
+            "decision",
+            "approval",
+            "review",
+            "assumption_challenge",
+            "blocker"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "context": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10000
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "protected"
+          ]
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": {
+          "default": 5,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "title",
+        "type",
+        "category",
+        "context",
+        "scope",
+        "maxItems"
+      ],
+      "additionalProperties": false
+    },
+    "githubIssueContextQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "repositoryId"
+      ],
+      "additionalProperties": false
+    },
+    "githubIssueListQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "githubIssueStateSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "open",
+        "closed"
+      ]
+    },
+    "githubPullRequestContextQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "repositoryId"
+      ],
+      "additionalProperties": false
+    },
+    "githubPullRequestListQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed",
+            "merged"
+          ]
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "githubPullRequestStateSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "open",
+        "closed",
+        "merged"
+      ]
+    },
+    "linkRepositoryInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 50,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "maxLength": 2000,
+          "format": "uri"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "provider",
+        "owner",
+        "name",
+        "canonicalUrl"
+      ],
+      "additionalProperties": false
+    },
+    "membershipStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "active",
+        "disabled"
+      ]
+    },
+    "notificationDeliveryPreferenceSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "immediate",
+        "digest",
+        "muted"
+      ]
+    },
+    "notificationListQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "unreadOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "unreadOnly"
+      ],
+      "additionalProperties": false
+    },
+    "notificationPreferenceInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "const": "email"
+        },
+        "preference": {
+          "type": "string",
+          "enum": [
+            "immediate",
+            "digest",
+            "muted"
+          ]
+        }
+      },
+      "required": [
+        "channel",
+        "preference"
+      ],
+      "additionalProperties": false
+    },
+    "notificationReadAllInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "notificationTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "question_assigned",
+        "question_blocking_escalation",
+        "question_response",
+        "question_comment",
+        "question_review",
+        "question_accepted",
+        "decision_lifecycle",
+        "assumption_expired",
+        "artifact_review_requested",
+        "artifact_review_feedback",
+        "artifact_approved"
+      ]
+    },
+    "outboxDeliveryStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "delivered",
+        "failed",
+        "suppressed",
+        "deferred"
+      ]
+    },
+    "outboxEventStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "pending",
+        "processing",
+        "processed",
+        "failed",
+        "dead_letter"
+      ]
+    },
+    "outboxEventTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "notification.created",
+        "decision.lifecycle_changed",
+        "question.reassigned",
+        "run.continuation_ready"
+      ]
+    },
+    "outboxOperationsQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "processing",
+            "processed",
+            "failed",
+            "dead_letter"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "notification.created",
+            "decision.lifecycle_changed",
+            "question.reassigned",
+            "run.continuation_ready"
+          ]
+        },
+        "limit": {
+          "default": 50,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "overrideQuestionApprovalInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "optionKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "rationale",
+        "expectedVersion",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "ownerRoleSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 80
+    },
+    "ownershipRuleInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "owners": {
+          "default": {
+            "principalIds": [],
+            "roles": [],
+            "teamKeys": []
+          },
+          "type": "object",
+          "properties": {
+            "principalIds": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "roles": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              }
+            },
+            "teamKeys": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              }
+            }
+          },
+          "required": [
+            "principalIds",
+            "roles",
+            "teamKeys"
+          ],
+          "additionalProperties": false
+        },
+        "reviewers": {
+          "default": {
+            "principalIds": [],
+            "roles": [],
+            "teamKeys": []
+          },
+          "type": "object",
+          "properties": {
+            "principalIds": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "roles": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              }
+            },
+            "teamKeys": {
+              "default": [],
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              }
+            }
+          },
+          "required": [
+            "principalIds",
+            "roles",
+            "teamKeys"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "priority",
+        "owners",
+        "reviewers"
+      ],
+      "additionalProperties": false
+    },
+    "ownershipRuleTargetSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "principalIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "roles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "teamKeys": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        }
+      },
+      "required": [
+        "principalIds",
+        "roles",
+        "teamKeys"
+      ],
+      "additionalProperties": false
+    },
+    "policyActionSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "assume_and_log",
+        "ask_async",
+        "block",
+        "protected_approval"
+      ]
+    },
+    "principalTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "human",
+        "agent",
+        "ci",
+        "integration"
+      ]
+    },
+    "projectAnalyticsQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "client": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude_code",
+            "cursor",
+            "copilot",
+            "custom",
+            "unknown"
+          ]
+        },
+        "startedFrom": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "startedTo": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectDataExportInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "decisionOffset": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "maxDecisions": {
+          "default": 1000,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "artifactOffset": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "maxArtifacts": {
+          "default": 100,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "auditOffset": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "maxAuditItems": {
+          "default": 5000,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "decisionOffset",
+        "maxDecisions",
+        "artifactOffset",
+        "maxArtifacts",
+        "auditOffset",
+        "maxAuditItems"
+      ],
+      "additionalProperties": false
+    },
+    "projectMembershipConfigurationSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "roles": {
+          "default": [],
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        }
+      },
+      "required": [
+        "projectId",
+        "roles"
+      ],
+      "additionalProperties": false
+    },
+    "projectPolicyRuleInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "assume_and_log",
+            "ask_async",
+            "block",
+            "protected_approval"
+          ]
+        },
+        "minimumRisk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "protected"
+          ]
+        },
+        "requiredOwnerRoles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "requiredReviewerRoles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "reviewerQuorum": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "priority",
+        "scope",
+        "action",
+        "minimumRisk",
+        "requiredOwnerRoles",
+        "requiredReviewerRoles"
+      ],
+      "additionalProperties": false
+    },
+    "projectRoleDefinitionSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "projectTeamInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "memberIds": {
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "memberIds"
+      ],
+      "additionalProperties": false
+    },
+    "proposeAnswerInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "optionKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "mentionedPrincipalIds": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "answer",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "publishArtifactInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 300
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "prd",
+            "adr",
+            "api_contract",
+            "test_plan"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000
+        },
+        "body": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 262144
+        },
+        "intendedReviewerIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "intendedReviewerRoles": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "intendedReviewerTeamKeys": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "requiredApprovals": {
+          "default": 1,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "citedDecisionIds": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "requestReview": {
+          "default": true,
+          "type": "boolean"
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "title",
+        "type",
+        "summary",
+        "body",
+        "intendedReviewerIds",
+        "requiredApprovals",
+        "citedDecisionIds",
+        "requestReview",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "questionAudienceViewQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "mode": {
+          "default": "explain",
+          "type": "string",
+          "enum": [
+            "explain",
+            "rewrite"
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "questionClarificationInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "questionCommentInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "body": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 5000
+        },
+        "parentCommentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "mentionedPrincipalIds": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "questionDecisionDigestQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "maxDigests": {
+          "default": 10,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "maxQuestionsPerDigest": {
+          "default": 10,
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "maxDigests",
+        "maxQuestionsPerDigest"
+      ],
+      "additionalProperties": false
+    },
+    "questionDueFilterSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "overdue",
+        "next_7_days",
+        "scheduled",
+        "none"
+      ]
+    },
+    "questionInboxQuerySchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "in_discussion",
+            "accepted",
+            "duplicate",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "protected"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "due": {
+          "type": "string",
+          "enum": [
+            "overdue",
+            "next_7_days",
+            "scheduled",
+            "none"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "questionLinkTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "repository",
+        "work_item",
+        "branch",
+        "artifact",
+        "run",
+        "external"
+      ]
+    },
+    "questionOptionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "tradeoffs": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "tradeoffs"
+      ],
+      "additionalProperties": false
+    },
+    "questionReviewInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "status",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "questionReviewStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected"
+      ]
+    },
+    "questionStatusSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "open",
+        "in_discussion",
+        "accepted",
+        "duplicate",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "questionSubmissionDispositionSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "created",
+        "idempotent_replay",
+        "reused_pending",
+        "reused_accepted"
+      ]
+    },
+    "questionTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "information",
+        "decision",
+        "approval",
+        "review",
+        "assumption_challenge",
+        "blocker"
+      ]
+    },
+    "reassignQuestionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ownerIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "ownerRoles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "reviewerIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "reviewerRoles": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "ownerIds",
+        "ownerRoles",
+        "reviewerIds",
+        "reviewerRoles",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "recordAdapterDiagnosticInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "client": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude_code",
+            "cursor",
+            "copilot",
+            "custom",
+            "unknown"
+          ]
+        },
+        "capabilities": {
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "instructions",
+              "cli",
+              "mcp",
+              "hooks",
+              "orchestrated"
+            ]
+          }
+        },
+        "mcpStatus": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "failed",
+            "not_configured"
+          ]
+        },
+        "checks": {
+          "minItems": 1,
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "api",
+                  "project-config",
+                  "project-mapping",
+                  "mcp",
+                  "bridge-instructions",
+                  "client-instructions"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "client",
+        "capabilities",
+        "mcpStatus",
+        "checks"
+      ],
+      "additionalProperties": false
+    },
+    "recordAssumptionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "protected"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "reversalCost": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "sourceLinks": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          }
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "statement",
+        "rationale",
+        "category",
+        "risk",
+        "confidence",
+        "reversible",
+        "reversalCost",
+        "scope",
+        "sourceLinks"
+      ],
+      "additionalProperties": false
+    },
+    "registerProjectInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "decisionOwnerIds": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "name",
+        "decisionOwnerIds"
+      ],
+      "additionalProperties": false
+    },
+    "replaceProjectOwnershipInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "roles": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              },
+              "description": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "name",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "teams": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 120
+              },
+              "memberIds": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              }
+            },
+            "required": [
+              "key",
+              "name",
+              "memberIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "rules": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 120
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "category": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 100
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "component": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "owners": {
+                "default": {
+                  "principalIds": [],
+                  "roles": [],
+                  "teamKeys": []
+                },
+                "type": "object",
+                "properties": {
+                  "principalIds": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "roles": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80
+                    }
+                  },
+                  "teamKeys": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80,
+                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    }
+                  }
+                },
+                "required": [
+                  "principalIds",
+                  "roles",
+                  "teamKeys"
+                ],
+                "additionalProperties": false
+              },
+              "reviewers": {
+                "default": {
+                  "principalIds": [],
+                  "roles": [],
+                  "teamKeys": []
+                },
+                "type": "object",
+                "properties": {
+                  "principalIds": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "roles": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80
+                    }
+                  },
+                  "teamKeys": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80,
+                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    }
+                  }
+                },
+                "required": [
+                  "principalIds",
+                  "roles",
+                  "teamKeys"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "key",
+              "name",
+              "priority",
+              "owners",
+              "reviewers"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "roles",
+        "teams",
+        "rules"
+      ],
+      "additionalProperties": false
+    },
+    "replaceProjectPolicyInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rules": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 120
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "category": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 100
+              },
+              "scope": {
+                "default": {},
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "component": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "branch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "environment": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "workItem": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                },
+                "additionalProperties": false
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "assume_and_log",
+                  "ask_async",
+                  "block",
+                  "protected_approval"
+                ]
+              },
+              "minimumRisk": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "protected"
+                ]
+              },
+              "requiredOwnerRoles": {
+                "default": [],
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 80
+                }
+              },
+              "requiredReviewerRoles": {
+                "default": [],
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 80
+                }
+              },
+              "reviewerQuorum": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                }
+              }
+            },
+            "required": [
+              "key",
+              "name",
+              "priority",
+              "scope",
+              "action",
+              "minimumRisk",
+              "requiredOwnerRoles",
+              "requiredReviewerRoles"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "rules"
+      ],
+      "additionalProperties": false
+    },
+    "replayOutboxEventInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "expectedAttempts"
+      ],
+      "additionalProperties": false
+    },
+    "reportAgentRunInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_for_human",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 4000
+        },
+        "resultLinks": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "status",
+        "resultLinks"
+      ],
+      "additionalProperties": false
+    },
+    "repositoryProviderSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 50,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "resolveAssumptionInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "confirmed",
+            "rejected",
+            "expired",
+            "superseded"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 5000
+        },
+        "confirmedDecisionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "createDecision": {
+          "type": "boolean"
+        },
+        "supersedingAssumptionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "status",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    "revokeServiceIdentityInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "expectedVersion"
+      ],
+      "additionalProperties": false
+    },
+    "riskSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "protected"
+      ]
+    },
+    "rotateServiceIdentityInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "expectedVersion"
+      ],
+      "additionalProperties": false
+    },
+    "scopeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "workItem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceCapabilityScopeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "bridge:read",
+        "bridge:write",
+        "bridge:admin",
+        "bridge:projects:read",
+        "bridge:projects:write",
+        "bridge:repositories:read",
+        "bridge:repositories:write",
+        "bridge:context:read",
+        "bridge:runs:read",
+        "bridge:runs:write",
+        "bridge:questions:read",
+        "bridge:questions:write",
+        "bridge:assumptions:read",
+        "bridge:assumptions:write",
+        "bridge:decisions:read",
+        "bridge:decisions:write",
+        "bridge:artifacts:read",
+        "bridge:artifacts:write",
+        "bridge:notifications:read",
+        "bridge:notifications:write",
+        "bridge:diagnostics:write",
+        "bridge:directory:sync",
+        "bridge:organization:read",
+        "bridge:organization:admin",
+        "bridge:project:admin"
+      ]
+    },
+    "serviceIdentityTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "agent",
+        "ci",
+        "integration"
+      ]
+    },
+    "startAgentRunInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "client": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude_code",
+            "cursor",
+            "copilot",
+            "custom",
+            "unknown"
+          ]
+        },
+        "capability": {
+          "type": "string",
+          "enum": [
+            "instructions",
+            "cli",
+            "mcp",
+            "hooks",
+            "orchestrated"
+          ]
+        },
+        "continuationMode": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "automatic"
+          ]
+        },
+        "vendorSessionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "taskSummary": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000
+        },
+        "scope": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "workItem": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "externalLinks": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          }
+        },
+        "continuesRunId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "resumeContextKey": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "client",
+        "capability",
+        "taskSummary",
+        "scope",
+        "externalLinks"
+      ],
+      "additionalProperties": false
+    },
+    "syncDirectoryGroupInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sourceUpdatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "disabled"
+          ]
+        },
+        "members": {
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "subject",
+              "displayName"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "expectedVersion",
+        "sourceUpdatedAt",
+        "status",
+        "members"
+      ],
+      "additionalProperties": false
+    },
+    "syncGithubIssueInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "number": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "maxLength": 2000,
+          "format": "uri"
+        },
+        "labels": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "sourceUpdatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "decisionIds": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "artifactVersionIds": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "repositoryId",
+        "number",
+        "title",
+        "state",
+        "canonicalUrl",
+        "labels",
+        "sourceUpdatedAt",
+        "decisionIds",
+        "artifactVersionIds"
+      ],
+      "additionalProperties": false
+    },
+    "syncGithubPullRequestInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "number": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed",
+            "merged"
+          ]
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "maxLength": 2000,
+          "format": "uri"
+        },
+        "headBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "baseBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "sourceUpdatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "decisionIds": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "artifactVersionIds": {
+          "default": [],
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "repositoryId",
+        "number",
+        "title",
+        "state",
+        "canonicalUrl",
+        "headBranch",
+        "baseBranch",
+        "headSha",
+        "sourceUpdatedAt",
+        "decisionIds",
+        "artifactVersionIds"
+      ],
+      "additionalProperties": false
+    },
+    "updateOrganizationMemberInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "roles": {
+              "default": [
+                "organization-member"
+              ],
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              }
+            },
+            "allProjects": {
+              "default": false,
+              "type": "boolean"
+            },
+            "projectMemberships": {
+              "default": [],
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "roles": {
+                    "default": [],
+                    "maxItems": 30,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 80
+                    }
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "roles"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "roles",
+            "allProjects",
+            "projectMemberships"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "disabled"
+              ]
+            }
+          },
+          "required": [
+            "expectedVersion",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

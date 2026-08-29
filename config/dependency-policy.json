@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "description": "Checked-in dependency import policy for Bridge package boundaries.",
+  "forbiddenImports": {
+    "@bridge/application": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "next", "postgres"],
+    "@bridge/auth": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "next", "postgres"],
+    "@bridge/contracts": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "next", "postgres"],
+    "@bridge/domain": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "jose", "next", "postgres"],
+    "@bridge/observability": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "next", "postgres"],
+    "@bridge/test-support": ["@modelcontextprotocol/sdk", "drizzle-orm", "express", "fastify", "next", "postgres"]
+  }
+}

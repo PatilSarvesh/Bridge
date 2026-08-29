@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-24, Asia/Kolkata |
+| Last updated | 2026-08-29, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable repository quality gates, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
+| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, a Slack Incoming Webhook notification handler, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack workspace/deployment validation, live email provider wiring, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -971,7 +971,7 @@ Run status and assumption resolution changes have explicit `expectedVersion` inp
 - Claude Code and later-client independent conformance runs; Codex-first observable conformance now passes.
 - A vendor hook or other enforceable signal for private/native clarification prompts; the current guard can verify Bridge outcomes but cannot observe UI that a vendor does not expose.
 - Automated browser regression tests; the current Hospital acceptance view was verified interactively in the in-app browser.
-- A full formatter/linter toolchain, generated request/response schema compatibility report, and deeper dependency-policy enforcement remain follow-up work; the current gates intentionally provide deterministic repository hygiene, package direction, transport-surface, secret, and production-audit checks without claiming those broader controls.
+- Full OpenAPI document generation, license/provenance policy, and hosted dependency-audit evidence remain follow-up hardening; BRG-004 now provides changed-file Biome formatting/linting, generated Zod request-schema snapshots, reviewed REST/MCP response-contract categories, direct-import/layer dependency policy, and production dependency auditing without claiming those broader controls.
 - External BRG-112 pilot readiness evidence: staging execution, live tenant/security validation, isolated restore, provider failure-window, onboarding acknowledgement, and named owner/feedback records remain deployment/private-operations work.
 
 ## 18. Git and workspace state
@@ -2654,6 +2654,35 @@ Deliberate boundaries:
 - `services:reset` is the only new data-removing command and requires explicit confirmation. No
   production database command was run.
 
+### 20.94 Completed CI and contract quality gates
+
+1. BRG-004 now uses the pinned Biome toolchain for changed-file formatting and linting against
+   `main`; the existing repository format gate continues to check all tracked text files for line
+   endings, final newlines, and unsafe trailing whitespace. Generated `dist`, `.next`, `.turbo`,
+   coverage, and dependency directories are excluded from Biome analysis.
+2. `scripts/contract-schema-gates.mjs` builds the shared contracts package, converts every exported
+   Zod schema into a draft-2020-12 JSON Schema snapshot, and compares it with
+   `config/contract-schema-baseline.json`. It also checks the reviewed REST/MCP surface and the
+   explicit request/response contract categories in `config/transport-contract-baseline.json`.
+   Template-literal Fastify routes are normalized as parameterized paths, so the decision lifecycle
+   route family is included rather than silently omitted. Baseline updates require the explicit
+   `pnpm contracts:baseline:update` command.
+3. `scripts/dependency-policy.mjs` verifies direct declarations for workspace and external imports
+   (including development-only config/test usage) and rejects forbidden transport/infrastructure
+   imports from domain, contracts, application, auth, observability, and test-support packages.
+   `pnpm dependency:check` runs this deterministic policy before the production dependency audit.
+4. `pnpm check` now executes the local formatter, linter, contract, dependency, security, type,
+   test, build, and distribution gates. CI keeps the isolated PostgreSQL integration setup and
+   runs the production audit as a separate dependency-check step.
+
+Deliberate boundaries:
+
+- The contract snapshot is a reviewed compatibility gate, not a generated public OpenAPI document;
+  full OpenAPI generation and richer field-level runtime response schemas remain future hardening.
+- Dependency auditing still depends on the package registry's advisory database; license policy,
+  lockfile provenance, and hosted collector evidence remain outside this slice.
+- No REST or MCP authority path changed, and MCP remains optional.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -2661,7 +2690,7 @@ Deliberate boundaries:
 - CI workflow: `.github/workflows/ci.yml`
 - Local development services: `infra/containers/compose.yaml`, `infra/containers/postgres/init/00-local-roles.sql`, and `scripts/local-services.mjs`
 - Workspace dependency policy and security override: `pnpm-workspace.yaml`
-- Repository quality gates: `scripts/repository-gates.mjs`, `scripts/repository-gates.test.mjs`, `config/package-boundaries.json`, and `config/transport-contract-baseline.json`
+- Repository quality gates: `scripts/repository-gates.mjs`, `scripts/repository-gates.test.mjs`, `scripts/dependency-policy.mjs`, `scripts/dependency-policy.test.mjs`, `scripts/contract-schema-gates.mjs`, `biome.json`, `config/package-boundaries.json`, `config/dependency-policy.json`, `config/contract-schema-baseline.json`, and `config/transport-contract-baseline.json`
 - Context retrieval benchmark: `config/context-retrieval-evaluation.json`, `scripts/context-retrieval-eval.mjs`, `scripts/context-retrieval-eval.test.mjs`, and `docs/retrieval-evaluation.md`
 - Founder/pilot decisions: `docs/pilot-decisions.md`
 - Technical architecture: `docs/technical-architecture.md`

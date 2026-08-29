@@ -147,10 +147,14 @@ export async function findArchitectureViolations(root = repositoryRoot) {
   return violations.sort();
 }
 
+export function normalizeRoutePath(route) {
+  return route.replace(/\$\{([^}]+)\}/g, ":$1");
+}
+
 export function extractRestRoutes(source) {
-  const routePattern = /app\.(get|post|patch|put|delete)\b[\s\S]{0,800}?\(\s*["'](\/[^"']+)["']/g;
+  const routePattern = /app\.(get|post|patch|put|delete)\b[\s\S]{0,800}?\(\s*(["'`])(\/[^"'`]+)\2/g;
   return [...source.matchAll(routePattern)]
-    .map((match) => `${match[1].toUpperCase()} ${match[2]}`)
+    .map((match) => `${match[1].toUpperCase()} ${normalizeRoutePath(match[3])}`)
     .sort();
 }
 
@@ -159,14 +163,14 @@ export function extractMcpTools(source) {
   return [...source.matchAll(toolPattern)].map((match) => match[1]).sort();
 }
 
-function extractRestRouteBlocks(source) {
-  const routePattern = /app\.(get|post|patch|put|delete)\b[\s\S]{0,800}?\(\s*["'](\/[^"']+)["']/g;
+export function extractRestRouteBlocks(source) {
+  const routePattern = /app\.(get|post|patch|put|delete)\b[\s\S]{0,800}?\(\s*(["'`])(\/[^"'`]+)\2/g;
   const matches = [...source.matchAll(routePattern)];
   return matches.map((match, index) => {
     const start = match.index ?? 0;
     const end = matches[index + 1]?.index ?? source.length;
     return {
-      name: `${match[1].toUpperCase()} ${match[2]}`,
+      name: `${match[1].toUpperCase()} ${normalizeRoutePath(match[3])}`,
       source: source.slice(start, end),
     };
   });
@@ -183,10 +187,14 @@ export async function findContractViolations(root = repositoryRoot) {
   const violations = [];
 
   if (JSON.stringify(actualRest) !== JSON.stringify(expectedRest)) {
-    violations.push(`REST surface differs from reviewed baseline (expected ${expectedRest.length}, found ${actualRest.length})`);
+    violations.push(
+      `REST surface differs from reviewed baseline (expected ${expectedRest.length}, found ${actualRest.length})`,
+    );
   }
   if (JSON.stringify(actualMcp) !== JSON.stringify(expectedMcp)) {
-    violations.push(`MCP tool surface differs from reviewed baseline (expected ${expectedMcp.length}, found ${actualMcp.length})`);
+    violations.push(
+      `MCP tool surface differs from reviewed baseline (expected ${expectedMcp.length}, found ${actualMcp.length})`,
+    );
   }
 
   const bodylessWrites = new Set(baseline.bodylessRestWrites);
@@ -243,7 +251,9 @@ export async function findSecretViolations(root = repositoryRoot) {
     const contents = await readFile(filePath, "utf8");
     findings.push(...findSecrets(path.relative(root, filePath), contents));
   }
-  return findings.sort((left, right) => `${left.filePath}:${left.line}`.localeCompare(`${right.filePath}:${right.line}`));
+  return findings.sort((left, right) =>
+    `${left.filePath}:${left.line}`.localeCompare(`${right.filePath}:${right.line}`),
+  );
 }
 
 function reportViolations(title, violations) {

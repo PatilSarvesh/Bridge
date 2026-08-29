@@ -29,6 +29,16 @@ Run `pnpm retrieval:evaluate` to reproduce the BRG-130 context-quality benchmark
 
 `pnpm dev` starts the API and web application with the dependency-free in-memory demo. `pnpm dev:all` also starts MCP and the worker and therefore requires the durable PostgreSQL configuration described below plus the worker's explicit maintenance connection.
 
+### Quality and contract gates
+
+`pnpm check` runs the complete local quality path, including changed-file Biome formatting and
+linting, repository hygiene, package/dependency boundaries, REST/MCP surface checks, generated
+request-schema compatibility, reviewed response-contract categories, secret scanning, type checks,
+tests, builds, and CLI distribution smoke checks. `pnpm dependency:check` adds the production
+dependency audit used by CI. When changing a shared Zod schema or a REST/MCP route contract, update
+the reviewed snapshots explicitly with `pnpm contracts:baseline:update`; ordinary checks never
+rewrite them.
+
 ### Local Docker services
 
 Bridge includes a loopback-only Docker Compose stack for durable local development. It starts

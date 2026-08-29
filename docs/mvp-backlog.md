@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-20 |
+| Last updated | 2026-08-29 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -187,7 +187,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — GitHub Actions runs deterministic format/boundary/REST-MCP surface/secret gates, typecheck, tests, builds, isolated PostgreSQL integration, and a production dependency audit; full formatter/linter integration, request/response schema compatibility, and deeper dependency-policy gates remain
+- **Status:** Implemented — GitHub Actions runs the changed-file Biome formatter/linter plus repository format/boundary/REST-MCP surface/secret gates, generated Zod request-schema and reviewed response-contract compatibility checks, direct-import/layer dependency policy checks, typecheck, tests, builds, isolated PostgreSQL integration, and a production dependency audit
 - **Dependencies:** BRG-002
 - **PRD references:** MVP acceptance criteria 14
 

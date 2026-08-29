@@ -4,110 +4,536 @@
   "rest": [
     "GET /health",
     "GET /health/live",
-    "GET /metrics",
     "GET /health/ready",
+    "GET /metrics",
+    "GET /v1/admin/organization/audit",
+    "GET /v1/admin/organization/directory-groups",
+    "GET /v1/admin/organization/members",
+    "GET /v1/admin/organization/service-identities",
+    "GET /v1/admin/projects/:projectId/analytics",
+    "GET /v1/admin/projects/:projectId/audit",
+    "GET /v1/admin/projects/:projectId/outbox",
+    "GET /v1/admin/projects/:projectId/ownership",
+    "GET /v1/admin/projects/:projectId/policy",
+    "GET /v1/admin/projects/:projectId/support",
+    "GET /v1/artifacts/:artifactId",
+    "GET /v1/artifacts/:artifactId/diff",
+    "GET /v1/assumptions/:assumptionId",
+    "GET /v1/auth/callback",
     "GET /v1/auth/config",
     "GET /v1/auth/login",
-    "GET /v1/auth/callback",
     "GET /v1/auth/logout",
     "GET /v1/auth/me",
+    "GET /v1/decisions/:decisionId/impact",
     "GET /v1/notifications",
     "GET /v1/notifications/preferences",
-    "POST /v1/notifications/preferences",
-    "POST /v1/notifications/:notificationId/read",
-    "POST /v1/notifications/read-all",
-    "GET /v1/admin/projects/:projectId/outbox",
-    "GET /v1/admin/projects/:projectId/analytics",
-    "GET /v1/admin/projects/:projectId/support",
-    "GET /v1/admin/projects/:projectId/audit",
-    "POST /v1/admin/projects/:projectId/audit/export",
-    "POST /v1/admin/projects/:projectId/export",
-    "POST /v1/admin/outbox/:eventId/replay",
     "GET /v1/principals",
-    "GET /v1/admin/organization/members",
-    "GET /v1/admin/organization/audit",
-    "POST /v1/admin/organization/audit/export",
-    "POST /v1/admin/organization/members",
+    "GET /v1/projects",
+    "GET /v1/projects/:projectId",
+    "GET /v1/projects/:projectId/artifacts",
+    "GET /v1/projects/:projectId/assumptions",
+    "GET /v1/projects/:projectId/context",
+    "GET /v1/projects/:projectId/decision-conflicts",
+    "GET /v1/projects/:projectId/decisions",
+    "GET /v1/projects/:projectId/inbox",
+    "GET /v1/projects/:projectId/integrations/github/issues",
+    "GET /v1/projects/:projectId/integrations/github/issues/:issueNumber/context",
+    "GET /v1/projects/:projectId/integrations/github/pull-requests",
+    "GET /v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context",
+    "GET /v1/projects/:projectId/question-digests",
+    "GET /v1/projects/:projectId/questions",
+    "GET /v1/projects/:projectId/repositories",
+    "GET /v1/projects/:projectId/runs",
+    "GET /v1/questions/:questionId",
+    "GET /v1/questions/:questionId/audience-view",
+    "GET /v1/runs/:runId",
     "PATCH /v1/admin/organization/members/:memberId",
-    "GET /v1/admin/organization/directory-groups",
+    "PATCH /v1/questions/:questionId/comments/:commentId",
+    "PATCH /v1/questions/:questionId/responses/:responseId",
+    "PATCH /v1/runs/:runId",
+    "POST /v1/admin/organization/audit/export",
     "POST /v1/admin/organization/directory-groups",
     "POST /v1/admin/organization/directory-groups/:groupId/sync",
-    "GET /v1/admin/organization/service-identities",
+    "POST /v1/admin/organization/members",
     "POST /v1/admin/organization/service-identities",
     "POST /v1/admin/organization/service-identities/:serviceCredentialId/revoke",
     "POST /v1/admin/organization/service-identities/:serviceCredentialId/rotate",
-    "POST /v1/projects",
-    "GET /v1/projects",
-    "GET /v1/projects/:projectId",
-    "POST /v1/projects/:projectId/repositories",
-    "GET /v1/projects/:projectId/repositories",
-    "POST /v1/projects/:projectId/integrations/github/pull-requests",
-    "GET /v1/projects/:projectId/integrations/github/pull-requests",
-    "GET /v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context",
-    "POST /v1/projects/:projectId/integrations/github/issues",
-    "GET /v1/projects/:projectId/integrations/github/issues",
-    "GET /v1/projects/:projectId/integrations/github/issues/:issueNumber/context",
-    "GET /v1/admin/projects/:projectId/ownership",
+    "POST /v1/admin/outbox/:eventId/replay",
+    "POST /v1/admin/projects/:projectId/audit/export",
+    "POST /v1/admin/projects/:projectId/export",
     "POST /v1/admin/projects/:projectId/ownership",
-    "GET /v1/admin/projects/:projectId/policy",
     "POST /v1/admin/projects/:projectId/policy",
-    "POST /v1/projects/:projectId/adapter-diagnostics",
-    "GET /v1/projects/:projectId/context",
-    "POST /v1/projects/:projectId/runs",
-    "GET /v1/projects/:projectId/runs",
-    "GET /v1/runs/:runId",
-    "PATCH /v1/runs/:runId",
-    "POST /v1/runs/:runId/continuation",
+    "POST /v1/artifact-versions/:versionId/approve",
+    "POST /v1/artifact-versions/:versionId/reviews",
+    "POST /v1/assumptions/:assumptionId/resolve",
+    "POST /v1/decisions/:decisionId/:action",
     "POST /v1/decisions/:decisionId/lifecycle",
-    "GET /v1/decisions/:decisionId/impact",
+    "POST /v1/notifications/:notificationId/read",
+    "POST /v1/notifications/preferences",
+    "POST /v1/notifications/read-all",
+    "POST /v1/projects",
+    "POST /v1/projects/:projectId/adapter-diagnostics",
+    "POST /v1/projects/:projectId/artifacts",
+    "POST /v1/projects/:projectId/assumptions",
+    "POST /v1/projects/:projectId/integrations/github/issues",
+    "POST /v1/projects/:projectId/integrations/github/pull-requests",
     "POST /v1/projects/:projectId/questions",
     "POST /v1/projects/:projectId/questions/matches",
-    "POST /v1/projects/:projectId/assumptions",
-    "GET /v1/projects/:projectId/assumptions",
-    "GET /v1/assumptions/:assumptionId",
-    "POST /v1/assumptions/:assumptionId/resolve",
-    "GET /v1/projects/:projectId/questions",
-    "GET /v1/projects/:projectId/inbox",
-    "GET /v1/projects/:projectId/question-digests",
-    "GET /v1/questions/:questionId",
-    "GET /v1/questions/:questionId/audience-view",
-    "POST /v1/questions/:questionId/responses",
-    "PATCH /v1/questions/:questionId/responses/:responseId",
-    "POST /v1/questions/:questionId/reviews",
-    "POST /v1/questions/:questionId/assignments",
-    "POST /v1/questions/:questionId/comments",
-    "PATCH /v1/questions/:questionId/comments/:commentId",
-    "POST /v1/questions/:questionId/clarification",
-    "POST /v1/questions/:questionId/reopen",
+    "POST /v1/projects/:projectId/repositories",
+    "POST /v1/projects/:projectId/runs",
     "POST /v1/questions/:questionId/accept",
+    "POST /v1/questions/:questionId/assignments",
+    "POST /v1/questions/:questionId/clarification",
+    "POST /v1/questions/:questionId/comments",
     "POST /v1/questions/:questionId/override",
-    "GET /v1/projects/:projectId/decisions",
-    "GET /v1/projects/:projectId/decision-conflicts",
-    "POST /v1/projects/:projectId/artifacts",
-    "GET /v1/projects/:projectId/artifacts",
-    "GET /v1/artifacts/:artifactId",
-    "GET /v1/artifacts/:artifactId/diff",
-    "POST /v1/artifact-versions/:versionId/reviews",
-    "POST /v1/artifact-versions/:versionId/approve"
+    "POST /v1/questions/:questionId/reopen",
+    "POST /v1/questions/:questionId/responses",
+    "POST /v1/questions/:questionId/reviews",
+    "POST /v1/runs/:runId/continuation"
   ],
   "bodylessRestWrites": ["POST /v1/notifications/:notificationId/read"],
   "mcp": [
-    "bridge_start_run",
-    "bridge_report_run",
-    "bridge_get_run",
-    "bridge_get_continuation",
-    "bridge_get_context",
-    "bridge_record_assumption",
-    "bridge_get_assumption",
-    "bridge_list_assumptions",
-    "bridge_search_decisions",
-    "bridge_find_question_matches",
     "bridge_create_question",
-    "bridge_get_question",
-    "bridge_list_pending",
-    "bridge_list_inbox",
-    "bridge_publish_artifact",
+    "bridge_find_question_matches",
     "bridge_get_artifact",
-    "bridge_list_artifacts"
-  ]
+    "bridge_get_assumption",
+    "bridge_get_context",
+    "bridge_get_continuation",
+    "bridge_get_question",
+    "bridge_get_run",
+    "bridge_list_artifacts",
+    "bridge_list_assumptions",
+    "bridge_list_inbox",
+    "bridge_list_pending",
+    "bridge_publish_artifact",
+    "bridge_record_assumption",
+    "bridge_report_run",
+    "bridge_search_decisions",
+    "bridge_start_run"
+  ],
+  "restContracts": {
+    "GET /health": {
+      "requestSchema": "none",
+      "responseContract": "health"
+    },
+    "GET /health/live": {
+      "requestSchema": "none",
+      "responseContract": "health"
+    },
+    "GET /metrics": {
+      "requestSchema": "none",
+      "responseContract": "metrics"
+    },
+    "GET /health/ready": {
+      "requestSchema": "none",
+      "responseContract": "health"
+    },
+    "GET /v1/auth/config": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "GET /v1/auth/login": {
+      "requestSchema": "none",
+      "responseContract": "redirect"
+    },
+    "GET /v1/auth/callback": {
+      "requestSchema": "none",
+      "responseContract": "redirect"
+    },
+    "GET /v1/auth/logout": {
+      "requestSchema": "none",
+      "responseContract": "redirect"
+    },
+    "GET /v1/auth/me": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "GET /v1/notifications": {
+      "requestSchema": "notificationListQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/notifications/preferences": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "POST /v1/notifications/preferences": {
+      "requestSchema": "notificationPreferenceInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/notifications/:notificationId/read": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "POST /v1/notifications/read-all": {
+      "requestSchema": "notificationReadAllInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/outbox": {
+      "requestSchema": "outboxOperationsQuerySchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/analytics": {
+      "requestSchema": "projectAnalyticsQuerySchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/support": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/audit": {
+      "requestSchema": "auditListQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/projects/:projectId/audit/export": {
+      "requestSchema": "auditExportInputSchema",
+      "responseContract": "download"
+    },
+    "POST /v1/admin/projects/:projectId/export": {
+      "requestSchema": "projectDataExportInputSchema",
+      "responseContract": "download"
+    },
+    "POST /v1/admin/outbox/:eventId/replay": {
+      "requestSchema": "replayOutboxEventInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/principals": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/admin/organization/members": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/admin/organization/audit": {
+      "requestSchema": "auditListQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/organization/audit/export": {
+      "requestSchema": "auditExportInputSchema",
+      "responseContract": "download"
+    },
+    "POST /v1/admin/organization/members": {
+      "requestSchema": "createOrganizationMemberInputSchema",
+      "responseContract": "record"
+    },
+    "PATCH /v1/admin/organization/members/:memberId": {
+      "requestSchema": "updateOrganizationMemberInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/organization/directory-groups": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "POST /v1/admin/organization/directory-groups": {
+      "requestSchema": "createDirectoryGroupInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/organization/directory-groups/:groupId/sync": {
+      "requestSchema": "syncDirectoryGroupInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/organization/service-identities": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "POST /v1/admin/organization/service-identities": {
+      "requestSchema": "createServiceIdentityInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/organization/service-identities/:serviceCredentialId/revoke": {
+      "requestSchema": "revokeServiceIdentityInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/organization/service-identities/:serviceCredentialId/rotate": {
+      "requestSchema": "rotateServiceIdentityInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects": {
+      "requestSchema": "registerProjectInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/repositories": {
+      "requestSchema": "linkRepositoryInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/repositories": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "POST /v1/projects/:projectId/integrations/github/pull-requests": {
+      "requestSchema": "syncGithubPullRequestInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/integrations/github/pull-requests": {
+      "requestSchema": "githubPullRequestListQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context": {
+      "requestSchema": "githubPullRequestContextQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/integrations/github/issues": {
+      "requestSchema": "syncGithubIssueInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/integrations/github/issues": {
+      "requestSchema": "githubIssueListQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId/integrations/github/issues/:issueNumber/context": {
+      "requestSchema": "githubIssueContextQuerySchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/ownership": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/projects/:projectId/ownership": {
+      "requestSchema": "replaceProjectOwnershipInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/admin/projects/:projectId/policy": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "POST /v1/admin/projects/:projectId/policy": {
+      "requestSchema": "replaceProjectPolicyInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/adapter-diagnostics": {
+      "requestSchema": "recordAdapterDiagnosticInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/context": {
+      "requestSchema": "contextQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/runs": {
+      "requestSchema": "startAgentRunInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/runs": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/runs/:runId": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "PATCH /v1/runs/:runId": {
+      "requestSchema": "reportAgentRunInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/runs/:runId/continuation": {
+      "requestSchema": "continuationQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/decisions/:decisionId/lifecycle": {
+      "requestSchema": "changeDecisionLifecycleInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/decisions/:decisionId/impact": {
+      "requestSchema": "decisionImpactQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/decisions/:decisionId/:action": {
+      "requestSchema": "changeDecisionLifecycleInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/questions": {
+      "requestSchema": "createQuestionInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/questions/matches": {
+      "requestSchema": "findQuestionMatchesInputSchema",
+      "responseContract": "collection"
+    },
+    "POST /v1/projects/:projectId/assumptions": {
+      "requestSchema": "recordAssumptionInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/assumptions": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/assumptions/:assumptionId": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "POST /v1/assumptions/:assumptionId/resolve": {
+      "requestSchema": "resolveAssumptionInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/questions": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId/inbox": {
+      "requestSchema": "questionInboxQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId/question-digests": {
+      "requestSchema": "questionDecisionDigestQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/questions/:questionId": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "GET /v1/questions/:questionId/audience-view": {
+      "requestSchema": "questionAudienceViewQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/responses": {
+      "requestSchema": "proposeAnswerInputSchema",
+      "responseContract": "record"
+    },
+    "PATCH /v1/questions/:questionId/responses/:responseId": {
+      "requestSchema": "editQuestionResponseInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/reviews": {
+      "requestSchema": "questionReviewInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/assignments": {
+      "requestSchema": "reassignQuestionInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/comments": {
+      "requestSchema": "questionCommentInputSchema",
+      "responseContract": "record"
+    },
+    "PATCH /v1/questions/:questionId/comments/:commentId": {
+      "requestSchema": "editQuestionCommentInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/clarification": {
+      "requestSchema": "questionClarificationInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/reopen": {
+      "requestSchema": "questionClarificationInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/accept": {
+      "requestSchema": "acceptAnswerInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/questions/:questionId/override": {
+      "requestSchema": "overrideQuestionApprovalInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/decisions": {
+      "requestSchema": "decisionListQuerySchema",
+      "responseContract": "collection"
+    },
+    "GET /v1/projects/:projectId/decision-conflicts": {
+      "requestSchema": "decisionConflictQuerySchema",
+      "responseContract": "collection"
+    },
+    "POST /v1/projects/:projectId/artifacts": {
+      "requestSchema": "publishArtifactInputSchema",
+      "responseContract": "record"
+    },
+    "GET /v1/projects/:projectId/artifacts": {
+      "requestSchema": "none",
+      "responseContract": "collection"
+    },
+    "GET /v1/artifacts/:artifactId": {
+      "requestSchema": "none",
+      "responseContract": "record"
+    },
+    "GET /v1/artifacts/:artifactId/diff": {
+      "requestSchema": "artifactVersionDiffQuerySchema",
+      "responseContract": "record"
+    },
+    "POST /v1/artifact-versions/:versionId/reviews": {
+      "requestSchema": "artifactReviewInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/artifact-versions/:versionId/approve": {
+      "requestSchema": "approveArtifactVersionInputSchema",
+      "responseContract": "record"
+    }
+  },
+  "mcpContracts": {
+    "bridge_create_question": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_find_question_matches": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_artifact": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_assumption": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_context": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_continuation": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_question": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_get_run": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_list_artifacts": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_list_assumptions": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_list_inbox": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_list_pending": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_publish_artifact": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_record_assumption": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_report_run": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_search_decisions": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    },
+    "bridge_start_run": {
+      "requestContract": "inputSchema",
+      "responseContract": "structured"
+    }
+  },
+  "contractVersion": 1
 }
