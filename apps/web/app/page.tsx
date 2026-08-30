@@ -646,6 +646,14 @@ interface ProjectSupport {
   readonly delivery: {
     readonly pendingCount: number;
     readonly failedCount: number;
+    readonly providerFeedbackCount: number;
+    readonly providerFeedback: readonly {
+      readonly deliveryId: string;
+      readonly channel: string;
+      readonly provider: string;
+      readonly type: string;
+      readonly receivedAt: string;
+    }[];
     readonly deadLetterEvents: readonly {
       readonly id: string;
       readonly type: string;
@@ -2946,6 +2954,26 @@ export default function Home() {
                       <div><h2>Delivery operations</h2><p>Dead letters contain only operational identifiers here; inspect and replay through the existing project-admin outbox controls.</p></div>
                       <small>{support.delivery.pendingCount} pending or processing</small>
                     </div>
+                    <div className="support-delivery-summary" role="status">
+                      <strong>{support.delivery.providerFeedbackCount === 0 ? "No provider feedback recorded" : `${support.delivery.providerFeedbackCount} provider feedback signal${support.delivery.providerFeedbackCount === 1 ? "" : "s"}`}</strong>
+                      <span>{support.delivery.providerFeedbackCount === 0 ? "Delivery receipts have not reported a bounce, complaint, or provider failure." : "Feedback is attached to the matching receipt and prevents another automatic send."}</span>
+                    </div>
+                    {support.delivery.providerFeedback.length > 0 && (
+                      <div className="analytics-table-wrap">
+                        <table className="analytics-table support-table">
+                          <caption className="sr-only">Recent provider delivery feedback</caption>
+                          <thead><tr><th>Channel</th><th>Signal</th><th>Received</th><th>Receipt</th></tr></thead>
+                          <tbody>{support.delivery.providerFeedback.map((feedback) => (
+                            <tr key={feedback.deliveryId}>
+                              <td><strong>{feedback.channel}</strong><small>{feedback.provider.toUpperCase()}</small></td>
+                              <td>{feedback.type.replaceAll("_", " ")}</td>
+                              <td><time dateTime={feedback.receivedAt}>{new Date(feedback.receivedAt).toLocaleString()}</time></td>
+                              <td><code>{feedback.deliveryId}</code></td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
                     {support.delivery.deadLetterEvents.length === 0 ? <div className="empty">No dead-letter jobs are currently recorded.</div> : (
                       <div className="analytics-table-wrap">
                         <table className="analytics-table support-table">

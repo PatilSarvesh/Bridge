@@ -484,6 +484,40 @@ describe("notification email delivery", () => {
     ]));
   });
 
+  it("does not retry an email receipt after provider feedback is recorded", async () => {
+    const item = notification("email_feedback");
+    const event = { ...notificationEvent("evt_email_feedback", item), status: "failed" as const, attempts: 2 };
+    const store = new TestNotificationEmailStore([item]);
+    const existing: OutboxDelivery = {
+      id: "odl_email_feedback",
+      organizationId: item.organizationId,
+      projectId: item.projectId,
+      outboxEventId: event.id,
+      channel: "email",
+      destinationHash: "e".repeat(64),
+      status: "failed",
+      attemptCount: 2,
+      preference: "immediate",
+      providerMessageId: "ses-feedback-worker-001",
+      feedback: { provider: "ses", type: "bounce", receivedAt: "2026-08-08T00:00:00.000Z" },
+      createdAt: "2026-08-08T00:00:00.000Z",
+      updatedAt: "2026-08-08T00:00:00.000Z",
+    };
+    await store.saveOutboxDelivery(existing);
+    let sends = 0;
+    const handler = createNotificationEmailHandler({
+      store,
+      directory: { resolveEmailRecipient: async () => ({ address: "owner@example.test", preference: "immediate" }) },
+      sender: { send: async () => { sends += 1; return { providerMessageId: "should-not-send" }; } },
+      publicBaseUrl: "https://bridge.example.test/",
+    });
+
+    await handler(event);
+
+    expect(sends).toBe(0);
+    expect(await store.getOutboxDelivery(event.id, "email")).toEqual(existing);
+  });
+
   it("maps overdue blocker notifications to the blocking-escalation email template", async () => {
     const item = notification("email_blocking", "question_blocking_escalation");
     const requests: EmailSendRequest[] = [];
@@ -787,6 +821,41 @@ describe("Slack notification delivery", () => {
       }),
     ]));
     expect(JSON.stringify(rendered)).not.toContain(item.body);
+  });
+
+  it("does not retry a Slack receipt after provider feedback is recorded", async () => {
+    const item = notification("slack_feedback");
+    const event = { ...notificationEvent("evt_slack_feedback", item), status: "failed" as const, attempts: 2 };
+    const store = new TestNotificationSlackStore([item]);
+    const existing: OutboxDelivery = {
+      id: "odl_slack_feedback",
+      organizationId: item.organizationId,
+      projectId: item.projectId,
+      outboxEventId: event.id,
+      channel: "slack",
+      destinationHash: "f".repeat(64),
+      status: "failed",
+      attemptCount: 2,
+      preference: "immediate",
+      providerMessageId: "slack-feedback-worker-001",
+      feedback: { provider: "slack", type: "provider_failure", receivedAt: "2026-08-08T00:00:00.000Z" },
+      createdAt: "2026-08-08T00:00:00.000Z",
+      updatedAt: "2026-08-08T00:00:00.000Z",
+    };
+    await store.saveOutboxDelivery(existing);
+    let sends = 0;
+    const handler = createNotificationSlackHandler({
+      store,
+      channels: createSlackChannelDirectory({ prj_worker: "https://hooks.slack.com/services/T000/B000/secret" }),
+      sender: { send: async () => { sends += 1; return { providerMessageId: "should-not-send" }; } },
+      publicBaseUrl: "https://bridge.example.test/",
+      owners: { resolveDisplayName: async () => "Architecture Owner" },
+    });
+
+    await handler(event);
+
+    expect(sends).toBe(0);
+    expect(await store.getOutboxDelivery(event.id, "slack")).toEqual(existing);
   });
 
   it("uses the configured Slack webhook once for duplicate event delivery", async () => {

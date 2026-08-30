@@ -365,6 +365,20 @@
       "when": 1788073948377,
       "tag": "0051_free_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1788077061314,
+      "tag": "0052_condemned_giant_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788077088844,
+      "tag": "0053_organic_carmella_unuscione",
+      "breakpoints": true
     }
   ]
 }

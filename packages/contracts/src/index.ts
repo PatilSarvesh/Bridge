@@ -57,6 +57,28 @@ export const outboxEventStatusSchema = z.enum([
 ]);
 export const deliveryChannelSchema = z.enum(["email", "slack"]);
 export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
+export const notificationDeliveryFeedbackProviderSchema = z.enum(["ses", "slack"]);
+export const notificationDeliveryFeedbackTypeSchema = z.enum([
+  "bounce",
+  "complaint",
+  "provider_failure",
+]);
+export const recordOutboxDeliveryFeedbackInputSchema = z.object({
+  channel: deliveryChannelSchema,
+  provider: notificationDeliveryFeedbackProviderSchema,
+  providerMessageId: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+=-]{0,499}$/),
+  type: notificationDeliveryFeedbackTypeSchema,
+  receivedAt: z.string().datetime({ offset: true }),
+}).superRefine((value, context) => {
+  const expectedProvider = value.channel === "email" ? "ses" : "slack";
+  if (value.provider !== expectedProvider) {
+    context.addIssue({
+      code: "custom",
+      message: "Feedback provider must match delivery channel.",
+      path: ["provider"],
+    });
+  }
+});
 export const auditSourceSchema = z.enum([
   "web",
   "api",
@@ -1065,6 +1087,8 @@ export type OutboxEventType = z.infer<typeof outboxEventTypeSchema>;
 export type OutboxEventStatus = z.infer<typeof outboxEventStatusSchema>;
 export type DeliveryChannel = z.infer<typeof deliveryChannelSchema>;
 export type OutboxDeliveryStatus = z.infer<typeof outboxDeliveryStatusSchema>;
+export type NotificationDeliveryFeedbackProvider = z.infer<typeof notificationDeliveryFeedbackProviderSchema>;
+export type NotificationDeliveryFeedbackType = z.infer<typeof notificationDeliveryFeedbackTypeSchema>;
 export type AuditSource = z.infer<typeof auditSourceSchema>;
 export type NotificationDeliveryPreference = z.infer<typeof notificationDeliveryPreferenceSchema>;
 export type AdapterDiagnosticMcpStatus = z.infer<typeof adapterDiagnosticMcpStatusSchema>;
@@ -1153,6 +1177,7 @@ export type ContinuationQuery = z.infer<typeof continuationQuerySchema>;
 export type RecordAssumptionInput = z.infer<typeof recordAssumptionInputSchema>;
 export type ResolveAssumptionInput = z.infer<typeof resolveAssumptionInputSchema>;
 export type RecordAdapterDiagnosticInput = z.infer<typeof recordAdapterDiagnosticInputSchema>;
+export type RecordOutboxDeliveryFeedbackInput = z.infer<typeof recordOutboxDeliveryFeedbackInputSchema>;
 
 export interface ArtifactDiffVersion {
   readonly id: string;

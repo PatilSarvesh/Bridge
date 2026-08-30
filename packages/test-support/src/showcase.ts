@@ -1693,7 +1693,13 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
         status: "failed",
         attemptCount: 8,
         preference: "immediate",
+        providerMessageId: "demo-slack-failure-051",
         lastError: "Synthetic delivery failure for dashboard coverage.",
+        feedback: {
+          provider: "slack",
+          type: "provider_failure",
+          receivedAt: shiftedIso(anchor, -1, 4),
+        },
         createdAt: shiftedIso(anchor, -5),
         updatedAt: shiftedIso(anchor, -2),
       },
@@ -1717,6 +1723,7 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
       ["aud_showcase_approve", "artifact.version_approved", "artifact_version", "av_showcase_prd_v2", architect, -12, "web"],
       ["aud_showcase_repository", "repository.linked", "repository", "repo_showcase_bridge", architect, -48, "api"],
       ["aud_showcase_policy", "project.policy_updated", "policy_configuration", project.id, architect, -10, "api"],
+      ["aud_showcase_feedback", "notification.delivery_feedback_recorded", "outbox_delivery", "odl_showcase_slack_failed", architect, -1, "integration"],
     ].map(([id, action, subjectType, subjectId, actor, days, source], index) => ({
       id: String(id),
       correlationId: `demo_audit_${String(index + 1).padStart(2, "0")}`,

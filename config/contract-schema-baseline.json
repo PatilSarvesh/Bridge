@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceSha256": "e0a9be62058a182a1c4d6ca5ddb0be81e3446687de0161a9143b5a080821fff8",
-  "schemaCount": 102,
+  "sourceSha256": "22e16e5ab1d549f0e2edd370a6b1f4fbb7588bb41fc5006985ed6d58ffef7f13",
+  "schemaCount": 105,
   "schemas": {
     "acceptAnswerInputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1495,6 +1495,23 @@
         "disabled"
       ]
     },
+    "notificationDeliveryFeedbackProviderSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "ses",
+        "slack"
+      ]
+    },
+    "notificationDeliveryFeedbackTypeSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "enum": [
+        "bounce",
+        "complaint",
+        "provider_failure"
+      ]
+    },
     "notificationDeliveryPreferenceSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "string",
@@ -2871,6 +2888,51 @@
         "reversalCost",
         "scope",
         "sourceLinks"
+      ],
+      "additionalProperties": false
+    },
+    "recordOutboxDeliveryFeedbackInputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "enum": [
+            "email",
+            "slack"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "ses",
+            "slack"
+          ]
+        },
+        "providerMessageId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+=-]{0,499}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "bounce",
+            "complaint",
+            "provider_failure"
+          ]
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "channel",
+        "provider",
+        "providerMessageId",
+        "type",
+        "receivedAt"
       ],
       "additionalProperties": false
     },

@@ -1289,6 +1289,124 @@ describe("Bridge API vertical slice", () => {
     expect(invalidRange.statusCode).toBe(400);
   });
 
+  it("accepts normalized provider feedback through the canonical REST boundary", async () => {
+    const runtime = await createDemoRuntime();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals });
+    apps.push(app);
+    await runtime.repository.saveOutboxDelivery({
+      id: "odl_api_feedback",
+      organizationId: demoProject.organizationId,
+      projectId: demoProject.id,
+      outboxEventId: "evt_api_feedback",
+      channel: "email",
+      destinationHash: "d".repeat(64),
+      status: "failed",
+      attemptCount: 2,
+      preference: "immediate",
+      providerMessageId: "api-ses-feedback-001",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const payload = {
+      channel: "email",
+      provider: "ses",
+      providerMessageId: "api-ses-feedback-001",
+      type: "complaint",
+      receivedAt: "2026-01-01T00:00:01.000Z",
+    };
+    const recorded = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload,
+    });
+    expect(recorded.statusCode).toBe(200);
+    expect(recorded.json()).toMatchObject({
+      projectId: demoProject.id,
+      channel: "email",
+      provider: "ses",
+      type: "complaint",
+      disposition: "recorded",
+      matchedCount: 1,
+      updatedCount: 1,
+      deliveryIds: ["odl_api_feedback"],
+    });
+    expect(await runtime.repository.listOutboxDeliveries(demoProject.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "odl_api_feedback",
+        status: "failed",
+        feedback: { provider: "ses", type: "complaint", receivedAt: payload.receivedAt },
+      }),
+    ]));
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({ disposition: "idempotent_replay", updatedCount: 0 });
+
+    let scopedPrincipal: Principal = {
+      ...demoPrincipals.agent,
+      type: "integration",
+      roles: ["integration"],
+      scopes: ["bridge:notifications:write"],
+    };
+    const scopedAuthenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => scopedPrincipal,
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const scopedApp = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      authenticator: scopedAuthenticator,
+    });
+    apps.push(scopedApp);
+    const scopedReplay = await scopedApp.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      payload,
+    });
+    expect(scopedReplay.statusCode).toBe(200);
+    scopedPrincipal = { ...scopedPrincipal, scopes: [] };
+    const scopeDenied = await scopedApp.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      payload,
+    });
+    expect(scopeDenied.statusCode).toBe(403);
+    expect(scopeDenied.json()).toMatchObject({ details: { requiredScope: "bridge:notifications:write" } });
+
+    const mismatch = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+      payload: { ...payload, provider: "slack" },
+    });
+    expect(mismatch.statusCode).toBe(400);
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+      payload,
+    });
+    expect(denied.statusCode).toBe(403);
+    const crossTenant = await app.inject({
+      method: "POST",
+      url: `/v1/projects/${demoProject.id}/integrations/notifications/delivery-feedback`,
+      headers: { "x-bridge-principal-id": demoPrincipals.outsider.id },
+      payload,
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("exposes project support signals only to project operators", async () => {
     const runtime = await createDemoRuntime({ seedQuestion: true });
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });

@@ -595,6 +595,15 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         createdAt: deliveryEvent.createdAt,
         updatedAt: deliveryEvent.createdAt,
         }));
+      await new BridgeService(firstStore.repository, {
+        now: () => new Date("2026-08-30T00:00:00.000Z"),
+      }).recordOutboxDeliveryFeedback(owner, project.id, {
+        channel: "email",
+        provider: "ses",
+        providerMessageId: `provider-${suffix}`,
+        type: "bounce",
+        receivedAt: "2026-08-30T00:00:01.000Z",
+      });
     } finally {
       await firstStore.close();
     }
@@ -695,9 +704,14 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         expect.objectContaining({
           outboxEventId: deliveryEventId,
           channel: "email",
-          status: "delivered",
+          status: "failed",
           destinationHash: "c".repeat(64),
           providerMessageId: `provider-${suffix}`,
+          feedback: {
+            provider: "ses",
+            type: "bounce",
+            receivedAt: "2026-08-30T00:00:01.000Z",
+          },
         }),
       ]);
     } finally {

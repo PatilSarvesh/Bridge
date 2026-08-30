@@ -1638,6 +1638,24 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(outboxDeliveryFromRow);
   }
 
+  async listOutboxDeliveriesByProviderMessageId(
+    projectId: string,
+    channel: OutboxDelivery["channel"],
+    providerMessageId: string,
+  ): Promise<readonly OutboxDelivery[]> {
+    const query = this.database
+      .select()
+      .from(outboxDeliveries)
+      .where(and(
+        eq(outboxDeliveries.projectId, projectId),
+        eq(outboxDeliveries.channel, channel),
+        eq(outboxDeliveries.providerMessageId, providerMessageId),
+      ))
+      .orderBy(asc(outboxDeliveries.updatedAt));
+    const rows = this.lockAggregateReads ? await query.for("update") : await query;
+    return rows.map(outboxDeliveryFromRow);
+  }
+
   async getOutboxDelivery(
     eventId: string,
     channel: OutboxDelivery["channel"],
@@ -1666,6 +1684,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
           preference: row.preference,
           providerMessageId: row.providerMessageId,
           lastError: row.lastError,
+          feedbackProvider: row.feedbackProvider,
+          feedbackType: row.feedbackType,
+          feedbackReceivedAt: row.feedbackReceivedAt,
           updatedAt: row.updatedAt,
           digestAvailableAt: row.digestAvailableAt,
           digestLeaseUntil: row.digestLeaseUntil,

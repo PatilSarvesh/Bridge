@@ -439,6 +439,11 @@ const outboxDelivery: OutboxDelivery = {
   attemptCount: 1,
   preference: "immediate",
   providerMessageId: "provider-message-mapping",
+  feedback: {
+    provider: "ses",
+    type: "bounce",
+    receivedAt: "2026-08-07T10:02:13.000Z",
+  },
   createdAt: "2026-08-07T10:02:11.000Z",
   updatedAt: "2026-08-07T10:02:12.000Z",
 };
@@ -1180,5 +1185,22 @@ describe("PostgreSQL domain mappings", () => {
       .toContain('ALTER TABLE "bridge_adapter_diagnostics" ADD COLUMN "history" jsonb DEFAULT \'[]\'::jsonb NOT NULL');
     expect(adapterDiagnosticHistoryMigration)
       .toContain("bridge_adapter_diagnostics_history_shape_check");
+
+    const deliveryFeedbackMigration = readFileSync(
+      new URL("../drizzle/0052_condemned_giant_man.sql", import.meta.url),
+      "utf8",
+    );
+    expect(deliveryFeedbackMigration)
+      .toContain('ALTER TABLE "bridge_outbox_deliveries" ADD COLUMN "feedback_provider" text');
+    expect(deliveryFeedbackMigration).toContain("bridge_outbox_deliveries_feedback_check");
+    expect(deliveryFeedbackMigration)
+      .toContain("bridge_outbox_deliveries_project_channel_provider_idx");
+
+    const auditSubjectMigration = readFileSync(
+      new URL("../drizzle/0053_organic_carmella_unuscione.sql", import.meta.url),
+      "utf8",
+    );
+    expect(auditSubjectMigration).toContain("DROP CONSTRAINT IF EXISTS");
+    expect(auditSubjectMigration).toContain("'outbox_delivery'");
   });
 });

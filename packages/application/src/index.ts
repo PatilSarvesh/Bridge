@@ -58,6 +58,7 @@ import type {
   QuestionSubmissionDisposition,
   ReplayOutboxEventInput,
   RecordAdapterDiagnosticInput,
+  RecordOutboxDeliveryFeedbackInput,
   ReplaceProjectOwnershipInput,
   ReplaceProjectPolicyInput,
   PolicyAction,
@@ -114,6 +115,7 @@ import {
   type QuestionLink,
   type Notification,
   type NotificationPreference,
+  type NotificationDeliveryFeedback,
   type NotificationQuestionContext,
   type Organization,
   type OrganizationAuditEvent,
@@ -304,6 +306,11 @@ export interface BridgeRepository {
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
   saveOutboxEvent(event: OutboxEvent): Promise<void>;
   listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]>;
+  listOutboxDeliveriesByProviderMessageId(
+    projectId: string,
+    channel: OutboxDelivery["channel"],
+    providerMessageId: string,
+  ): Promise<readonly OutboxDelivery[]>;
   getOutboxDelivery(eventId: string, channel: OutboxDelivery["channel"]): Promise<OutboxDelivery | undefined>;
   saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
@@ -387,6 +394,18 @@ export interface GithubPullRequestContextView {
 export interface GithubIssueRegistration {
   readonly issue: GithubIssueWorkItem;
   readonly disposition: "created" | "updated" | "idempotent_replay";
+}
+
+export interface OutboxDeliveryFeedbackResult {
+  readonly projectId: string;
+  readonly channel: OutboxDelivery["channel"];
+  readonly provider: NotificationDeliveryFeedback["provider"];
+  readonly type: NotificationDeliveryFeedback["type"];
+  readonly receivedAt: string;
+  readonly disposition: "recorded" | "idempotent_replay";
+  readonly matchedCount: number;
+  readonly updatedCount: number;
+  readonly deliveryIds: readonly string[];
 }
 
 export interface GithubIssueContextView {
@@ -562,6 +581,7 @@ export interface OutboxOperationsMetrics {
   readonly oldestReadyAt?: string;
   readonly oldestReadyAgeMs?: number;
   readonly deliveryStatusCounts: Readonly<Record<OutboxDelivery["status"], number>>;
+  readonly providerFeedbackCount: number;
 }
 
 export interface OutboxOperationsView {
@@ -623,6 +643,14 @@ export interface ProjectSupportView {
   readonly delivery: {
     readonly pendingCount: number;
     readonly failedCount: number;
+    readonly providerFeedbackCount: number;
+    readonly providerFeedback: readonly {
+      readonly deliveryId: string;
+      readonly channel: OutboxDelivery["channel"];
+      readonly provider: NotificationDeliveryFeedback["provider"];
+      readonly type: NotificationDeliveryFeedback["type"];
+      readonly receivedAt: string;
+    }[];
     readonly deadLetterEvents: readonly {
       readonly id: string;
       readonly type: OutboxEvent["type"];
@@ -1115,6 +1143,27 @@ const adapterDiagnosticTrend = (
     healthyObservationCount: observations.filter((observation) => observation.status === "pass").length,
     ...(lastChangedAt ? { lastChangedAt } : {}),
   };
+};
+
+const sameNotificationDeliveryFeedback = (
+  left: NotificationDeliveryFeedback,
+  right: NotificationDeliveryFeedback,
+): boolean =>
+  left.provider === right.provider &&
+  left.type === right.type &&
+  left.receivedAt === right.receivedAt;
+
+const providerFeedbackError = (
+  type: NotificationDeliveryFeedback["type"],
+): string => {
+  switch (type) {
+    case "bounce":
+      return "Provider reported that the email address bounced.";
+    case "complaint":
+      return "Provider reported a recipient complaint.";
+    case "provider_failure":
+      return "Provider reported a delivery failure.";
+  }
 };
 
 const policyRule = (
@@ -2093,6 +2142,20 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   async listOutboxDeliveries(projectId: string): Promise<readonly OutboxDelivery[]> {
     return [...this.outboxDeliveries.values()]
       .filter((delivery) => delivery.projectId === projectId)
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  }
+
+  async listOutboxDeliveriesByProviderMessageId(
+    projectId: string,
+    channel: OutboxDelivery["channel"],
+    providerMessageId: string,
+  ): Promise<readonly OutboxDelivery[]> {
+    return [...this.outboxDeliveries.values()]
+      .filter((delivery) =>
+        delivery.projectId === projectId &&
+        delivery.channel === channel &&
+        delivery.providerMessageId === providerMessageId,
+      )
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
   }
 
@@ -3857,6 +3920,7 @@ export class BridgeService {
       deferred: 0,
     };
     for (const delivery of deliveries) deliveryStatusCounts[delivery.status] += 1;
+    const providerFeedbackCount = deliveries.filter((delivery) => Boolean(delivery.feedback)).length;
     let totalAttempts = 0;
     let expiredLeaseCount = 0;
     const readyEvents: OutboxEvent[] = [];
@@ -3892,6 +3956,7 @@ export class BridgeService {
         readyCount: readyEvents.length,
         expiredLeaseCount,
         deliveryStatusCounts,
+        providerFeedbackCount,
         ...(oldestReadyAt
           ? {
               oldestReadyAt,
@@ -4002,17 +4067,100 @@ export class BridgeService {
     });
   }
 
+  async recordOutboxDeliveryFeedback(
+    principal: Principal,
+    projectId: string,
+    input: RecordOutboxDeliveryFeedbackInput,
+  ): Promise<OutboxDeliveryFeedbackResult> {
+    return this.tenantTransaction(principal, async (repository) => {
+      const project = await this.requireProject(principal, projectId, repository);
+      this.assertIntegrationWriter(principal, "Recording notification delivery feedback", projectId);
+      this.assertSecretSafe("administration", input);
+      const expectedProvider = input.channel === "email" ? "ses" : "slack";
+      if (input.provider !== expectedProvider) {
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "Feedback provider must match delivery channel.",
+          400,
+        );
+      }
+      const deliveries = (await repository.listOutboxDeliveriesByProviderMessageId(
+        projectId,
+        input.channel,
+        input.providerMessageId,
+      )).filter((delivery) =>
+        delivery.organizationId === project.organizationId && delivery.projectId === projectId,
+      );
+      if (deliveries.length === 0) {
+        throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Notification delivery not found.", 404);
+      }
+      const feedback: NotificationDeliveryFeedback = {
+        provider: input.provider,
+        type: input.type,
+        receivedAt: input.receivedAt,
+      };
+      for (const delivery of deliveries) {
+        if (delivery.feedback && !sameNotificationDeliveryFeedback(delivery.feedback, feedback)) {
+          throw new BridgeError(
+            "CONFLICT",
+            "The delivery already has different provider feedback.",
+            409,
+          );
+        }
+      }
+      const pending = deliveries.filter((delivery) => !delivery.feedback);
+      const updatedAt = this.now().toISOString();
+      for (const delivery of pending) {
+        const {
+          digestAvailableAt: _digestAvailableAt,
+          digestLeaseUntil: _digestLeaseUntil,
+          ...deliveryWithoutDigest
+        } = delivery;
+        await repository.saveOutboxDelivery({
+          ...deliveryWithoutDigest,
+          status: "failed",
+          feedback,
+          lastError: providerFeedbackError(input.type),
+          updatedAt,
+        });
+        await this.audit(
+          repository,
+          principal,
+          projectId,
+          "notification.delivery_feedback_recorded",
+          "outbox_delivery",
+          delivery.id,
+          updatedAt,
+          undefined,
+          `provider_feedback:${input.type}`,
+        );
+      }
+      return {
+        projectId,
+        channel: input.channel,
+        provider: input.provider,
+        type: input.type,
+        receivedAt: input.receivedAt,
+        disposition: pending.length > 0 ? "recorded" : "idempotent_replay",
+        matchedCount: deliveries.length,
+        updatedCount: pending.length,
+        deliveryIds: deliveries.map((delivery) => delivery.id),
+      };
+    });
+  }
+
   async getProjectSupport(principal: Principal, projectId: string): Promise<ProjectSupportView> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project support operations", projectId);
-      const [questions, decisions, assumptions, runs, events, adapterDiagnostics] = await Promise.all([
+      const [questions, decisions, assumptions, runs, events, adapterDiagnostics, deliveries] = await Promise.all([
         repository.listQuestions(projectId),
         repository.listDecisions(projectId),
         repository.listAssumptions(projectId),
         repository.listRuns(projectId),
         repository.listOutboxEvents(projectId),
         repository.listAdapterDiagnostics(projectId),
+        repository.listOutboxDeliveries(projectId),
       ]);
       const questionById = new Map(questions.map((question) => [question.id, question]));
       const now = this.now().getTime();
@@ -4124,6 +4272,18 @@ export class BridgeService {
             ...(mcpRuns[0]?.updatedAt ? { lastSuccessfulMcpRunAt: mcpRuns[0].updatedAt } : {}),
           };
         });
+      const providerFeedback = deliveries
+        .flatMap((delivery) => delivery.feedback
+          ? [{
+              deliveryId: delivery.id,
+              channel: delivery.channel,
+              provider: delivery.feedback.provider,
+              type: delivery.feedback.type,
+              receivedAt: delivery.feedback.receivedAt,
+            }]
+          : [])
+        .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt))
+        .slice(0, 50);
       return {
         projectId,
         generatedAt: this.now().toISOString(),
@@ -4134,6 +4294,8 @@ export class BridgeService {
         delivery: {
           pendingCount: events.filter((event) => event.status === "pending" || event.status === "processing").length,
           failedCount: events.filter((event) => event.status === "failed" || event.status === "dead_letter").length,
+          providerFeedbackCount: deliveries.filter((delivery) => Boolean(delivery.feedback)).length,
+          providerFeedback,
           deadLetterEvents: events
             .filter((event) => event.status === "dead_letter")
             .slice(0, 50)

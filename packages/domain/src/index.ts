@@ -15,6 +15,8 @@ import type {
   ArtifactVersionStatus,
   DecisionStatus,
   DeliveryChannel,
+  NotificationDeliveryFeedbackProvider,
+  NotificationDeliveryFeedbackType,
   NotificationDeliveryPreference,
   PrincipalType,
   NotificationType,
@@ -33,6 +35,8 @@ import type {
 export type {
   AuditSource,
   DeliveryChannel,
+  NotificationDeliveryFeedbackProvider,
+  NotificationDeliveryFeedbackType,
   NotificationDeliveryPreference,
   OutboxDeliveryStatus,
   OutboxEventStatus,
@@ -637,6 +641,13 @@ export interface OutboxDelivery {
   readonly digestLeaseUntil?: string;
   readonly providerMessageId?: string;
   readonly lastError?: string;
+  readonly feedback?: NotificationDeliveryFeedback;
+}
+
+export interface NotificationDeliveryFeedback {
+  readonly provider: NotificationDeliveryFeedbackProvider;
+  readonly type: NotificationDeliveryFeedbackType;
+  readonly receivedAt: string;
 }
 
 export interface Question {
@@ -875,7 +886,7 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "pull_request_context" | "work_item" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export" | "project_export";
+  readonly subjectType: "project" | "repository" | "pull_request_context" | "work_item" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "outbox_delivery" | "audit_export" | "project_export";
   readonly subjectId: string;
   /** The trusted Bridge transport/application boundary that produced this event. */
   readonly source?: AuditSource;

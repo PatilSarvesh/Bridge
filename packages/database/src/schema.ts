@@ -978,6 +978,10 @@ export const auditEvents = pgTable(
   (table) => [
     index("bridge_audit_events_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_audit_events_correlation_idx").on(table.correlationId),
+    check(
+      "bridge_audit_events_subject_type_check",
+      sql`${table.subjectType} IN ('project', 'repository', 'pull_request_context', 'work_item', 'ownership_configuration', 'policy_configuration', 'question', 'response', 'decision', 'assumption', 'artifact', 'artifact_version', 'context_snapshot', 'run', 'outbox_event', 'outbox_delivery', 'audit_export', 'project_export')`,
+    ),
     tenantPolicy("bridge_audit_events_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -1143,6 +1147,9 @@ export const outboxDeliveries = pgTable(
     preference: text("preference").notNull(),
     providerMessageId: text("provider_message_id"),
     lastError: text("last_error"),
+    feedbackProvider: text("feedback_provider"),
+    feedbackType: text("feedback_type"),
+    feedbackReceivedAt: timestamp("feedback_received_at", { withTimezone: true, mode: "string" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
     digestAvailableAt: timestamp("digest_available_at", { withTimezone: true, mode: "string" }),
@@ -1162,7 +1169,27 @@ export const outboxDeliveries = pgTable(
       table.channel,
       table.dedupeKey,
     ),
+    index("bridge_outbox_deliveries_project_channel_provider_idx").on(
+      table.projectId,
+      table.channel,
+      table.providerMessageId,
+    ),
     check("bridge_outbox_deliveries_channel_check", sql`${table.channel} IN ('email', 'slack')`),
+    check(
+      "bridge_outbox_deliveries_feedback_check",
+      sql`(
+        (${table.feedbackProvider} IS NULL AND ${table.feedbackType} IS NULL AND ${table.feedbackReceivedAt} IS NULL)
+        OR (
+          ${table.feedbackProvider} IN ('ses', 'slack')
+          AND ${table.feedbackType} IN ('bounce', 'complaint', 'provider_failure')
+          AND ${table.feedbackReceivedAt} IS NOT NULL
+          AND (
+            (${table.channel} = 'email' AND ${table.feedbackProvider} = 'ses')
+            OR (${table.channel} = 'slack' AND ${table.feedbackProvider} = 'slack')
+          )
+        )
+      )`,
+    ),
     foreignKey({
       name: "bridge_outbox_deliveries_event_scope_fk",
       columns: [table.organizationId, table.projectId, table.outboxEventId],

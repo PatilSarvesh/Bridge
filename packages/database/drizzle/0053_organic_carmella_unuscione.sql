@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_audit_events" DROP CONSTRAINT IF EXISTS "bridge_audit_events_subject_type_check";--> statement-breakpoint
+ALTER TABLE "bridge_audit_events" ADD CONSTRAINT "bridge_audit_events_subject_type_check" CHECK ("bridge_audit_events"."subject_type" IN ('project', 'repository', 'pull_request_context', 'work_item', 'ownership_configuration', 'policy_configuration', 'question', 'response', 'decision', 'assumption', 'artifact', 'artifact_version', 'context_snapshot', 'run', 'outbox_event', 'outbox_delivery', 'audit_export', 'project_export'));

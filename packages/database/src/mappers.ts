@@ -13,6 +13,7 @@ import {
   type GithubPullRequestContext,
   type GithubIssueWorkItem,
   type Notification,
+  type NotificationDeliveryFeedback,
   type NotificationPreference,
   type Organization,
   type OrganizationAuditEvent,
@@ -382,6 +383,9 @@ export function outboxDeliveryToRow(delivery: OutboxDelivery): typeof outboxDeli
     preference: delivery.preference,
     providerMessageId: delivery.providerMessageId ?? null,
     lastError: delivery.lastError ?? null,
+    feedbackProvider: delivery.feedback?.provider ?? null,
+    feedbackType: delivery.feedback?.type ?? null,
+    feedbackReceivedAt: delivery.feedback?.receivedAt ?? null,
     createdAt: delivery.createdAt,
     updatedAt: delivery.updatedAt,
     digestAvailableAt: delivery.digestAvailableAt ?? null,
@@ -407,6 +411,15 @@ export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
     ...(row.digestLeaseUntil === null ? {} : { digestLeaseUntil: row.digestLeaseUntil }),
     ...(row.providerMessageId === null ? {} : { providerMessageId: row.providerMessageId }),
     ...(row.lastError === null ? {} : { lastError: row.lastError }),
+    ...(row.feedbackProvider === null && row.feedbackType === null && row.feedbackReceivedAt === null
+      ? {}
+      : {
+          feedback: {
+            provider: row.feedbackProvider as NotificationDeliveryFeedback["provider"],
+            type: row.feedbackType as NotificationDeliveryFeedback["type"],
+            receivedAt: row.feedbackReceivedAt!,
+          },
+        }),
   };
 }
 

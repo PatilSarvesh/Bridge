@@ -3523,6 +3523,106 @@ describe("Bridge decision workflow", () => {
     );
   });
 
+  it("records provider feedback once, blocks conflicting replays, and exposes safe support metadata", async () => {
+    const { repository, service } = await runtime();
+    await repository.saveOutboxEvent({
+      id: "evt_feedback",
+      correlationId: "cor_feedback",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      type: "notification.created",
+      payload: {
+        notificationId: "ntf_feedback",
+        recipientId: owner.id,
+        notificationType: "question_assigned",
+        targetType: "question",
+        targetId: "qst_feedback",
+      },
+      status: "failed",
+      attempts: 2,
+      availableAt: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    await repository.saveOutboxDelivery({
+      id: "odl_feedback",
+      organizationId: project.organizationId,
+      projectId: project.id,
+      outboxEventId: "evt_feedback",
+      channel: "email",
+      destinationHash: "c".repeat(64),
+      status: "deferred",
+      attemptCount: 1,
+      preference: "digest",
+      providerMessageId: "ses-feedback-001",
+      digestAvailableAt: "2026-01-02T00:00:00.000Z",
+      digestLeaseUntil: "2026-01-01T01:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const input = {
+      channel: "email" as const,
+      provider: "ses" as const,
+      providerMessageId: "ses-feedback-001",
+      type: "bounce" as const,
+      receivedAt: "2026-01-01T00:00:01.000Z",
+    };
+    await expect(service.recordOutboxDeliveryFeedback(githubIntegration, project.id, input)).resolves.toEqual({
+      projectId: project.id,
+      channel: "email",
+      provider: "ses",
+      type: "bounce",
+      receivedAt: input.receivedAt,
+      disposition: "recorded",
+      matchedCount: 1,
+      updatedCount: 1,
+      deliveryIds: ["odl_feedback"],
+    });
+    const [recorded] = await repository.listOutboxDeliveries(project.id);
+    expect(recorded).toMatchObject({
+      id: "odl_feedback",
+      status: "failed",
+      feedback: { provider: "ses", type: "bounce", receivedAt: input.receivedAt },
+      lastError: "Provider reported that the email address bounced.",
+    });
+    expect(recorded).not.toHaveProperty("digestAvailableAt");
+    expect(recorded).not.toHaveProperty("digestLeaseUntil");
+    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "notification.delivery_feedback_recorded",
+        subjectType: "outbox_delivery",
+        subjectId: "odl_feedback",
+        reason: "provider_feedback:bounce",
+      }),
+    ]));
+
+    await expect(service.recordOutboxDeliveryFeedback(githubIntegration, project.id, input)).resolves.toMatchObject({
+      disposition: "idempotent_replay",
+      matchedCount: 1,
+      updatedCount: 0,
+    });
+    await expect(service.recordOutboxDeliveryFeedback(githubIntegration, project.id, {
+      ...input,
+      type: "complaint",
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.recordOutboxDeliveryFeedback(contributor, project.id, input))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.recordOutboxDeliveryFeedback(outsider, project.id, input))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+
+    const support = await service.getProjectSupport(owner, project.id);
+    expect(support.delivery).toMatchObject({
+      providerFeedbackCount: 1,
+      providerFeedback: [{
+        deliveryId: "odl_feedback",
+        channel: "email",
+        provider: "ses",
+        type: "bounce",
+        receivedAt: input.receivedAt,
+      }],
+    });
+  });
+
   it("derives a privacy-safe project support view and restricts it to project operators", async () => {
     const { repository, service } = await runtime();
     await service.createQuestion(agent, project.id, questionInput({

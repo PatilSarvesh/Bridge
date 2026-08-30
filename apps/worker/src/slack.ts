@@ -295,7 +295,7 @@ export function createNotificationSlackHandler(
       }
 
       const existing = await options.store.getOutboxDelivery(event.id, "slack");
-      if (existing && existing.status !== "failed") {
+      if (existing && (existing.status !== "failed" || existing.feedback)) {
         outcome = "skipped";
         return;
       }
