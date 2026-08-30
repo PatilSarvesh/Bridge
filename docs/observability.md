@@ -38,6 +38,7 @@ Errors retain only a bounded error name and safe machine code when present. Logs
 
 - `GET /health/live` and `GET /health/ready` return a correlation response header.
 - API completion/failure and MCP completion/failure events use safe structured logs when those standalone servers run.
+- API and MCP authentication failures emit a bounded `authentication.outcome` warning with the flow, fixed outcome, route/path, method, status, and the current correlation context; credential values and tenant attribution are never included.
 - Worker processed/retry/dead-letter log records reuse the outbox event's persisted correlation ID when a safe logger is supplied.
 - Project-admin outbox inspection includes the durable correlation ID through the existing authorized event representation.
 
@@ -56,6 +57,7 @@ The endpoints intentionally contain no tenant, project, principal, record, promp
 The registry records:
 
 - HTTP request count, outcome, authorization denials, and duration by `api`/`mcp` and bounded operation;
+- authentication outcomes by service and fixed flow/outcome (`authenticated`, `missing_credentials`, `invalid_credentials`, `authorization_denied`, or `configuration_error`), without tenant, project, principal, credential, or provider-response labels;
 - context success/error count, latency, result count, and candidate count;
 - in-memory/PostgreSQL transaction count, outcome, and duration;
 - most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
@@ -68,6 +70,8 @@ The registry records:
 API, MCP, and worker metrics are process-local and reset on restart. A multi-instance deployment must scrape every instance and aggregate in the metrics backend. Repository, `runOutboxCycle`, and Slack delivery instrumentation share the exported worker registry; an email-enabled deployment must pass the same registry to its provider-neutral email handler and digest composition.
 
 Import `config/observability/bridge-pilot-dashboard.json` into Grafana (or translate its PromQL into the chosen dashboard system), load `config/observability/bridge-pilot-alerts.yml` into a Prometheus-compatible rule evaluator, and use [`service-objectives.md`](./service-objectives.md) for the initial objectives and threshold rationale.
+
+Authentication outcome metrics are diagnostic transport signals, not audit records. A missing or invalid identity is intentionally not attributed to an organization, and a successful authentication outcome does not grant authority; the normal server-side membership and policy checks still decide access. The existing trusted-human sign-in/logout audit events remain the only persisted authentication events in the current slice.
 
 ## Remaining BRG-104 work
 

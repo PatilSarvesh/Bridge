@@ -5,6 +5,13 @@ export type BridgeRequestOutcome = "success" | "client_error" | "server_error";
 export type BridgeDatabaseBackend = "memory" | "postgresql";
 export type BridgeOperationOutcome = "success" | "error";
 export type BridgeMcpSessionOutcome = "initialized" | "failed";
+export type BridgeAuthenticationFlow = "api" | "mcp" | "web_callback" | "web_logout";
+export type BridgeAuthenticationOutcome =
+  | "authenticated"
+  | "missing_credentials"
+  | "invalid_credentials"
+  | "authorization_denied"
+  | "configuration_error";
 export type BridgeNotificationOutcome =
   | "delivered"
   | "failed"
@@ -138,6 +145,12 @@ export interface McpSessionMetric {
   readonly outcome: BridgeMcpSessionOutcome;
 }
 
+export interface AuthenticationMetric {
+  readonly service: BridgeServiceName;
+  readonly flow: BridgeAuthenticationFlow;
+  readonly outcome: BridgeAuthenticationOutcome;
+}
+
 export interface McpToolCallMetric {
   readonly tool: string;
   readonly outcome: BridgeOperationOutcome;
@@ -176,6 +189,10 @@ const definitions = {
   authorizationDenials: {
     name: "bridge_authorization_denials_total",
     help: "Bridge HTTP requests denied with status 401 or 403.",
+  },
+  authenticationOutcomes: {
+    name: "bridge_authentication_outcomes_total",
+    help: "Bridge authentication outcomes by bounded service, flow, and outcome.",
   },
   contextRequests: {
     name: "bridge_context_requests_total",
@@ -352,6 +369,14 @@ export class BridgeMetrics {
         status: metric.statusCode.toString(),
       });
     }
+  }
+
+  recordAuthentication(metric: AuthenticationMetric): void {
+    this.increment(definitions.authenticationOutcomes, {
+      service: metric.service,
+      flow: metric.flow,
+      outcome: metric.outcome,
+    });
   }
 
   recordContextRetrieval(metric: ContextRetrievalMetric): void {

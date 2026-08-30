@@ -74,6 +74,8 @@ const sensitiveKeyPattern = /(authorization|cookie|credential|token|secret|passw
 const safeStringKeys = new Set([
   "action",
   "actorid",
+  "authflow",
+  "authoutcome",
   "artifactid",
   "artifactversionid",
   "backend",

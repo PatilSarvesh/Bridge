@@ -956,7 +956,7 @@ Implementation note: Slack is intentionally notification-only. Incoming Webhooks
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, immutable before/after version lineage for administrative changes, trusted request-source attribution, matched question-policy rule provenance, immutable question assignment references, and immutable per-version specification reviewer-assignment lineage are implemented; failed/unknown authentication attribution and production retention controls remain
+- **Status:** Partial — append-only events plus tenant-scoped project/organization administrator browsing, filters, bounded JSON/CSV export, self-auditing exports, durable human web sign-in/logout events, immutable before/after version lineage for administrative changes, trusted request-source attribution, matched question-policy rule provenance, immutable question assignment references, immutable per-version specification reviewer-assignment lineage, and bounded privacy-safe failed/unknown authentication outcomes are implemented; tenant-attributed authentication audit policy and production retention controls remain
 - **Dependencies:** BRG-011, BRG-012
 - **PRD references:** AUD-01
 
@@ -1065,7 +1065,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/auth/context/database/outbox/notification metrics, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/authentication/authorization/context/database/outbox/notification metrics, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 
