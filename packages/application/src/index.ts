@@ -169,23 +169,11 @@ export interface BridgeRepository {
   getServiceCredentialByTokenHash(tokenHash: string): Promise<ServiceCredential | undefined>;
   listServiceCredentials(organizationId: string): Promise<readonly ServiceCredential[]>;
   saveServiceCredential(credential: ServiceCredential): Promise<void>;
-  revokeServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean>;
-  rotateServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean>;
-  getOrganizationMembership(
-    organizationId: string,
-    principalId: string,
-  ): Promise<OrganizationMembership | undefined>;
+  revokeServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean>;
+  rotateServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean>;
+  getOrganizationMembership(organizationId: string, principalId: string): Promise<OrganizationMembership | undefined>;
   listOrganizationMemberships(organizationId: string): Promise<readonly OrganizationMembership[]>;
-  saveOrganizationMembership(
-    membership: OrganizationMembership,
-    expectedVersion?: number,
-  ): Promise<boolean>;
+  saveOrganizationMembership(membership: OrganizationMembership, expectedVersion?: number): Promise<boolean>;
   getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined>;
   listDirectoryGroups(organizationId: string): Promise<readonly DirectoryGroup[]>;
   saveDirectoryGroup(group: DirectoryGroup, expectedVersion?: number): Promise<boolean>;
@@ -195,10 +183,7 @@ export interface BridgeRepository {
     principalId: string,
   ): Promise<readonly DirectoryGroupMember[]>;
   saveDirectoryGroupMember(member: DirectoryGroupMember, expectedVersion?: number): Promise<boolean>;
-  listProjectMemberships(
-    organizationId: string,
-    principalId: string,
-  ): Promise<readonly ProjectMembership[]>;
+  listProjectMemberships(organizationId: string, principalId: string): Promise<readonly ProjectMembership[]>;
   saveProjectMembership(membership: ProjectMembership, expectedVersion?: number): Promise<boolean>;
   resolveOidcPrincipal(identity: {
     readonly issuer: string;
@@ -215,10 +200,7 @@ export interface BridgeRepository {
   saveRepositoryRecord(repository: RepositoryRecord): Promise<void>;
   getGithubPullRequest(pullRequestId: string): Promise<GithubPullRequestContext | undefined>;
   listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]>;
-  saveGithubPullRequest(
-    pullRequest: GithubPullRequestContext,
-    expectedVersion?: number,
-  ): Promise<boolean>;
+  saveGithubPullRequest(pullRequest: GithubPullRequestContext, expectedVersion?: number): Promise<boolean>;
   getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined>;
   listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]>;
   saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean>;
@@ -228,10 +210,7 @@ export interface BridgeRepository {
     expectedVersion: number,
   ): Promise<boolean>;
   getProjectPolicyConfiguration(projectId: string): Promise<ProjectPolicyConfiguration | undefined>;
-  saveProjectPolicyConfiguration(
-    configuration: ProjectPolicyConfiguration,
-    expectedVersion: number,
-  ): Promise<boolean>;
+  saveProjectPolicyConfiguration(configuration: ProjectPolicyConfiguration, expectedVersion: number): Promise<boolean>;
   getRun(runId: string): Promise<AgentRun | undefined>;
   listRuns(projectId: string): Promise<readonly AgentRun[]>;
   saveRun(run: AgentRun): Promise<void>;
@@ -242,11 +221,7 @@ export interface BridgeRepository {
   saveIdempotentRun(key: string, runId: string, requestHash: string): Promise<void>;
   getRunContinuationKey(runId: string): Promise<string | undefined>;
   getRunVendorSessionId(runId: string): Promise<string | undefined>;
-  saveRunContinuationKey(
-    runId: string,
-    resumeContextKey: string,
-    vendorSessionId?: string,
-  ): Promise<void>;
+  saveRunContinuationKey(runId: string, resumeContextKey: string, vendorSessionId?: string): Promise<void>;
   getAssumption(assumptionId: string): Promise<Assumption | undefined>;
   listAssumptions(projectId: string): Promise<readonly Assumption[]>;
   saveAssumption(assumption: Assumption): Promise<void>;
@@ -255,10 +230,7 @@ export interface BridgeRepository {
   saveIdempotentAssumption(key: string, assumptionId: string, requestHash: string): Promise<void>;
   getQuestion(questionId: string): Promise<Question | undefined>;
   listQuestions(projectId: string): Promise<readonly Question[]>;
-  searchQuestionMatchCandidates(
-    projectId: string,
-    query: QuestionMatchCandidateQuery,
-  ): Promise<readonly Question[]>;
+  searchQuestionMatchCandidates(projectId: string, query: QuestionMatchCandidateQuery): Promise<readonly Question[]>;
   saveQuestion(question: Question): Promise<void>;
   findIdempotentQuestion(key: string): Promise<Question | undefined>;
   saveIdempotentQuestion(key: string, questionId: string, requestHash: string): Promise<void>;
@@ -273,11 +245,7 @@ export interface BridgeRepository {
   saveArtifact(artifact: Artifact): Promise<void>;
   getIdempotentArtifactVersionId(key: string): Promise<string | undefined>;
   getIdempotentArtifactRequestHash(key: string): Promise<string | undefined>;
-  saveIdempotentArtifactVersion(
-    key: string,
-    versionId: string,
-    requestHash: string,
-  ): Promise<void>;
+  saveIdempotentArtifactVersion(key: string, versionId: string, requestHash: string): Promise<void>;
   saveContextSnapshot(snapshot: ContextSnapshot): Promise<void>;
   listContextSnapshots(projectId: string): Promise<readonly ContextSnapshot[]>;
   saveAuditEvent(event: AuditEvent): Promise<void>;
@@ -297,10 +265,7 @@ export interface BridgeRepository {
     principalId: string,
     channel: NotificationPreference["channel"],
   ): Promise<NotificationPreference | undefined>;
-  listNotificationPreferences(
-    organizationId: string,
-    principalId: string,
-  ): Promise<readonly NotificationPreference[]>;
+  listNotificationPreferences(organizationId: string, principalId: string): Promise<readonly NotificationPreference[]>;
   saveNotificationPreference(preference: NotificationPreference): Promise<void>;
   listOutboxEvents(projectId?: string): Promise<readonly OutboxEvent[]>;
   getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined>;
@@ -315,12 +280,7 @@ export interface BridgeRepository {
   saveOutboxDelivery(delivery: OutboxDelivery): Promise<void>;
   claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]>;
   completeOutboxEvent(eventId: string, processedAt: string): Promise<void>;
-  failOutboxEvent(
-    eventId: string,
-    lastError: string,
-    availableAt: string,
-    deadLetter: boolean,
-  ): Promise<void>;
+  failOutboxEvent(eventId: string, lastError: string, availableAt: string, deadLetter: boolean): Promise<void>;
 }
 
 interface IdempotencyRecord {
@@ -852,15 +812,10 @@ function medianDuration(values: readonly number[]): number | undefined {
   if (values.length === 0) return undefined;
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1]! + sorted[middle]!) / 2
-    : sorted[middle];
+  return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle];
 }
 
-function calculateAnalyticsCohort(
-  runs: readonly AgentRun[],
-  source: AnalyticsSource,
-): AnalyticsCohort {
+function calculateAnalyticsCohort(runs: readonly AgentRun[], source: AnalyticsSource): AnalyticsCohort {
   const runIds = new Set(runs.map((run) => run.id));
   const questionsById = new Map(source.questions.map((question) => [question.id, question]));
   const decisionsById = new Map(source.decisions.map((decision) => [decision.id, decision]));
@@ -871,11 +826,13 @@ function calculateAnalyticsCohort(
       if (question) questionPairs.push({ run, question });
     }
   }
-  const createdQuestions = [...new Map(
-    questionPairs
-      .filter(({ run, question }) => question.runId === run.id)
-      .map(({ question }) => [question.id, question]),
-  ).values()];
+  const createdQuestions = [
+    ...new Map(
+      questionPairs
+        .filter(({ run, question }) => question.runId === run.id)
+        .map(({ question }) => [question.id, question]),
+    ).values(),
+  ];
   const reusedQuestionPairs = questionPairs.filter(({ run, question }) => question.runId !== run.id);
   const snapshots = source.snapshots.filter((snapshot) => snapshot.runId && runIds.has(snapshot.runId));
   const assumptions = source.assumptions.filter((assumption) => assumption.runId && runIds.has(assumption.runId));
@@ -894,7 +851,8 @@ function calculateAnalyticsCohort(
   for (const snapshot of snapshots) {
     for (const itemId of snapshot.itemIds) {
       const decision = decisionsById.get(itemId);
-      if (!decision || !decision.questionId || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt)) continue;
+      if (!decision || !decision.questionId || Date.parse(decision.createdAt) > Date.parse(snapshot.createdAt))
+        continue;
       const originQuestion = questionsById.get(decision.questionId);
       if (originQuestion?.runId === snapshot.runId) continue;
       reusedDecisionIds.add(decision.id);
@@ -915,9 +873,9 @@ function calculateAnalyticsCohort(
     if (!decision) return [];
     return [Math.max(0, Date.parse(decision.createdAt) - Date.parse(question.createdAt))];
   });
-  const approvalDurations = approvedVersions.flatMap((version) => version.approvedAt
-    ? [Math.max(0, Date.parse(version.approvedAt) - Date.parse(version.createdAt))]
-    : []);
+  const approvalDurations = approvedVersions.flatMap((version) =>
+    version.approvedAt ? [Math.max(0, Date.parse(version.approvedAt) - Date.parse(version.createdAt))] : [],
+  );
   const medianQuestionResolutionMs = medianDuration(questionResolutionDurations);
   const medianSpecificationApprovalMs = medianDuration(approvalDurations);
   const blockingQuestions = createdQuestions.filter((question) => question.blocking);
@@ -942,10 +900,7 @@ function calculateAnalyticsCohort(
   return {
     activity,
     outcomes: {
-      runsWithContextRate: analyticsRate(
-        runs.filter((run) => run.contextSnapshotIds.length > 0).length,
-        runs.length,
-      ),
+      runsWithContextRate: analyticsRate(runs.filter((run) => run.contextSnapshotIds.length > 0).length, runs.length),
       questionReuseRate: analyticsRate(activity.questionsReused, activity.questionSubmissions),
       firstAssignmentRoutingRate: analyticsRate(activity.questionsRoutedOnCreation, activity.questionsCreated),
       decisionAcceptanceRate: analyticsRate(activity.decisionsAccepted, activity.questionsCreated),
@@ -956,12 +911,8 @@ function calculateAnalyticsCohort(
         activity.specificationVersionsApproved,
         activity.specificationVersionsPublished,
       ),
-      ...(medianQuestionResolutionMs !== undefined
-        ? { medianQuestionResolutionMs }
-        : {}),
-      ...(medianSpecificationApprovalMs !== undefined
-        ? { medianSpecificationApprovalMs }
-        : {}),
+      ...(medianQuestionResolutionMs !== undefined ? { medianQuestionResolutionMs } : {}),
+      ...(medianSpecificationApprovalMs !== undefined ? { medianSpecificationApprovalMs } : {}),
     },
     guardrails: {
       questionsPerRun: analyticsRate(activity.questionSubmissions, runs.length),
@@ -1100,9 +1051,7 @@ const SUPPORT_ASSUMPTION_EXPIRY_WINDOW_MS = 7 * 86_400_000;
 const adapterDiagnosticHistoryEntry = (
   diagnostic: Pick<AdapterDiagnostic, "status" | "mcpStatus" | "checks" | "observedAt">,
 ): AdapterDiagnosticHistoryEntry => {
-  const failingCheckNames = diagnostic.checks
-    .filter((check) => check.status === "fail")
-    .map((check) => check.name);
+  const failingCheckNames = diagnostic.checks.filter((check) => check.status === "fail").map((check) => check.name);
   return {
     status: diagnostic.status,
     mcpStatus: diagnostic.mcpStatus,
@@ -1130,13 +1079,14 @@ const adapterDiagnosticTrend = (
   }
   const latest = observations[observations.length - 1];
   const previous = observations[observations.length - 2];
-  const direction = !previous || !latest
-    ? "insufficient_data"
-    : latest.status === "pass" && previous.status === "fail"
-      ? "improving"
-      : latest.status === "fail" && previous.status === "pass"
-        ? "degrading"
-        : "stable";
+  const direction =
+    !previous || !latest
+      ? "insufficient_data"
+      : latest.status === "pass" && previous.status === "fail"
+        ? "improving"
+        : latest.status === "fail" && previous.status === "pass"
+          ? "degrading"
+          : "stable";
   return {
     direction,
     observationCount: observations.length,
@@ -1148,14 +1098,9 @@ const adapterDiagnosticTrend = (
 const sameNotificationDeliveryFeedback = (
   left: NotificationDeliveryFeedback,
   right: NotificationDeliveryFeedback,
-): boolean =>
-  left.provider === right.provider &&
-  left.type === right.type &&
-  left.receivedAt === right.receivedAt;
+): boolean => left.provider === right.provider && left.type === right.type && left.receivedAt === right.receivedAt;
 
-const providerFeedbackError = (
-  type: NotificationDeliveryFeedback["type"],
-): string => {
+const providerFeedbackError = (type: NotificationDeliveryFeedback["type"]): string => {
   switch (type) {
     case "bounce":
       return "Provider reported that the email address bounced.";
@@ -1196,12 +1141,22 @@ const DEFAULT_PROTECTED_POLICY_RULES: readonly ProjectPolicyRule[] = [
   policyRule("bridge-regulated-data", "regulated-data", ["data-privacy-owner"], ["security-reviewer"]),
   policyRule("bridge-production-deletion", "production-deletion", ["component-owner"], ["operations-sre-reviewer"]),
   policyRule("bridge-destructive-migration", "destructive-migration", ["component-owner"], ["operations-sre-reviewer"]),
-  policyRule("bridge-irreversible-schema", "irreversible-schema-migration", ["component-owner"], ["database-architecture-reviewer"]),
+  policyRule(
+    "bridge-irreversible-schema",
+    "irreversible-schema-migration",
+    ["component-owner"],
+    ["database-architecture-reviewer"],
+  ),
   policyRule("bridge-breaking-api", "breaking-api", ["product-owner"], ["architecture-owner"]),
   policyRule("bridge-security-exception", "security-exception", ["security-owner"], []),
   policyRule("bridge-legal", "legal", ["legal-compliance-owner"], []),
   policyRule("bridge-regulatory", "regulatory", ["legal-compliance-owner"], []),
-  policyRule("bridge-recurring-spend", "recurring-infrastructure-spend", ["project-owner"], ["finance-operations-approver"]),
+  policyRule(
+    "bridge-recurring-spend",
+    "recurring-infrastructure-spend",
+    ["project-owner"],
+    ["finance-operations-approver"],
+  ),
 ];
 
 const RISK_RANK: Readonly<Record<Risk, number>> = { low: 0, medium: 1, high: 2, protected: 3 };
@@ -1217,15 +1172,13 @@ function splitMarkdownLines(body: string): readonly string[] {
 }
 
 function exactLineDiff(fromLines: readonly string[], toLines: readonly string[]): readonly RawArtifactDiffLine[] {
-  const matrix = Array.from(
-    { length: fromLines.length + 1 },
-    () => new Uint32Array(toLines.length + 1),
-  );
+  const matrix = Array.from({ length: fromLines.length + 1 }, () => new Uint32Array(toLines.length + 1));
   for (let fromIndex = 1; fromIndex <= fromLines.length; fromIndex += 1) {
     for (let toIndex = 1; toIndex <= toLines.length; toIndex += 1) {
-      matrix[fromIndex]![toIndex] = fromLines[fromIndex - 1] === toLines[toIndex - 1]
-        ? matrix[fromIndex - 1]![toIndex - 1]! + 1
-        : Math.max(matrix[fromIndex - 1]![toIndex]!, matrix[fromIndex]![toIndex - 1]!);
+      matrix[fromIndex]![toIndex] =
+        fromLines[fromIndex - 1] === toLines[toIndex - 1]
+          ? matrix[fromIndex - 1]![toIndex - 1]! + 1
+          : Math.max(matrix[fromIndex - 1]![toIndex]!, matrix[fromIndex]![toIndex - 1]!);
     }
   }
 
@@ -1233,11 +1186,7 @@ function exactLineDiff(fromLines: readonly string[], toLines: readonly string[])
   let fromIndex = fromLines.length;
   let toIndex = toLines.length;
   while (fromIndex > 0 || toIndex > 0) {
-    if (
-      fromIndex > 0 &&
-      toIndex > 0 &&
-      fromLines[fromIndex - 1] === toLines[toIndex - 1]
-    ) {
+    if (fromIndex > 0 && toIndex > 0 && fromLines[fromIndex - 1] === toLines[toIndex - 1]) {
       reversed.push({ kind: "unchanged", text: fromLines[fromIndex - 1]! });
       fromIndex -= 1;
       toIndex -= 1;
@@ -1281,7 +1230,8 @@ function buildArtifactVersionDiff(
 
   const fromMiddle = fromLines.slice(prefixLength, fromLines.length - suffixLength);
   const toMiddle = toLines.slice(prefixLength, toLines.length - suffixLength);
-  const exact = fromMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
+  const exact =
+    fromMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
     toMiddle.length <= MAX_EXACT_DIFF_DIMENSION &&
     fromMiddle.length * toMiddle.length <= MAX_EXACT_DIFF_CELLS;
   const lines: ArtifactDiffLine[] = [];
@@ -1484,9 +1434,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     for (const [key, value] of source) target.set(key, value);
   }
 
-  async getOrganizationByExternalId(
-    externalIdentityProviderId: string,
-  ): Promise<Organization | undefined> {
+  async getOrganizationByExternalId(externalIdentityProviderId: string): Promise<Organization | undefined> {
     return [...this.organizations.values()].find(
       (organization) => organization.externalIdentityProviderId === externalIdentityProviderId,
     );
@@ -1500,10 +1448,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.organizations.set(organization.id, organization);
   }
 
-  async getPrincipalIdentityByOidc(
-    issuer: string,
-    subject: string,
-  ): Promise<PrincipalIdentity | undefined> {
+  async getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined> {
     return [...this.principalIdentities.values()].find(
       (identity) => identity.oidcIssuer === issuer && identity.oidcSubject === subject,
     );
@@ -1535,20 +1480,14 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.serviceCredentials.set(credential.id, credential);
   }
 
-  async revokeServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async revokeServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean> {
     const current = this.serviceCredentials.get(credential.id);
     if (!current || (expectedVersion !== undefined && current.version !== expectedVersion)) return false;
     this.serviceCredentials.set(credential.id, credential);
     return true;
   }
 
-  async rotateServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async rotateServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean> {
     const current = this.serviceCredentials.get(credential.id);
     if (!current || (expectedVersion !== undefined && current.version !== expectedVersion)) return false;
     this.serviceCredentials.set(credential.id, credential);
@@ -1562,25 +1501,17 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.organizationMemberships.get(`${organizationId}:${principalId}`);
   }
 
-  async listOrganizationMemberships(
-    organizationId: string,
-  ): Promise<readonly OrganizationMembership[]> {
+  async listOrganizationMemberships(organizationId: string): Promise<readonly OrganizationMembership[]> {
     return [...this.organizationMemberships.values()]
       .filter((membership) => membership.organizationId === organizationId)
       .sort((left, right) => left.principalId.localeCompare(right.principalId));
   }
 
-  async saveOrganizationMembership(
-    membership: OrganizationMembership,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveOrganizationMembership(membership: OrganizationMembership, expectedVersion?: number): Promise<boolean> {
     const key = `${membership.organizationId}:${membership.principalId}`;
     const current = this.organizationMemberships.get(key);
     if (expectedVersion !== undefined && current?.version !== expectedVersion) return false;
-    this.organizationMemberships.set(
-      key,
-      membership,
-    );
+    this.organizationMemberships.set(key, membership);
     return true;
   }
 
@@ -1599,7 +1530,8 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     if (
       (expectedVersion === undefined && current !== undefined) ||
       (expectedVersion !== undefined && current?.version !== expectedVersion)
-    ) return false;
+    )
+      return false;
     this.directoryGroups.set(group.id, group);
     return true;
   }
@@ -1615,39 +1547,28 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     principalId: string,
   ): Promise<readonly DirectoryGroupMember[]> {
     return [...this.directoryGroupMembers.values()]
-      .filter((member) =>
-        member.organizationId === organizationId && member.principalId === principalId)
+      .filter((member) => member.organizationId === organizationId && member.principalId === principalId)
       .sort((left, right) => left.groupId.localeCompare(right.groupId));
   }
 
-  async saveDirectoryGroupMember(
-    member: DirectoryGroupMember,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveDirectoryGroupMember(member: DirectoryGroupMember, expectedVersion?: number): Promise<boolean> {
     const current = this.directoryGroupMembers.get(member.id);
     if (
       (expectedVersion === undefined && current !== undefined) ||
       (expectedVersion !== undefined && current?.version !== expectedVersion)
-    ) return false;
+    )
+      return false;
     this.directoryGroupMembers.set(member.id, member);
     return true;
   }
 
-  async listProjectMemberships(
-    organizationId: string,
-    principalId: string,
-  ): Promise<readonly ProjectMembership[]> {
+  async listProjectMemberships(organizationId: string, principalId: string): Promise<readonly ProjectMembership[]> {
     return [...this.projectMemberships.values()].filter(
-      (membership) =>
-        membership.organizationId === organizationId &&
-        membership.principalId === principalId,
+      (membership) => membership.organizationId === organizationId && membership.principalId === principalId,
     );
   }
 
-  async saveProjectMembership(
-    membership: ProjectMembership,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveProjectMembership(membership: ProjectMembership, expectedVersion?: number): Promise<boolean> {
     const key = `${membership.organizationId}:${membership.projectId}:${membership.principalId}`;
     const current = this.projectMemberships.get(key);
     if (expectedVersion !== undefined && current?.version !== expectedVersion) return false;
@@ -1663,15 +1584,11 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     const principalIdentity = await this.getPrincipalIdentityByOidc(identity.issuer, identity.subject);
     const organization = await this.getOrganizationByExternalId(identity.organizationExternalId);
     if (!principalIdentity || !organization) return undefined;
-    const organizationMembership = await this.getOrganizationMembership(
-      organization.id,
-      principalIdentity.id,
-    );
+    const organizationMembership = await this.getOrganizationMembership(organization.id, principalIdentity.id);
     if (!organizationMembership || organizationMembership.status !== "active") return undefined;
-    const projectMemberships = (await this.listProjectMemberships(
-      organization.id,
-      principalIdentity.id,
-    )).filter((membership) => membership.status === "active");
+    const projectMemberships = (await this.listProjectMemberships(organization.id, principalIdentity.id)).filter(
+      (membership) => membership.status === "active",
+    );
     return {
       id: principalIdentity.id,
       type: principalIdentity.type,
@@ -1694,12 +1611,16 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     const organizationMembership = principalIdentity
       ? await this.getOrganizationMembership(credential.organizationId, principalIdentity.id)
       : undefined;
-    if (!principalIdentity || principalIdentity.type === "human" || !organizationMembership ||
-      organizationMembership.status !== "active") return undefined;
-    const projectMemberships = (await this.listProjectMemberships(
-      credential.organizationId,
-      principalIdentity.id,
-    )).filter((membership) => membership.status === "active");
+    if (
+      !principalIdentity ||
+      principalIdentity.type === "human" ||
+      !organizationMembership ||
+      organizationMembership.status !== "active"
+    )
+      return undefined;
+    const projectMemberships = (
+      await this.listProjectMemberships(credential.organizationId, principalIdentity.id)
+    ).filter((membership) => membership.status === "active");
     return {
       credential,
       principal: {
@@ -1723,8 +1644,9 @@ export class InMemoryBridgeRepository implements BridgeRepository {
       if (membership.organizationId !== organizationId || membership.status !== "active") continue;
       const identity = this.principalIdentities.get(membership.principalId);
       if (!identity) continue;
-      const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id))
-        .filter((projectMembership) => projectMembership.status === "active");
+      const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id)).filter(
+        (projectMembership) => projectMembership.status === "active",
+      );
       principals.push({
         id: identity.id,
         type: identity.type,
@@ -1769,28 +1691,25 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.repositoryRecords.set(repository.id, repository);
   }
 
-  async getGithubPullRequest(
-    pullRequestId: string,
-  ): Promise<GithubPullRequestContext | undefined> {
+  async getGithubPullRequest(pullRequestId: string): Promise<GithubPullRequestContext | undefined> {
     return this.githubPullRequests.get(pullRequestId);
   }
 
   async listGithubPullRequests(projectId: string): Promise<readonly GithubPullRequestContext[]> {
     return [...this.githubPullRequests.values()]
       .filter((pullRequest) => pullRequest.projectId === projectId)
-      .sort((left, right) =>
-        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+      .sort(
+        (left, right) => right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id),
+      );
   }
 
-  async saveGithubPullRequest(
-    pullRequest: GithubPullRequestContext,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveGithubPullRequest(pullRequest: GithubPullRequestContext, expectedVersion?: number): Promise<boolean> {
     const current = this.githubPullRequests.get(pullRequest.id);
     if (
       (expectedVersion === undefined && current !== undefined) ||
       (expectedVersion !== undefined && current?.version !== expectedVersion)
-    ) return false;
+    )
+      return false;
     this.githubPullRequests.set(pullRequest.id, pullRequest);
     return true;
   }
@@ -1802,8 +1721,9 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   async listGithubIssues(projectId: string): Promise<readonly GithubIssueWorkItem[]> {
     return [...this.githubIssues.values()]
       .filter((issue) => issue.projectId === projectId)
-      .sort((left, right) =>
-        right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id));
+      .sort(
+        (left, right) => right.sourceUpdatedAt.localeCompare(left.sourceUpdatedAt) || left.id.localeCompare(right.id),
+      );
   }
 
   async saveGithubIssue(issue: GithubIssueWorkItem, expectedVersion?: number): Promise<boolean> {
@@ -1811,14 +1731,13 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     if (
       (expectedVersion === undefined && current !== undefined) ||
       (expectedVersion !== undefined && current?.version !== expectedVersion)
-    ) return false;
+    )
+      return false;
     this.githubIssues.set(issue.id, issue);
     return true;
   }
 
-  async getProjectOwnershipConfiguration(
-    projectId: string,
-  ): Promise<ProjectOwnershipConfiguration | undefined> {
+  async getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined> {
     return this.projectOwnershipConfigurations.get(projectId);
   }
 
@@ -1832,9 +1751,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return true;
   }
 
-  async getProjectPolicyConfiguration(
-    projectId: string,
-  ): Promise<ProjectPolicyConfiguration | undefined> {
+  async getProjectPolicyConfiguration(projectId: string): Promise<ProjectPolicyConfiguration | undefined> {
     return this.projectPolicyConfigurations.get(projectId);
   }
 
@@ -1893,11 +1810,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.runVendorSessionIds.get(runId);
   }
 
-  async saveRunContinuationKey(
-    runId: string,
-    resumeContextKey: string,
-    vendorSessionId?: string,
-  ): Promise<void> {
+  async saveRunContinuationKey(runId: string, resumeContextKey: string, vendorSessionId?: string): Promise<void> {
     this.runContinuationKeys.set(runId, resumeContextKey);
     if (vendorSessionId) this.runVendorSessionIds.set(runId, vendorSessionId);
   }
@@ -1925,11 +1838,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.assumptionIdempotency.get(key)?.requestHash;
   }
 
-  async saveIdempotentAssumption(
-    key: string,
-    assumptionId: string,
-    requestHash: string,
-  ): Promise<void> {
+  async saveIdempotentAssumption(key: string, assumptionId: string, requestHash: string): Promise<void> {
     this.assumptionIdempotency.set(key, { assumptionId, requestHash });
   }
 
@@ -1978,8 +1887,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   }
 
   async searchDecisions(projectId: string, search: string): Promise<readonly Decision[]> {
-    const tokenize = (value: string): readonly string[] =>
-      value.toLocaleLowerCase("en").match(/[\p{L}\p{N}]+/gu) ?? [];
+    const tokenize = (value: string): readonly string[] => value.toLocaleLowerCase("en").match(/[\p{L}\p{N}]+/gu) ?? [];
     const searchTokens = [...new Set(tokenize(search))];
     if (searchTokens.length === 0) return [];
 
@@ -1988,23 +1896,24 @@ export class InMemoryBridgeRepository implements BridgeRepository {
         const answerTokens = new Set(tokenize(decision.answer));
         const rationaleTokens = new Set(tokenize(decision.rationale));
         const categoryTokens = new Set(tokenize(decision.category));
-        const matches = searchTokens.every((token) =>
-          answerTokens.has(token) || rationaleTokens.has(token) || categoryTokens.has(token),
+        const matches = searchTokens.every(
+          (token) => answerTokens.has(token) || rationaleTokens.has(token) || categoryTokens.has(token),
         );
         const score = matches
           ? searchTokens.reduce(
-            (total, token) => total +
-              (answerTokens.has(token) ? 4 : 0) +
-              (rationaleTokens.has(token) ? 2 : 0) +
-              (categoryTokens.has(token) ? 1 : 0),
-            0,
-          )
+              (total, token) =>
+                total +
+                (answerTokens.has(token) ? 4 : 0) +
+                (rationaleTokens.has(token) ? 2 : 0) +
+                (categoryTokens.has(token) ? 1 : 0),
+              0,
+            )
           : 0;
         return { decision, score };
       })
       .filter(({ score }) => score > 0)
-      .sort((left, right) =>
-        right.score - left.score || right.decision.createdAt.localeCompare(left.decision.createdAt),
+      .sort(
+        (left, right) => right.score - left.score || right.decision.createdAt.localeCompare(left.decision.createdAt),
       )
       .map(({ decision }) => decision);
   }
@@ -2041,11 +1950,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     return this.artifactIdempotency.get(key)?.requestHash;
   }
 
-  async saveIdempotentArtifactVersion(
-    key: string,
-    versionId: string,
-    requestHash: string,
-  ): Promise<void> {
+  async saveIdempotentArtifactVersion(key: string, versionId: string, requestHash: string): Promise<void> {
     this.artifactIdempotency.set(key, { versionId, requestHash });
   }
 
@@ -2067,13 +1972,10 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     this.organizationAuditEvents.set(event.id, event);
   }
 
-  async listOrganizationAuditEvents(
-    organizationId: string,
-  ): Promise<readonly OrganizationAuditEvent[]> {
+  async listOrganizationAuditEvents(organizationId: string): Promise<readonly OrganizationAuditEvent[]> {
     return [...this.organizationAuditEvents.values()]
       .filter((event) => event.organizationId === organizationId)
-      .sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
   }
 
   async getNotification(notificationId: string): Promise<Notification | undefined> {
@@ -2087,11 +1989,12 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     unreadOnly = false,
   ): Promise<readonly Notification[]> {
     return [...this.notifications.values()]
-      .filter((notification) =>
-        notification.organizationId === organizationId &&
-        notification.recipientId === recipientId &&
-        (!projectId || notification.projectId === projectId) &&
-        (!unreadOnly || !notification.readAt),
+      .filter(
+        (notification) =>
+          notification.organizationId === organizationId &&
+          notification.recipientId === recipientId &&
+          (!projectId || notification.projectId === projectId) &&
+          (!unreadOnly || !notification.readAt),
       )
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
@@ -2113,8 +2016,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     principalId: string,
   ): Promise<readonly NotificationPreference[]> {
     return [...this.notificationPreferences.values()]
-      .filter((preference) =>
-        preference.organizationId === organizationId && preference.principalId === principalId)
+      .filter((preference) => preference.organizationId === organizationId && preference.principalId === principalId)
       .sort((left, right) => left.channel.localeCompare(right.channel));
   }
 
@@ -2151,18 +2053,16 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     providerMessageId: string,
   ): Promise<readonly OutboxDelivery[]> {
     return [...this.outboxDeliveries.values()]
-      .filter((delivery) =>
-        delivery.projectId === projectId &&
-        delivery.channel === channel &&
-        delivery.providerMessageId === providerMessageId,
+      .filter(
+        (delivery) =>
+          delivery.projectId === projectId &&
+          delivery.channel === channel &&
+          delivery.providerMessageId === providerMessageId,
       )
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
   }
 
-  async getOutboxDelivery(
-    eventId: string,
-    channel: OutboxDelivery["channel"],
-  ): Promise<OutboxDelivery | undefined> {
+  async getOutboxDelivery(eventId: string, channel: OutboxDelivery["channel"]): Promise<OutboxDelivery | undefined> {
     return [...this.outboxDeliveries.values()].find(
       (delivery) => delivery.outboxEventId === eventId && delivery.channel === channel,
     );
@@ -2175,12 +2075,16 @@ export class InMemoryBridgeRepository implements BridgeRepository {
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {
     const nowTime = Date.parse(now);
     const candidates = [...this.outboxEvents.values()]
-      .filter((event) =>
-        (event.status === "pending" || event.status === "failed" || event.status === "processing") &&
-        Date.parse(event.availableAt) <= nowTime &&
-        (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime),
+      .filter(
+        (event) =>
+          (event.status === "pending" || event.status === "failed" || event.status === "processing") &&
+          Date.parse(event.availableAt) <= nowTime &&
+          (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime),
       )
-      .sort((left, right) => left.availableAt.localeCompare(right.availableAt) || left.createdAt.localeCompare(right.createdAt))
+      .sort(
+        (left, right) =>
+          left.availableAt.localeCompare(right.availableAt) || left.createdAt.localeCompare(right.createdAt),
+      )
       .slice(0, Math.max(0, limit));
     const leaseUntil = new Date(nowTime + 5 * 60 * 1_000).toISOString();
     const claimed = candidates.map((event) => {
@@ -2203,12 +2107,7 @@ export class InMemoryBridgeRepository implements BridgeRepository {
     await this.saveOutboxEvent({ ...base, status: "processed", processedAt });
   }
 
-  async failOutboxEvent(
-    eventId: string,
-    lastError: string,
-    availableAt: string,
-    deadLetter: boolean,
-  ): Promise<void> {
+  async failOutboxEvent(eventId: string, lastError: string, availableAt: string, deadLetter: boolean): Promise<void> {
     const event = this.outboxEvents.get(eventId);
     if (!event) return;
     const { leaseUntil: _leaseUntil, processedAt: _processedAt, ...base } = event;
@@ -2236,12 +2135,14 @@ export interface BridgeServiceOptions {
 
 export interface BridgeReadiness {
   readonly status: "ready" | "not_ready";
-  readonly checks: readonly [{
-    readonly name: "repository";
-    readonly status: "ready" | "failed";
-    readonly backend?: string;
-    readonly message?: string;
-  }];
+  readonly checks: readonly [
+    {
+      readonly name: "repository";
+      readonly status: "ready" | "failed";
+      readonly backend?: string;
+      readonly message?: string;
+    },
+  ];
 }
 
 export class BridgeService {
@@ -2257,33 +2158,23 @@ export class BridgeService {
     options: BridgeServiceOptions = {},
   ) {
     this.publicBaseUrl = options.publicBaseUrl ?? "http://localhost:3000";
-    this.identityIssuer = options.identityIssuer
-      ? `${options.identityIssuer.replace(/\/+$/, "")}/`
-      : undefined;
+    this.identityIssuer = options.identityIssuer ? `${options.identityIssuer.replace(/\/+$/, "")}/` : undefined;
     this.now = options.now ?? (() => new Date());
     this.id = options.id ?? randomUUID;
     this.resumeKey = options.resumeKey ?? (() => randomBytes(32).toString("base64url"));
     this.metrics = options.metrics;
   }
 
-  private tenantTransaction<T>(
-    principal: Principal,
-    work: (repository: BridgeRepository) => Promise<T>,
-  ): Promise<T> {
-    return this.repository
-      .transaction(work, { organizationId: principal.organizationId })
-      .catch((error: unknown) => {
-        if (error instanceof BridgeError && error.code === "CONFLICT") {
-          this.metrics?.recordConflict();
-        }
-        throw error;
-      });
+  private tenantTransaction<T>(principal: Principal, work: (repository: BridgeRepository) => Promise<T>): Promise<T> {
+    return this.repository.transaction(work, { organizationId: principal.organizationId }).catch((error: unknown) => {
+      if (error instanceof BridgeError && error.code === "CONFLICT") {
+        this.metrics?.recordConflict();
+      }
+      throw error;
+    });
   }
 
-  private recordIdempotency(
-    operation: BridgeIdempotencyOperation,
-    outcome: BridgeIdempotencyOutcome,
-  ): void {
+  private recordIdempotency(operation: BridgeIdempotencyOperation, outcome: BridgeIdempotencyOutcome): void {
     this.metrics?.recordIdempotency({ operation, outcome });
   }
 
@@ -2322,11 +2213,13 @@ export class BridgeService {
     } catch {
       return {
         status: "not_ready",
-        checks: [{
-          name: "repository",
-          status: "failed",
-          message: "Repository dependency is unavailable.",
-        }],
+        checks: [
+          {
+            name: "repository",
+            status: "failed",
+            message: "Repository dependency is unavailable.",
+          },
+        ],
       };
     }
   }
@@ -2348,16 +2241,10 @@ export class BridgeService {
     });
   }
 
-  async registerProject(
-    principal: Principal,
-    input: RegisterProjectInput,
-  ): Promise<ProjectRegistration> {
+  async registerProject(principal: Principal, input: RegisterProjectInput): Promise<ProjectRegistration> {
     return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Registering a project");
-      if (
-        !principalHasRole(principal, "organization-admin") &&
-        !principalHasRole(principal, "project-admin")
-      ) {
+      if (!principalHasRole(principal, "organization-admin") && !principalHasRole(principal, "project-admin")) {
         throw new BridgeError("FORBIDDEN", "Project registration requires an organization administrator.", 403);
       }
       this.assertSecretSafe("administration", input);
@@ -2365,12 +2252,11 @@ export class BridgeService {
         .update(`${principal.organizationId}:${input.idempotencyKey}`)
         .digest("hex")
         .slice(0, 24)}`;
-      const ownerIds = input.decisionOwnerIds.length > 0
-        ? [...input.decisionOwnerIds]
-        : [principal.id];
+      const ownerIds = input.decisionOwnerIds.length > 0 ? [...input.decisionOwnerIds] : [principal.id];
       const existing = await repository.getProject(projectId);
       if (existing) {
-        const sameRequest = existing.organizationId === principal.organizationId &&
+        const sameRequest =
+          existing.organizationId === principal.organizationId &&
           existing.name === input.name &&
           JSON.stringify(existing.decisionOwnerIds) === JSON.stringify(ownerIds);
         if (!sameRequest) {
@@ -2439,7 +2325,8 @@ export class BridgeService {
         .slice(0, 24)}`;
       const existing = await repository.getRepositoryRecord(repositoryId);
       if (existing) {
-        const sameRequest = existing.organizationId === principal.organizationId &&
+        const sameRequest =
+          existing.organizationId === principal.organizationId &&
           existing.projectId === projectId &&
           existing.provider === provider &&
           existing.owner === owner &&
@@ -2481,10 +2368,7 @@ export class BridgeService {
     });
   }
 
-  async listProjectRepositories(
-    principal: Principal,
-    projectId: string,
-  ): Promise<readonly RepositoryRecord[]> {
+  async listProjectRepositories(principal: Principal, projectId: string): Promise<readonly RepositoryRecord[]> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       return repository.listProjectRepositories(projectId);
@@ -2590,7 +2474,7 @@ export class BridgeService {
           updatedAt: timestamp,
           version: existing.version + 1,
         };
-        if (!await repository.saveGithubPullRequest(updated, existing.version)) {
+        if (!(await repository.saveGithubPullRequest(updated, existing.version))) {
           this.recordIdempotency("github_pull_request_sync", "conflict");
           throw new BridgeError("CONFLICT", "The pull-request context changed during synchronization.", 409);
         }
@@ -2615,7 +2499,7 @@ export class BridgeService {
         updatedAt: timestamp,
         version: 1,
       };
-      if (!await repository.saveGithubPullRequest(created)) {
+      if (!(await repository.saveGithubPullRequest(created))) {
         this.recordIdempotency("github_pull_request_sync", "conflict");
         throw new BridgeError("CONFLICT", "The pull-request context was created concurrently.", 409);
       }
@@ -2766,7 +2650,7 @@ export class BridgeService {
           updatedAt: timestamp,
           version: existing.version + 1,
         };
-        if (!await repository.saveGithubIssue(updated, existing.version)) {
+        if (!(await repository.saveGithubIssue(updated, existing.version))) {
           this.recordIdempotency("github_issue_sync", "conflict");
           throw new BridgeError("CONFLICT", "The work item changed during synchronization.", 409);
         }
@@ -2791,7 +2675,7 @@ export class BridgeService {
         updatedAt: timestamp,
         version: 1,
       };
-      if (!await repository.saveGithubIssue(created)) {
+      if (!(await repository.saveGithubIssue(created))) {
         this.recordIdempotency("github_issue_sync", "conflict");
         throw new BridgeError("CONFLICT", "The work item was created concurrently.", 409);
       }
@@ -2852,14 +2736,16 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       const project = await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project ownership configuration", projectId);
-      return await repository.getProjectOwnershipConfiguration(projectId) ?? {
-        organizationId: project.organizationId,
-        projectId: project.id,
-        roles: [],
-        teams: [],
-        rules: [],
-        version: 0,
-      };
+      return (
+        (await repository.getProjectOwnershipConfiguration(projectId)) ?? {
+          organizationId: project.organizationId,
+          projectId: project.id,
+          roles: [],
+          teams: [],
+          rules: [],
+          version: 0,
+        }
+      );
     });
   }
 
@@ -2875,12 +2761,10 @@ export class BridgeService {
       const current = await repository.getProjectOwnershipConfiguration(projectId);
       const currentVersion = current?.version ?? 0;
       if (input.expectedVersion !== currentVersion) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The project ownership configuration changed after it was read.",
-          409,
-          { expectedVersion: input.expectedVersion, currentVersion },
-        );
+        throw new BridgeError("CONFLICT", "The project ownership configuration changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion,
+        });
       }
 
       const activeHumans = new Map(
@@ -2903,12 +2787,8 @@ export class BridgeService {
         activeHumans,
         currentVersion + 1,
       );
-      if (!await repository.saveProjectOwnershipConfiguration(configuration, currentVersion)) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The project ownership configuration changed while it was being saved.",
-          409,
-        );
+      if (!(await repository.saveProjectOwnershipConfiguration(configuration, currentVersion))) {
+        throw new BridgeError("CONFLICT", "The project ownership configuration changed while it was being saved.", 409);
       }
       await this.audit(
         repository,
@@ -2926,14 +2806,11 @@ export class BridgeService {
     });
   }
 
-  async getProjectPolicyConfiguration(
-    principal: Principal,
-    projectId: string,
-  ): Promise<ProjectPolicyView> {
+  async getProjectPolicyConfiguration(principal: Principal, projectId: string): Promise<ProjectPolicyView> {
     return this.tenantTransaction(principal, async (repository) => {
       const project = await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project policy configuration", projectId);
-      const configuration = await repository.getProjectPolicyConfiguration(projectId) ?? {
+      const configuration = (await repository.getProjectPolicyConfiguration(projectId)) ?? {
         organizationId: project.organizationId,
         projectId: project.id,
         rules: [],
@@ -2955,12 +2832,10 @@ export class BridgeService {
       const current = await repository.getProjectPolicyConfiguration(projectId);
       const currentVersion = current?.version ?? 0;
       if (input.expectedVersion !== currentVersion) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The project policy configuration changed after it was read.",
-          409,
-          { expectedVersion: input.expectedVersion, currentVersion },
-        );
+        throw new BridgeError("CONFLICT", "The project policy configuration changed after it was read.", 409, {
+          expectedVersion: input.expectedVersion,
+          currentVersion,
+        });
       }
       const timestamp = this.now().toISOString();
       const configuration: ProjectPolicyConfiguration = {
@@ -2971,12 +2846,8 @@ export class BridgeService {
         updatedById: principal.id,
         updatedAt: timestamp,
       };
-      if (!await repository.saveProjectPolicyConfiguration(configuration, currentVersion)) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The project policy configuration changed while it was being saved.",
-          409,
-        );
+      if (!(await repository.saveProjectPolicyConfiguration(configuration, currentVersion))) {
+        throw new BridgeError("CONFLICT", "The project policy configuration changed while it was being saved.", 409);
       }
       await this.audit(
         repository,
@@ -3015,8 +2886,7 @@ export class BridgeService {
           ...candidate,
           projectIds: candidate.projectIds.filter((projectId) => accessibleProjectIds.has(projectId)),
           projectRoles: Object.fromEntries(
-            Object.entries(candidate.projectRoles ?? {})
-              .filter(([projectId]) => accessibleProjectIds.has(projectId)),
+            Object.entries(candidate.projectRoles ?? {}).filter(([projectId]) => accessibleProjectIds.has(projectId)),
           ),
         }));
     });
@@ -3026,14 +2896,17 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading organization members");
       const memberships = await repository.listOrganizationMemberships(principal.organizationId);
-      const members = await Promise.all(memberships.map(async (membership) => {
-        const identity = await repository.getPrincipalIdentity(membership.principalId);
-        if (!identity || identity.type !== "human") return undefined;
-        return this.organizationMember(identity, membership, await repository.listProjectMemberships(
-          principal.organizationId,
-          identity.id,
-        ));
-      }));
+      const members = await Promise.all(
+        memberships.map(async (membership) => {
+          const identity = await repository.getPrincipalIdentity(membership.principalId);
+          if (!identity || identity.type !== "human") return undefined;
+          return this.organizationMember(
+            identity,
+            membership,
+            await repository.listProjectMemberships(principal.organizationId, identity.id),
+          );
+        }),
+      );
       return members
         .filter((member): member is OrganizationMember => Boolean(member))
         .sort((left, right) => left.displayName.localeCompare(right.displayName));
@@ -3050,10 +2923,12 @@ export class BridgeService {
   async listDirectoryGroups(principal: Principal): Promise<readonly DirectoryGroupView[]> {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading directory groups");
-      return Promise.all((await repository.listDirectoryGroups(principal.organizationId)).map(async (group) => ({
-        group,
-        members: await repository.listDirectoryGroupMembers(group.id),
-      })));
+      return Promise.all(
+        (await repository.listDirectoryGroups(principal.organizationId)).map(async (group) => ({
+          group,
+          members: await repository.listDirectoryGroupMembers(group.id),
+        })),
+      );
     });
   }
 
@@ -3087,7 +2962,8 @@ export class BridgeService {
         .slice(0, 24)}`;
       const existing = await repository.getDirectoryGroup(groupId);
       if (existing) {
-        const exactReplay = existing.organizationId === principal.organizationId &&
+        const exactReplay =
+          existing.organizationId === principal.organizationId &&
           existing.provider === provider &&
           existing.issuer === issuer &&
           existing.externalGroupId === externalGroupId &&
@@ -3116,7 +2992,7 @@ export class BridgeService {
         updatedAt: timestamp,
         version: 1,
       };
-      if (!await repository.saveDirectoryGroup(group)) {
+      if (!(await repository.saveDirectoryGroup(group))) {
         this.recordIdempotency("directory_group_create", "conflict");
         throw new BridgeError("CONFLICT", "The directory group was created concurrently.", 409);
       }
@@ -3159,8 +3035,8 @@ export class BridgeService {
         .sort((left, right) => left.subject.localeCompare(right.subject));
       if (group.sourceUpdatedAt) {
         const sourceOrder = sourceUpdatedAt.localeCompare(group.sourceUpdatedAt);
-        const sameSnapshot = group.status === input.status &&
-          JSON.stringify(activeSnapshot) === JSON.stringify(normalizedMembers);
+        const sameSnapshot =
+          group.status === input.status && JSON.stringify(activeSnapshot) === JSON.stringify(normalizedMembers);
         if (sourceOrder < 0 || (sourceOrder === 0 && !sameSnapshot)) {
           this.recordIdempotency("directory_group_sync", "conflict");
           throw new BridgeError(
@@ -3189,19 +3065,14 @@ export class BridgeService {
         });
       }
       const timestamp = this.now().toISOString();
-      const existingBySubject = new Map(
-        existingMembers.map((member) => [member.externalSubject, member]),
-      );
+      const existingBySubject = new Map(existingMembers.map((member) => [member.externalSubject, member]));
       const desiredSubjects = new Set(normalizedMembers.map((member) => member.subject));
       const changes = { provisioned: 0, reactivated: 0, disabled: 0, preserved: 0 };
       for (const desired of normalizedMembers) {
         let identity = await repository.getPrincipalIdentityByOidc(group.issuer, desired.subject);
         if (!identity) {
           identity = {
-            id: `usr_${createHash("sha256")
-              .update(`${group.issuer}:${desired.subject}`)
-              .digest("hex")
-              .slice(0, 24)}`,
+            id: `usr_${createHash("sha256").update(`${group.issuer}:${desired.subject}`).digest("hex").slice(0, 24)}`,
             type: "human",
             displayName: desired.displayName,
             oidcIssuer: group.issuer,
@@ -3215,10 +3086,7 @@ export class BridgeService {
           identity = { ...identity, displayName: desired.displayName };
           await repository.savePrincipalIdentity(identity);
         }
-        const membership = await repository.getOrganizationMembership(
-          principal.organizationId,
-          identity.id,
-        );
+        const membership = await repository.getOrganizationMembership(principal.organizationId, identity.id);
         if (!membership) {
           await repository.saveOrganizationMembership({
             organizationId: principal.organizationId,
@@ -3233,12 +3101,17 @@ export class BridgeService {
           });
           changes.provisioned += 1;
         } else if (membership.provisioning === "directory" && membership.status === "disabled") {
-          if (!await repository.saveOrganizationMembership({
-            ...membership,
-            status: "active",
-            updatedAt: timestamp,
-            version: membership.version + 1,
-          }, membership.version)) {
+          if (
+            !(await repository.saveOrganizationMembership(
+              {
+                ...membership,
+                status: "active",
+                updatedAt: timestamp,
+                version: membership.version + 1,
+              },
+              membership.version,
+            ))
+          ) {
             throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
           }
           changes.reactivated += 1;
@@ -3252,23 +3125,25 @@ export class BridgeService {
             existingMember.displayName !== desired.displayName ||
             existingMember.principalId !== identity.id
           ) {
-            if (!await repository.saveDirectoryGroupMember({
-              ...existingMember,
-              principalId: identity.id,
-              displayName: desired.displayName,
-              status: "active",
-              updatedAt: timestamp,
-              version: existingMember.version + 1,
-            }, existingMember.version)) {
+            if (
+              !(await repository.saveDirectoryGroupMember(
+                {
+                  ...existingMember,
+                  principalId: identity.id,
+                  displayName: desired.displayName,
+                  status: "active",
+                  updatedAt: timestamp,
+                  version: existingMember.version + 1,
+                },
+                existingMember.version,
+              ))
+            ) {
               throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
             }
           }
         } else {
           const groupMember: DirectoryGroupMember = {
-            id: `dgm_${createHash("sha256")
-              .update(`${group.id}:${desired.subject}`)
-              .digest("hex")
-              .slice(0, 24)}`,
+            id: `dgm_${createHash("sha256").update(`${group.id}:${desired.subject}`).digest("hex").slice(0, 24)}`,
             organizationId: principal.organizationId,
             groupId: group.id,
             principalId: identity.id,
@@ -3279,7 +3154,7 @@ export class BridgeService {
             updatedAt: timestamp,
             version: 1,
           };
-          if (!await repository.saveDirectoryGroupMember(groupMember)) {
+          if (!(await repository.saveDirectoryGroupMember(groupMember))) {
             throw new BridgeError("CONFLICT", "A directory group member was created concurrently.", 409);
           }
         }
@@ -3287,33 +3162,42 @@ export class BridgeService {
       const removedPrincipalIds = new Set<string>();
       for (const existing of existingMembers) {
         if (existing.status !== "active" || desiredSubjects.has(existing.externalSubject)) continue;
-        if (!await repository.saveDirectoryGroupMember({
-          ...existing,
-          status: "removed",
-          updatedAt: timestamp,
-          version: existing.version + 1,
-        }, existing.version)) {
+        if (
+          !(await repository.saveDirectoryGroupMember(
+            {
+              ...existing,
+              status: "removed",
+              updatedAt: timestamp,
+              version: existing.version + 1,
+            },
+            existing.version,
+          ))
+        ) {
           throw new BridgeError("CONFLICT", "A directory group member changed during synchronization.", 409);
         }
         removedPrincipalIds.add(existing.principalId);
       }
       for (const principalId of removedPrincipalIds) {
-        const remainsInDirectory = (await repository.listDirectoryGroupMembersForPrincipal(
-          principal.organizationId,
-          principalId,
-        )).some((member) => member.status === "active");
+        const remainsInDirectory = (
+          await repository.listDirectoryGroupMembersForPrincipal(principal.organizationId, principalId)
+        ).some((member) => member.status === "active");
         const membership = await repository.getOrganizationMembership(principal.organizationId, principalId);
         if (remainsInDirectory || !membership || membership.status !== "active") continue;
         if (membership.provisioning === "manual") {
           changes.preserved += 1;
           continue;
         }
-        if (!await repository.saveOrganizationMembership({
-          ...membership,
-          status: "disabled",
-          updatedAt: timestamp,
-          version: membership.version + 1,
-        }, membership.version)) {
+        if (
+          !(await repository.saveOrganizationMembership(
+            {
+              ...membership,
+              status: "disabled",
+              updatedAt: timestamp,
+              version: membership.version + 1,
+            },
+            membership.version,
+          ))
+        ) {
           throw new BridgeError("CONFLICT", "A directory membership changed during synchronization.", 409);
         }
         changes.disabled += 1;
@@ -3325,7 +3209,7 @@ export class BridgeService {
         updatedAt: timestamp,
         version: group.version + 1,
       };
-      if (!await repository.saveDirectoryGroup(updatedGroup, group.version)) {
+      if (!(await repository.saveDirectoryGroup(updatedGroup, group.version))) {
         this.recordIdempotency("directory_group_sync", "conflict");
         throw new BridgeError("CONFLICT", "The directory group changed during synchronization.", 409);
       }
@@ -3353,18 +3237,22 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading service identities");
       const credentials = await repository.listServiceCredentials(principal.organizationId);
-      const identities = await Promise.all(credentials.map(async (credential) => {
-        const identity = await repository.getPrincipalIdentity(credential.principalId);
-        const membership = await repository.getOrganizationMembership(
-          principal.organizationId,
-          credential.principalId,
-        );
-        if (!identity || !membership || identity.type === "human") return undefined;
-        return this.serviceIdentity(credential, identity, membership, await repository.listProjectMemberships(
-          principal.organizationId,
-          credential.principalId,
-        ));
-      }));
+      const identities = await Promise.all(
+        credentials.map(async (credential) => {
+          const identity = await repository.getPrincipalIdentity(credential.principalId);
+          const membership = await repository.getOrganizationMembership(
+            principal.organizationId,
+            credential.principalId,
+          );
+          if (!identity || !membership || identity.type === "human") return undefined;
+          return this.serviceIdentity(
+            credential,
+            identity,
+            membership,
+            await repository.listProjectMemberships(principal.organizationId, credential.principalId),
+          );
+        }),
+      );
       return identities
         .filter((identity): identity is ServiceIdentity => Boolean(identity))
         .sort((left, right) => left.name.localeCompare(right.name));
@@ -3484,7 +3372,7 @@ export class BridgeService {
       }
       const revokedAt = credential.revokedAt ?? this.now().toISOString();
       const revoked = { ...credential, revokedAt, version: credential.version + 1 };
-      if (!await repository.revokeServiceCredential(revoked, credential.version)) {
+      if (!(await repository.revokeServiceCredential(revoked, credential.version))) {
         throw new BridgeError("CONFLICT", "The service identity changed while it was being revoked.", 409);
       }
       await this.auditOrganizationEvent(
@@ -3527,17 +3415,20 @@ export class BridgeService {
       }
       const expiresAt = Date.parse(credential.expiresAt);
       if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) {
-        throw new BridgeError("VALIDATION_FAILED", "An expired service identity cannot be rotated; create a new identity.", 400);
+        throw new BridgeError(
+          "VALIDATION_FAILED",
+          "An expired service identity cannot be rotated; create a new identity.",
+          400,
+        );
       }
       const identity = await repository.getPrincipalIdentity(credential.principalId);
       const membership = await repository.getOrganizationMembership(principal.organizationId, credential.principalId);
       if (!identity || !membership || identity.type === "human") {
         throw new BridgeError("MEMBER_NOT_FOUND", "Service identity not found.", 404);
       }
-      const projectMemberships = (await repository.listProjectMemberships(
-        principal.organizationId,
-        credential.principalId,
-      )).filter((projectMembership) => projectMembership.status === "active");
+      const projectMemberships = (
+        await repository.listProjectMemberships(principal.organizationId, credential.principalId)
+      ).filter((projectMembership) => projectMembership.status === "active");
       const timestamp = this.now().toISOString();
       const token = `brg_srv_${randomBytes(32).toString("base64url")}`;
       const rotated: ServiceCredential = {
@@ -3546,7 +3437,7 @@ export class BridgeService {
         rotatedAt: timestamp,
         version: credential.version + 1,
       };
-      if (!await repository.rotateServiceCredential(rotated, credential.version)) {
+      if (!(await repository.rotateServiceCredential(rotated, credential.version))) {
         throw new BridgeError("CONFLICT", "The service identity changed while it was being rotated.", 409);
       }
       await this.auditOrganizationEvent(
@@ -3607,7 +3498,8 @@ export class BridgeService {
       const existing = await repository.getOrganizationMembership(principal.organizationId, identity.id);
       if (existing) {
         const existingProjects = await repository.listProjectMemberships(principal.organizationId, identity.id);
-        const exactReplay = identity.displayName === input.displayName &&
+        const exactReplay =
+          identity.displayName === input.displayName &&
           existing.status === "active" &&
           existing.allProjects === input.allProjects &&
           this.sameRoles(existing.roles, roles) &&
@@ -3653,14 +3545,10 @@ export class BridgeService {
         await repository.saveProjectMembership(projectMembership);
         projectMembershipRecords.push(projectMembership);
       }
-      await this.auditOrganizationMember(
-        repository,
-        principal,
-        "organization_member.created",
-        identity.id,
-        timestamp,
-        { beforeVersion: 0, afterVersion: membership.version },
-      );
+      await this.auditOrganizationMember(repository, principal, "organization_member.created", identity.id, timestamp, {
+        beforeVersion: 0,
+        afterVersion: membership.version,
+      });
       this.recordIdempotency("organization_member_create", "created");
       return {
         member: this.organizationMember(identity, membership, projectMembershipRecords),
@@ -3695,9 +3583,11 @@ export class BridgeService {
         current.roles.some((role) => normalizeRoleName(role) === "organization-admin") &&
         !remainsAdministrator
       ) {
-        const activeAdministrators = (await repository.listOrganizationMemberships(principal.organizationId))
-          .filter((membership) => membership.status === "active" &&
-            membership.roles.some((role) => normalizeRoleName(role) === "organization-admin"));
+        const activeAdministrators = (await repository.listOrganizationMemberships(principal.organizationId)).filter(
+          (membership) =>
+            membership.status === "active" &&
+            membership.roles.some((role) => normalizeRoleName(role) === "organization-admin"),
+        );
         if (activeAdministrators.length <= 1) {
           throw new BridgeError(
             "LAST_ORGANIZATION_ADMIN",
@@ -3721,7 +3611,7 @@ export class BridgeService {
         updatedAt: timestamp,
         version: current.version + 1,
       };
-      if (!await repository.saveOrganizationMembership(updatedMembership, current.version)) {
+      if (!(await repository.saveOrganizationMembership(updatedMembership, current.version))) {
         throw new BridgeError("CONFLICT", "The member configuration changed while it was being saved.", 409);
       }
       const existingProjects = await repository.listProjectMemberships(principal.organizationId, memberId);
@@ -3736,7 +3626,7 @@ export class BridgeService {
           updatedAt: timestamp,
           version: existing.version + 1,
         };
-        if (!await repository.saveProjectMembership(updatedProject, existing.version)) {
+        if (!(await repository.saveProjectMembership(updatedProject, existing.version))) {
           throw new BridgeError("CONFLICT", "A project membership changed while it was being saved.", 409);
         }
         savedProjects.push(updatedProject);
@@ -3756,21 +3646,16 @@ export class BridgeService {
         await repository.saveProjectMembership(projectMembership);
         savedProjects.push(projectMembership);
       }
-      await this.auditOrganizationMember(
-        repository,
-        principal,
-        "organization_member.updated",
-        memberId,
-        timestamp,
-        { beforeVersion: current.version, afterVersion: updatedMembership.version },
-      );
+      await this.auditOrganizationMember(repository, principal, "organization_member.updated", memberId, timestamp, {
+        beforeVersion: current.version,
+        afterVersion: updatedMembership.version,
+      });
       return this.organizationMember(identity, updatedMembership, savedProjects);
     });
   }
 
   async getProject(principal: Principal, projectId: string): Promise<Project> {
-    return this.tenantTransaction(principal, (repository) =>
-      this.requireProject(principal, projectId, repository));
+    return this.tenantTransaction(principal, (repository) => this.requireProject(principal, projectId, repository));
   }
 
   async listNotifications(
@@ -3803,9 +3688,7 @@ export class BridgeService {
     });
   }
 
-  async listNotificationPreferences(
-    principal: Principal,
-  ): Promise<readonly NotificationPreference[]> {
+  async listNotificationPreferences(principal: Principal): Promise<readonly NotificationPreference[]> {
     return this.tenantTransaction(principal, async (repository) => {
       assertHuman(principal, "Reading notification preferences");
       return repository.listNotificationPreferences(principal.organizationId, principal.id);
@@ -3901,70 +3784,67 @@ export class BridgeService {
     query: OutboxOperationsQuery,
   ): Promise<OutboxOperationsView> {
     return this.tenantTransaction(principal, async (repository) => {
-    await this.requireProject(principal, projectId, repository);
-    this.assertProjectOperator(principal, "Inspecting delivery operations", projectId);
-    const events = await repository.listOutboxEvents(projectId);
-    const deliveries = await repository.listOutboxDeliveries(projectId);
-    const nowTime = this.now().getTime();
-    const statusCounts: Record<OutboxEvent["status"], number> = {
-      pending: 0,
-      processing: 0,
-      processed: 0,
-      failed: 0,
-      dead_letter: 0,
-    };
-    const deliveryStatusCounts: Record<OutboxDelivery["status"], number> = {
-      delivered: 0,
-      failed: 0,
-      suppressed: 0,
-      deferred: 0,
-    };
-    for (const delivery of deliveries) deliveryStatusCounts[delivery.status] += 1;
-    const providerFeedbackCount = deliveries.filter((delivery) => Boolean(delivery.feedback)).length;
-    let totalAttempts = 0;
-    let expiredLeaseCount = 0;
-    const readyEvents: OutboxEvent[] = [];
-    for (const event of events) {
-      statusCounts[event.status] += 1;
-      totalAttempts += event.attempts;
-      const leaseExpired = event.status === "processing" &&
-        Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowTime;
-      if (leaseExpired) expiredLeaseCount += 1;
-      const processingReady = event.status === "processing" &&
-        (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime);
-      const retryable = event.status === "pending" || event.status === "failed" || processingReady;
-      if (retryable && Date.parse(event.availableAt) <= nowTime) readyEvents.push(event);
-    }
-    const oldestReadyAt = readyEvents
-      .map((event) => event.availableAt)
-      .sort((left, right) => left.localeCompare(right))[0];
-    const matching = events.filter((event) =>
-      (!query.status || event.status === query.status) &&
-      (!query.type || event.type === query.type),
-    );
-    return {
-      items: matching.slice(0, query.limit),
-      deliveries: deliveries.filter((delivery) =>
-        matching.some((event) => event.id === delivery.outboxEventId),
-      ),
-      totalMatching: matching.length,
-      metrics: {
-        total: events.length,
-        statusCounts,
-        failedCount: statusCounts.failed + statusCounts.dead_letter,
-        totalAttempts,
-        readyCount: readyEvents.length,
-        expiredLeaseCount,
-        deliveryStatusCounts,
-        providerFeedbackCount,
-        ...(oldestReadyAt
-          ? {
-              oldestReadyAt,
-              oldestReadyAgeMs: Math.max(0, nowTime - Date.parse(oldestReadyAt)),
-            }
-          : {}),
-      },
-    };
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Inspecting delivery operations", projectId);
+      const events = await repository.listOutboxEvents(projectId);
+      const deliveries = await repository.listOutboxDeliveries(projectId);
+      const nowTime = this.now().getTime();
+      const statusCounts: Record<OutboxEvent["status"], number> = {
+        pending: 0,
+        processing: 0,
+        processed: 0,
+        failed: 0,
+        dead_letter: 0,
+      };
+      const deliveryStatusCounts: Record<OutboxDelivery["status"], number> = {
+        delivered: 0,
+        failed: 0,
+        suppressed: 0,
+        deferred: 0,
+      };
+      for (const delivery of deliveries) deliveryStatusCounts[delivery.status] += 1;
+      const providerFeedbackCount = deliveries.filter((delivery) => Boolean(delivery.feedback)).length;
+      let totalAttempts = 0;
+      let expiredLeaseCount = 0;
+      const readyEvents: OutboxEvent[] = [];
+      for (const event of events) {
+        statusCounts[event.status] += 1;
+        totalAttempts += event.attempts;
+        const leaseExpired =
+          event.status === "processing" && Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowTime;
+        if (leaseExpired) expiredLeaseCount += 1;
+        const processingReady =
+          event.status === "processing" && (!event.leaseUntil || Date.parse(event.leaseUntil) <= nowTime);
+        const retryable = event.status === "pending" || event.status === "failed" || processingReady;
+        if (retryable && Date.parse(event.availableAt) <= nowTime) readyEvents.push(event);
+      }
+      const oldestReadyAt = readyEvents
+        .map((event) => event.availableAt)
+        .sort((left, right) => left.localeCompare(right))[0];
+      const matching = events.filter(
+        (event) => (!query.status || event.status === query.status) && (!query.type || event.type === query.type),
+      );
+      return {
+        items: matching.slice(0, query.limit),
+        deliveries: deliveries.filter((delivery) => matching.some((event) => event.id === delivery.outboxEventId)),
+        totalMatching: matching.length,
+        metrics: {
+          total: events.length,
+          statusCounts,
+          failedCount: statusCounts.failed + statusCounts.dead_letter,
+          totalAttempts,
+          readyCount: readyEvents.length,
+          expiredLeaseCount,
+          deliveryStatusCounts,
+          providerFeedbackCount,
+          ...(oldestReadyAt
+            ? {
+                oldestReadyAt,
+                oldestReadyAgeMs: Math.max(0, nowTime - Date.parse(oldestReadyAt)),
+              }
+            : {}),
+        },
+      };
     });
   }
 
@@ -3974,64 +3854,65 @@ export class BridgeService {
     query: ProjectAnalyticsQuery,
   ): Promise<ProjectAnalyticsView> {
     return this.tenantTransaction(principal, async (repository) => {
-    await this.requireProject(principal, projectId, repository);
-    this.assertProjectOperator(principal, "Reading project analytics", projectId);
-    const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
-      repository.listRuns(projectId),
-      repository.listContextSnapshots(projectId),
-      repository.listQuestions(projectId),
-      repository.listDecisions(projectId),
-      repository.listAssumptions(projectId),
-      repository.listArtifacts(projectId),
-    ]);
-    const runs = allRuns.filter((run) =>
-      (!query.client || run.client === query.client) &&
-      (!query.startedFrom || Date.parse(run.startedAt) >= Date.parse(query.startedFrom)) &&
-      (!query.startedTo || Date.parse(run.startedAt) <= Date.parse(query.startedTo)),
-    );
-    const source: AnalyticsSource = { snapshots, questions, decisions, assumptions, artifacts };
-    const cohort = calculateAnalyticsCohort(runs, source);
-    const clients = [...new Set(runs.map((run) => run.client))].sort((left, right) => left.localeCompare(right));
-    const byClient = clients.map((client): ProjectAnalyticsClientBreakdown => {
-      const clientRuns = runs.filter((run) => run.client === client);
-      const clientCohort = calculateAnalyticsCohort(clientRuns, source);
+      await this.requireProject(principal, projectId, repository);
+      this.assertProjectOperator(principal, "Reading project analytics", projectId);
+      const [allRuns, snapshots, questions, decisions, assumptions, artifacts] = await Promise.all([
+        repository.listRuns(projectId),
+        repository.listContextSnapshots(projectId),
+        repository.listQuestions(projectId),
+        repository.listDecisions(projectId),
+        repository.listAssumptions(projectId),
+        repository.listArtifacts(projectId),
+      ]);
+      const runs = allRuns.filter(
+        (run) =>
+          (!query.client || run.client === query.client) &&
+          (!query.startedFrom || Date.parse(run.startedAt) >= Date.parse(query.startedFrom)) &&
+          (!query.startedTo || Date.parse(run.startedAt) <= Date.parse(query.startedTo)),
+      );
+      const source: AnalyticsSource = { snapshots, questions, decisions, assumptions, artifacts };
+      const cohort = calculateAnalyticsCohort(runs, source);
+      const clients = [...new Set(runs.map((run) => run.client))].sort((left, right) => left.localeCompare(right));
+      const byClient = clients.map((client): ProjectAnalyticsClientBreakdown => {
+        const clientRuns = runs.filter((run) => run.client === client);
+        const clientCohort = calculateAnalyticsCohort(clientRuns, source);
+        return {
+          client,
+          runCount: clientRuns.length,
+          contextRetrievals: clientCohort.activity.contextRetrievals,
+          questionSubmissions: clientCohort.activity.questionSubmissions,
+          questionsReused: clientCohort.activity.questionsReused,
+          decisionsAccepted: clientCohort.activity.decisionsAccepted,
+          decisionReuseOccurrences: clientCohort.activity.decisionReuseOccurrences,
+          assumptionsRecorded: clientCohort.activity.assumptionsRecorded,
+        };
+      });
       return {
-        client,
-        runCount: clientRuns.length,
-        contextRetrievals: clientCohort.activity.contextRetrievals,
-        questionSubmissions: clientCohort.activity.questionSubmissions,
-        questionsReused: clientCohort.activity.questionsReused,
-        decisionsAccepted: clientCohort.activity.decisionsAccepted,
-        decisionReuseOccurrences: clientCohort.activity.decisionReuseOccurrences,
-        assumptionsRecorded: clientCohort.activity.assumptionsRecorded,
+        projectId,
+        generatedAt: this.now().toISOString(),
+        cohort: {
+          runCount: runs.length,
+          ...(query.client ? { client: query.client } : {}),
+          ...(query.startedFrom ? { startedFrom: query.startedFrom } : {}),
+          ...(query.startedTo ? { startedTo: query.startedTo } : {}),
+        },
+        ...cohort,
+        byClient,
+        privacy: {
+          derivedFrom: [
+            "agent run client, capability, status, timestamps, and linked record identifiers",
+            "context snapshot timestamps and returned record identifiers",
+            "question routing, lifecycle, response, and accepted-decision metadata",
+            "assumption lifecycle and specification version approval metadata",
+          ],
+          excluded: [
+            "raw prompts, agent outputs, transcripts, and hidden reasoning",
+            "task summaries, question text, responses, comments, decision text, and assumption text",
+            "specification titles, summaries, bodies, hashes, and review text",
+            "principal names, notification content, external links, secrets, and credentials",
+          ],
+        },
       };
-    });
-    return {
-      projectId,
-      generatedAt: this.now().toISOString(),
-      cohort: {
-        runCount: runs.length,
-        ...(query.client ? { client: query.client } : {}),
-        ...(query.startedFrom ? { startedFrom: query.startedFrom } : {}),
-        ...(query.startedTo ? { startedTo: query.startedTo } : {}),
-      },
-      ...cohort,
-      byClient,
-      privacy: {
-        derivedFrom: [
-          "agent run client, capability, status, timestamps, and linked record identifiers",
-          "context snapshot timestamps and returned record identifiers",
-          "question routing, lifecycle, response, and accepted-decision metadata",
-          "assumption lifecycle and specification version approval metadata",
-        ],
-        excluded: [
-          "raw prompts, agent outputs, transcripts, and hidden reasoning",
-          "task summaries, question text, responses, comments, decision text, and assumption text",
-          "specification titles, summaries, bodies, hashes, and review text",
-          "principal names, notification content, external links, secrets, and credentials",
-        ],
-      },
-    };
     });
   }
 
@@ -4042,8 +3923,9 @@ export class BridgeService {
   ): Promise<AdapterDiagnostic> {
     return this.tenantTransaction(principal, async (repository) => {
       const project = await this.requireProject(principal, projectId, repository);
-      const previous = (await repository.listAdapterDiagnostics(projectId))
-        .find((diagnostic) => diagnostic.client === input.client);
+      const previous = (await repository.listAdapterDiagnostics(projectId)).find(
+        (diagnostic) => diagnostic.client === input.client,
+      );
       const observedAt = this.now().toISOString();
       const diagnostic: AdapterDiagnostic = {
         organizationId: project.organizationId,
@@ -4057,10 +3939,9 @@ export class BridgeService {
         checks: input.checks,
         status: input.checks.every((check) => check.status === "pass") ? "pass" : "fail",
         observedAt,
-        history: [
-          ...(previous?.history ?? []),
-          ...(previous ? [adapterDiagnosticHistoryEntry(previous)] : []),
-        ].slice(-ADAPTER_DIAGNOSTIC_HISTORY_LIMIT),
+        history: [...(previous?.history ?? []), ...(previous ? [adapterDiagnosticHistoryEntry(previous)] : [])].slice(
+          -ADAPTER_DIAGNOSTIC_HISTORY_LIMIT,
+        ),
       };
       await repository.saveAdapterDiagnostic(diagnostic);
       return diagnostic;
@@ -4078,19 +3959,11 @@ export class BridgeService {
       this.assertSecretSafe("administration", input);
       const expectedProvider = input.channel === "email" ? "ses" : "slack";
       if (input.provider !== expectedProvider) {
-        throw new BridgeError(
-          "VALIDATION_FAILED",
-          "Feedback provider must match delivery channel.",
-          400,
-        );
+        throw new BridgeError("VALIDATION_FAILED", "Feedback provider must match delivery channel.", 400);
       }
-      const deliveries = (await repository.listOutboxDeliveriesByProviderMessageId(
-        projectId,
-        input.channel,
-        input.providerMessageId,
-      )).filter((delivery) =>
-        delivery.organizationId === project.organizationId && delivery.projectId === projectId,
-      );
+      const deliveries = (
+        await repository.listOutboxDeliveriesByProviderMessageId(projectId, input.channel, input.providerMessageId)
+      ).filter((delivery) => delivery.organizationId === project.organizationId && delivery.projectId === projectId);
       if (deliveries.length === 0) {
         throw new BridgeError("OUTBOX_EVENT_NOT_FOUND", "Notification delivery not found.", 404);
       }
@@ -4101,11 +3974,7 @@ export class BridgeService {
       };
       for (const delivery of deliveries) {
         if (delivery.feedback && !sameNotificationDeliveryFeedback(delivery.feedback, feedback)) {
-          throw new BridgeError(
-            "CONFLICT",
-            "The delivery already has different provider feedback.",
-            409,
-          );
+          throw new BridgeError("CONFLICT", "The delivery already has different provider feedback.", 409);
         }
       }
       const pending = deliveries.filter((delivery) => !delivery.feedback);
@@ -4165,10 +4034,11 @@ export class BridgeService {
       const questionById = new Map(questions.map((question) => [question.id, question]));
       const now = this.now().getTime();
       const unroutedQuestions = questions
-        .filter((question) =>
-          ["open", "in_discussion"].includes(question.status) &&
-          question.ownerIds.length === 0 &&
-          question.ownerRoles.length === 0,
+        .filter(
+          (question) =>
+            ["open", "in_discussion"].includes(question.status) &&
+            question.ownerIds.length === 0 &&
+            question.ownerRoles.length === 0,
         )
         .map((question) => ({
           id: question.id,
@@ -4184,17 +4054,17 @@ export class BridgeService {
       const overdueProtected = decisions.flatMap((decision) => {
         if (!decision.questionId) return [];
         const question = questionById.get(decision.questionId);
-        return decision.status === "active" &&
-          question?.risk === "protected" &&
-          Date.parse(decision.reviewAt) <= now
-          ? [{
-              id: decision.id,
-              questionId: decision.questionId,
-              category: decision.category,
-              ownerId: decision.ownerId,
-              status: decision.status,
-              reviewAt: decision.reviewAt,
-            }]
+        return decision.status === "active" && question?.risk === "protected" && Date.parse(decision.reviewAt) <= now
+          ? [
+              {
+                id: decision.id,
+                questionId: decision.questionId,
+                category: decision.category,
+                ownerId: decision.ownerId,
+                status: decision.status,
+                reviewAt: decision.reviewAt,
+              },
+            ]
           : [];
       });
       const expiringAssumptions = assumptions
@@ -4216,11 +4086,7 @@ export class BridgeService {
         }));
       const remainingBlockingQuestionCounts = new Map<string, number>();
       for (const question of questions) {
-        if (
-          question.runId &&
-          question.blocking &&
-          ["open", "in_discussion"].includes(question.status)
-        ) {
+        if (question.runId && question.blocking && ["open", "in_discussion"].includes(question.status)) {
           remainingBlockingQuestionCounts.set(
             question.runId,
             (remainingBlockingQuestionCounts.get(question.runId) ?? 0) + 1,
@@ -4273,15 +4139,19 @@ export class BridgeService {
           };
         });
       const providerFeedback = deliveries
-        .flatMap((delivery) => delivery.feedback
-          ? [{
-              deliveryId: delivery.id,
-              channel: delivery.channel,
-              provider: delivery.feedback.provider,
-              type: delivery.feedback.type,
-              receivedAt: delivery.feedback.receivedAt,
-            }]
-          : [])
+        .flatMap((delivery) =>
+          delivery.feedback
+            ? [
+                {
+                  deliveryId: delivery.id,
+                  channel: delivery.channel,
+                  provider: delivery.feedback.provider,
+                  type: delivery.feedback.type,
+                  receivedAt: delivery.feedback.receivedAt,
+                },
+              ]
+            : [],
+        )
         .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt))
         .slice(0, 50);
       return {
@@ -4312,7 +4182,9 @@ export class BridgeService {
           items: adapters,
           mcpDiagnostics: adapters.some((adapter) => adapter.capabilities.includes("mcp"))
             ? "observed_from_runs"
-            : adapterDiagnostics.length > 0 ? "observed_from_doctor" : "not_reported",
+            : adapterDiagnostics.length > 0
+              ? "observed_from_doctor"
+              : "not_reported",
           note: "Capabilities are derived from recorded runs; the latest bounded `bridge doctor` report is shown separately.",
         },
         diagnostics: adapterDiagnostics.map((diagnostic) => {
@@ -4340,75 +4212,51 @@ export class BridgeService {
   async listOrganizationAudit(principal: Principal, query: AuditListQuery): Promise<AuditPage> {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Reading organization audit events");
-      const events = (await repository.listOrganizationAuditEvents(principal.organizationId))
-        .map((event): AuditRecord => ({ ...event, scope: "organization" }));
+      const events = (await repository.listOrganizationAuditEvents(principal.organizationId)).map(
+        (event): AuditRecord => ({ ...event, scope: "organization" }),
+      );
       return this.auditPage(events, query);
     });
   }
 
-  async listProjectAudit(
-    principal: Principal,
-    projectId: string,
-    query: AuditListQuery,
-  ): Promise<AuditPage> {
+  async listProjectAudit(principal: Principal, projectId: string, query: AuditListQuery): Promise<AuditPage> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Reading project audit events", projectId);
-      const events = (await repository.listAuditEvents(projectId))
-        .map((event): AuditRecord => ({ ...event, scope: "project" }));
+      const events = (await repository.listAuditEvents(projectId)).map(
+        (event): AuditRecord => ({ ...event, scope: "project" }),
+      );
       return this.auditPage(events, query);
     });
   }
 
-  async exportOrganizationAudit(
-    principal: Principal,
-    input: AuditExportInput,
-  ): Promise<AuditExport> {
+  async exportOrganizationAudit(principal: Principal, input: AuditExportInput): Promise<AuditExport> {
     return this.tenantTransaction(principal, async (repository) => {
       this.assertOrganizationAdministrator(principal, "Exporting organization audit events");
       const records = this.filterAuditRecords(
-        (await repository.listOrganizationAuditEvents(principal.organizationId))
-          .map((event): AuditRecord => ({ ...event, scope: "organization" })),
+        (await repository.listOrganizationAuditEvents(principal.organizationId)).map(
+          (event): AuditRecord => ({ ...event, scope: "organization" }),
+        ),
         input,
       ).slice(0, input.maxItems);
       const timestamp = this.now().toISOString();
       const exportId = `aex_${this.id()}`;
-      await this.auditOrganizationEvent(
-        repository,
-        principal,
-        "audit.exported",
-        exportId,
-        timestamp,
-        "audit_export",
-      );
+      await this.auditOrganizationEvent(repository, principal, "audit.exported", exportId, timestamp, "audit_export");
       return this.renderAuditExport("organization", principal.organizationId, records, input.format, timestamp);
     });
   }
 
-  async exportProjectAudit(
-    principal: Principal,
-    projectId: string,
-    input: AuditExportInput,
-  ): Promise<AuditExport> {
+  async exportProjectAudit(principal: Principal, projectId: string, input: AuditExportInput): Promise<AuditExport> {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       this.assertProjectOperator(principal, "Exporting project audit events", projectId);
       const records = this.filterAuditRecords(
-        (await repository.listAuditEvents(projectId))
-          .map((event): AuditRecord => ({ ...event, scope: "project" })),
+        (await repository.listAuditEvents(projectId)).map((event): AuditRecord => ({ ...event, scope: "project" })),
         input,
       ).slice(0, input.maxItems);
       const timestamp = this.now().toISOString();
       const exportId = `aex_${this.id()}`;
-      await this.audit(
-        repository,
-        principal,
-        projectId,
-        "audit.exported",
-        "audit_export",
-        exportId,
-        timestamp,
-      );
+      await this.audit(repository, principal, projectId, "audit.exported", "audit_export", exportId, timestamp);
       return this.renderAuditExport("project", projectId, records, input.format, timestamp);
     });
   }
@@ -4423,28 +4271,17 @@ export class BridgeService {
       this.assertProjectOperator(principal, "Exporting project data", projectId);
       const exportedAt = this.now().toISOString();
       const exportId = `pex_${this.id()}`;
-      await this.audit(
-        repository,
-        principal,
-        projectId,
-        "project.exported",
-        "project_export",
-        exportId,
-        exportedAt,
-      );
+      await this.audit(repository, principal, projectId, "project.exported", "project_export", exportId, exportedAt);
 
       const decisions = (await repository.listDecisions(projectId))
         .slice()
-        .sort((left, right) =>
-          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
       const artifacts = (await repository.listArtifacts(projectId))
         .slice()
-        .sort((left, right) =>
-          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
       const auditEvents = (await repository.listAuditEvents(projectId))
         .slice()
-        .sort((left, right) =>
-          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
 
       const decisionItems = decisions.slice(input.decisionOffset, input.decisionOffset + input.maxDecisions);
       const artifactItems = artifacts.slice(input.artifactOffset, input.artifactOffset + input.maxArtifacts);
@@ -4458,28 +4295,28 @@ export class BridgeService {
       return {
         filename: `bridge-project-${projectId}-${safeTimestamp}.json`,
         contentType: "application/json; charset=utf-8",
-        body: JSON.stringify({
-          schemaVersion: 1,
-          exportId,
-          exportedAt,
-          project,
-          counts,
-          humanApprovalChanged: false,
-          decisions: decisionItems,
-          artifacts: artifactItems,
-          auditEvents: auditItems,
-        }, null, 2),
+        body: JSON.stringify(
+          {
+            schemaVersion: 1,
+            exportId,
+            exportedAt,
+            project,
+            counts,
+            humanApprovalChanged: false,
+            decisions: decisionItems,
+            artifacts: artifactItems,
+            auditEvents: auditItems,
+          },
+          null,
+          2,
+        ),
         counts,
         humanApprovalChanged: false,
       };
     });
   }
 
-  async replayOutboxEvent(
-    principal: Principal,
-    eventId: string,
-    input: ReplayOutboxEventInput,
-  ): Promise<OutboxEvent> {
+  async replayOutboxEvent(principal: Principal, eventId: string, input: ReplayOutboxEventInput): Promise<OutboxEvent> {
     return this.tenantTransaction(principal, async (repository) => {
       const event = await repository.getOutboxEvent(eventId);
       if (!event || event.organizationId !== principal.organizationId) {
@@ -4494,20 +4331,16 @@ export class BridgeService {
       );
       this.assertProjectOperator(principal, "Replaying a delivery event", event.projectId);
       if (event.status !== "failed" && event.status !== "dead_letter") {
-        throw new BridgeError(
-          "CONFLICT",
-          "Only failed or dead-letter delivery events can be replayed.",
-          409,
-          { currentStatus: event.status, currentAttempts: event.attempts },
-        );
+        throw new BridgeError("CONFLICT", "Only failed or dead-letter delivery events can be replayed.", 409, {
+          currentStatus: event.status,
+          currentAttempts: event.attempts,
+        });
       }
       if (event.attempts !== input.expectedAttempts) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The delivery event changed before replay; refresh and try again.",
-          409,
-          { currentStatus: event.status, currentAttempts: event.attempts },
-        );
+        throw new BridgeError("CONFLICT", "The delivery event changed before replay; refresh and try again.", 409, {
+          currentStatus: event.status,
+          currentAttempts: event.attempts,
+        });
       }
       const { leaseUntil: _leaseUntil, processedAt: _processedAt, lastError: _lastError, ...base } = event;
       const replayed: OutboxEvent = {
@@ -4530,11 +4363,7 @@ export class BridgeService {
     });
   }
 
-  async startRun(
-    principal: Principal,
-    projectId: string,
-    input: StartAgentRunInput,
-  ): Promise<RunRegistration> {
+  async startRun(principal: Principal, projectId: string, input: StartAgentRunInput): Promise<RunRegistration> {
     return this.tenantTransaction(principal, (repository) =>
       this.startRunInTransaction(repository, principal, projectId, input),
     );
@@ -4598,16 +4427,11 @@ export class BridgeService {
       }
       await this.assertContinuationKey(repository, previous.id, input.resumeContextKey);
       const blockingQuestions = await this.blockingQuestions(repository, previous);
-      const remaining = blockingQuestions.filter((question) =>
-        ["open", "in_discussion"].includes(question.status),
-      );
+      const remaining = blockingQuestions.filter((question) => ["open", "in_discussion"].includes(question.status));
       if (remaining.length > 0) {
-        throw new BridgeError(
-          "CONFLICT",
-          "The prior run still has unresolved blocking questions.",
-          409,
-          { questionIds: remaining.map((question) => question.id) },
-        );
+        throw new BridgeError("CONFLICT", "The prior run still has unresolved blocking questions.", 409, {
+          questionIds: remaining.map((question) => question.id),
+        });
       }
     }
 
@@ -4652,15 +4476,10 @@ export class BridgeService {
   }
 
   async getRun(principal: Principal, runId: string): Promise<AgentRun> {
-    return this.tenantTransaction(principal, (repository) =>
-      this.requireRun(principal, runId, repository));
+    return this.tenantTransaction(principal, (repository) => this.requireRun(principal, runId, repository));
   }
 
-  async reportRun(
-    principal: Principal,
-    runId: string,
-    input: ReportAgentRunInput,
-  ): Promise<AgentRun> {
+  async reportRun(principal: Principal, runId: string, input: ReportAgentRunInput): Promise<AgentRun> {
     return this.tenantTransaction(principal, (repository) =>
       this.reportRunInTransaction(repository, principal, runId, input),
     );
@@ -4673,7 +4492,8 @@ export class BridgeService {
     input: ReportAgentRunInput,
   ): Promise<AgentRun> {
     const run = await this.requireRun(principal, runId, repository);
-    const mayOperate = run.agentId === principal.id ||
+    const mayOperate =
+      run.agentId === principal.id ||
       (principal.type === "human" && principalHasRole(principal, "project-admin", run.projectId));
     if (!mayOperate) {
       throw new BridgeError("FORBIDDEN", "Only the run principal or a project administrator can update this run.", 403);
@@ -4694,17 +4514,11 @@ export class BridgeService {
       cancelled: [],
     };
     if (!allowed[run.status].includes(input.status)) {
-      throw new BridgeError(
-        "CONFLICT",
-        `A run cannot transition from ${run.status} to ${input.status}.`,
-        409,
-      );
+      throw new BridgeError("CONFLICT", `A run cannot transition from ${run.status} to ${input.status}.`, 409);
     }
 
     const blockingQuestions = await this.blockingQuestions(repository, run);
-    const unresolved = blockingQuestions.filter((question) =>
-      ["open", "in_discussion"].includes(question.status),
-    );
+    const unresolved = blockingQuestions.filter((question) => ["open", "in_discussion"].includes(question.status));
     if (input.status === "waiting_for_human" && unresolved.length === 0) {
       throw new BridgeError(
         "VALIDATION_FAILED",
@@ -4729,11 +4543,7 @@ export class BridgeService {
       );
     }
     if (["completed", "failed"].includes(input.status) && !input.summary) {
-      throw new BridgeError(
-        "VALIDATION_FAILED",
-        `A ${input.status} run requires a concise summary.`,
-        422,
-      );
+      throw new BridgeError("VALIDATION_FAILED", `A ${input.status} run requires a concise summary.`, 422);
     }
 
     const timestamp = this.now().toISOString();
@@ -4790,11 +4600,7 @@ export class BridgeService {
     });
   }
 
-  async recordAssumption(
-    principal: Principal,
-    projectId: string,
-    input: RecordAssumptionInput,
-  ): Promise<Assumption> {
+  async recordAssumption(principal: Principal, projectId: string, input: RecordAssumptionInput): Promise<Assumption> {
     return this.tenantTransaction(principal, (repository) =>
       this.recordAssumptionInTransaction(repository, principal, projectId, input),
     );
@@ -4809,11 +4615,7 @@ export class BridgeService {
     await this.requireProject(principal, projectId, repository);
     this.assertSecretSafe("assumption", input);
     if (principal.type !== "human" && !input.runId) {
-      throw new BridgeError(
-        "VALIDATION_FAILED",
-        "A non-human assumption requires a source run ID.",
-        422,
-      );
+      throw new BridgeError("VALIDATION_FAILED", "A non-human assumption requires a source run ID.", 422);
     }
 
     const idempotencyKey = `assumption:${principal.organizationId}:${principal.id}:${input.idempotencyKey}`;
@@ -4859,9 +4661,7 @@ export class BridgeService {
       );
     }
 
-    const sourceRun = input.runId
-      ? await this.requireLinkableRun(principal, input.runId, repository)
-      : undefined;
+    const sourceRun = input.runId ? await this.requireLinkableRun(principal, input.runId, repository) : undefined;
     const exactScopeDecisions = (await repository.listDecisions(projectId)).filter(
       (decision) =>
         decision.status === "active" &&
@@ -4958,117 +4758,120 @@ export class BridgeService {
   }
 
   async expireDueAssumptions(): Promise<AssumptionExpiryCycleResult> {
-    return this.repository.transaction(async (repository) => {
-      let expiredCount = 0;
-      for (const organization of await repository.listOrganizations()) {
-        const maintenancePrincipal: Principal = {
-          id: "bridge-worker",
-          type: "integration",
-          organizationId: organization.id,
-          projectIds: [],
-          allProjects: true,
-          roles: ["system-maintenance"],
-          displayName: "Bridge worker",
-        };
-        for (const project of await repository.listProjects(organization.id)) {
-          for (const assumption of await repository.listAssumptions(project.id)) {
-            const refreshed = await this.expireAssumptionIfDue(
-              repository,
-              maintenancePrincipal,
-              assumption,
-              { notify: true },
-            );
-            if (refreshed.status === "expired" && assumption.status === "active") expiredCount += 1;
+    return this.repository.transaction(
+      async (repository) => {
+        let expiredCount = 0;
+        for (const organization of await repository.listOrganizations()) {
+          const maintenancePrincipal: Principal = {
+            id: "bridge-worker",
+            type: "integration",
+            organizationId: organization.id,
+            projectIds: [],
+            allProjects: true,
+            roles: ["system-maintenance"],
+            displayName: "Bridge worker",
+          };
+          for (const project of await repository.listProjects(organization.id)) {
+            for (const assumption of await repository.listAssumptions(project.id)) {
+              const refreshed = await this.expireAssumptionIfDue(repository, maintenancePrincipal, assumption, {
+                notify: true,
+              });
+              if (refreshed.status === "expired" && assumption.status === "active") expiredCount += 1;
+            }
           }
         }
-      }
-      return { expiredCount };
-    }, { maintenance: true });
+        return { expiredCount };
+      },
+      { maintenance: true },
+    );
   }
 
   async escalateDueBlockingQuestions(): Promise<BlockingQuestionEscalationCycleResult> {
-    return this.repository.transaction(async (repository) => {
-      let escalatedCount = 0;
-      const now = this.now();
-      const escalatedAt = now.toISOString();
-      for (const organization of await repository.listOrganizations()) {
-        const maintenancePrincipal: Principal = {
-          id: "bridge-worker",
-          type: "integration",
-          organizationId: organization.id,
-          projectIds: [],
-          allProjects: true,
-          roles: ["system-maintenance"],
-          displayName: "Bridge worker",
-        };
-        for (const project of await repository.listProjects(organization.id)) {
-          for (const listedQuestion of await repository.listQuestions(project.id)) {
-            if (
-              !listedQuestion.blocking ||
-              !listedQuestion.dueAt ||
-              listedQuestion.blockingEscalatedAt ||
-              !["open", "in_discussion"].includes(listedQuestion.status) ||
-              Date.parse(listedQuestion.dueAt) > now.getTime()
-            ) {
-              continue;
-            }
-            const question = await repository.getQuestion(listedQuestion.id);
-            if (
-              !question ||
-              !question.blocking ||
-              !question.dueAt ||
-              question.blockingEscalatedAt ||
-              !["open", "in_discussion"].includes(question.status) ||
-              Date.parse(question.dueAt) > now.getTime()
-            ) {
-              continue;
-            }
+    return this.repository.transaction(
+      async (repository) => {
+        let escalatedCount = 0;
+        const now = this.now();
+        const escalatedAt = now.toISOString();
+        for (const organization of await repository.listOrganizations()) {
+          const maintenancePrincipal: Principal = {
+            id: "bridge-worker",
+            type: "integration",
+            organizationId: organization.id,
+            projectIds: [],
+            allProjects: true,
+            roles: ["system-maintenance"],
+            displayName: "Bridge worker",
+          };
+          for (const project of await repository.listProjects(organization.id)) {
+            for (const listedQuestion of await repository.listQuestions(project.id)) {
+              if (
+                !listedQuestion.blocking ||
+                !listedQuestion.dueAt ||
+                listedQuestion.blockingEscalatedAt ||
+                !["open", "in_discussion"].includes(listedQuestion.status) ||
+                Date.parse(listedQuestion.dueAt) > now.getTime()
+              ) {
+                continue;
+              }
+              const question = await repository.getQuestion(listedQuestion.id);
+              if (
+                !question ||
+                !question.blocking ||
+                !question.dueAt ||
+                question.blockingEscalatedAt ||
+                !["open", "in_discussion"].includes(question.status) ||
+                Date.parse(question.dueAt) > now.getTime()
+              ) {
+                continue;
+              }
 
-            await repository.saveQuestion({ ...question, blockingEscalatedAt: escalatedAt });
-            await this.audit(
-              repository,
-              maintenancePrincipal,
-              project.id,
-              "question.blocking_escalated",
-              "question",
-              question.id,
-              escalatedAt,
-              question.policyVersion,
-              undefined,
-              { policyRuleKey: question.policyRuleKey },
-            );
-            await this.notify(
-              repository,
-              maintenancePrincipal,
-              project.id,
-              [...question.ownerIds, ...question.reviewerIds, ...project.decisionOwnerIds],
-              {
-                type: "question_blocking_escalation",
-                title: "Overdue blocking question needs attention",
-                body: `“${question.title}” is overdue and still blocks progress. Review the authoritative question in Bridge.`,
-                targetType: "question",
-                targetId: question.id,
-                recipientRoles: [
-                  ...question.ownerRoles,
-                  ...question.requiredOwnerRoles,
-                  ...question.reviewerRoles,
-                  ...question.requiredReviewerRoles,
-                  "project-admin",
-                ],
-                questionContext: {
-                  id: question.id,
-                  status: question.status,
-                  risk: question.risk,
-                  ownerIds: question.ownerIds,
+              await repository.saveQuestion({ ...question, blockingEscalatedAt: escalatedAt });
+              await this.audit(
+                repository,
+                maintenancePrincipal,
+                project.id,
+                "question.blocking_escalated",
+                "question",
+                question.id,
+                escalatedAt,
+                question.policyVersion,
+                undefined,
+                { policyRuleKey: question.policyRuleKey },
+              );
+              await this.notify(
+                repository,
+                maintenancePrincipal,
+                project.id,
+                [...question.ownerIds, ...question.reviewerIds, ...project.decisionOwnerIds],
+                {
+                  type: "question_blocking_escalation",
+                  title: "Overdue blocking question needs attention",
+                  body: `“${question.title}” is overdue and still blocks progress. Review the authoritative question in Bridge.`,
+                  targetType: "question",
+                  targetId: question.id,
+                  recipientRoles: [
+                    ...question.ownerRoles,
+                    ...question.requiredOwnerRoles,
+                    ...question.reviewerRoles,
+                    ...question.requiredReviewerRoles,
+                    "project-admin",
+                  ],
+                  questionContext: {
+                    id: question.id,
+                    status: question.status,
+                    risk: question.risk,
+                    ownerIds: question.ownerIds,
+                  },
                 },
-              },
-            );
-            escalatedCount += 1;
+              );
+              escalatedCount += 1;
+            }
           }
         }
-      }
-      return { escalatedCount };
-    }, { maintenance: true });
+        return { escalatedCount };
+      },
+      { maintenance: true },
+    );
   }
 
   async resolveAssumption(
@@ -5220,9 +5023,7 @@ export class BridgeService {
         resolvedAt: timestamp,
         resolutionRationale: input.rationale,
         ...(confirmedDecisionId ? { confirmedDecisionId } : {}),
-        ...(input.supersedingAssumptionId
-          ? { supersedingAssumptionId: input.supersedingAssumptionId }
-          : {}),
+        ...(input.supersedingAssumptionId ? { supersedingAssumptionId: input.supersedingAssumptionId } : {}),
         version: assumption.version + 1,
       };
       await repository.saveAssumption(updated);
@@ -5279,11 +5080,7 @@ export class BridgeService {
       blocking: input.blocking,
     });
     if (policy.action === "protected_approval" && input.fallback) {
-      throw new BridgeError(
-        "POLICY_BLOCKED",
-        "Protected questions cannot define an automatic fallback.",
-        403,
-      );
+      throw new BridgeError("POLICY_BLOCKED", "Protected questions cannot define an automatic fallback.", 403);
     }
 
     const timestamp = this.now().toISOString();
@@ -5293,9 +5090,7 @@ export class BridgeService {
     }
     const dueAt = parsedDueAt === undefined ? undefined : new Date(parsedDueAt).toISOString();
     const routing = await this.resolveQuestionRouting(repository, project, input, policy);
-    const sourceRun = input.runId
-      ? await this.requireLinkableRun(principal, input.runId, repository)
-      : undefined;
+    const sourceRun = input.runId ? await this.requireLinkableRun(principal, input.runId, repository) : undefined;
 
     const effectiveBlocking = input.blocking || ["block", "protected_approval"].includes(policy.action);
     const reusable = await this.findReusableQuestion(
@@ -5449,9 +5244,7 @@ export class BridgeService {
     for (const question of questions) {
       if (!["open", "in_discussion", "accepted"].includes(question.status)) continue;
       if (question.status === "accepted") {
-        const decision = question.decisionId
-          ? await repository.getDecision(question.decisionId)
-          : undefined;
+        const decision = question.decisionId ? await repository.getDecision(question.decisionId) : undefined;
         if (!decision || decision.status !== "active") continue;
       }
 
@@ -5463,11 +5256,13 @@ export class BridgeService {
         this.tokenSimilarity(input.context, question.context),
         this.trigramSimilarity(input.context, question.context),
       );
-      const sameCategory = this.normalizeQuestionText(input.category) ===
-        this.normalizeQuestionText(question.category);
+      const sameCategory = this.normalizeQuestionText(input.category) === this.normalizeQuestionText(question.category);
       const sameType = input.type === question.type;
       const sameScope = this.scopesEqual(input.scope, question.scope);
-      const exact = sameCategory && sameType && sameScope &&
+      const exact =
+        sameCategory &&
+        sameType &&
+        sameScope &&
         this.normalizeQuestionText(input.title) === this.normalizeQuestionText(question.title) &&
         this.normalizeQuestionText(input.context) === this.normalizeQuestionText(question.context);
       const score = exact
@@ -5477,7 +5272,8 @@ export class BridgeService {
               contextSimilarity * 0.25 +
               (sameCategory ? 0.15 : 0) +
               (sameType ? 0.1 : 0) +
-              (sameScope ? 0.1 : 0)) * 100,
+              (sameScope ? 0.1 : 0)) *
+              100,
           );
       if (!exact && score < 40) continue;
 
@@ -5505,11 +5301,12 @@ export class BridgeService {
     }
 
     return matches
-      .sort((left, right) =>
-        Number(right.matchKind === "exact") - Number(left.matchKind === "exact") ||
-        Number(right.status === "accepted") - Number(left.status === "accepted") ||
-        right.score - left.score ||
-        right.createdAt.localeCompare(left.createdAt),
+      .sort(
+        (left, right) =>
+          Number(right.matchKind === "exact") - Number(left.matchKind === "exact") ||
+          Number(right.status === "accepted") - Number(left.status === "accepted") ||
+          right.score - left.score ||
+          right.createdAt.localeCompare(left.createdAt),
       )
       .slice(0, input.maxItems);
   }
@@ -5524,40 +5321,43 @@ export class BridgeService {
     effectiveBlocking: boolean,
   ): Promise<Question | undefined> {
     const questions = await repository.listQuestions(projectId);
-    const candidates = questions.filter((question) =>
-      ["open", "in_discussion", "accepted"].includes(question.status) &&
-      question.type === input.type &&
-      this.normalizeQuestionText(question.category) === this.normalizeQuestionText(input.category) &&
-      this.normalizeQuestionText(question.title) === this.normalizeQuestionText(input.title) &&
-      this.normalizeQuestionText(question.context) === this.normalizeQuestionText(input.context) &&
-      this.scopesEqual(question.scope, input.scope) &&
-      question.risk === policy.risk &&
-      question.policyAction === policy.action &&
-      question.reversible === input.reversible &&
-      question.blocking === effectiveBlocking &&
-      question.dueAt === dueAt &&
-      JSON.stringify([...question.ownerIds].sort()) === JSON.stringify([...routing.ownerIds].sort()) &&
-      JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...routing.ownerRoles].sort()) &&
-      JSON.stringify([...(question.reviewerIds ?? [])].sort()) ===
-        JSON.stringify([...routing.reviewerIds].sort()) &&
-      JSON.stringify([...(question.reviewerRoles ?? [])].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...routing.reviewerRoles].sort()) &&
-      JSON.stringify([...question.requiredOwnerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...policy.requiredOwnerRoles].sort()) &&
-      JSON.stringify([...question.requiredReviewerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
-        JSON.stringify([...policy.requiredReviewerRoles].sort()) &&
-      JSON.stringify(Object.entries(question.requiredReviewerQuorum ?? {}).sort(([left], [right]) => left.localeCompare(right))) ===
-        JSON.stringify(Object.entries(policy.requiredReviewerQuorum).sort(([left], [right]) => left.localeCompare(right)))
+    const candidates = questions.filter(
+      (question) =>
+        ["open", "in_discussion", "accepted"].includes(question.status) &&
+        question.type === input.type &&
+        this.normalizeQuestionText(question.category) === this.normalizeQuestionText(input.category) &&
+        this.normalizeQuestionText(question.title) === this.normalizeQuestionText(input.title) &&
+        this.normalizeQuestionText(question.context) === this.normalizeQuestionText(input.context) &&
+        this.scopesEqual(question.scope, input.scope) &&
+        question.risk === policy.risk &&
+        question.policyAction === policy.action &&
+        question.reversible === input.reversible &&
+        question.blocking === effectiveBlocking &&
+        question.dueAt === dueAt &&
+        JSON.stringify([...question.ownerIds].sort()) === JSON.stringify([...routing.ownerIds].sort()) &&
+        JSON.stringify([...question.ownerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
+          JSON.stringify([...routing.ownerRoles].sort()) &&
+        JSON.stringify([...(question.reviewerIds ?? [])].sort()) === JSON.stringify([...routing.reviewerIds].sort()) &&
+        JSON.stringify([...(question.reviewerRoles ?? [])].map(normalizeRoleName).filter(Boolean).sort()) ===
+          JSON.stringify([...routing.reviewerRoles].sort()) &&
+        JSON.stringify([...question.requiredOwnerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
+          JSON.stringify([...policy.requiredOwnerRoles].sort()) &&
+        JSON.stringify([...question.requiredReviewerRoles].map(normalizeRoleName).filter(Boolean).sort()) ===
+          JSON.stringify([...policy.requiredReviewerRoles].sort()) &&
+        JSON.stringify(
+          Object.entries(question.requiredReviewerQuorum ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+        ) ===
+          JSON.stringify(
+            Object.entries(policy.requiredReviewerQuorum).sort(([left], [right]) => left.localeCompare(right)),
+          ),
     );
-    for (const question of candidates.sort((left, right) =>
-      Number(right.status === "accepted") - Number(left.status === "accepted") ||
-      right.createdAt.localeCompare(left.createdAt),
+    for (const question of candidates.sort(
+      (left, right) =>
+        Number(right.status === "accepted") - Number(left.status === "accepted") ||
+        right.createdAt.localeCompare(left.createdAt),
     )) {
       if (question.status !== "accepted") return question;
-      const decision = question.decisionId
-        ? await repository.getDecision(question.decisionId)
-        : undefined;
+      const decision = question.decisionId ? await repository.getDecision(question.decisionId) : undefined;
       if (decision?.status === "active") return question;
     }
     return undefined;
@@ -5571,9 +5371,8 @@ export class BridgeService {
     timestamp: string,
   ): Promise<void> {
     if (run.questionIds.includes(question.id)) return;
-    const waiting = question.blocking &&
-      ["open", "in_discussion"].includes(question.status) &&
-      run.status === "running";
+    const waiting =
+      question.blocking && ["open", "in_discussion"].includes(question.status) && run.status === "running";
     await repository.saveRun({
       ...run,
       status: waiting ? "waiting_for_human" : run.status,
@@ -5619,10 +5418,9 @@ export class BridgeService {
       const normalized = `  ${this.normalizeQuestionText(value)} `;
       const characters = Array.from(normalized);
       if (characters.length <= 3) return new Set([normalized]);
-      return new Set(Array.from(
-        { length: characters.length - 2 },
-        (_, index) => characters.slice(index, index + 3).join(""),
-      ));
+      return new Set(
+        Array.from({ length: characters.length - 2 }, (_, index) => characters.slice(index, index + 3).join("")),
+      );
     };
     const leftTrigrams = trigrams(left);
     const rightTrigrams = trigrams(right);
@@ -5635,8 +5433,7 @@ export class BridgeService {
     return this.tenantTransaction(principal, async (repository) => {
       await this.requireProject(principal, projectId, repository);
       const now = this.now();
-      return (await repository.listQuestions(projectId)).map((question) =>
-        questionInboxItem(principal, question, now));
+      return (await repository.listQuestions(projectId)).map((question) => questionInboxItem(principal, question, now));
     });
   }
 
@@ -5646,47 +5443,53 @@ export class BridgeService {
     filters: QuestionInboxQuery = {},
   ): Promise<readonly QuestionInboxItem[]> {
     return this.tenantTransaction(principal, async (repository) => {
-    await this.requireProject(principal, projectId, repository);
-    const now = this.now();
-    const questions = (await repository.listQuestions(projectId)).map((question) =>
-      questionInboxItem(principal, question, now));
-    const normalizedCategory = filters.category?.normalize("NFKC").toLocaleLowerCase("en");
-    const normalizedRole = filters.role ? normalizeRoleName(filters.role) : undefined;
-    return questions
-      .filter((question) =>
-        (!filters.status || question.status === filters.status) &&
-        (!filters.risk || question.risk === filters.risk) &&
-        (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
-        (!normalizedRole || [...question.ownerRoles, ...(question.reviewerRoles ?? [])]
-          .some((role) => normalizeRoleName(role) === normalizedRole)) &&
-        (!filters.due ||
-          (filters.due === "overdue" && question.dueStatus === "overdue") ||
-          (filters.due === "next_7_days" && question.dueStatus === "due_soon") ||
-          (filters.due === "scheduled" && question.dueStatus !== "none") ||
-          (filters.due === "none" && question.dueStatus === "none")),
-      )
-      .filter((question) => question.inboxReasons.length > 0)
-      .sort((left, right) => {
-        const riskRank = { protected: 4, high: 3, medium: 2, low: 1 } as const;
-        const protectedDifference = Number(right.risk === "protected") - Number(left.risk === "protected");
-        if (protectedDifference !== 0) return protectedDifference;
-        const overdueDifference = Number(right.dueStatus === "overdue") - Number(left.dueStatus === "overdue");
-        if (overdueDifference !== 0) return overdueDifference;
-        if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
-        const dueSoonDifference = Number(right.dueStatus === "due_soon") - Number(left.dueStatus === "due_soon");
-        if (dueSoonDifference !== 0) return dueSoonDifference;
-        const riskDifference = riskRank[right.risk] - riskRank[left.risk];
-        if (riskDifference !== 0) return riskDifference;
-        if (left.dueAt && right.dueAt) {
-          const dueAtDifference = Date.parse(left.dueAt) - Date.parse(right.dueAt);
-          if (dueAtDifference !== 0) return dueAtDifference;
-        } else if (left.dueAt || right.dueAt) {
-          return left.dueAt ? -1 : 1;
-        }
-        const discussionDifference = Number(right.status === "in_discussion") - Number(left.status === "in_discussion");
-        if (discussionDifference !== 0) return discussionDifference;
-        return Date.parse(right.createdAt) - Date.parse(left.createdAt);
-      });
+      await this.requireProject(principal, projectId, repository);
+      const now = this.now();
+      const questions = (await repository.listQuestions(projectId)).map((question) =>
+        questionInboxItem(principal, question, now),
+      );
+      const normalizedCategory = filters.category?.normalize("NFKC").toLocaleLowerCase("en");
+      const normalizedRole = filters.role ? normalizeRoleName(filters.role) : undefined;
+      return questions
+        .filter(
+          (question) =>
+            (!filters.status || question.status === filters.status) &&
+            (!filters.risk || question.risk === filters.risk) &&
+            (!normalizedCategory ||
+              question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
+            (!normalizedRole ||
+              [...question.ownerRoles, ...(question.reviewerRoles ?? [])].some(
+                (role) => normalizeRoleName(role) === normalizedRole,
+              )) &&
+            (!filters.due ||
+              (filters.due === "overdue" && question.dueStatus === "overdue") ||
+              (filters.due === "next_7_days" && question.dueStatus === "due_soon") ||
+              (filters.due === "scheduled" && question.dueStatus !== "none") ||
+              (filters.due === "none" && question.dueStatus === "none")),
+        )
+        .filter((question) => question.inboxReasons.length > 0)
+        .sort((left, right) => {
+          const riskRank = { protected: 4, high: 3, medium: 2, low: 1 } as const;
+          const protectedDifference = Number(right.risk === "protected") - Number(left.risk === "protected");
+          if (protectedDifference !== 0) return protectedDifference;
+          const overdueDifference = Number(right.dueStatus === "overdue") - Number(left.dueStatus === "overdue");
+          if (overdueDifference !== 0) return overdueDifference;
+          if (left.blocking !== right.blocking) return left.blocking ? -1 : 1;
+          const dueSoonDifference = Number(right.dueStatus === "due_soon") - Number(left.dueStatus === "due_soon");
+          if (dueSoonDifference !== 0) return dueSoonDifference;
+          const riskDifference = riskRank[right.risk] - riskRank[left.risk];
+          if (riskDifference !== 0) return riskDifference;
+          if (left.dueAt && right.dueAt) {
+            const dueAtDifference = Date.parse(left.dueAt) - Date.parse(right.dueAt);
+            if (dueAtDifference !== 0) return dueAtDifference;
+          } else if (left.dueAt || right.dueAt) {
+            return left.dueAt ? -1 : 1;
+          }
+          const discussionDifference =
+            Number(right.status === "in_discussion") - Number(left.status === "in_discussion");
+          if (discussionDifference !== 0) return discussionDifference;
+          return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+        });
     });
   }
 
@@ -5701,16 +5504,19 @@ export class BridgeService {
       const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
       const candidates = (await repository.listQuestions(projectId))
         .map((question) => questionInboxItem(principal, question, now))
-        .filter((question) =>
-          question.inboxReasons.length > 0 &&
-          ["open", "in_discussion"].includes(question.status) &&
-          question.risk === "low" &&
-          !question.blocking &&
-          (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory),
+        .filter(
+          (question) =>
+            question.inboxReasons.length > 0 &&
+            ["open", "in_discussion"].includes(question.status) &&
+            question.risk === "low" &&
+            !question.blocking &&
+            (!normalizedCategory || question.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory),
         );
       const grouped = new Map<string, QuestionInboxItem[]>();
       for (const question of candidates) {
-        const scopeKey = JSON.stringify(Object.entries(question.scope).sort(([left], [right]) => left.localeCompare(right)));
+        const scopeKey = JSON.stringify(
+          Object.entries(question.scope).sort(([left], [right]) => left.localeCompare(right)),
+        );
         const key = `${question.category.normalize("NFKC").toLocaleLowerCase("en")}\u0000${scopeKey}`;
         grouped.set(key, [...(grouped.get(key) ?? []), question]);
       }
@@ -5721,7 +5527,11 @@ export class BridgeService {
           const ordered = [...questions].sort((left, right) => {
             const leftDue = left.dueAt ? Date.parse(left.dueAt) : Number.POSITIVE_INFINITY;
             const rightDue = right.dueAt ? Date.parse(right.dueAt) : Number.POSITIVE_INFINITY;
-            return leftDue - rightDue || Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id);
+            return (
+              leftDue - rightDue ||
+              Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+              left.id.localeCompare(right.id)
+            );
           });
           const first = ordered[0]!;
           const shown = ordered.slice(0, query.maxQuestionsPerDigest);
@@ -5761,7 +5571,8 @@ export class BridgeService {
 
   async getQuestion(principal: Principal, questionId: string): Promise<QuestionInboxItem> {
     return this.tenantTransaction(principal, async (repository) =>
-      questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()));
+      questionInboxItem(principal, await this.requireQuestion(principal, questionId, repository), this.now()),
+    );
   }
 
   async getQuestionAudienceView(
@@ -5785,21 +5596,22 @@ export class BridgeService {
           options: question.options.map((option) => ({ ...option })),
           ...(question.recommendationKey ? { recommendationKey: question.recommendationKey } : {}),
         },
-        presentation: query.mode === "rewrite"
-          ? {
-              title: `For ${role}: ${question.title}`,
-              context: `${question.context}\n\nRole focus: ${lens.summary}`,
-              whyItMatters: question.whyItMatters,
-              focusAreas: lens.focusAreas,
-              reviewPrompt: lens.reviewPrompt,
-            }
-          : {
-              title: `What ${role} should evaluate`,
-              context: `The recorded question is “${question.title}”. ${lens.summary}`,
-              whyItMatters: `The recorded impact remains: ${question.whyItMatters}`,
-              focusAreas: lens.focusAreas,
-              reviewPrompt: lens.reviewPrompt,
-            },
+        presentation:
+          query.mode === "rewrite"
+            ? {
+                title: `For ${role}: ${question.title}`,
+                context: `${question.context}\n\nRole focus: ${lens.summary}`,
+                whyItMatters: question.whyItMatters,
+                focusAreas: lens.focusAreas,
+                reviewPrompt: lens.reviewPrompt,
+              }
+            : {
+                title: `What ${role} should evaluate`,
+                context: `The recorded question is “${question.title}”. ${lens.summary}`,
+                whyItMatters: `The recorded impact remains: ${question.whyItMatters}`,
+                focusAreas: lens.focusAreas,
+                reviewPrompt: lens.reviewPrompt,
+              },
         guardrails: {
           derivedOnly: true,
           sourceFieldsUnchanged: true,
@@ -5817,7 +5629,8 @@ export class BridgeService {
     const normalized = normalizeRoleName(role);
     if (["security", "privacy", "compliance", "risk"].some((term) => normalized.includes(term))) {
       return {
-        summary: "Evaluate the same options through confidentiality, access-control, abuse, and compliance consequences.",
+        summary:
+          "Evaluate the same options through confidentiality, access-control, abuse, and compliance consequences.",
         focusAreas: ["security controls", "data exposure", "threat and compliance evidence"],
         reviewPrompt: "Which recorded option has acceptable security risk, and what evidence supports that assessment?",
       };
@@ -5852,15 +5665,18 @@ export class BridgeService {
     }
     if (["architect", "engineer", "developer", "technical"].some((term) => normalized.includes(term))) {
       return {
-        summary: "Evaluate the same options through system boundaries, compatibility, delivery complexity, and maintenance.",
+        summary:
+          "Evaluate the same options through system boundaries, compatibility, delivery complexity, and maintenance.",
         focusAreas: ["system boundaries", "compatibility", "implementation and maintenance cost"],
         reviewPrompt: "Which recorded option fits the architecture with acceptable complexity and long-term cost?",
       };
     }
     return {
-      summary: "Evaluate the recorded options through this role's responsibilities, evidence, and accountable trade-offs.",
+      summary:
+        "Evaluate the recorded options through this role's responsibilities, evidence, and accountable trade-offs.",
       focusAreas: ["role responsibilities", "supporting evidence", "risks and trade-offs"],
-      reviewPrompt: "Which recorded option should this role support, and what evidence or concern should the owner consider?",
+      reviewPrompt:
+        "Which recorded option should this role support, and what evidence or concern should the owner consider?",
     };
   }
 
@@ -5934,11 +5750,7 @@ export class BridgeService {
     });
   }
 
-  async reopenQuestion(
-    principal: Principal,
-    questionId: string,
-    input: QuestionClarificationInput,
-  ): Promise<Question> {
+  async reopenQuestion(principal: Principal, questionId: string, input: QuestionClarificationInput): Promise<Question> {
     return this.tenantTransaction(principal, async (repository) => {
       const question = await this.requireQuestion(principal, questionId, repository);
       assertHuman(principal, "Reopening question discussion");
@@ -6004,11 +5816,7 @@ export class BridgeService {
     });
   }
 
-  async reassignQuestion(
-    principal: Principal,
-    questionId: string,
-    input: ReassignQuestionInput,
-  ): Promise<Question> {
+  async reassignQuestion(principal: Principal, questionId: string, input: ReassignQuestionInput): Promise<Question> {
     return this.tenantTransaction(principal, async (repository) => {
       const question = await this.requireQuestion(principal, questionId, repository);
       const project = await this.requireProject(principal, question.projectId, repository);
@@ -6048,8 +5856,10 @@ export class BridgeService {
       }
       const normalizedOwnerRoles = this.normalizedRoles(input.ownerRoles);
       const normalizedReviewerRoles = this.normalizedRoles(input.reviewerRoles);
-      if (normalizedOwnerRoles.length !== input.ownerRoles.length ||
-        normalizedReviewerRoles.length !== input.reviewerRoles.length) {
+      if (
+        normalizedOwnerRoles.length !== input.ownerRoles.length ||
+        normalizedReviewerRoles.length !== input.reviewerRoles.length
+      ) {
         throw new BridgeError("VALIDATION_FAILED", "Assignment roles must be unique after normalization.", 400);
       }
       const ownerRoles = this.normalizedRoles([...normalizedOwnerRoles, ...(question.requiredOwnerRoles ?? [])]);
@@ -6057,9 +5867,11 @@ export class BridgeService {
         ...normalizedReviewerRoles,
         ...(question.requiredReviewerRoles ?? []),
       ]);
-      const ownersChanged = JSON.stringify([...input.ownerIds].sort()) !== JSON.stringify([...question.ownerIds].sort()) ||
+      const ownersChanged =
+        JSON.stringify([...input.ownerIds].sort()) !== JSON.stringify([...question.ownerIds].sort()) ||
         JSON.stringify(ownerRoles) !== JSON.stringify(this.normalizedRoles(question.ownerRoles));
-      const reviewersChanged = JSON.stringify([...input.reviewerIds].sort()) !== JSON.stringify([...question.reviewerIds].sort()) ||
+      const reviewersChanged =
+        JSON.stringify([...input.reviewerIds].sort()) !== JSON.stringify([...question.reviewerIds].sort()) ||
         JSON.stringify(reviewerRoles) !== JSON.stringify(this.normalizedRoles(question.reviewerRoles));
       if (!ownersChanged && !reviewersChanged) {
         throw new BridgeError("CONFLICT", "The reassignment does not change the current owner or reviewer route.", 409);
@@ -6133,10 +5945,7 @@ export class BridgeService {
         availableAt: timestamp,
         createdAt: timestamp,
       });
-      await this.notify(repository, principal, question.projectId, [
-        ...updated.ownerIds,
-        ...updated.reviewerIds,
-      ], {
+      await this.notify(repository, principal, question.projectId, [...updated.ownerIds, ...updated.reviewerIds], {
         type: "question_assigned",
         title: "Question assignment changed",
         body: `${principal.displayName} reassigned “${question.title}”.`,
@@ -6154,11 +5963,7 @@ export class BridgeService {
     });
   }
 
-  async reviewQuestion(
-    principal: Principal,
-    questionId: string,
-    input: QuestionReviewInput,
-  ): Promise<QuestionReview> {
+  async reviewQuestion(principal: Principal, questionId: string, input: QuestionReviewInput): Promise<QuestionReview> {
     return this.tenantTransaction(principal, (repository) =>
       this.reviewQuestionInTransaction(repository, principal, questionId, input),
     );
@@ -6175,11 +5980,12 @@ export class BridgeService {
     if (question.risk !== "protected") {
       throw new BridgeError("POLICY_BLOCKED", "Separate policy review is required only for protected questions.", 422);
     }
-    const requiredReviewerRoles = question.requiredReviewerRoles.length > 0
-      ? question.requiredReviewerRoles
-      : !question.policyRuleKey || question.policyRuleKey === "bridge-legacy-protected"
-        ? ["security-reviewer"]
-        : [];
+    const requiredReviewerRoles =
+      question.requiredReviewerRoles.length > 0
+        ? question.requiredReviewerRoles
+        : !question.policyRuleKey || question.policyRuleKey === "bridge-legacy-protected"
+          ? ["security-reviewer"]
+          : [];
     if (requiredReviewerRoles.length === 0) {
       throw new BridgeError(
         "POLICY_BLOCKED",
@@ -6188,7 +5994,8 @@ export class BridgeService {
       );
     }
     const principalReviewerRoles = requiredReviewerRoles.filter((role) =>
-      principalHasRole(principal, role, question.projectId));
+      principalHasRole(principal, role, question.projectId),
+    );
     if (principalReviewerRoles.length === 0) {
       throw new BridgeError(
         "FORBIDDEN",
@@ -6197,9 +6004,13 @@ export class BridgeService {
         { requiredReviewerRoles },
       );
     }
-    const reviewerRole = principalReviewerRoles.find((role) =>
-      !question.reviews.some((review) =>
-        review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role)));
+    const reviewerRole = principalReviewerRoles.find(
+      (role) =>
+        !question.reviews.some(
+          (review) =>
+            review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role),
+        ),
+    );
     if (!reviewerRole) {
       throw new BridgeError(
         "CONFLICT",
@@ -6318,8 +6129,16 @@ export class BridgeService {
       version: question.version + 1,
     });
     await this.audit(
-      repository, principal, question.projectId, "question.comment_added", "question", question.id, timestamp,
-      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
+      repository,
+      principal,
+      question.projectId,
+      "question.comment_added",
+      "question",
+      question.id,
+      timestamp,
+      question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6377,11 +6196,13 @@ export class BridgeService {
     if (uniqueIds.length === 0) return [];
     const projectHumans = new Set(
       (await repository.listOrganizationPrincipals(question.organizationId))
-        .filter((candidate) => candidate.type === "human" && (
-          candidate.allProjects === true ||
-          candidate.projectIds.includes(question.projectId) ||
-          principalHasRole(candidate, "organization-admin")
-        ))
+        .filter(
+          (candidate) =>
+            candidate.type === "human" &&
+            (candidate.allProjects === true ||
+              candidate.projectIds.includes(question.projectId) ||
+              principalHasRole(candidate, "organization-admin")),
+        )
         .map((candidate) => candidate.id),
     );
     const invalidPrincipalId = uniqueIds.find((principalId) => !projectHumans.has(principalId));
@@ -6396,11 +6217,7 @@ export class BridgeService {
     return uniqueIds;
   }
 
-  async proposeAnswer(
-    principal: Principal,
-    questionId: string,
-    input: ProposeAnswerInput,
-  ): Promise<QuestionResponse> {
+  async proposeAnswer(principal: Principal, questionId: string, input: ProposeAnswerInput): Promise<QuestionResponse> {
     return this.tenantTransaction(principal, (repository) =>
       this.proposeAnswerInTransaction(repository, principal, questionId, input),
     );
@@ -6446,13 +6263,18 @@ export class BridgeService {
       version: question.version + 1,
     });
     await this.audit(
-      repository, principal, question.projectId, "response.proposed", "response", response.id, timestamp,
-      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
+      repository,
+      principal,
+      question.projectId,
+      "response.proposed",
+      "response",
+      response.id,
+      timestamp,
+      question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
-    await this.notify(repository, principal, question.projectId, [
-      ...question.ownerIds,
-      ...mentionedPrincipalIds,
-    ], {
+    await this.notify(repository, principal, question.projectId, [...question.ownerIds, ...mentionedPrincipalIds], {
       type: "question_response",
       title: "New proposed answer",
       body: `${principal.displayName} proposed an answer for “${question.title}”.`,
@@ -6514,7 +6336,8 @@ export class BridgeService {
       question,
       input.mentionedPrincipalIds ?? response.mentionedPrincipalIds,
     );
-    const unchanged = response.answer === input.answer &&
+    const unchanged =
+      response.answer === input.answer &&
       response.rationale === input.rationale &&
       response.optionKey === input.optionKey &&
       JSON.stringify(response.mentionedPrincipalIds ?? []) === JSON.stringify(mentionedPrincipalIds);
@@ -6532,11 +6355,9 @@ export class BridgeService {
       editedByType: principal.type,
       editedAt: timestamp,
     };
-    const {
-      optionKey: previousOptionKey,
-      mentionedPrincipalIds: previousMentionedPrincipalIds,
-      ...responseWithoutEditableMetadata
-    } = response;
+    const responseWithoutEditableMetadata = { ...response };
+    delete responseWithoutEditableMetadata.optionKey;
+    delete responseWithoutEditableMetadata.mentionedPrincipalIds;
     const updatedResponse: QuestionResponse = {
       ...responseWithoutEditableMetadata,
       answer: input.answer,
@@ -6547,7 +6368,7 @@ export class BridgeService {
     };
     await repository.saveQuestion({
       ...question,
-      responses: question.responses.map((candidate) => candidate.id === responseId ? updatedResponse : candidate),
+      responses: question.responses.map((candidate) => (candidate.id === responseId ? updatedResponse : candidate)),
       version: question.version + 1,
     });
     await this.audit(
@@ -6632,7 +6453,8 @@ export class BridgeService {
       question,
       input.mentionedPrincipalIds ?? comment.mentionedPrincipalIds,
     );
-    const unchanged = comment.body === input.body &&
+    const unchanged =
+      comment.body === input.body &&
       JSON.stringify(comment.mentionedPrincipalIds ?? []) === JSON.stringify(mentionedPrincipalIds);
     if (unchanged) {
       throw new BridgeError("CONFLICT", "The comment edit does not change the current comment.", 409);
@@ -6646,10 +6468,8 @@ export class BridgeService {
       editedByType: principal.type,
       editedAt: timestamp,
     };
-    const {
-      mentionedPrincipalIds: previousMentionedPrincipalIds,
-      ...commentWithoutEditableMetadata
-    } = comment;
+    const commentWithoutEditableMetadata = { ...comment };
+    delete commentWithoutEditableMetadata.mentionedPrincipalIds;
     const updatedComment: QuestionComment = {
       ...commentWithoutEditableMetadata,
       body: input.body,
@@ -6658,7 +6478,7 @@ export class BridgeService {
     };
     await repository.saveQuestion({
       ...question,
-      comments: question.comments.map((candidate) => candidate.id === commentId ? updatedComment : candidate),
+      comments: question.comments.map((candidate) => (candidate.id === commentId ? updatedComment : candidate)),
       version: question.version + 1,
     });
     await this.audit(
@@ -6701,11 +6521,7 @@ export class BridgeService {
     return updatedComment;
   }
 
-  async acceptAnswer(
-    principal: Principal,
-    questionId: string,
-    input: AcceptAnswerInput,
-  ): Promise<Decision> {
+  async acceptAnswer(principal: Principal, questionId: string, input: AcceptAnswerInput): Promise<Decision> {
     return this.tenantTransaction(principal, (repository) =>
       this.acceptAnswerInTransaction(repository, principal, questionId, input),
     );
@@ -6742,10 +6558,18 @@ export class BridgeService {
         });
       }
       if (question.risk !== "protected") {
-        throw new BridgeError("POLICY_BLOCKED", "Administrative approval override is limited to protected questions.", 403);
+        throw new BridgeError(
+          "POLICY_BLOCKED",
+          "Administrative approval override is limited to protected questions.",
+          403,
+        );
       }
       if (canAcceptQuestion(principal, question)) {
-        throw new BridgeError("CONFLICT", "Protected approval requirements are already satisfied for this administrator; use ordinary acceptance.", 409);
+        throw new BridgeError(
+          "CONFLICT",
+          "Protected approval requirements are already satisfied for this administrator; use ordinary acceptance.",
+          409,
+        );
       }
       this.assertSecretSafe("question", { ...input, reason: override.reason });
     } else {
@@ -6799,15 +6623,17 @@ export class BridgeService {
       responses: [...question.responses, response],
       acceptedResponseId: response.id,
       decisionId: decision.id,
-      ...(override ? {
-        approvalOverride: {
-          changedById: principal.id,
-          changedByType: principal.type,
-          reason: override.reason,
-          createdAt: timestamp,
-          questionVersion: question.version + 1,
-        } satisfies QuestionApprovalOverride,
-      } : {}),
+      ...(override
+        ? {
+            approvalOverride: {
+              changedById: principal.id,
+              changedByType: principal.type,
+              reason: override.reason,
+              createdAt: timestamp,
+              questionVersion: question.version + 1,
+            } satisfies QuestionApprovalOverride,
+          }
+        : {}),
       version: question.version + 1,
     });
     if (override) {
@@ -6825,8 +6651,16 @@ export class BridgeService {
       );
     }
     await this.audit(
-      repository, principal, question.projectId, "decision.accepted", "decision", decision.id, timestamp,
-      question.policyVersion, undefined, { policyRuleKey: question.policyRuleKey },
+      repository,
+      principal,
+      question.projectId,
+      "decision.accepted",
+      "decision",
+      decision.id,
+      timestamp,
+      question.policyVersion,
+      undefined,
+      { policyRuleKey: question.policyRuleKey },
     );
     await this.notify(
       repository,
@@ -6871,22 +6705,24 @@ export class BridgeService {
     query: DecisionListQuery = { includeHistory: false, scope: {} },
   ): Promise<readonly Decision[]> {
     return this.tenantTransaction(principal, async (repository) => {
-    await this.requireProject(principal, projectId, repository);
-    const category = query.category?.toLocaleLowerCase("en");
-    const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
-    const candidates = query.search
-      ? await repository.searchDecisions(projectId, query.search)
-      : await repository.listDecisions(projectId);
-    return candidates.filter((decision) => {
-      if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
-        return false;
-      }
-      if (category && decision.category.toLocaleLowerCase("en") !== category) return false;
-      if (query.ownerId && decision.ownerId !== query.ownerId) return false;
-      if (query.createdFrom && Date.parse(decision.createdAt) < Date.parse(query.createdFrom)) return false;
-      if (query.createdTo && Date.parse(decision.createdAt) > Date.parse(query.createdTo)) return false;
-      return scopeEntries.every(([key, value]) => decision.scope[key] === value);
-    });
+      await this.requireProject(principal, projectId, repository);
+      const category = query.category?.toLocaleLowerCase("en");
+      const scopeEntries = Object.entries(query.scope).filter((entry): entry is [keyof Scope, string] =>
+        Boolean(entry[1]),
+      );
+      const candidates = query.search
+        ? await repository.searchDecisions(projectId, query.search)
+        : await repository.listDecisions(projectId);
+      return candidates.filter((decision) => {
+        if (query.status ? decision.status !== query.status : !query.includeHistory && decision.status !== "active") {
+          return false;
+        }
+        if (category && decision.category.toLocaleLowerCase("en") !== category) return false;
+        if (query.ownerId && decision.ownerId !== query.ownerId) return false;
+        if (query.createdFrom && Date.parse(decision.createdAt) < Date.parse(query.createdFrom)) return false;
+        if (query.createdTo && Date.parse(decision.createdAt) > Date.parse(query.createdTo)) return false;
+        return scopeEntries.every(([key, value]) => decision.scope[key] === value);
+      });
     });
   }
 
@@ -6899,10 +6735,12 @@ export class BridgeService {
       await this.requireProject(principal, projectId, repository);
       const normalizedCategory = query.category?.normalize("NFKC").toLocaleLowerCase("en");
       const decisions = (await repository.listDecisions(projectId))
-        .filter((decision) =>
-          decision.status === "active" &&
-          (!normalizedCategory || decision.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
-          this.scopesOverlap(decision.scope, query.scope),
+        .filter(
+          (decision) =>
+            decision.status === "active" &&
+            (!normalizedCategory ||
+              decision.category.normalize("NFKC").toLocaleLowerCase("en") === normalizedCategory) &&
+            this.scopesOverlap(decision.scope, query.scope),
         )
         .sort((left, right) => left.id.localeCompare(right.id));
       const conflicts: DecisionConflict[] = [];
@@ -6915,7 +6753,8 @@ export class BridgeService {
               right.category.normalize("NFKC").toLocaleLowerCase("en") ||
             !this.scopesOverlap(left.scope, right.scope) ||
             this.normalizeQuestionText(left.answer) === this.normalizeQuestionText(right.answer)
-          ) continue;
+          )
+            continue;
           const opposingLanguage = this.answersUseOpposingLanguage(left.answer, right.answer);
           const exactScope = this.scopesEqual(left.scope, right.scope);
           if (!exactScope && !opposingLanguage) continue;
@@ -6923,13 +6762,20 @@ export class BridgeService {
             ...(exactScope ? ["different answers in exact scope" as const] : []),
             ...(opposingLanguage ? ["opposing language" as const] : []),
           ];
-          const leftScopeEntries = Object.entries(left.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
-          const rightScopeEntries = Object.entries(right.scope).filter((entry): entry is [keyof Scope, string] => Boolean(entry[1]));
+          const leftScopeEntries = Object.entries(left.scope).filter((entry): entry is [keyof Scope, string] =>
+            Boolean(entry[1]),
+          );
+          const rightScopeEntries = Object.entries(right.scope).filter((entry): entry is [keyof Scope, string] =>
+            Boolean(entry[1]),
+          );
           const leftContainsRight = rightScopeEntries.every(([key, value]) => left.scope[key] === value);
           const rightContainsLeft = leftScopeEntries.every(([key, value]) => right.scope[key] === value);
           const pairIds = [left.id, right.id].sort((a, b) => a.localeCompare(b));
           conflicts.push({
-            id: `dcf_${createHash("sha256").update(`${projectId}\u0000${pairIds.join("\u0000")}`).digest("hex").slice(0, 24)}`,
+            id: `dcf_${createHash("sha256")
+              .update(`${projectId}\u0000${pairIds.join("\u0000")}`)
+              .digest("hex")
+              .slice(0, 24)}`,
             category: left.category,
             confidence: opposingLanguage && exactScope ? "high" : "medium",
             scopeRelation: exactScope
@@ -6965,10 +6811,11 @@ export class BridgeService {
         }
       }
       return conflicts
-        .sort((left, right) =>
-          Number(right.confidence === "high") - Number(left.confidence === "high") ||
-          right.signals.length - left.signals.length ||
-          left.id.localeCompare(right.id),
+        .sort(
+          (left, right) =>
+            Number(right.confidence === "high") - Number(left.confidence === "high") ||
+            right.signals.length - left.signals.length ||
+            left.id.localeCompare(right.id),
         )
         .slice(0, query.maxItems);
     });
@@ -7004,7 +6851,8 @@ export class BridgeService {
     const decision = await this.requireDecision(principal, decisionId, repository);
     assertHuman(principal, "Changing a decision lifecycle");
     const project = await this.requireProject(principal, decision.projectId, repository);
-    const mayManage = decision.ownerId === principal.id ||
+    const mayManage =
+      decision.ownerId === principal.id ||
       project.decisionOwnerIds.includes(principal.id) ||
       principalHasRole(principal, "project-admin", decision.projectId);
     if (!mayManage) {
@@ -7050,16 +6898,12 @@ export class BridgeService {
       lifecycleRationale: input.rationale,
       lifecycleChangedById: principal.id,
       lifecycleChangedAt: timestamp,
-      ...(input.replacementDecisionId
-        ? { replacementDecisionId: input.replacementDecisionId }
-        : {}),
+      ...(input.replacementDecisionId ? { replacementDecisionId: input.replacementDecisionId } : {}),
       version: decision.version + 1,
     };
     await repository.saveDecision(changed);
 
-    const sourceQuestion = decision.questionId
-      ? await repository.getQuestion(decision.questionId)
-      : undefined;
+    const sourceQuestion = decision.questionId ? await repository.getQuestion(decision.questionId) : undefined;
     const impact = await this.calculateDecisionImpact(repository, decision, {
       maxDepth: 5,
       maxNodes: 200,
@@ -7087,9 +6931,7 @@ export class BridgeService {
         decisionId: decision.id,
         status: input.status,
         changedById: principal.id,
-        ...(input.replacementDecisionId
-          ? { replacementDecisionId: input.replacementDecisionId }
-          : {}),
+        ...(input.replacementDecisionId ? { replacementDecisionId: input.replacementDecisionId } : {}),
       },
       status: "pending",
       attempts: 0,
@@ -7118,14 +6960,16 @@ export class BridgeService {
         targetType: "decision",
         targetId: decision.id,
         ...(sourceQuestion ? { recipientRoles: sourceQuestion.ownerRoles } : {}),
-        ...(sourceQuestion ? {
-          questionContext: {
-            id: sourceQuestion.id,
-            status: sourceQuestion.status,
-            risk: sourceQuestion.risk,
-            ownerIds: sourceQuestion.ownerIds,
-          },
-        } : {}),
+        ...(sourceQuestion
+          ? {
+              questionContext: {
+                id: sourceQuestion.id,
+                status: sourceQuestion.status,
+                risk: sourceQuestion.risk,
+                ownerIds: sourceQuestion.ownerIds,
+              },
+            }
+          : {}),
       },
     );
     return { decision: changed, impact };
@@ -7195,16 +7039,9 @@ export class BridgeService {
     }
 
     const timestamp = this.now().toISOString();
-    const sourceRun = input.runId
-      ? await this.requireLinkableRun(principal, input.runId, repository)
-      : undefined;
+    const sourceRun = input.runId ? await this.requireLinkableRun(principal, input.runId, repository) : undefined;
     const artifactId = existingArtifact?.id ?? `art_${this.id()}`;
-    const reviewerResolution = await this.resolveArtifactReviewers(
-      repository,
-      project,
-      input,
-      existingArtifact,
-    );
+    const reviewerResolution = await this.resolveArtifactReviewers(repository, project, input, existingArtifact);
     const reviewerIds = reviewerResolution.reviewerIds;
     if (input.requiredApprovals > reviewerIds.length) {
       throw new BridgeError(
@@ -7311,7 +7148,7 @@ export class BridgeService {
     input: PublishArtifactInput,
     existingArtifact?: Artifact,
   ): Promise<ArtifactReviewerResolution> {
-    const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
+    const ownership = (await repository.getProjectOwnershipConfiguration(project.id)) ?? {
       organizationId: project.organizationId,
       projectId: project.id,
       roles: [],
@@ -7319,23 +7156,21 @@ export class BridgeService {
       rules: [],
       version: 0,
     };
-    const directory = (await repository.listOrganizationPrincipals(project.organizationId))
-      .filter((candidate) => {
-        if (candidate.type !== "human") return false;
-        try {
-          assertProjectAccess(candidate, project);
-          return true;
-        } catch {
-          return false;
-        }
-      });
+    const directory = (await repository.listOrganizationPrincipals(project.organizationId)).filter((candidate) => {
+      if (candidate.type !== "human") return false;
+      try {
+        assertProjectAccess(candidate, project);
+        return true;
+      } catch {
+        return false;
+      }
+    });
     const activeHumans = new Map(directory.map((candidate) => [candidate.id, candidate]));
-    const explicitIds = [...new Set(input.intendedReviewerIds)]
-      .sort((left, right) => left.localeCompare(right));
+    const explicitIds = [...new Set(input.intendedReviewerIds)].sort((left, right) => left.localeCompare(right));
     const explicitRoles = this.normalizedRoles(input.intendedReviewerRoles ?? []);
-    const explicitTeamKeys = [...new Set(
-      (input.intendedReviewerTeamKeys ?? []).map(normalizeRoleName).filter(Boolean),
-    )].sort((left, right) => left.localeCompare(right));
+    const explicitTeamKeys = [
+      ...new Set((input.intendedReviewerTeamKeys ?? []).map(normalizeRoleName).filter(Boolean)),
+    ].sort((left, right) => left.localeCompare(right));
     const hasExplicitTargets = explicitIds.length + explicitRoles.length + explicitTeamKeys.length > 0;
     const resolution = (
       reviewerIds: readonly string[],
@@ -7383,10 +7218,7 @@ export class BridgeService {
       roles: readonly string[],
       teamKeys: readonly string[],
     ): readonly string[] => {
-      const resolved = new Set([
-        ...principalIds,
-        ...teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? []),
-      ]);
+      const resolved = new Set([...principalIds, ...teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? [])]);
       for (const candidate of directory) {
         if (roles.some((role) => principalHasRole(candidate, role, project.id))) {
           resolved.add(candidate.id);
@@ -7405,29 +7237,30 @@ export class BridgeService {
     }
 
     if (existingArtifact) {
-      const current = activeHumans.size === 0
-        ? existingArtifact.reviewerIds
-        : existingArtifact.reviewerIds.filter((reviewerId) => activeHumans.has(reviewerId));
+      const current =
+        activeHumans.size === 0
+          ? existingArtifact.reviewerIds
+          : existingArtifact.reviewerIds.filter((reviewerId) => activeHumans.has(reviewerId));
       if (current.length > 0) {
         const currentVersion = existingArtifact.versions.find(
           (version) => version.id === existingArtifact.currentVersionId,
         );
-        return resolution(
-          current,
-          "retained_reviewers",
-          undefined,
-          currentVersion?.reviewerAssignment?.id,
-        );
+        return resolution(current, "retained_reviewers", undefined, currentVersion?.reviewerAssignment?.id);
       }
     }
 
     const matchingRules = ownership.rules
       .filter((rule) => !rule.category && this.ownershipRuleMatches(rule, "", input.scope))
       .sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
-    const reviewerRule = matchingRules.find((rule) =>
-      this.ownershipRouteSource(rule) === "scoped_ownership" && this.ownershipTargetCount(rule.reviewers) > 0) ??
-      matchingRules.find((rule) =>
-        this.ownershipRouteSource(rule) === "project_default" && this.ownershipTargetCount(rule.reviewers) > 0);
+    const reviewerRule =
+      matchingRules.find(
+        (rule) =>
+          this.ownershipRouteSource(rule) === "scoped_ownership" && this.ownershipTargetCount(rule.reviewers) > 0,
+      ) ??
+      matchingRules.find(
+        (rule) =>
+          this.ownershipRouteSource(rule) === "project_default" && this.ownershipTargetCount(rule.reviewers) > 0,
+      );
     if (reviewerRule) {
       const resolved = resolveTargets(
         reviewerRule.reviewers.principalIds,
@@ -7437,9 +7270,7 @@ export class BridgeService {
       if (resolved.length > 0) {
         return resolution(
           resolved,
-          this.ownershipRouteSource(reviewerRule) === "scoped_ownership"
-            ? "scoped_ownership"
-            : "project_default",
+          this.ownershipRouteSource(reviewerRule) === "scoped_ownership" ? "scoped_ownership" : "project_default",
           reviewerRule.key,
         );
       }
@@ -7460,8 +7291,7 @@ export class BridgeService {
   }
 
   async getArtifact(principal: Principal, artifactId: string): Promise<Artifact> {
-    return this.tenantTransaction(principal, (repository) =>
-      this.requireArtifact(principal, artifactId, repository));
+    return this.tenantTransaction(principal, (repository) => this.requireArtifact(principal, artifactId, repository));
   }
 
   async diffArtifactVersions(
@@ -7470,17 +7300,17 @@ export class BridgeService {
     query: ArtifactVersionDiffQuery,
   ): Promise<ArtifactVersionDiff> {
     return this.tenantTransaction(principal, async (repository) => {
-    const artifact = await this.requireArtifact(principal, artifactId, repository);
-    const fromVersion = artifact.versions.find((version) => version.id === query.fromVersionId);
-    const toVersion = artifact.versions.find((version) => version.id === query.toVersionId);
-    if (!fromVersion || !toVersion) {
-      throw new BridgeError(
-        "ARTIFACT_NOT_FOUND",
-        "Both specification versions must belong to the requested specification.",
-        404,
-      );
-    }
-    return buildArtifactVersionDiff(artifact.id, fromVersion, toVersion);
+      const artifact = await this.requireArtifact(principal, artifactId, repository);
+      const fromVersion = artifact.versions.find((version) => version.id === query.fromVersionId);
+      const toVersion = artifact.versions.find((version) => version.id === query.toVersionId);
+      if (!fromVersion || !toVersion) {
+        throw new BridgeError(
+          "ARTIFACT_NOT_FOUND",
+          "Both specification versions must belong to the requested specification.",
+          404,
+        );
+      }
+      return buildArtifactVersionDiff(artifact.id, fromVersion, toVersion);
     });
   }
 
@@ -7534,7 +7364,11 @@ export class BridgeService {
       throw new BridgeError("CONFLICT", "Review feedback can be added only to the current specification version.", 409);
     }
     if (["approved", "superseded"].includes(target.status)) {
-      throw new BridgeError("CONFLICT", "Approved or superseded specification versions no longer accept review feedback.", 409);
+      throw new BridgeError(
+        "CONFLICT",
+        "Approved or superseded specification versions no longer accept review feedback.",
+        409,
+      );
     }
 
     const timestamp = this.now().toISOString();
@@ -7555,16 +7389,14 @@ export class BridgeService {
     };
     const updatedArtifact: Artifact = {
       ...artifact,
-      versions: artifact.versions.map((version) => version.id === versionId ? reviewedVersion : version),
+      versions: artifact.versions.map((version) => (version.id === versionId ? reviewedVersion : version)),
     };
     await repository.saveArtifact(updatedArtifact);
     await this.audit(
       repository,
       principal,
       artifact.projectId,
-      input.status === "changes_requested"
-        ? "artifact.version_changes_requested"
-        : "artifact.version_commented",
+      input.status === "changes_requested" ? "artifact.version_changes_requested" : "artifact.version_commented",
       "artifact_version",
       versionId,
       timestamp,
@@ -7581,13 +7413,11 @@ export class BridgeService {
       repository,
       principal,
       artifact.projectId,
-      [
-        artifact.createdById,
-        ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
-      ],
+      [artifact.createdById, ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)],
       {
         type: "artifact_review_feedback",
-        title: input.status === "changes_requested" ? "Specification changes requested" : "Specification review comment",
+        title:
+          input.status === "changes_requested" ? "Specification changes requested" : "Specification review comment",
         body: `${principal.displayName} ${input.status === "changes_requested" ? "requested changes to" : "commented on"} “${artifact.title}”.`,
         targetType: "artifact_version",
         targetId: versionId,
@@ -7663,7 +7493,7 @@ export class BridgeService {
       const pendingVersion: ArtifactVersion = { ...pendingState, approvalStatus };
       const pendingArtifact: Artifact = {
         ...artifact,
-        versions: artifact.versions.map((version) => version.id === versionId ? pendingVersion : version),
+        versions: artifact.versions.map((version) => (version.id === versionId ? pendingVersion : version)),
       };
       await repository.saveArtifact(pendingArtifact);
       await this.audit(
@@ -7683,16 +7513,19 @@ export class BridgeService {
             }
           : {},
       );
-      await this.notify(repository, principal, artifact.projectId, [
-        artifact.createdById,
-        ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
-      ], {
-        type: "artifact_review_feedback",
-        title: "Specification approval recorded",
-        body: `${principal.displayName} approved “${artifact.title}”; ${approvalStatus.remainingCount} more approval${approvalStatus.remainingCount === 1 ? " is" : "s are"} required.`,
-        targetType: "artifact_version",
-        targetId: versionId,
-      });
+      await this.notify(
+        repository,
+        principal,
+        artifact.projectId,
+        [artifact.createdById, ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)],
+        {
+          type: "artifact_review_feedback",
+          title: "Specification approval recorded",
+          body: `${principal.displayName} approved “${artifact.title}”; ${approvalStatus.remainingCount} more approval${approvalStatus.remainingCount === 1 ? " is" : "s are"} required.`,
+          targetType: "artifact_version",
+          targetId: versionId,
+        },
+      );
       return { artifact: pendingArtifact, version: pendingVersion };
     }
 
@@ -7728,16 +7561,19 @@ export class BridgeService {
           }
         : {},
     );
-    await this.notify(repository, principal, artifact.projectId, [
-      artifact.createdById,
-      ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds),
-    ], {
-      type: "artifact_approved",
-      title: "Specification approved",
-      body: `${principal.displayName} approved “${artifact.title}”.`,
-      targetType: "artifact_version",
-      targetId: versionId,
-    });
+    await this.notify(
+      repository,
+      principal,
+      artifact.projectId,
+      [artifact.createdById, ...(target.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)],
+      {
+        type: "artifact_approved",
+        title: "Specification approved",
+        body: `${principal.displayName} approved “${artifact.title}”.`,
+        targetType: "artifact_version",
+        targetId: versionId,
+      },
+    );
     return { artifact: updatedArtifact, version: approvedVersion };
   }
 
@@ -7745,7 +7581,11 @@ export class BridgeService {
     principal: Principal,
     projectId: string,
     query: ContextQuery,
-  ): Promise<{ readonly contextSnapshotId: string; readonly items: readonly ContextItem[]; readonly truncated: boolean }> {
+  ): Promise<{
+    readonly contextSnapshotId: string;
+    readonly items: readonly ContextItem[];
+    readonly truncated: boolean;
+  }> {
     const startedAt = performance.now();
     try {
       const { candidateCount, ...result } = await this.tenantTransaction(principal, (repository) =>
@@ -7780,9 +7620,7 @@ export class BridgeService {
   }> {
     await this.requireProject(principal, projectId, repository);
     this.assertSecretSafe("context", query);
-    const sourceRun = query.runId
-      ? await this.requireLinkableRun(principal, query.runId, repository)
-      : undefined;
+    const sourceRun = query.runId ? await this.requireLinkableRun(principal, query.runId, repository) : undefined;
     const activeDecisions = (await repository.listDecisions(projectId)).filter(
       (decision) => decision.status === "active",
     );
@@ -7793,13 +7631,20 @@ export class BridgeService {
     const artifacts = await repository.listArtifacts(projectId);
     const normalizedWorkItem = query.scope.workItem?.trim().toLowerCase();
     const linkedIssue = normalizedWorkItem
-      ? (await repository.listGithubIssues(projectId)).find((issue) =>
-        issue.reference.toLowerCase() === normalizedWorkItem ||
-        issue.canonicalUrl.toLowerCase() === normalizedWorkItem)
+      ? (await repository.listGithubIssues(projectId)).find(
+          (issue) =>
+            issue.reference.toLowerCase() === normalizedWorkItem ||
+            issue.canonicalUrl.toLowerCase() === normalizedWorkItem,
+        )
       : undefined;
     const linkedDecisionIds = new Set(linkedIssue?.decisionIds ?? []);
     const linkedArtifactVersionIds = new Set(linkedIssue?.artifactVersionIds ?? []);
-    const taskTokens = new Set(query.task.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2));
+    const taskTokens = new Set(
+      query.task
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((token) => token.length > 2),
+    );
     const scopeMatch = (scope: Scope): number => {
       let score = 0;
       for (const key of ["repository", "component", "branch", "environment", "workItem"] as const) {
@@ -7829,8 +7674,7 @@ export class BridgeService {
         };
         return {
           item,
-          score: 10 + scopeMatch(decision.scope) + textScore +
-            (linkedDecisionIds.has(decision.id) ? 12 : 0),
+          score: 10 + scopeMatch(decision.scope) + textScore + (linkedDecisionIds.has(decision.id) ? 12 : 0),
         };
       });
     const artifactCandidates = artifacts.flatMap((artifact) => {
@@ -7863,11 +7707,12 @@ export class BridgeService {
         }),
         updatedAt: version.approvedAt ?? version.createdAt,
       };
-      return [{
-        item,
-        score: 10 + scopeMatch(artifact.scope) + textScore +
-          (linkedArtifactVersionIds.has(version.id) ? 12 : 0),
-      }];
+      return [
+        {
+          item,
+          score: 10 + scopeMatch(artifact.scope) + textScore + (linkedArtifactVersionIds.has(version.id) ? 12 : 0),
+        },
+      ];
     });
     const assumptionCandidates = assumptions
       .filter((assumption) => ["active", "confirmed"].includes(assumption.status))
@@ -7939,20 +7784,10 @@ export class BridgeService {
     };
   }
 
-  private async requireRun(
-    principal: Principal,
-    runId: string,
-    repository: BridgeRepository,
-  ): Promise<AgentRun> {
+  private async requireRun(principal: Principal, runId: string, repository: BridgeRepository): Promise<AgentRun> {
     const run = await repository.getRun(runId);
     if (!run) throw new BridgeError("RUN_NOT_FOUND", "Agent run not found.", 404);
-    await this.requireProjectForResource(
-      principal,
-      run.projectId,
-      repository,
-      "RUN_NOT_FOUND",
-      "Agent run not found.",
-    );
+    await this.requireProjectForResource(principal, run.projectId, repository, "RUN_NOT_FOUND", "Agent run not found.");
     return run;
   }
 
@@ -8039,8 +7874,9 @@ export class BridgeService {
   }
 
   private scopesEqual(left: Scope, right: Scope): boolean {
-    return (["repository", "component", "branch", "environment", "workItem"] as const)
-      .every((key) => left[key] === right[key]);
+    return (["repository", "component", "branch", "environment", "workItem"] as const).every(
+      (key) => left[key] === right[key],
+    );
   }
 
   private async calculateDecisionImpact(
@@ -8100,11 +7936,7 @@ export class BridgeService {
         edges.push({ fromId: from.id, toId: target.id, relation });
       }
     };
-    const recordLink = (
-      source: DecisionImpactNode,
-      type: DecisionImpactLink["type"],
-      url: string,
-    ): void => {
+    const recordLink = (source: DecisionImpactNode, type: DecisionImpactLink["type"], url: string): void => {
       const depth = source.depth + 1;
       if (depth > query.maxDepth) {
         truncated = true;
@@ -8115,32 +7947,45 @@ export class BridgeService {
     };
     const addSnapshotConsumers = (source: DecisionImpactNode, itemId: string): void => {
       for (const snapshot of contextSnapshots.filter((candidate) => candidate.itemIds.includes(itemId))) {
-        connect(source, {
-          id: snapshot.id,
-          type: "context_snapshot",
-          label: "Context snapshot",
-        }, "consumed_in_context");
+        connect(
+          source,
+          {
+            id: snapshot.id,
+            type: "context_snapshot",
+            label: "Context snapshot",
+          },
+          "consumed_in_context",
+        );
       }
     };
     const hasDownstream = (node: DecisionImpactNode): boolean => {
       if (node.type === "decision") {
-        return Boolean(decision.questionId) ||
-          artifacts.some((artifact) => artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id))) ||
+        return (
+          Boolean(decision.questionId) ||
+          artifacts.some((artifact) =>
+            artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
+          ) ||
           assumptions.some((assumption) => assumption.confirmedDecisionId === decision.id) ||
-          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(decision.id));
+          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(decision.id))
+        );
       }
       if (node.type === "question") {
         const question = questions.find((candidate) => candidate.id === node.id);
         return Boolean(question?.runId || question?.relatedLinks?.length);
       }
       if (node.type === "artifact") {
-        return artifacts.some((artifact) => artifact.id === node.id &&
-          artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)));
+        return artifacts.some(
+          (artifact) =>
+            artifact.id === node.id &&
+            artifact.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
+        );
       }
       if (node.type === "artifact_version") {
-        return artifacts.some((artifact) => artifact.versions.some((version) =>
-          version.id === node.id && Boolean(version.runId))) ||
-          contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id));
+        return (
+          artifacts.some((artifact) =>
+            artifact.versions.some((version) => version.id === node.id && Boolean(version.runId)),
+          ) || contextSnapshots.some((snapshot) => snapshot.itemIds.includes(node.id))
+        );
       }
       if (node.type === "assumption") {
         const assumption = assumptions.find((candidate) => candidate.id === node.id);
@@ -8150,14 +7995,15 @@ export class BridgeService {
         return contextSnapshots.some((snapshot) => snapshot.id === node.id && Boolean(snapshot.runId));
       }
       const run = runs.find((candidate) => candidate.id === node.id);
-      return Boolean(run && (
-        runs.some((candidate) => candidate.continuesRunId === run.id) ||
-        questions.some((question) => question.runId === run.id) ||
-        assumptions.some((assumption) => assumption.runId === run.id) ||
-        artifacts.some((artifact) => artifact.versions.some((version) => version.runId === run.id)) ||
-        run.externalLinks.length > 0 ||
-        run.resultLinks.length > 0
-      ));
+      return Boolean(
+        run &&
+          (runs.some((candidate) => candidate.continuesRunId === run.id) ||
+            questions.some((question) => question.runId === run.id) ||
+            assumptions.some((assumption) => assumption.runId === run.id) ||
+            artifacts.some((artifact) => artifact.versions.some((version) => version.runId === run.id)) ||
+            run.externalLinks.length > 0 ||
+            run.resultLinks.length > 0),
+      );
     };
 
     while (queue.length > 0) {
@@ -8171,33 +8017,46 @@ export class BridgeService {
           ? questions.find((question) => question.id === decision.questionId)
           : undefined;
         if (sourceQuestion) {
-          connect(node, {
-            id: sourceQuestion.id,
-            type: "question",
-            label: sourceQuestion.title,
-            scope: { ...sourceQuestion.scope },
-            status: sourceQuestion.status,
-          }, "source_question");
+          connect(
+            node,
+            {
+              id: sourceQuestion.id,
+              type: "question",
+              label: sourceQuestion.title,
+              scope: { ...sourceQuestion.scope },
+              status: sourceQuestion.status,
+            },
+            "source_question",
+          );
         }
         for (const artifact of artifacts.filter((candidate) =>
-          candidate.versions.some((version) => version.citedDecisionIds.includes(decision.id)))) {
+          candidate.versions.some((version) => version.citedDecisionIds.includes(decision.id)),
+        )) {
           const currentStatus = artifact.versions.find((version) => version.id === artifact.currentVersionId)?.status;
-          connect(node, {
-            id: artifact.id,
-            type: "artifact",
-            label: artifact.title,
-            scope: { ...artifact.scope },
-            ...(currentStatus ? { status: currentStatus } : {}),
-          }, "cited_by_artifact");
+          connect(
+            node,
+            {
+              id: artifact.id,
+              type: "artifact",
+              label: artifact.title,
+              scope: { ...artifact.scope },
+              ...(currentStatus ? { status: currentStatus } : {}),
+            },
+            "cited_by_artifact",
+          );
         }
         for (const assumption of assumptions.filter((candidate) => candidate.confirmedDecisionId === decision.id)) {
-          connect(node, {
-            id: assumption.id,
-            type: "assumption",
-            label: assumption.statement,
-            scope: { ...assumption.scope },
-            status: assumption.status,
-          }, "confirmed_assumption");
+          connect(
+            node,
+            {
+              id: assumption.id,
+              type: "assumption",
+              label: assumption.statement,
+              scope: { ...assumption.scope },
+              status: assumption.status,
+            },
+            "confirmed_assumption",
+          );
         }
         addSnapshotConsumers(node, decision.id);
       } else if (node.type === "question") {
@@ -8205,105 +8064,143 @@ export class BridgeService {
         if (!question) continue;
         const sourceRun = question.runId ? runs.find((run) => run.id === question.runId) : undefined;
         if (sourceRun) {
-          connect(node, {
-            id: sourceRun.id,
-            type: "run",
-            label: sourceRun.taskSummary,
-            scope: { ...sourceRun.scope },
-            status: sourceRun.status,
-          }, "created_in_run");
+          connect(
+            node,
+            {
+              id: sourceRun.id,
+              type: "run",
+              label: sourceRun.taskSummary,
+              scope: { ...sourceRun.scope },
+              status: sourceRun.status,
+            },
+            "created_in_run",
+          );
         }
         for (const link of question.relatedLinks ?? []) recordLink(node, link.type, link.url);
       } else if (node.type === "artifact") {
         const artifact = artifacts.find((candidate) => candidate.id === node.id);
         if (!artifact) continue;
-        for (const version of artifact.versions.filter((candidate) => candidate.citedDecisionIds.includes(decision.id))) {
-          connect(node, {
-            id: version.id,
-            type: "artifact_version",
-            label: version.summary,
-            scope: { ...artifact.scope },
-            status: version.status,
-          }, "contains_citing_version");
+        for (const version of artifact.versions.filter((candidate) =>
+          candidate.citedDecisionIds.includes(decision.id),
+        )) {
+          connect(
+            node,
+            {
+              id: version.id,
+              type: "artifact_version",
+              label: version.summary,
+              scope: { ...artifact.scope },
+              status: version.status,
+            },
+            "contains_citing_version",
+          );
         }
       } else if (node.type === "artifact_version") {
         const artifact = artifacts.find((candidate) => candidate.versions.some((version) => version.id === node.id));
         const version = artifact?.versions.find((candidate) => candidate.id === node.id);
         const sourceRun = version?.runId ? runs.find((run) => run.id === version.runId) : undefined;
         if (sourceRun) {
-          connect(node, {
-            id: sourceRun.id,
-            type: "run",
-            label: sourceRun.taskSummary,
-            scope: { ...sourceRun.scope },
-            status: sourceRun.status,
-          }, "created_in_run");
+          connect(
+            node,
+            {
+              id: sourceRun.id,
+              type: "run",
+              label: sourceRun.taskSummary,
+              scope: { ...sourceRun.scope },
+              status: sourceRun.status,
+            },
+            "created_in_run",
+          );
         }
         addSnapshotConsumers(node, node.id);
       } else if (node.type === "assumption") {
         const assumption = assumptions.find((candidate) => candidate.id === node.id);
         const sourceRun = assumption?.runId ? runs.find((run) => run.id === assumption.runId) : undefined;
         if (sourceRun) {
-          connect(node, {
-            id: sourceRun.id,
-            type: "run",
-            label: sourceRun.taskSummary,
-            scope: { ...sourceRun.scope },
-            status: sourceRun.status,
-          }, "created_in_run");
+          connect(
+            node,
+            {
+              id: sourceRun.id,
+              type: "run",
+              label: sourceRun.taskSummary,
+              scope: { ...sourceRun.scope },
+              status: sourceRun.status,
+            },
+            "created_in_run",
+          );
         }
         addSnapshotConsumers(node, node.id);
       } else if (node.type === "context_snapshot") {
         const snapshot = contextSnapshots.find((candidate) => candidate.id === node.id);
         const consumerRun = snapshot?.runId ? runs.find((run) => run.id === snapshot.runId) : undefined;
         if (consumerRun) {
-          connect(node, {
-            id: consumerRun.id,
-            type: "run",
-            label: consumerRun.taskSummary,
-            scope: { ...consumerRun.scope },
-            status: consumerRun.status,
-          }, "context_used_by_run");
+          connect(
+            node,
+            {
+              id: consumerRun.id,
+              type: "run",
+              label: consumerRun.taskSummary,
+              scope: { ...consumerRun.scope },
+              status: consumerRun.status,
+            },
+            "context_used_by_run",
+          );
         }
       } else if (node.type === "run") {
         const run = runs.find((candidate) => candidate.id === node.id);
         if (!run) continue;
         for (const continuation of runs.filter((candidate) => candidate.continuesRunId === run.id)) {
-          connect(node, {
-            id: continuation.id,
-            type: "run",
-            label: continuation.taskSummary,
-            scope: { ...continuation.scope },
-            status: continuation.status,
-          }, "continued_by_run");
+          connect(
+            node,
+            {
+              id: continuation.id,
+              type: "run",
+              label: continuation.taskSummary,
+              scope: { ...continuation.scope },
+              status: continuation.status,
+            },
+            "continued_by_run",
+          );
         }
         for (const question of questions.filter((candidate) => candidate.runId === run.id)) {
-          connect(node, {
-            id: question.id,
-            type: "question",
-            label: question.title,
-            scope: { ...question.scope },
-            status: question.status,
-          }, "produced_question");
+          connect(
+            node,
+            {
+              id: question.id,
+              type: "question",
+              label: question.title,
+              scope: { ...question.scope },
+              status: question.status,
+            },
+            "produced_question",
+          );
         }
         for (const assumption of assumptions.filter((candidate) => candidate.runId === run.id)) {
-          connect(node, {
-            id: assumption.id,
-            type: "assumption",
-            label: assumption.statement,
-            scope: { ...assumption.scope },
-            status: assumption.status,
-          }, "produced_assumption");
+          connect(
+            node,
+            {
+              id: assumption.id,
+              type: "assumption",
+              label: assumption.statement,
+              scope: { ...assumption.scope },
+              status: assumption.status,
+            },
+            "produced_assumption",
+          );
         }
         for (const artifact of artifacts) {
           for (const version of artifact.versions.filter((candidate) => candidate.runId === run.id)) {
-            connect(node, {
-              id: version.id,
-              type: "artifact_version",
-              label: version.summary,
-              scope: { ...artifact.scope },
-              status: version.status,
-            }, "produced_artifact_version");
+            connect(
+              node,
+              {
+                id: version.id,
+                type: "artifact_version",
+                label: version.summary,
+                scope: { ...artifact.scope },
+                status: version.status,
+              },
+              "produced_artifact_version",
+            );
           }
         }
         for (const url of run.externalLinks) recordLink(node, "run_external", url);
@@ -8314,9 +8211,9 @@ export class BridgeService {
     const impactNodes = [...nodes.values()];
     const valuesFor = (type: DecisionImpactNodeType): readonly string[] =>
       impactNodes.filter((node) => node.type === type).map((node) => node.id);
-    const scopedValues = (key: keyof Scope): readonly string[] => [...new Set(
-      impactNodes.flatMap((node) => node.scope?.[key] ? [node.scope[key]!] : []),
-    )];
+    const scopedValues = (key: keyof Scope): readonly string[] => [
+      ...new Set(impactNodes.flatMap((node) => (node.scope?.[key] ? [node.scope[key]!] : []))),
+    ];
     return {
       artifactIds: valuesFor("artifact"),
       artifactVersionIds: valuesFor("artifact_version"),
@@ -8336,8 +8233,9 @@ export class BridgeService {
   }
 
   private scopesOverlap(left: Scope, right: Scope): boolean {
-    return (["repository", "component", "branch", "environment", "workItem"] as const)
-      .every((key) => !left[key] || !right[key] || left[key] === right[key]);
+    return (["repository", "component", "branch", "environment", "workItem"] as const).every(
+      (key) => !left[key] || !right[key] || left[key] === right[key],
+    );
   }
 
   private answersUseOpposingLanguage(left: string, right: string): boolean {
@@ -8357,9 +8255,10 @@ export class BridgeService {
       ["sync", "async"],
     ] as const;
     const has = (text: string, phrase: string) => text.includes(` ${phrase} `);
-    return opposingPairs.some(([affirmative, negative]) =>
-      (has(leftText, affirmative) && has(rightText, negative)) ||
-      (has(leftText, negative) && has(rightText, affirmative)),
+    return opposingPairs.some(
+      ([affirmative, negative]) =>
+        (has(leftText, affirmative) && has(rightText, negative)) ||
+        (has(leftText, negative) && has(rightText, affirmative)),
     );
   }
 
@@ -8380,8 +8279,7 @@ export class BridgeService {
       }
       return undefined;
     };
-    return removeNegation(leftNormalized) === rightNormalized ||
-      removeNegation(rightNormalized) === leftNormalized;
+    return removeNegation(leftNormalized) === rightNormalized || removeNegation(rightNormalized) === leftNormalized;
   }
 
   private async requireLinkableRun(
@@ -8390,7 +8288,8 @@ export class BridgeService {
     repository: BridgeRepository,
   ): Promise<AgentRun> {
     const run = await this.requireRun(principal, runId, repository);
-    const mayLink = run.agentId === principal.id ||
+    const mayLink =
+      run.agentId === principal.id ||
       (principal.type === "human" && principalHasRole(principal, "project-admin", run.projectId));
     if (!mayLink) {
       throw new BridgeError("FORBIDDEN", "Only the run principal can attach new run provenance.", 403);
@@ -8401,32 +8300,17 @@ export class BridgeService {
     return run;
   }
 
-  private async blockingQuestions(
-    repository: BridgeRepository,
-    run: AgentRun,
-  ): Promise<readonly Question[]> {
+  private async blockingQuestions(repository: BridgeRepository, run: AgentRun): Promise<readonly Question[]> {
     const questions = await Promise.all(run.questionIds.map((questionId) => repository.getQuestion(questionId)));
     return questions.filter((question): question is Question => Boolean(question?.blocking));
   }
 
-  private async assertContinuationKey(
-    repository: BridgeRepository,
-    runId: string,
-    supplied: string,
-  ): Promise<void> {
+  private async assertContinuationKey(repository: BridgeRepository, runId: string, supplied: string): Promise<void> {
     const expected = await repository.getRunContinuationKey(runId);
     const expectedBytes = Buffer.from(expected ?? "");
     const suppliedBytes = Buffer.from(supplied);
-    if (
-      !expected ||
-      expectedBytes.length !== suppliedBytes.length ||
-      !timingSafeEqual(expectedBytes, suppliedBytes)
-    ) {
-      throw new BridgeError(
-        "CONTINUATION_INVALID",
-        "The continuation locator is invalid for this run.",
-        403,
-      );
+    if (!expected || expectedBytes.length !== suppliedBytes.length || !timingSafeEqual(expectedBytes, suppliedBytes)) {
+      throw new BridgeError("CONTINUATION_INVALID", "The continuation locator is invalid for this run.", 403);
     }
   }
 
@@ -8453,29 +8337,30 @@ export class BridgeService {
 
   private filterAuditRecords(
     records: readonly AuditRecord[],
-    query: Pick<AuditListQuery, "action" | "actorId" | "source" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo">,
+    query: Pick<
+      AuditListQuery,
+      "action" | "actorId" | "source" | "subjectType" | "subjectId" | "correlationId" | "createdFrom" | "createdTo"
+    >,
   ): readonly AuditRecord[] {
     return records
-      .filter((event) =>
-        (!query.action || event.action === query.action) &&
-        (!query.actorId || event.actorId === query.actorId) &&
-        (!query.source || event.source === query.source) &&
-        (!query.subjectType || event.subjectType === query.subjectType) &&
-        (!query.subjectId || event.subjectId === query.subjectId) &&
-        (!query.correlationId || event.correlationId === query.correlationId) &&
-        (!query.createdFrom || Date.parse(event.createdAt) >= Date.parse(query.createdFrom)) &&
-        (!query.createdTo || Date.parse(event.createdAt) <= Date.parse(query.createdTo)),
+      .filter(
+        (event) =>
+          (!query.action || event.action === query.action) &&
+          (!query.actorId || event.actorId === query.actorId) &&
+          (!query.source || event.source === query.source) &&
+          (!query.subjectType || event.subjectType === query.subjectType) &&
+          (!query.subjectId || event.subjectId === query.subjectId) &&
+          (!query.correlationId || event.correlationId === query.correlationId) &&
+          (!query.createdFrom || Date.parse(event.createdAt) >= Date.parse(query.createdFrom)) &&
+          (!query.createdTo || Date.parse(event.createdAt) <= Date.parse(query.createdTo)),
       )
-      .sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
   }
 
   private auditPage(records: readonly AuditRecord[], query: AuditListQuery): AuditPage {
     const matching = this.filterAuditRecords(records, query);
     const items = matching.slice(query.offset, query.offset + query.limit);
-    const nextOffset = query.offset + items.length < matching.length
-      ? query.offset + items.length
-      : undefined;
+    const nextOffset = query.offset + items.length < matching.length ? query.offset + items.length : undefined;
     return {
       items,
       offset: query.offset,
@@ -8502,9 +8387,26 @@ export class BridgeService {
       };
     }
     const fields: readonly (keyof AuditRecord)[] = [
-      "id", "scope", "organizationId", "projectId", "correlationId", "actorId", "actorType",
-      "source", "action", "subjectType", "subjectId", "reason", "policyVersion", "policyRuleKey",
-      "assignmentId", "ownerRouteSource", "reviewerRouteSource", "beforeVersion", "afterVersion", "createdAt",
+      "id",
+      "scope",
+      "organizationId",
+      "projectId",
+      "correlationId",
+      "actorId",
+      "actorType",
+      "source",
+      "action",
+      "subjectType",
+      "subjectId",
+      "reason",
+      "policyVersion",
+      "policyRuleKey",
+      "assignmentId",
+      "ownerRouteSource",
+      "reviewerRouteSource",
+      "beforeVersion",
+      "afterVersion",
+      "createdAt",
     ];
     const csvCell = (value: unknown): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const body = [
@@ -8519,11 +8421,7 @@ export class BridgeService {
     };
   }
 
-  private projectDataExportCount(
-    total: number,
-    offset: number,
-    included: number,
-  ): ProjectDataExportCount {
+  private projectDataExportCount(total: number, offset: number, included: number): ProjectDataExportCount {
     const nextOffset = offset + included < total ? offset + included : undefined;
     return {
       total,
@@ -8645,12 +8543,9 @@ export class BridgeService {
     }
     for (const teamKey of normalizedTeamKeys) {
       if (!teamKeys.has(teamKey)) {
-        throw new BridgeError(
-          "VALIDATION_FAILED",
-          "Ownership rules must reference a configured project team.",
-          400,
-          { teamKey },
-        );
+        throw new BridgeError("VALIDATION_FAILED", "Ownership rules must reference a configured project team.", 400, {
+          teamKey,
+        });
       }
     }
     return { principalIds, roles, teamKeys: normalizedTeamKeys };
@@ -8665,9 +8560,14 @@ export class BridgeService {
   }
 
   private normalizedPolicyCategory(value: string | undefined): string | undefined {
-    return value?.normalize("NFKC").trim().toLocaleLowerCase("en")
-      .replace(/[^\p{L}\p{N}]+/gu, "-")
-      .replace(/^-+|-+$/g, "") || undefined;
+    return (
+      value
+        ?.normalize("NFKC")
+        .trim()
+        .toLocaleLowerCase("en")
+        .replace(/[^\p{L}\p{N}]+/gu, "-")
+        .replace(/^-+|-+$/g, "") || undefined
+    );
   }
 
   private ownershipRulesOverlap(left: ProjectOwnershipRule, right: ProjectOwnershipRule): boolean {
@@ -8683,7 +8583,8 @@ export class BridgeService {
       for (const right of rules.slice(index + 1)) {
         if (left.priority !== right.priority || !this.ownershipRulesOverlap(left, right)) continue;
         const ownerConflict = this.ownershipTargetCount(left.owners) > 0 && this.ownershipTargetCount(right.owners) > 0;
-        const reviewerConflict = this.ownershipTargetCount(left.reviewers) > 0 && this.ownershipTargetCount(right.reviewers) > 0;
+        const reviewerConflict =
+          this.ownershipTargetCount(left.reviewers) > 0 && this.ownershipTargetCount(right.reviewers) > 0;
         if (ownerConflict || reviewerConflict) {
           throw new BridgeError(
             "VALIDATION_FAILED",
@@ -8696,9 +8597,7 @@ export class BridgeService {
     }
   }
 
-  private normalizeProjectPolicyRules(
-    inputRules: ReplaceProjectPolicyInput["rules"],
-  ): readonly ProjectPolicyRule[] {
+  private normalizeProjectPolicyRules(inputRules: ReplaceProjectPolicyInput["rules"]): readonly ProjectPolicyRule[] {
     const rules: ProjectPolicyRule[] = [];
     const keys = new Set<string>();
     for (const inputRule of inputRules) {
@@ -8710,12 +8609,16 @@ export class BridgeService {
       const requiredOwnerRoles = this.normalizedRoles(inputRule.requiredOwnerRoles);
       const requiredReviewerRoles = this.normalizedRoles(inputRule.requiredReviewerRoles);
       const reviewerQuorum = this.normalizedReviewerQuorum(inputRule.reviewerQuorum, requiredReviewerRoles);
-      if (requiredOwnerRoles.length !== inputRule.requiredOwnerRoles.length ||
-        requiredReviewerRoles.length !== inputRule.requiredReviewerRoles.length) {
+      if (
+        requiredOwnerRoles.length !== inputRule.requiredOwnerRoles.length ||
+        requiredReviewerRoles.length !== inputRule.requiredReviewerRoles.length
+      ) {
         throw new BridgeError("VALIDATION_FAILED", "Required policy roles must be unique after normalization.", 400);
       }
-      if (inputRule.action === "assume_and_log" &&
-        (inputRule.minimumRisk !== "low" || requiredOwnerRoles.length > 0 || requiredReviewerRoles.length > 0)) {
+      if (
+        inputRule.action === "assume_and_log" &&
+        (inputRule.minimumRisk !== "low" || requiredOwnerRoles.length > 0 || requiredReviewerRoles.length > 0)
+      ) {
         throw new BridgeError(
           "VALIDATION_FAILED",
           "Assume-and-log policy cannot require elevated risk, owners, or reviewers.",
@@ -8729,15 +8632,17 @@ export class BridgeService {
           400,
         );
       }
-      if (inputRule.action !== "protected_approval" && (requiredReviewerRoles.length > 0 || Object.keys(reviewerQuorum).length > 0)) {
+      if (
+        inputRule.action !== "protected_approval" &&
+        (requiredReviewerRoles.length > 0 || Object.keys(reviewerQuorum).length > 0)
+      ) {
         throw new BridgeError(
           "VALIDATION_FAILED",
           "Required reviewer roles are supported only by protected-approval policy.",
           400,
         );
       }
-      if (inputRule.action === "protected_approval" &&
-        requiredOwnerRoles.length + requiredReviewerRoles.length === 0) {
+      if (inputRule.action === "protected_approval" && requiredOwnerRoles.length + requiredReviewerRoles.length === 0) {
         throw new BridgeError(
           "VALIDATION_FAILED",
           "Protected policy must require at least one human owner or reviewer role.",
@@ -8749,7 +8654,8 @@ export class BridgeService {
         ? DEFAULT_PROTECTED_POLICY_RULES.find((rule) => rule.category === category)
         : undefined;
       if (defaultRule) {
-        const missingDefaultRole = defaultRule.requiredOwnerRoles.some((role) => !requiredOwnerRoles.includes(role)) ||
+        const missingDefaultRole =
+          defaultRule.requiredOwnerRoles.some((role) => !requiredOwnerRoles.includes(role)) ||
           defaultRule.requiredReviewerRoles.some((role) => !requiredReviewerRoles.includes(role));
         if (inputRule.action !== "protected_approval" || inputRule.minimumRisk !== "protected" || missingDefaultRole) {
           throw new BridgeError(
@@ -8780,12 +8686,9 @@ export class BridgeService {
     for (const [index, left] of rules.entries()) {
       for (const right of rules.slice(index + 1)) {
         if (left.priority === right.priority && this.policyRulesOverlap(left, right)) {
-          throw new BridgeError(
-            "VALIDATION_FAILED",
-            "Equal-priority project policy rules cannot overlap.",
-            400,
-            { ruleKeys: [left.key, right.key] },
-          );
+          throw new BridgeError("VALIDATION_FAILED", "Equal-priority project policy rules cannot overlap.", 400, {
+            ruleKeys: [left.key, right.key],
+          });
         }
       }
     }
@@ -8824,18 +8727,32 @@ export class BridgeService {
     input: PolicyEvaluationInput,
   ): Promise<PolicyEvaluation> {
     const configuration = await repository.getProjectPolicyConfiguration(projectId);
-    const configuredRule = configuration?.rules.find((rule) => this.policyRuleMatches(rule, input.category, input.scope));
+    const configuredRule = configuration?.rules.find((rule) =>
+      this.policyRuleMatches(rule, input.category, input.scope),
+    );
     const defaultRule = DEFAULT_PROTECTED_POLICY_RULES.find((rule) =>
-      this.policyRuleMatches(rule, input.category, input.scope));
-    const baseAction: PolicyAction = input.operation === "assumption"
-      ? input.declaredRisk === "low" && input.reversible ? "assume_and_log" : "block"
-      : input.declaredRisk === "protected" ? "protected_approval"
-        : input.blocking || input.declaredRisk === "high" ? "block" : "ask_async";
+      this.policyRuleMatches(rule, input.category, input.scope),
+    );
+    const baseAction: PolicyAction =
+      input.operation === "assumption"
+        ? input.declaredRisk === "low" && input.reversible
+          ? "assume_and_log"
+          : "block"
+        : input.declaredRisk === "protected"
+          ? "protected_approval"
+          : input.blocking || input.declaredRisk === "high"
+            ? "block"
+            : "ask_async";
     let action = baseAction;
     let risk = input.declaredRisk;
-    let policyRuleKey = input.operation === "assumption" ? "bridge-assumption-default" :
-      baseAction === "ask_async" ? "bridge-question-async" :
-        baseAction === "block" ? "bridge-question-blocking" : "bridge-agent-protected";
+    let policyRuleKey =
+      input.operation === "assumption"
+        ? "bridge-assumption-default"
+        : baseAction === "ask_async"
+          ? "bridge-question-async"
+          : baseAction === "block"
+            ? "bridge-question-blocking"
+            : "bridge-agent-protected";
     let requiredOwnerRoles: readonly string[] = [];
     let requiredReviewerRoles: readonly string[] = baseAction === "protected_approval" ? ["security-reviewer"] : [];
     let requiredReviewerQuorum: Readonly<Record<string, number>> = {};
@@ -8853,22 +8770,15 @@ export class BridgeService {
       const beforeRisk = risk;
       action = this.strongerAction(action, configuredRule.action);
       risk = this.higherRisk(risk, configuredRule.minimumRisk);
-      if (ACTION_RANK[configuredRule.action] >= ACTION_RANK[beforeAction] &&
-        RISK_RANK[configuredRule.minimumRisk] >= RISK_RANK[beforeRisk]) {
+      if (
+        ACTION_RANK[configuredRule.action] >= ACTION_RANK[beforeAction] &&
+        RISK_RANK[configuredRule.minimumRisk] >= RISK_RANK[beforeRisk]
+      ) {
         policyRuleKey = configuredRule.key;
       }
-      requiredOwnerRoles = this.normalizedRoles([
-        ...requiredOwnerRoles,
-        ...configuredRule.requiredOwnerRoles,
-      ]);
-      requiredReviewerRoles = this.normalizedRoles([
-        ...requiredReviewerRoles,
-        ...configuredRule.requiredReviewerRoles,
-      ]);
-      requiredReviewerQuorum = this.mergeReviewerQuorum(
-        requiredReviewerQuorum,
-        configuredRule.reviewerQuorum ?? {},
-      );
+      requiredOwnerRoles = this.normalizedRoles([...requiredOwnerRoles, ...configuredRule.requiredOwnerRoles]);
+      requiredReviewerRoles = this.normalizedRoles([...requiredReviewerRoles, ...configuredRule.requiredReviewerRoles]);
+      requiredReviewerQuorum = this.mergeReviewerQuorum(requiredReviewerQuorum, configuredRule.reviewerQuorum ?? {});
     }
     if (action === "protected_approval") risk = "protected";
     return {
@@ -8882,16 +8792,14 @@ export class BridgeService {
     };
   }
 
-  private ownershipRuleMatches(
-    rule: ProjectOwnershipRule,
-    category: string,
-    scope: Scope,
-  ): boolean {
-    return (!rule.category || this.normalizedPolicyCategory(rule.category) === this.normalizedPolicyCategory(category)) &&
-      (!rule.repository || this.normalizedOwnershipSelector(rule.repository) ===
-        this.normalizedOwnershipSelector(scope.repository)) &&
-      (!rule.component || this.normalizedOwnershipSelector(rule.component) ===
-        this.normalizedOwnershipSelector(scope.component));
+  private ownershipRuleMatches(rule: ProjectOwnershipRule, category: string, scope: Scope): boolean {
+    return (
+      (!rule.category || this.normalizedPolicyCategory(rule.category) === this.normalizedPolicyCategory(category)) &&
+      (!rule.repository ||
+        this.normalizedOwnershipSelector(rule.repository) === this.normalizedOwnershipSelector(scope.repository)) &&
+      (!rule.component ||
+        this.normalizedOwnershipSelector(rule.component) === this.normalizedOwnershipSelector(scope.component))
+    );
   }
 
   private ownershipRouteSource(rule: ProjectOwnershipRule): QuestionRouteSource {
@@ -8906,10 +8814,9 @@ export class BridgeService {
   ): { readonly principalIds: readonly string[]; readonly roles: readonly string[] } {
     const teamMembers = new Map(configuration.teams.map((team) => [team.key, team.memberIds]));
     return {
-      principalIds: [...new Set([
-        ...targets.principalIds,
-        ...targets.teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? []),
-      ])],
+      principalIds: [
+        ...new Set([...targets.principalIds, ...targets.teamKeys.flatMap((teamKey) => teamMembers.get(teamKey) ?? [])]),
+      ],
       roles: this.normalizedRoles(targets.roles),
     };
   }
@@ -8920,7 +8827,7 @@ export class BridgeService {
     input: CreateQuestionInput,
     policy: PolicyEvaluation,
   ): Promise<RoutingResolution> {
-    const ownership = await repository.getProjectOwnershipConfiguration(project.id) ?? {
+    const ownership = (await repository.getProjectOwnershipConfiguration(project.id)) ?? {
       organizationId: project.organizationId,
       projectId: project.id,
       roles: [],
@@ -8931,11 +8838,8 @@ export class BridgeService {
     const rules = [...ownership.rules]
       .filter((rule) => this.ownershipRuleMatches(rule, input.category, input.scope))
       .sort((left, right) => left.priority - right.priority || left.key.localeCompare(right.key));
-    const findRule = (
-      lane: "owners" | "reviewers",
-      source: "scoped_ownership" | "category_role" | "project_default",
-    ) => rules.find((rule) =>
-      this.ownershipRouteSource(rule) === source && this.ownershipTargetCount(rule[lane]) > 0);
+    const findRule = (lane: "owners" | "reviewers", source: "scoped_ownership" | "category_role" | "project_default") =>
+      rules.find((rule) => this.ownershipRouteSource(rule) === source && this.ownershipTargetCount(rule[lane]) > 0);
 
     let ownerIds: readonly string[] = [...new Set(input.intendedOwnerIds)];
     let ownerRoles: readonly string[] = this.normalizedRoles(input.intendedOwnerRoles);
@@ -8944,7 +8848,8 @@ export class BridgeService {
     if (ownerIds.length > 0 || ownerRoles.length > 0) {
       ownerSource = "explicit_owner";
     } else {
-      const ownerRule = findRule("owners", "scoped_ownership") ??
+      const ownerRule =
+        findRule("owners", "scoped_ownership") ??
         findRule("owners", "category_role") ??
         findRule("owners", "project_default");
       if (ownerRule) {
@@ -8962,20 +8867,20 @@ export class BridgeService {
     }
     ownerRoles = this.normalizedRoles([...ownerRoles, ...policy.requiredOwnerRoles]);
 
-    const reviewerRule = findRule("reviewers", "scoped_ownership") ??
+    const reviewerRule =
+      findRule("reviewers", "scoped_ownership") ??
       findRule("reviewers", "category_role") ??
       findRule("reviewers", "project_default");
     const expandedReviewers = reviewerRule
       ? this.expandOwnershipTargets(reviewerRule.reviewers, ownership)
       : { principalIds: [], roles: [] };
     const reviewerIds = expandedReviewers.principalIds;
-    const reviewerRoles = this.normalizedRoles([
-      ...expandedReviewers.roles,
-      ...policy.requiredReviewerRoles,
-    ]);
+    const reviewerRoles = this.normalizedRoles([...expandedReviewers.roles, ...policy.requiredReviewerRoles]);
     const reviewerSource: QuestionRouteSource = reviewerRule
       ? this.ownershipRouteSource(reviewerRule)
-      : policy.requiredReviewerRoles.length > 0 ? "policy" : "none";
+      : policy.requiredReviewerRoles.length > 0
+        ? "policy"
+        : "none";
     return {
       ownerIds,
       ownerRoles,
@@ -8993,8 +8898,7 @@ export class BridgeService {
   }
 
   private normalizedRoles(roles: readonly string[]): readonly string[] {
-    return [...new Set(roles.map(normalizeRoleName).filter(Boolean))].sort((left, right) =>
-      left.localeCompare(right));
+    return [...new Set(roles.map(normalizeRoleName).filter(Boolean))].sort((left, right) => left.localeCompare(right));
   }
 
   private normalizedReviewerQuorum(
@@ -9066,11 +8970,7 @@ export class BridgeService {
       }
       seenProjectIds.add(membership.projectId);
       if (!projects.has(membership.projectId)) {
-        throw new BridgeError(
-          "PROJECT_NOT_FOUND",
-          "A configured project was not found in this organization.",
-          404,
-        );
+        throw new BridgeError("PROJECT_NOT_FOUND", "A configured project was not found in this organization.", 404);
       }
       return { projectId: membership.projectId, roles: [...this.normalizedRoles(membership.roles)] };
     });
@@ -9089,8 +8989,7 @@ export class BridgeService {
       roles: membership.roles,
       allProjects: membership.allProjects,
       provisioning: membership.provisioning,
-      projectMemberships: [...projectMemberships].sort((left, right) =>
-        left.projectId.localeCompare(right.projectId)),
+      projectMemberships: [...projectMemberships].sort((left, right) => left.projectId.localeCompare(right.projectId)),
       createdAt: membership.createdAt,
       updatedAt: membership.updatedAt,
       version: membership.version,
@@ -9111,8 +9010,7 @@ export class BridgeService {
       scopes: credential.scopes,
       roles: membership.roles,
       allProjects: membership.allProjects,
-      projectMemberships: [...projectMemberships].sort((left, right) =>
-        left.projectId.localeCompare(right.projectId)),
+      projectMemberships: [...projectMemberships].sort((left, right) => left.projectId.localeCompare(right.projectId)),
       createdAt: credential.createdAt,
       expiresAt: credential.expiresAt,
       ...(credential.rotatedAt ? { rotatedAt: credential.rotatedAt } : {}),
@@ -9170,13 +9068,7 @@ export class BridgeService {
     projectId: string,
     repository: BridgeRepository = this.repository,
   ): Promise<Project> {
-    return this.requireProjectForResource(
-      principal,
-      projectId,
-      repository,
-      "PROJECT_NOT_FOUND",
-      "Project not found.",
-    );
+    return this.requireProjectForResource(principal, projectId, repository, "PROJECT_NOT_FOUND", "Project not found.");
   }
 
   private async requireProjectForResource(
@@ -9239,7 +9131,8 @@ export class BridgeService {
       | "sourceUpdatedAt"
     >,
   ): boolean {
-    return existing.repositoryId === candidate.repositoryId &&
+    return (
+      existing.repositoryId === candidate.repositoryId &&
       existing.number === candidate.number &&
       existing.title === candidate.title &&
       existing.state === candidate.state &&
@@ -9249,7 +9142,8 @@ export class BridgeService {
       existing.headSha === candidate.headSha &&
       existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
       JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
-      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds)
+    );
   }
 
   private async githubPullRequestView(
@@ -9259,10 +9153,10 @@ export class BridgeService {
     const decisions = (
       await Promise.all(pullRequest.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
     )
-      .filter((decision): decision is Decision =>
-        decision !== undefined &&
-        decision.projectId === pullRequest.projectId &&
-        decision.status === "active")
+      .filter(
+        (decision): decision is Decision =>
+          decision !== undefined && decision.projectId === pullRequest.projectId && decision.status === "active",
+      )
       .map(({ id, answer, category, status, scope }) => ({
         id,
         answer,
@@ -9281,7 +9175,8 @@ export class BridgeService {
             artifact.projectId !== pullRequest.projectId ||
             !version ||
             !["approved", "superseded"].includes(version.status)
-          ) return undefined;
+          )
+            return undefined;
           return {
             artifactId: artifact.id,
             artifactTitle: artifact.title,
@@ -9294,8 +9189,7 @@ export class BridgeService {
           };
         }),
       )
-    ).filter((version): version is GithubPullRequestContextView["artifactVersions"][number] =>
-      version !== undefined);
+    ).filter((version): version is GithubPullRequestContextView["artifactVersions"][number] => version !== undefined);
     return {
       pullRequest,
       trustLevel: "untrusted_data",
@@ -9321,7 +9215,8 @@ export class BridgeService {
       | "sourceUpdatedAt"
     >,
   ): boolean {
-    return existing.repositoryId === candidate.repositoryId &&
+    return (
+      existing.repositoryId === candidate.repositoryId &&
       existing.number === candidate.number &&
       existing.reference === candidate.reference &&
       existing.title === candidate.title &&
@@ -9330,20 +9225,19 @@ export class BridgeService {
       existing.sourceUpdatedAt === candidate.sourceUpdatedAt &&
       JSON.stringify(existing.labels) === JSON.stringify(candidate.labels) &&
       JSON.stringify(existing.decisionIds) === JSON.stringify(candidate.decisionIds) &&
-      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds);
+      JSON.stringify(existing.artifactVersionIds) === JSON.stringify(candidate.artifactVersionIds)
+    );
   }
 
   private async githubIssueView(
     repository: BridgeRepository,
     issue: GithubIssueWorkItem,
   ): Promise<GithubIssueContextView> {
-    const decisions = (
-      await Promise.all(issue.decisionIds.map((decisionId) => repository.getDecision(decisionId)))
-    )
-      .filter((decision): decision is Decision =>
-        decision !== undefined &&
-        decision.projectId === issue.projectId &&
-        decision.status === "active")
+    const decisions = (await Promise.all(issue.decisionIds.map((decisionId) => repository.getDecision(decisionId))))
+      .filter(
+        (decision): decision is Decision =>
+          decision !== undefined && decision.projectId === issue.projectId && decision.status === "active",
+      )
       .map(({ id, answer, category, status, scope }) => ({
         id,
         answer,
@@ -9362,7 +9256,8 @@ export class BridgeService {
             artifact.projectId !== issue.projectId ||
             !version ||
             !["approved", "superseded"].includes(version.status)
-          ) return undefined;
+          )
+            return undefined;
           return {
             artifactId: artifact.id,
             artifactTitle: artifact.title,
@@ -9375,8 +9270,7 @@ export class BridgeService {
           };
         }),
       )
-    ).filter((version): version is GithubIssueContextView["artifactVersions"][number] =>
-      version !== undefined);
+    ).filter((version): version is GithubIssueContextView["artifactVersions"][number] => version !== undefined);
     return {
       issue,
       trustLevel: "untrusted_data",
@@ -9414,9 +9308,7 @@ export class BridgeService {
       ...(metadata.policyRuleKey === undefined ? {} : { policyRuleKey: metadata.policyRuleKey }),
       ...(metadata.assignmentId === undefined ? {} : { assignmentId: metadata.assignmentId }),
       ...(metadata.ownerRouteSource === undefined ? {} : { ownerRouteSource: metadata.ownerRouteSource }),
-      ...(metadata.reviewerRouteSource === undefined
-        ? {}
-        : { reviewerRouteSource: metadata.reviewerRouteSource }),
+      ...(metadata.reviewerRouteSource === undefined ? {} : { reviewerRouteSource: metadata.reviewerRouteSource }),
       ...(metadata.beforeVersion === undefined ? {} : { beforeVersion: metadata.beforeVersion }),
       ...(metadata.afterVersion === undefined ? {} : { afterVersion: metadata.afterVersion }),
       createdAt,
@@ -9482,11 +9374,13 @@ export class BridgeService {
     triggeringDecisionId: string,
     createdAt: string,
   ): Promise<void> {
-    const candidates = (await repository.listRuns(projectId)).filter((run) =>
-      run.status === "waiting_for_human" &&
-      run.continuationMode === "automatic" &&
-      run.client === "codex" &&
-      run.questionIds.includes(resolvedQuestionId));
+    const candidates = (await repository.listRuns(projectId)).filter(
+      (run) =>
+        run.status === "waiting_for_human" &&
+        run.continuationMode === "automatic" &&
+        run.client === "codex" &&
+        run.questionIds.includes(resolvedQuestionId),
+    );
     for (const run of candidates) {
       const vendorSessionId = await repository.getRunVendorSessionId(run.id);
       if (!vendorSessionId) continue;
@@ -9510,15 +9404,7 @@ export class BridgeService {
         availableAt: createdAt,
         createdAt,
       });
-      await this.audit(
-        repository,
-        principal,
-        projectId,
-        "run.continuation_queued",
-        "run",
-        run.id,
-        createdAt,
-      );
+      await this.audit(repository, principal, projectId, "run.continuation_queued", "run", run.id, createdAt);
     }
   }
 
@@ -9529,9 +9415,7 @@ export class BridgeService {
     recipientIds: readonly string[],
     recipientRoles: readonly string[],
   ): Promise<readonly string[]> {
-    const recipients = new Set(
-      recipientIds.filter((recipientId) => recipientId && recipientId !== principal.id),
-    );
+    const recipients = new Set(recipientIds.filter((recipientId) => recipientId && recipientId !== principal.id));
     const roles = [...new Set(recipientRoles.map(normalizeRoleName).filter(Boolean))];
     if (roles.length === 0) return [...recipients];
 

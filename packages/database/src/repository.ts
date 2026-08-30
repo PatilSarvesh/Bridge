@@ -1,14 +1,6 @@
-import type {
-  BridgeRepository,
-  QuestionMatchCandidateQuery,
-  RepositoryTransactionContext,
-} from "@bridge/application";
+import type { BridgeRepository, QuestionMatchCandidateQuery, RepositoryTransactionContext } from "@bridge/application";
 import { BridgeError } from "@bridge/domain";
-import {
-  type BridgeMetrics,
-  currentCorrelationId,
-  runWithCorrelationContextIfAbsent,
-} from "@bridge/observability";
+import { type BridgeMetrics, currentCorrelationId, runWithCorrelationContextIfAbsent } from "@bridge/observability";
 import type {
   AdapterDiagnostic,
   AgentRun,
@@ -96,7 +88,7 @@ import {
   runFromRow,
   runToRow,
 } from "./mappers.js";
-import * as schema from "./schema.js";
+import type * as schema from "./schema.js";
 import {
   artifacts,
   agentRuns,
@@ -254,9 +246,11 @@ export class PostgresBridgeRepository implements BridgeRepository {
       throw new Error("The active PostgreSQL role could not be inspected.");
     }
     if (this.allowMaintenance ? !bypassesRls : bypassesRls) {
-      throw new Error(this.allowMaintenance
-        ? "The maintenance PostgreSQL role must have BYPASSRLS."
-        : "The application PostgreSQL role must be non-superuser and NOBYPASSRLS.");
+      throw new Error(
+        this.allowMaintenance
+          ? "The maintenance PostgreSQL role must have BYPASSRLS."
+          : "The application PostgreSQL role must be non-superuser and NOBYPASSRLS.",
+      );
     }
     return { backend: "postgresql" };
   }
@@ -269,16 +263,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
       return runWithCorrelationContextIfAbsent("application", () => this.transaction(work, context));
     }
     if (context?.organizationId && context.maintenance) {
-      throw new BridgeError("VALIDATION_FAILED", "A database transaction cannot be tenant and maintenance scoped.", 500);
+      throw new BridgeError(
+        "VALIDATION_FAILED",
+        "A database transaction cannot be tenant and maintenance scoped.",
+        500,
+      );
     }
     if (context?.maintenance && !this.allowMaintenance) {
       throw new BridgeError("FORBIDDEN", "The database connection is not configured for maintenance access.", 403);
     }
     if (this.lockAggregateReads) {
-      if (
-        context?.organizationId &&
-        this.transactionContext?.organizationId !== context.organizationId
-      ) {
+      if (context?.organizationId && this.transactionContext?.organizationId !== context.organizationId) {
         throw new BridgeError("FORBIDDEN", "A nested database transaction cannot change tenant scope.", 403);
       }
       if (context?.maintenance && !this.transactionContext?.maintenance) {
@@ -291,21 +286,18 @@ export class PostgresBridgeRepository implements BridgeRepository {
     let outcome: "success" | "error" = "success";
 
     try {
-      return await this.database.transaction(async (transaction) => {
-        const scopedDatabase = transaction as unknown as BridgeDatabase;
-        if (context?.organizationId) {
-          await scopedDatabase.execute(
-            sql`select set_config('bridge.organization_id', ${context.organizationId}, true)`,
-          );
-        }
-        return work(new PostgresBridgeRepository(
-          scopedDatabase,
-          true,
-          this.metrics,
-          context,
-          this.allowMaintenance,
-        ));
-      }, { isolationLevel: "serializable" });
+      return await this.database.transaction(
+        async (transaction) => {
+          const scopedDatabase = transaction as unknown as BridgeDatabase;
+          if (context?.organizationId) {
+            await scopedDatabase.execute(
+              sql`select set_config('bridge.organization_id', ${context.organizationId}, true)`,
+            );
+          }
+          return work(new PostgresBridgeRepository(scopedDatabase, true, this.metrics, context, this.allowMaintenance));
+        },
+        { isolationLevel: "serializable" },
+      );
     } catch (error) {
       outcome = "error";
       const code = databaseErrorCode(error);
@@ -325,9 +317,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
     }
   }
 
-  async getOrganizationByExternalId(
-    externalIdentityProviderId: string,
-  ): Promise<Organization | undefined> {
+  async getOrganizationByExternalId(externalIdentityProviderId: string): Promise<Organization | undefined> {
     const rows = await this.database.execute<OrganizationLookupRow>(sql`
       select * from public.bridge_lookup_organization_by_external_id(${externalIdentityProviderId})
     `);
@@ -335,29 +325,26 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async listOrganizations(): Promise<readonly Organization[]> {
-    const rows = await this.database
-      .select()
-      .from(organizations)
-      .orderBy(asc(organizations.id));
+    const rows = await this.database.select().from(organizations).orderBy(asc(organizations.id));
     return rows.map(organizationFromRow);
   }
 
   async saveOrganization(organization: Organization): Promise<void> {
     const row = organizationToRow(organization);
-    await this.database.insert(organizations).values(row).onConflictDoUpdate({
-      target: organizations.id,
-      set: {
-        externalIdentityProviderId: row.externalIdentityProviderId,
-        slug: row.slug,
-        name: row.name,
-      },
-    });
+    await this.database
+      .insert(organizations)
+      .values(row)
+      .onConflictDoUpdate({
+        target: organizations.id,
+        set: {
+          externalIdentityProviderId: row.externalIdentityProviderId,
+          slug: row.slug,
+          name: row.name,
+        },
+      });
   }
 
-  async getPrincipalIdentityByOidc(
-    issuer: string,
-    subject: string,
-  ): Promise<PrincipalIdentity | undefined> {
+  async getPrincipalIdentityByOidc(issuer: string, subject: string): Promise<PrincipalIdentity | undefined> {
     const rows = await this.database.execute<PrincipalIdentityLookupRow>(sql`
       select * from public.bridge_lookup_principal_identity_by_oidc(${issuer}, ${subject})
     `);
@@ -373,15 +360,18 @@ export class PostgresBridgeRepository implements BridgeRepository {
 
   async savePrincipalIdentity(identity: PrincipalIdentity): Promise<void> {
     const row = principalIdentityToRow(identity);
-    await this.database.insert(principalIdentities).values(row).onConflictDoUpdate({
-      target: principalIdentities.id,
-      set: {
-        type: row.type,
-        displayName: row.displayName,
-        oidcIssuer: row.oidcIssuer,
-        oidcSubject: row.oidcSubject,
-      },
-    });
+    await this.database
+      .insert(principalIdentities)
+      .values(row)
+      .onConflictDoUpdate({
+        target: principalIdentities.id,
+        set: {
+          type: row.type,
+          displayName: row.displayName,
+          oidcIssuer: row.oidcIssuer,
+          oidcSubject: row.oidcSubject,
+        },
+      });
   }
 
   async getServiceCredential(serviceCredentialId: string): Promise<ServiceCredential | undefined> {
@@ -405,26 +395,24 @@ export class PostgresBridgeRepository implements BridgeRepository {
 
   async saveServiceCredential(credential: ServiceCredential): Promise<void> {
     const row = serviceCredentialToRow(credential);
-    await this.database.insert(serviceCredentials).values(row).onConflictDoUpdate({
-      target: serviceCredentials.id,
-      set: {
-        name: row.name,
-        scopes: row.scopes,
-        expiresAt: row.expiresAt,
-        revokedAt: row.revokedAt,
-        version: row.version,
-      },
-    });
+    await this.database
+      .insert(serviceCredentials)
+      .values(row)
+      .onConflictDoUpdate({
+        target: serviceCredentials.id,
+        set: {
+          name: row.name,
+          scopes: row.scopes,
+          expiresAt: row.expiresAt,
+          revokedAt: row.revokedAt,
+          version: row.version,
+        },
+      });
   }
 
-  async revokeServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async revokeServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean> {
     const row = serviceCredentialToRow(credential);
-    const expectedVersionCondition = expectedVersion === undefined
-      ? sql``
-      : sql`and version = ${expectedVersion}`;
+    const expectedVersionCondition = expectedVersion === undefined ? sql`` : sql`and version = ${expectedVersion}`;
     const updated = await this.database.execute(sql`
       update public.bridge_service_credentials
       set revoked_at = ${row.revokedAt}, version = ${row.version}
@@ -435,14 +423,9 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return updated.count === 1;
   }
 
-  async rotateServiceCredential(
-    credential: ServiceCredential,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async rotateServiceCredential(credential: ServiceCredential, expectedVersion?: number): Promise<boolean> {
     const row = serviceCredentialToRow(credential);
-    const expectedVersionCondition = expectedVersion === undefined
-      ? sql``
-      : sql`and version = ${expectedVersion}`;
+    const expectedVersionCondition = expectedVersion === undefined ? sql`` : sql`and version = ${expectedVersion}`;
     const updated = await this.database.execute(sql`
       update public.bridge_service_credentials
       set token_hash = ${row.tokenHash}, rotated_at = ${row.rotatedAt}, version = ${row.version}
@@ -460,17 +443,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const [row] = await this.database
       .select()
       .from(organizationMemberships)
-      .where(and(
-        eq(organizationMemberships.organizationId, organizationId),
-        eq(organizationMemberships.principalId, principalId),
-      ))
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.principalId, principalId),
+        ),
+      )
       .limit(1);
     return row ? organizationMembershipFromRow(row) : undefined;
   }
 
-  async listOrganizationMemberships(
-    organizationId: string,
-  ): Promise<readonly OrganizationMembership[]> {
+  async listOrganizationMemberships(organizationId: string): Promise<readonly OrganizationMembership[]> {
     const rows = await this.database
       .select()
       .from(organizationMemberships)
@@ -479,46 +462,48 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(organizationMembershipFromRow);
   }
 
-  async saveOrganizationMembership(
-    membership: OrganizationMembership,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveOrganizationMembership(membership: OrganizationMembership, expectedVersion?: number): Promise<boolean> {
     const row = organizationMembershipToRow(membership);
     if (expectedVersion !== undefined) {
-      const updated = await this.database.update(organizationMemberships).set({
-        status: row.status,
-        roles: row.roles,
-        allProjects: row.allProjects,
-        provisioning: row.provisioning,
-        updatedAt: row.updatedAt,
-        version: row.version,
-      }).where(and(
-        eq(organizationMemberships.organizationId, membership.organizationId),
-        eq(organizationMemberships.principalId, membership.principalId),
-        eq(organizationMemberships.version, expectedVersion),
-      )).returning({ principalId: organizationMemberships.principalId });
+      const updated = await this.database
+        .update(organizationMemberships)
+        .set({
+          status: row.status,
+          roles: row.roles,
+          allProjects: row.allProjects,
+          provisioning: row.provisioning,
+          updatedAt: row.updatedAt,
+          version: row.version,
+        })
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, membership.organizationId),
+            eq(organizationMemberships.principalId, membership.principalId),
+            eq(organizationMemberships.version, expectedVersion),
+          ),
+        )
+        .returning({ principalId: organizationMemberships.principalId });
       return updated.length === 1;
     }
-    await this.database.insert(organizationMemberships).values(row).onConflictDoUpdate({
-      target: [organizationMemberships.organizationId, organizationMemberships.principalId],
-      set: {
-        status: row.status,
-        roles: row.roles,
-        allProjects: row.allProjects,
-        provisioning: row.provisioning,
-        updatedAt: row.updatedAt,
-        version: row.version,
-      },
-    });
+    await this.database
+      .insert(organizationMemberships)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [organizationMemberships.organizationId, organizationMemberships.principalId],
+        set: {
+          status: row.status,
+          roles: row.roles,
+          allProjects: row.allProjects,
+          provisioning: row.provisioning,
+          updatedAt: row.updatedAt,
+          version: row.version,
+        },
+      });
     return true;
   }
 
   async getDirectoryGroup(groupId: string): Promise<DirectoryGroup | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(directoryGroups)
-      .where(eq(directoryGroups.id, groupId))
-      .limit(1);
+    const [row] = await this.database.select().from(directoryGroups).where(eq(directoryGroups.id, groupId)).limit(1);
     return row ? directoryGroupFromRow(row) : undefined;
   }
 
@@ -549,11 +534,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedAt: row.updatedAt,
         version: row.version,
       })
-      .where(and(
-        eq(directoryGroups.id, group.id),
-        eq(directoryGroups.organizationId, group.organizationId),
-        eq(directoryGroups.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(directoryGroups.id, group.id),
+          eq(directoryGroups.organizationId, group.organizationId),
+          eq(directoryGroups.version, expectedVersion),
+        ),
+      )
       .returning({ id: directoryGroups.id });
     return updated.length === 1;
   }
@@ -574,18 +561,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const rows = await this.database
       .select()
       .from(directoryGroupMembers)
-      .where(and(
-        eq(directoryGroupMembers.organizationId, organizationId),
-        eq(directoryGroupMembers.principalId, principalId),
-      ))
+      .where(
+        and(
+          eq(directoryGroupMembers.organizationId, organizationId),
+          eq(directoryGroupMembers.principalId, principalId),
+        ),
+      )
       .orderBy(asc(directoryGroupMembers.groupId));
     return rows.map(directoryGroupMemberFromRow);
   }
 
-  async saveDirectoryGroupMember(
-    member: DirectoryGroupMember,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveDirectoryGroupMember(member: DirectoryGroupMember, expectedVersion?: number): Promise<boolean> {
     const row = directoryGroupMemberToRow(member);
     if (expectedVersion === undefined) {
       const inserted = await this.database
@@ -604,62 +590,62 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedAt: row.updatedAt,
         version: row.version,
       })
-      .where(and(
-        eq(directoryGroupMembers.id, member.id),
-        eq(directoryGroupMembers.organizationId, member.organizationId),
-        eq(directoryGroupMembers.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(directoryGroupMembers.id, member.id),
+          eq(directoryGroupMembers.organizationId, member.organizationId),
+          eq(directoryGroupMembers.version, expectedVersion),
+        ),
+      )
       .returning({ id: directoryGroupMembers.id });
     return updated.length === 1;
   }
 
-  async listProjectMemberships(
-    organizationId: string,
-    principalId: string,
-  ): Promise<readonly ProjectMembership[]> {
+  async listProjectMemberships(organizationId: string, principalId: string): Promise<readonly ProjectMembership[]> {
     const rows = await this.database
       .select()
       .from(projectMemberships)
-      .where(and(
-        eq(projectMemberships.organizationId, organizationId),
-        eq(projectMemberships.principalId, principalId),
-      ))
+      .where(
+        and(eq(projectMemberships.organizationId, organizationId), eq(projectMemberships.principalId, principalId)),
+      )
       .orderBy(asc(projectMemberships.projectId));
     return rows.map(projectMembershipFromRow);
   }
 
-  async saveProjectMembership(
-    membership: ProjectMembership,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveProjectMembership(membership: ProjectMembership, expectedVersion?: number): Promise<boolean> {
     const row = projectMembershipToRow(membership);
     if (expectedVersion !== undefined) {
-      const updated = await this.database.update(projectMemberships).set({
-        status: row.status,
-        roles: row.roles,
-        updatedAt: row.updatedAt,
-        version: row.version,
-      }).where(and(
-        eq(projectMemberships.organizationId, membership.organizationId),
-        eq(projectMemberships.projectId, membership.projectId),
-        eq(projectMemberships.principalId, membership.principalId),
-        eq(projectMemberships.version, expectedVersion),
-      )).returning({ principalId: projectMemberships.principalId });
+      const updated = await this.database
+        .update(projectMemberships)
+        .set({
+          status: row.status,
+          roles: row.roles,
+          updatedAt: row.updatedAt,
+          version: row.version,
+        })
+        .where(
+          and(
+            eq(projectMemberships.organizationId, membership.organizationId),
+            eq(projectMemberships.projectId, membership.projectId),
+            eq(projectMemberships.principalId, membership.principalId),
+            eq(projectMemberships.version, expectedVersion),
+          ),
+        )
+        .returning({ principalId: projectMemberships.principalId });
       return updated.length === 1;
     }
-    await this.database.insert(projectMemberships).values(row).onConflictDoUpdate({
-      target: [
-        projectMemberships.organizationId,
-        projectMemberships.projectId,
-        projectMemberships.principalId,
-      ],
-      set: {
-        status: row.status,
-        roles: row.roles,
-        updatedAt: row.updatedAt,
-        version: row.version,
-      },
-    });
+    await this.database
+      .insert(projectMemberships)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [projectMemberships.organizationId, projectMemberships.projectId, projectMemberships.principalId],
+        set: {
+          status: row.status,
+          roles: row.roles,
+          updatedAt: row.updatedAt,
+          version: row.version,
+        },
+      });
     return true;
   }
 
@@ -673,86 +659,91 @@ export class PostgresBridgeRepository implements BridgeRepository {
       this.getOrganizationByExternalId(identity.organizationExternalId),
     ]);
     if (!principalIdentity || !organization) return undefined;
-    return this.transaction(async (repository) => {
-      const organizationMembership = await repository.getOrganizationMembership(
-        organization.id,
-        principalIdentity.id,
-      );
-      if (!organizationMembership || organizationMembership.status !== "active") return undefined;
-      const memberships = (await repository.listProjectMemberships(
-        organization.id,
-        principalIdentity.id,
-      )).filter((membership) => membership.status === "active");
-      return {
-        id: principalIdentity.id,
-        type: principalIdentity.type,
-        organizationId: organization.id,
-        projectIds: memberships.map((membership) => membership.projectId),
-        allProjects: organizationMembership.allProjects,
-        roles: organizationMembership.roles,
-        projectRoles: Object.fromEntries(
-          memberships.map((membership) => [membership.projectId, membership.roles]),
-        ),
-        displayName: principalIdentity.displayName,
-      };
-    }, { organizationId: organization.id });
+    return this.transaction(
+      async (repository) => {
+        const organizationMembership = await repository.getOrganizationMembership(
+          organization.id,
+          principalIdentity.id,
+        );
+        if (!organizationMembership || organizationMembership.status !== "active") return undefined;
+        const memberships = (await repository.listProjectMemberships(organization.id, principalIdentity.id)).filter(
+          (membership) => membership.status === "active",
+        );
+        return {
+          id: principalIdentity.id,
+          type: principalIdentity.type,
+          organizationId: organization.id,
+          projectIds: memberships.map((membership) => membership.projectId),
+          allProjects: organizationMembership.allProjects,
+          roles: organizationMembership.roles,
+          projectRoles: Object.fromEntries(memberships.map((membership) => [membership.projectId, membership.roles])),
+          displayName: principalIdentity.displayName,
+        };
+      },
+      { organizationId: organization.id },
+    );
   }
 
   async resolveServiceToken(tokenHash: string): Promise<ServiceTokenResolution | undefined> {
     const lookup = await this.lookupServiceToken(tokenHash);
     const credential = lookup ? serviceCredentialFromLookupRow(lookup) : undefined;
     const expiresAt = credential ? Date.parse(credential.expiresAt) : Number.NaN;
-    if (!lookup || !credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
-    return this.transaction(async (repository) => {
-      const organizationMembership = await repository.getOrganizationMembership(
-        credential.organizationId,
-        lookup.principal_id,
-      );
-      if (lookup.principal_type === "human" || !organizationMembership ||
-        organizationMembership.status !== "active") return undefined;
-      const memberships = (await repository.listProjectMemberships(
-        credential.organizationId,
-        lookup.principal_id,
-      )).filter((membership) => membership.status === "active");
-      return {
-        credential,
-        principal: {
-          id: lookup.principal_id,
-          type: lookup.principal_type,
-          organizationId: credential.organizationId,
-          projectIds: memberships.map((membership) => membership.projectId),
-          allProjects: organizationMembership.allProjects,
-          roles: organizationMembership.roles,
-          projectRoles: Object.fromEntries(
-            memberships.map((membership) => [membership.projectId, membership.roles]),
-          ),
-          displayName: lookup.principal_display_name,
-        },
-      };
-    }, { organizationId: credential.organizationId });
+    if (!lookup || !credential || credential.revokedAt || !Number.isFinite(expiresAt) || expiresAt <= Date.now())
+      return undefined;
+    return this.transaction(
+      async (repository) => {
+        const organizationMembership = await repository.getOrganizationMembership(
+          credential.organizationId,
+          lookup.principal_id,
+        );
+        if (lookup.principal_type === "human" || !organizationMembership || organizationMembership.status !== "active")
+          return undefined;
+        const memberships = (
+          await repository.listProjectMemberships(credential.organizationId, lookup.principal_id)
+        ).filter((membership) => membership.status === "active");
+        return {
+          credential,
+          principal: {
+            id: lookup.principal_id,
+            type: lookup.principal_type,
+            organizationId: credential.organizationId,
+            projectIds: memberships.map((membership) => membership.projectId),
+            allProjects: organizationMembership.allProjects,
+            roles: organizationMembership.roles,
+            projectRoles: Object.fromEntries(memberships.map((membership) => [membership.projectId, membership.roles])),
+            displayName: lookup.principal_display_name,
+          },
+        };
+      },
+      { organizationId: credential.organizationId },
+    );
   }
 
   async listOrganizationPrincipals(organizationId: string): Promise<readonly Principal[]> {
-    const memberships = (await this.listOrganizationMemberships(organizationId))
-      .filter((membership) => membership.status === "active");
-    const principals = await Promise.all(memberships.map(async (membership): Promise<Principal | undefined> => {
-      const identity = await this.getPrincipalIdentity(membership.principalId);
-      if (!identity) return undefined;
-      const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id))
-        .filter((membership) => membership.status === "active");
-      return {
-        id: identity.id,
-        type: identity.type,
-        organizationId,
-        projectIds: projectMemberships.map((membership) => membership.projectId),
-        allProjects: membership.allProjects,
-        roles: membership.roles,
-        projectRoles: Object.fromEntries(
-          projectMemberships.map((membership) => [membership.projectId, membership.roles]),
-        ),
-        displayName: identity.displayName,
-      };
-    }));
+    const memberships = (await this.listOrganizationMemberships(organizationId)).filter(
+      (membership) => membership.status === "active",
+    );
+    const principals = await Promise.all(
+      memberships.map(async (membership): Promise<Principal | undefined> => {
+        const identity = await this.getPrincipalIdentity(membership.principalId);
+        if (!identity) return undefined;
+        const projectMemberships = (await this.listProjectMemberships(organizationId, identity.id)).filter(
+          (membership) => membership.status === "active",
+        );
+        return {
+          id: identity.id,
+          type: identity.type,
+          organizationId,
+          projectIds: projectMemberships.map((membership) => membership.projectId),
+          allProjects: membership.allProjects,
+          roles: membership.roles,
+          projectRoles: Object.fromEntries(
+            projectMemberships.map((membership) => [membership.projectId, membership.roles]),
+          ),
+          displayName: identity.displayName,
+        };
+      }),
+    );
     return principals
       .filter((principal): principal is Principal => principal !== undefined)
       .sort((left, right) => left.displayName.localeCompare(right.displayName));
@@ -824,9 +815,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
       });
   }
 
-  async getGithubPullRequest(
-    pullRequestId: string,
-  ): Promise<GithubPullRequestContext | undefined> {
+  async getGithubPullRequest(pullRequestId: string): Promise<GithubPullRequestContext | undefined> {
     const [row] = await this.database
       .select()
       .from(githubPullRequests)
@@ -844,10 +833,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return rows.map(githubPullRequestFromRow);
   }
 
-  async saveGithubPullRequest(
-    pullRequest: GithubPullRequestContext,
-    expectedVersion?: number,
-  ): Promise<boolean> {
+  async saveGithubPullRequest(pullRequest: GithubPullRequestContext, expectedVersion?: number): Promise<boolean> {
     const row = githubPullRequestToRow(pullRequest);
     if (expectedVersion === undefined) {
       const inserted = await this.database
@@ -872,22 +858,20 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedAt: row.updatedAt,
         version: row.version,
       })
-      .where(and(
-        eq(githubPullRequests.id, pullRequest.id),
-        eq(githubPullRequests.organizationId, pullRequest.organizationId),
-        eq(githubPullRequests.projectId, pullRequest.projectId),
-        eq(githubPullRequests.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(githubPullRequests.id, pullRequest.id),
+          eq(githubPullRequests.organizationId, pullRequest.organizationId),
+          eq(githubPullRequests.projectId, pullRequest.projectId),
+          eq(githubPullRequests.version, expectedVersion),
+        ),
+      )
       .returning({ id: githubPullRequests.id });
     return updated.length === 1;
   }
 
   async getGithubIssue(issueId: string): Promise<GithubIssueWorkItem | undefined> {
-    const [row] = await this.database
-      .select()
-      .from(githubIssues)
-      .where(eq(githubIssues.id, issueId))
-      .limit(1);
+    const [row] = await this.database.select().from(githubIssues).where(eq(githubIssues.id, issueId)).limit(1);
     return row ? githubIssueFromRow(row) : undefined;
   }
 
@@ -924,19 +908,19 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedAt: row.updatedAt,
         version: row.version,
       })
-      .where(and(
-        eq(githubIssues.id, issue.id),
-        eq(githubIssues.organizationId, issue.organizationId),
-        eq(githubIssues.projectId, issue.projectId),
-        eq(githubIssues.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(githubIssues.id, issue.id),
+          eq(githubIssues.organizationId, issue.organizationId),
+          eq(githubIssues.projectId, issue.projectId),
+          eq(githubIssues.version, expectedVersion),
+        ),
+      )
       .returning({ id: githubIssues.id });
     return updated.length === 1;
   }
 
-  async getProjectOwnershipConfiguration(
-    projectId: string,
-  ): Promise<ProjectOwnershipConfiguration | undefined> {
+  async getProjectOwnershipConfiguration(projectId: string): Promise<ProjectOwnershipConfiguration | undefined> {
     const [row] = await this.database
       .select()
       .from(projectOwnershipConfigurations)
@@ -968,18 +952,18 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedById: row.updatedById,
         updatedAt: row.updatedAt,
       })
-      .where(and(
-        eq(projectOwnershipConfigurations.organizationId, configuration.organizationId),
-        eq(projectOwnershipConfigurations.projectId, configuration.projectId),
-        eq(projectOwnershipConfigurations.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(projectOwnershipConfigurations.organizationId, configuration.organizationId),
+          eq(projectOwnershipConfigurations.projectId, configuration.projectId),
+          eq(projectOwnershipConfigurations.version, expectedVersion),
+        ),
+      )
       .returning({ projectId: projectOwnershipConfigurations.projectId });
     return updated.length === 1;
   }
 
-  async getProjectPolicyConfiguration(
-    projectId: string,
-  ): Promise<ProjectPolicyConfiguration | undefined> {
+  async getProjectPolicyConfiguration(projectId: string): Promise<ProjectPolicyConfiguration | undefined> {
     const [row] = await this.database
       .select()
       .from(projectPolicyConfigurations)
@@ -1009,11 +993,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
         updatedById: row.updatedById,
         updatedAt: row.updatedAt,
       })
-      .where(and(
-        eq(projectPolicyConfigurations.organizationId, configuration.organizationId),
-        eq(projectPolicyConfigurations.projectId, configuration.projectId),
-        eq(projectPolicyConfigurations.version, expectedVersion),
-      ))
+      .where(
+        and(
+          eq(projectPolicyConfigurations.organizationId, configuration.organizationId),
+          eq(projectPolicyConfigurations.projectId, configuration.projectId),
+          eq(projectPolicyConfigurations.version, expectedVersion),
+        ),
+      )
       .returning({ projectId: projectPolicyConfigurations.projectId });
     return updated.length === 1;
   }
@@ -1116,11 +1102,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return row?.vendorSessionId ?? undefined;
   }
 
-  async saveRunContinuationKey(
-    runId: string,
-    resumeContextKey: string,
-    vendorSessionId?: string,
-  ): Promise<void> {
+  async saveRunContinuationKey(runId: string, resumeContextKey: string, vendorSessionId?: string): Promise<void> {
     await this.database
       .insert(runContinuationLocators)
       .values({ runId, resumeContextKey, vendorSessionId })
@@ -1128,11 +1110,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async getAssumption(assumptionId: string): Promise<Assumption | undefined> {
-    const query = this.database
-      .select()
-      .from(assumptions)
-      .where(eq(assumptions.id, assumptionId))
-      .limit(1);
+    const query = this.database.select().from(assumptions).where(eq(assumptions.id, assumptionId)).limit(1);
     const rows = this.lockAggregateReads ? await query.for("update") : await query;
     return rows[0] ? assumptionFromRow(rows[0]) : undefined;
   }
@@ -1175,11 +1153,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return (await this.getIdempotencyRecord(key, "assumption"))?.requestHash;
   }
 
-  async saveIdempotentAssumption(
-    key: string,
-    assumptionId: string,
-    requestHash: string,
-  ): Promise<void> {
+  async saveIdempotentAssumption(key: string, assumptionId: string, requestHash: string): Promise<void> {
     await this.saveIdempotencyRecord(key, "assumption", assumptionId, requestHash);
   }
 
@@ -1206,7 +1180,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const responses = await this.database
       .select()
       .from(questionResponses)
-      .where(inArray(questionResponses.questionId, rows.map((row) => row.id)))
+      .where(
+        inArray(
+          questionResponses.questionId,
+          rows.map((row) => row.id),
+        ),
+      )
       .orderBy(asc(questionResponses.createdAt));
     return rows.map((row) => questionFromRows(row, responses));
   }
@@ -1229,15 +1208,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const rows = await this.database
       .select()
       .from(questions)
-      .where(and(
-        eq(questions.projectId, projectId),
-        inArray(questions.status, ["open", "in_discussion", "accepted"]),
-        or(
-          sql`${document} @@ (${projectQuery} && ${query})`,
-          sql`lower(${questions.projectId} || ':' || ${questions.title}) % lower(${scopedTitle})`,
-          sql`lower(${questions.projectId} || ':' || ${questions.context}) % lower(${scopedContext})`,
+      .where(
+        and(
+          eq(questions.projectId, projectId),
+          inArray(questions.status, ["open", "in_discussion", "accepted"]),
+          or(
+            sql`${document} @@ (${projectQuery} && ${query})`,
+            sql`lower(${questions.projectId} || ':' || ${questions.title}) % lower(${scopedTitle})`,
+            sql`lower(${questions.projectId} || ':' || ${questions.context}) % lower(${scopedContext})`,
+          ),
         ),
-      ))
+      )
       .orderBy(
         desc(sql<number>`greatest(
           ts_rank_cd(${document}, ${query}),
@@ -1250,7 +1231,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const responses = await this.database
       .select()
       .from(questionResponses)
-      .where(inArray(questionResponses.questionId, rows.map((row) => row.id)))
+      .where(
+        inArray(
+          questionResponses.questionId,
+          rows.map((row) => row.id),
+        ),
+      )
       .orderBy(asc(questionResponses.createdAt));
     return rows.map((row) => questionFromRows(row, responses));
   }
@@ -1394,7 +1380,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const versions = await this.database
       .select()
       .from(artifactVersions)
-      .where(inArray(artifactVersions.artifactId, rows.map((row) => row.id)))
+      .where(
+        inArray(
+          artifactVersions.artifactId,
+          rows.map((row) => row.id),
+        ),
+      )
       .orderBy(asc(artifactVersions.version));
     return rows.map((row) => artifactFromRows(row, versions));
   }
@@ -1441,11 +1432,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
     return (await this.getIdempotencyRecord(key, "artifact_version"))?.requestHash;
   }
 
-  async saveIdempotentArtifactVersion(
-    key: string,
-    versionId: string,
-    requestHash: string,
-  ): Promise<void> {
+  async saveIdempotentArtifactVersion(key: string, versionId: string, requestHash: string): Promise<void> {
     await this.saveIdempotencyRecord(key, "artifact_version", versionId, requestHash);
   }
 
@@ -1488,9 +1475,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .onConflictDoNothing({ target: organizationAuditEvents.id });
   }
 
-  async listOrganizationAuditEvents(
-    organizationId: string,
-  ): Promise<readonly OrganizationAuditEvent[]> {
+  async listOrganizationAuditEvents(organizationId: string): Promise<readonly OrganizationAuditEvent[]> {
     const rows = await this.database
       .select()
       .from(organizationAuditEvents)
@@ -1543,11 +1528,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const [row] = await this.database
       .select()
       .from(notificationPreferences)
-      .where(and(
-        eq(notificationPreferences.organizationId, organizationId),
-        eq(notificationPreferences.principalId, principalId),
-        eq(notificationPreferences.channel, channel),
-      ))
+      .where(
+        and(
+          eq(notificationPreferences.organizationId, organizationId),
+          eq(notificationPreferences.principalId, principalId),
+          eq(notificationPreferences.channel, channel),
+        ),
+      )
       .limit(1);
     return row ? notificationPreferenceFromRow(row) : undefined;
   }
@@ -1559,10 +1546,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const rows = await this.database
       .select()
       .from(notificationPreferences)
-      .where(and(
-        eq(notificationPreferences.organizationId, organizationId),
-        eq(notificationPreferences.principalId, principalId),
-      ))
+      .where(
+        and(
+          eq(notificationPreferences.organizationId, organizationId),
+          eq(notificationPreferences.principalId, principalId),
+        ),
+      )
       .orderBy(asc(notificationPreferences.channel));
     return rows.map(notificationPreferenceFromRow);
   }
@@ -1596,11 +1585,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
   }
 
   async getOutboxEvent(eventId: string): Promise<OutboxEvent | undefined> {
-    const query = this.database
-      .select()
-      .from(outboxEvents)
-      .where(eq(outboxEvents.id, eventId))
-      .limit(1);
+    const query = this.database.select().from(outboxEvents).where(eq(outboxEvents.id, eventId)).limit(1);
     const rows = this.lockAggregateReads ? await query.for("update") : await query;
     return rows[0] ? outboxEventFromRow(rows[0]) : undefined;
   }
@@ -1646,20 +1631,19 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const query = this.database
       .select()
       .from(outboxDeliveries)
-      .where(and(
-        eq(outboxDeliveries.projectId, projectId),
-        eq(outboxDeliveries.channel, channel),
-        eq(outboxDeliveries.providerMessageId, providerMessageId),
-      ))
+      .where(
+        and(
+          eq(outboxDeliveries.projectId, projectId),
+          eq(outboxDeliveries.channel, channel),
+          eq(outboxDeliveries.providerMessageId, providerMessageId),
+        ),
+      )
       .orderBy(asc(outboxDeliveries.updatedAt));
     const rows = this.lockAggregateReads ? await query.for("update") : await query;
     return rows.map(outboxDeliveryFromRow);
   }
 
-  async getOutboxDelivery(
-    eventId: string,
-    channel: OutboxDelivery["channel"],
-  ): Promise<OutboxDelivery | undefined> {
+  async getOutboxDelivery(eventId: string, channel: OutboxDelivery["channel"]): Promise<OutboxDelivery | undefined> {
     const query = this.database
       .select()
       .from(outboxDeliveries)
@@ -1710,15 +1694,14 @@ export class PostgresBridgeRepository implements BridgeRepository {
     if (this.lockAggregateReads) {
       return this.claimDeferredEmailDeliveriesInTransaction(this.database, now, limit, leaseMs);
     }
-    return this.database.transaction(
-      async (transaction) =>
-        new PostgresBridgeRepository(
-          transaction as unknown as BridgeDatabase,
-          true,
-          this.metrics,
-          { maintenance: true },
-          true,
-        ).claimDeferredEmailDeliveries(now, limit, leaseMs),
+    return this.database.transaction(async (transaction) =>
+      new PostgresBridgeRepository(
+        transaction as unknown as BridgeDatabase,
+        true,
+        this.metrics,
+        { maintenance: true },
+        true,
+      ).claimDeferredEmailDeliveries(now, limit, leaseMs),
     );
   }
 
@@ -1731,12 +1714,14 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const rows = await database
       .select()
       .from(outboxDeliveries)
-      .where(and(
-        eq(outboxDeliveries.channel, "email"),
-        eq(outboxDeliveries.status, "deferred"),
-        lte(outboxDeliveries.digestAvailableAt, now),
-        or(isNull(outboxDeliveries.digestLeaseUntil), lte(outboxDeliveries.digestLeaseUntil, now)),
-      ))
+      .where(
+        and(
+          eq(outboxDeliveries.channel, "email"),
+          eq(outboxDeliveries.status, "deferred"),
+          lte(outboxDeliveries.digestAvailableAt, now),
+          or(isNull(outboxDeliveries.digestLeaseUntil), lte(outboxDeliveries.digestLeaseUntil, now)),
+        ),
+      )
       .orderBy(asc(outboxDeliveries.digestAvailableAt), asc(outboxDeliveries.createdAt))
       .limit(limit)
       .for("update");
@@ -1764,19 +1749,22 @@ export class PostgresBridgeRepository implements BridgeRepository {
   async claimOutboxEvents(now: string, limit: number): Promise<readonly OutboxEvent[]> {
     if (limit <= 0) return [];
     if (!this.allowMaintenance) {
-      throw new BridgeError("FORBIDDEN", "Claiming cross-tenant delivery work requires a maintenance database connection.", 403);
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Claiming cross-tenant delivery work requires a maintenance database connection.",
+        403,
+      );
     }
     if (this.lockAggregateReads) return this.claimOutboxEventsInTransaction(this.database, now, limit);
 
-    return this.database.transaction(
-      async (transaction) =>
-        new PostgresBridgeRepository(
-          transaction as unknown as BridgeDatabase,
-          true,
-          this.metrics,
-          { maintenance: true },
-          true,
-        ).claimOutboxEvents(now, limit),
+    return this.database.transaction(async (transaction) =>
+      new PostgresBridgeRepository(
+        transaction as unknown as BridgeDatabase,
+        true,
+        this.metrics,
+        { maintenance: true },
+        true,
+      ).claimOutboxEvents(now, limit),
     );
   }
 
@@ -1832,7 +1820,11 @@ export class PostgresBridgeRepository implements BridgeRepository {
 
   async completeOutboxEvent(eventId: string, processedAt: string): Promise<void> {
     if (!this.allowMaintenance) {
-      throw new BridgeError("FORBIDDEN", "Completing cross-tenant delivery work requires a maintenance database connection.", 403);
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Completing cross-tenant delivery work requires a maintenance database connection.",
+        403,
+      );
     }
     await this.database
       .update(outboxEvents)
@@ -1840,14 +1832,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
       .where(eq(outboxEvents.id, eventId));
   }
 
-  async failOutboxEvent(
-    eventId: string,
-    lastError: string,
-    availableAt: string,
-    deadLetter: boolean,
-  ): Promise<void> {
+  async failOutboxEvent(eventId: string, lastError: string, availableAt: string, deadLetter: boolean): Promise<void> {
     if (!this.allowMaintenance) {
-      throw new BridgeError("FORBIDDEN", "Failing cross-tenant delivery work requires a maintenance database connection.", 403);
+      throw new BridgeError(
+        "FORBIDDEN",
+        "Failing cross-tenant delivery work requires a maintenance database connection.",
+        403,
+      );
     }
     await this.database
       .update(outboxEvents)
@@ -1873,11 +1864,13 @@ export class PostgresBridgeRepository implements BridgeRepository {
     const query = this.database
       .select()
       .from(idempotencyRecords)
-      .where(and(
-        eq(idempotencyRecords.organizationId, organizationId),
-        eq(idempotencyRecords.key, key),
-        eq(idempotencyRecords.kind, kind),
-      ))
+      .where(
+        and(
+          eq(idempotencyRecords.organizationId, organizationId),
+          eq(idempotencyRecords.key, key),
+          eq(idempotencyRecords.kind, kind),
+        ),
+      )
       .limit(1);
     const rows = this.lockAggregateReads ? await query.for("update") : await query;
     return rows[0];

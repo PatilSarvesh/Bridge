@@ -9,24 +9,10 @@ export const questionTypeSchema = z.enum([
   "assumption_challenge",
   "blocker",
 ]);
-export const questionLinkTypeSchema = z.enum([
-  "repository",
-  "work_item",
-  "branch",
-  "artifact",
-  "run",
-  "external",
-]);
+export const questionLinkTypeSchema = z.enum(["repository", "work_item", "branch", "artifact", "run", "external"]);
 export const riskSchema = z.enum(["low", "medium", "high", "protected"]);
 export const policyActionSchema = z.enum(["assume_and_log", "ask_async", "block", "protected_approval"]);
-export const questionStatusSchema = z.enum([
-  "open",
-  "in_discussion",
-  "accepted",
-  "duplicate",
-  "cancelled",
-  "expired",
-]);
+export const questionStatusSchema = z.enum(["open", "in_discussion", "accepted", "duplicate", "cancelled", "expired"]);
 export const questionReviewStatusSchema = z.enum(["approved", "rejected"]);
 export const questionDueFilterSchema = z.enum(["overdue", "next_7_days", "scheduled", "none"]);
 export const notificationTypeSchema = z.enum([
@@ -48,66 +34,40 @@ export const outboxEventTypeSchema = z.enum([
   "question.reassigned",
   "run.continuation_ready",
 ]);
-export const outboxEventStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "processed",
-  "failed",
-  "dead_letter",
-]);
+export const outboxEventStatusSchema = z.enum(["pending", "processing", "processed", "failed", "dead_letter"]);
 export const deliveryChannelSchema = z.enum(["email", "slack"]);
 export const outboxDeliveryStatusSchema = z.enum(["delivered", "failed", "suppressed", "deferred"]);
 export const notificationDeliveryFeedbackProviderSchema = z.enum(["ses", "slack"]);
-export const notificationDeliveryFeedbackTypeSchema = z.enum([
-  "bounce",
-  "complaint",
-  "provider_failure",
-]);
-export const recordOutboxDeliveryFeedbackInputSchema = z.object({
-  channel: deliveryChannelSchema,
-  provider: notificationDeliveryFeedbackProviderSchema,
-  providerMessageId: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+=-]{0,499}$/),
-  type: notificationDeliveryFeedbackTypeSchema,
-  receivedAt: z.string().datetime({ offset: true }),
-}).superRefine((value, context) => {
-  const expectedProvider = value.channel === "email" ? "ses" : "slack";
-  if (value.provider !== expectedProvider) {
-    context.addIssue({
-      code: "custom",
-      message: "Feedback provider must match delivery channel.",
-      path: ["provider"],
-    });
-  }
-});
-export const auditSourceSchema = z.enum([
-  "web",
-  "api",
-  "cli",
-  "mcp",
-  "application",
-  "worker",
-  "integration",
-]);
+export const notificationDeliveryFeedbackTypeSchema = z.enum(["bounce", "complaint", "provider_failure"]);
+export const recordOutboxDeliveryFeedbackInputSchema = z
+  .object({
+    channel: deliveryChannelSchema,
+    provider: notificationDeliveryFeedbackProviderSchema,
+    providerMessageId: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:/+=-]{0,499}$/),
+    type: notificationDeliveryFeedbackTypeSchema,
+    receivedAt: z.string().datetime({ offset: true }),
+  })
+  .superRefine((value, context) => {
+    const expectedProvider = value.channel === "email" ? "ses" : "slack";
+    if (value.provider !== expectedProvider) {
+      context.addIssue({
+        code: "custom",
+        message: "Feedback provider must match delivery channel.",
+        path: ["provider"],
+      });
+    }
+  });
+export const auditSourceSchema = z.enum(["web", "api", "cli", "mcp", "application", "worker", "integration"]);
 export const notificationDeliveryPreferenceSchema = z.enum(["immediate", "digest", "muted"]);
 export const decisionStatusSchema = z.enum(["active", "superseded", "expired", "revoked"]);
 export const artifactTypeSchema = z.enum(["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusSchema = z.enum(["draft", "in_review", "approved", "superseded"]);
 export const artifactReviewStatusSchema = z.enum(["commented", "changes_requested", "approved"]);
-export const agentRunClientSchema = z.enum([
-  "codex",
-  "claude_code",
-  "cursor",
-  "copilot",
-  "custom",
-  "unknown",
-]);
-export const agentRunCapabilitySchema = z.enum([
-  "instructions",
-  "cli",
-  "mcp",
-  "hooks",
-  "orchestrated",
-]);
+export const agentRunClientSchema = z.enum(["codex", "claude_code", "cursor", "copilot", "custom", "unknown"]);
+export const agentRunCapabilitySchema = z.enum(["instructions", "cli", "mcp", "hooks", "orchestrated"]);
 export const agentRunContinuationModeSchema = z.enum(["manual", "automatic"]);
 export const adapterDiagnosticMcpStatusSchema = z.enum(["ready", "failed", "not_configured"]);
 export const adapterDiagnosticCheckNameSchema = z.enum([
@@ -123,46 +83,36 @@ export const adapterDiagnosticCheckSchema = z.object({
   name: adapterDiagnosticCheckNameSchema,
   status: adapterDiagnosticCheckStatusSchema,
 });
-export const recordAdapterDiagnosticInputSchema = z.object({
-  client: agentRunClientSchema,
-  capabilities: z.array(agentRunCapabilitySchema).max(10),
-  mcpStatus: adapterDiagnosticMcpStatusSchema,
-  checks: z.array(adapterDiagnosticCheckSchema).min(1).max(20),
-}).superRefine((value, context) => {
-  const checkNames = new Set<string>();
-  for (const [index, check] of value.checks.entries()) {
-    if (checkNames.has(check.name)) {
+export const recordAdapterDiagnosticInputSchema = z
+  .object({
+    client: agentRunClientSchema,
+    capabilities: z.array(agentRunCapabilitySchema).max(10),
+    mcpStatus: adapterDiagnosticMcpStatusSchema,
+    checks: z.array(adapterDiagnosticCheckSchema).min(1).max(20),
+  })
+  .superRefine((value, context) => {
+    const checkNames = new Set<string>();
+    for (const [index, check] of value.checks.entries()) {
+      if (checkNames.has(check.name)) {
+        context.addIssue({
+          code: "custom",
+          message: "Each diagnostic check can appear only once.",
+          path: ["checks", index, "name"],
+        });
+      }
+      checkNames.add(check.name);
+    }
+    if (new Set(value.capabilities).size !== value.capabilities.length) {
       context.addIssue({
         code: "custom",
-        message: "Each diagnostic check can appear only once.",
-        path: ["checks", index, "name"],
+        message: "Each adapter capability can appear only once.",
+        path: ["capabilities"],
       });
     }
-    checkNames.add(check.name);
-  }
-  if (new Set(value.capabilities).size !== value.capabilities.length) {
-    context.addIssue({
-      code: "custom",
-      message: "Each adapter capability can appear only once.",
-      path: ["capabilities"],
-    });
-  }
-});
-export const agentRunStatusSchema = z.enum([
-  "running",
-  "waiting_for_human",
-  "completed",
-  "failed",
-  "cancelled",
-]);
+  });
+export const agentRunStatusSchema = z.enum(["running", "waiting_for_human", "completed", "failed", "cancelled"]);
 export const assumptionConfidenceSchema = z.enum(["low", "medium", "high"]);
-export const assumptionStatusSchema = z.enum([
-  "active",
-  "confirmed",
-  "rejected",
-  "expired",
-  "superseded",
-]);
+export const assumptionStatusSchema = z.enum(["active", "confirmed", "rejected", "expired", "superseded"]);
 
 export const scopeSchema = z.object({
   repository: z.string().trim().min(1).max(200).optional(),
@@ -180,7 +130,12 @@ export const projectRoleDefinitionSchema = z.object({
 });
 
 export const projectTeamInputSchema = z.object({
-  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
+  key: z
+    .string()
+    .trim()
+    .min(2)
+    .max(80)
+    .regex(/^[a-z0-9][a-z0-9-]*$/),
   name: z.string().trim().min(2).max(120),
   memberIds: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
 });
@@ -188,150 +143,209 @@ export const projectTeamInputSchema = z.object({
 export const ownershipRuleTargetSchema = z.object({
   principalIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
   roles: z.array(ownerRoleSchema).max(20).default([]),
-  teamKeys: z.array(z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/)).max(20).default([]),
+  teamKeys: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(2)
+        .max(80)
+        .regex(/^[a-z0-9][a-z0-9-]*$/),
+    )
+    .max(20)
+    .default([]),
 });
 
-export const ownershipRuleInputSchema = z.object({
-  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
-  name: z.string().trim().min(2).max(120),
-  priority: z.number().int().min(1).max(1_000),
-  category: z.string().trim().min(2).max(100).optional(),
-  repository: z.string().trim().min(1).max(200).optional(),
-  component: z.string().trim().min(1).max(200).optional(),
-  owners: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
-  reviewers: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
-}).superRefine((value, context) => {
-  const targetCount = (target: z.infer<typeof ownershipRuleTargetSchema>) =>
-    target.principalIds.length + target.roles.length + target.teamKeys.length;
-  if (targetCount(value.owners) + targetCount(value.reviewers) === 0) {
-    context.addIssue({
-      code: "custom",
-      message: "An ownership rule must configure at least one owner or reviewer target.",
-      path: ["owners"],
-    });
-  }
-});
-
-export const replaceProjectOwnershipInputSchema = z.object({
-  expectedVersion: z.number().int().nonnegative(),
-  roles: z.array(projectRoleDefinitionSchema).max(50).default([]),
-  teams: z.array(projectTeamInputSchema).max(50).default([]),
-  rules: z.array(ownershipRuleInputSchema).max(100).default([]),
-}).superRefine((value, context) => {
-  const addUniqueIssues = (
-    values: readonly string[],
-    path: "roles" | "teams" | "rules",
-    label: string,
-  ) => {
-    const seen = new Set<string>();
-    for (const [index, current] of values.entries()) {
-      const normalized = current.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
-      if (seen.has(normalized)) {
-        context.addIssue({
-          code: "custom",
-          message: `${label} values must be unique.`,
-          path: [path, index],
-        });
-      }
-      seen.add(normalized);
-    }
-  };
-  addUniqueIssues(value.roles.map((role) => role.name), "roles", "Role name");
-  addUniqueIssues(value.teams.map((team) => team.key), "teams", "Team key");
-  addUniqueIssues(value.rules.map((rule) => rule.key), "rules", "Rule key");
-
-  for (const [teamIndex, team] of value.teams.entries()) {
-    const seen = new Set<string>();
-    for (const [memberIndex, memberId] of team.memberIds.entries()) {
-      if (seen.has(memberId)) {
-        context.addIssue({
-          code: "custom",
-          message: "A team member can appear only once.",
-          path: ["teams", teamIndex, "memberIds", memberIndex],
-        });
-      }
-      seen.add(memberId);
-    }
-  }
-});
-
-export const projectPolicyRuleInputSchema = z.object({
-  key: z.string().trim().min(2).max(80).regex(/^[a-z0-9][a-z0-9-]*$/),
-  name: z.string().trim().min(2).max(120),
-  priority: z.number().int().min(1).max(1_000),
-  category: z.string().trim().min(2).max(100).optional(),
-  scope: scopeSchema.default({}),
-  action: policyActionSchema,
-  minimumRisk: riskSchema,
-  requiredOwnerRoles: z.array(ownerRoleSchema).max(20).default([]),
-  requiredReviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
-  reviewerQuorum: z.record(z.string().trim().min(1).max(100), z.number().int().min(1).max(20)).optional(),
-}).superRefine((value, context) => {
-  if (value.action === "assume_and_log" && value.minimumRisk !== "low") {
-    context.addIssue({
-      code: "custom",
-      message: "Assume-and-log rules must keep the minimum risk low.",
-      path: ["minimumRisk"],
-    });
-  }
-  if (value.action === "protected_approval" && value.minimumRisk !== "protected") {
-    context.addIssue({
-      code: "custom",
-      message: "Protected-approval rules must set protected minimum risk.",
-      path: ["minimumRisk"],
-    });
-  }
-  const reviewerRoles = new Set(value.requiredReviewerRoles.map((role) =>
-    role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")));
-  for (const role of Object.keys(value.reviewerQuorum ?? {})) {
-    const normalizedRole = role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
-    if (!reviewerRoles.has(normalizedRole)) {
+export const ownershipRuleInputSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[a-z0-9][a-z0-9-]*$/),
+    name: z.string().trim().min(2).max(120),
+    priority: z.number().int().min(1).max(1_000),
+    category: z.string().trim().min(2).max(100).optional(),
+    repository: z.string().trim().min(1).max(200).optional(),
+    component: z.string().trim().min(1).max(200).optional(),
+    owners: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+    reviewers: ownershipRuleTargetSchema.default({ principalIds: [], roles: [], teamKeys: [] }),
+  })
+  .superRefine((value, context) => {
+    const targetCount = (target: z.infer<typeof ownershipRuleTargetSchema>) =>
+      target.principalIds.length + target.roles.length + target.teamKeys.length;
+    if (targetCount(value.owners) + targetCount(value.reviewers) === 0) {
       context.addIssue({
         code: "custom",
-        message: "Reviewer quorum can only be configured for a required reviewer role.",
-        path: ["reviewerQuorum", role],
+        message: "An ownership rule must configure at least one owner or reviewer target.",
+        path: ["owners"],
       });
     }
-  }
-  if (Object.keys(value.reviewerQuorum ?? {}).length > 0 && value.action !== "protected_approval") {
-    context.addIssue({
-      code: "custom",
-      message: "Reviewer quorum is supported only by protected-approval policy.",
-      path: ["reviewerQuorum"],
-    });
-  }
-});
+  });
 
-export const replaceProjectPolicyInputSchema = z.object({
-  expectedVersion: z.number().int().nonnegative(),
-  rules: z.array(projectPolicyRuleInputSchema).max(100).default([]),
-}).superRefine((value, context) => {
-  const seenKeys = new Set<string>();
-  for (const [index, rule] of value.rules.entries()) {
-    const normalized = rule.key.normalize("NFKC").toLocaleLowerCase("en");
-    if (seenKeys.has(normalized)) {
-      context.addIssue({ code: "custom", message: "Policy rule keys must be unique.", path: ["rules", index, "key"] });
-    }
-    seenKeys.add(normalized);
-    for (const [field, roles] of [
-      ["requiredOwnerRoles", rule.requiredOwnerRoles],
-      ["requiredReviewerRoles", rule.requiredReviewerRoles],
-    ] as const) {
-      const seenRoles = new Set<string>();
-      for (const [roleIndex, role] of roles.entries()) {
-        const normalizedRole = role.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
-        if (seenRoles.has(normalizedRole)) {
+export const replaceProjectOwnershipInputSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative(),
+    roles: z.array(projectRoleDefinitionSchema).max(50).default([]),
+    teams: z.array(projectTeamInputSchema).max(50).default([]),
+    rules: z.array(ownershipRuleInputSchema).max(100).default([]),
+  })
+  .superRefine((value, context) => {
+    const addUniqueIssues = (values: readonly string[], path: "roles" | "teams" | "rules", label: string) => {
+      const seen = new Set<string>();
+      for (const [index, current] of values.entries()) {
+        const normalized = current
+          .normalize("NFKC")
+          .toLocaleLowerCase("en")
+          .replace(/[^\p{L}\p{N}]+/gu, "-")
+          .replace(/^-+|-+$/g, "");
+        if (seen.has(normalized)) {
           context.addIssue({
             code: "custom",
-            message: "Required policy roles must be unique.",
-            path: ["rules", index, field, roleIndex],
+            message: `${label} values must be unique.`,
+            path: [path, index],
           });
         }
-        seenRoles.add(normalizedRole);
+        seen.add(normalized);
+      }
+    };
+    addUniqueIssues(
+      value.roles.map((role) => role.name),
+      "roles",
+      "Role name",
+    );
+    addUniqueIssues(
+      value.teams.map((team) => team.key),
+      "teams",
+      "Team key",
+    );
+    addUniqueIssues(
+      value.rules.map((rule) => rule.key),
+      "rules",
+      "Rule key",
+    );
+
+    for (const [teamIndex, team] of value.teams.entries()) {
+      const seen = new Set<string>();
+      for (const [memberIndex, memberId] of team.memberIds.entries()) {
+        if (seen.has(memberId)) {
+          context.addIssue({
+            code: "custom",
+            message: "A team member can appear only once.",
+            path: ["teams", teamIndex, "memberIds", memberIndex],
+          });
+        }
+        seen.add(memberId);
       }
     }
-  }
-});
+  });
+
+export const projectPolicyRuleInputSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[a-z0-9][a-z0-9-]*$/),
+    name: z.string().trim().min(2).max(120),
+    priority: z.number().int().min(1).max(1_000),
+    category: z.string().trim().min(2).max(100).optional(),
+    scope: scopeSchema.default({}),
+    action: policyActionSchema,
+    minimumRisk: riskSchema,
+    requiredOwnerRoles: z.array(ownerRoleSchema).max(20).default([]),
+    requiredReviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+    reviewerQuorum: z.record(z.string().trim().min(1).max(100), z.number().int().min(1).max(20)).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.action === "assume_and_log" && value.minimumRisk !== "low") {
+      context.addIssue({
+        code: "custom",
+        message: "Assume-and-log rules must keep the minimum risk low.",
+        path: ["minimumRisk"],
+      });
+    }
+    if (value.action === "protected_approval" && value.minimumRisk !== "protected") {
+      context.addIssue({
+        code: "custom",
+        message: "Protected-approval rules must set protected minimum risk.",
+        path: ["minimumRisk"],
+      });
+    }
+    const reviewerRoles = new Set(
+      value.requiredReviewerRoles.map((role) =>
+        role
+          .normalize("NFKC")
+          .toLocaleLowerCase("en")
+          .replace(/[^\p{L}\p{N}]+/gu, "-")
+          .replace(/^-+|-+$/g, ""),
+      ),
+    );
+    for (const role of Object.keys(value.reviewerQuorum ?? {})) {
+      const normalizedRole = role
+        .normalize("NFKC")
+        .toLocaleLowerCase("en")
+        .replace(/[^\p{L}\p{N}]+/gu, "-")
+        .replace(/^-+|-+$/g, "");
+      if (!reviewerRoles.has(normalizedRole)) {
+        context.addIssue({
+          code: "custom",
+          message: "Reviewer quorum can only be configured for a required reviewer role.",
+          path: ["reviewerQuorum", role],
+        });
+      }
+    }
+    if (Object.keys(value.reviewerQuorum ?? {}).length > 0 && value.action !== "protected_approval") {
+      context.addIssue({
+        code: "custom",
+        message: "Reviewer quorum is supported only by protected-approval policy.",
+        path: ["reviewerQuorum"],
+      });
+    }
+  });
+
+export const replaceProjectPolicyInputSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative(),
+    rules: z.array(projectPolicyRuleInputSchema).max(100).default([]),
+  })
+  .superRefine((value, context) => {
+    const seenKeys = new Set<string>();
+    for (const [index, rule] of value.rules.entries()) {
+      const normalized = rule.key.normalize("NFKC").toLocaleLowerCase("en");
+      if (seenKeys.has(normalized)) {
+        context.addIssue({
+          code: "custom",
+          message: "Policy rule keys must be unique.",
+          path: ["rules", index, "key"],
+        });
+      }
+      seenKeys.add(normalized);
+      for (const [field, roles] of [
+        ["requiredOwnerRoles", rule.requiredOwnerRoles],
+        ["requiredReviewerRoles", rule.requiredReviewerRoles],
+      ] as const) {
+        const seenRoles = new Set<string>();
+        for (const [roleIndex, role] of roles.entries()) {
+          const normalizedRole = role
+            .normalize("NFKC")
+            .toLocaleLowerCase("en")
+            .replace(/[^\p{L}\p{N}]+/gu, "-")
+            .replace(/^-+|-+$/g, "");
+          if (seenRoles.has(normalizedRole)) {
+            context.addIssue({
+              code: "custom",
+              message: "Required policy roles must be unique.",
+              path: ["rules", index, field, roleIndex],
+            });
+          }
+          seenRoles.add(normalizedRole);
+        }
+      }
+    }
+  });
 
 export const membershipStatusSchema = z.enum(["active", "disabled"]);
 export const serviceIdentityTypeSchema = z.enum(["agent", "ci", "integration"]);
@@ -396,92 +410,112 @@ export const projectMembershipConfigurationSchema = z.object({
   roles: z.array(ownerRoleSchema).max(30).default([]),
 });
 
-const memberConfigurationSchema = z.object({
-  roles: z.array(ownerRoleSchema).max(30).default(["organization-member"]),
-  allProjects: z.boolean().default(false),
-  projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
-}).superRefine((value, context) => {
-  const projectIds = new Set<string>();
-  for (const [index, membership] of value.projectMemberships.entries()) {
-    if (projectIds.has(membership.projectId)) {
-      context.addIssue({
-        code: "custom",
-        message: "Each project can appear only once.",
-        path: ["projectMemberships", index, "projectId"],
-      });
+const memberConfigurationSchema = z
+  .object({
+    roles: z.array(ownerRoleSchema).max(30).default(["organization-member"]),
+    allProjects: z.boolean().default(false),
+    projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
+  })
+  .superRefine((value, context) => {
+    const projectIds = new Set<string>();
+    for (const [index, membership] of value.projectMemberships.entries()) {
+      if (projectIds.has(membership.projectId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Each project can appear only once.",
+          path: ["projectMemberships", index, "projectId"],
+        });
+      }
+      projectIds.add(membership.projectId);
     }
-    projectIds.add(membership.projectId);
-  }
-});
+  });
 
-export const createOrganizationMemberInputSchema = memberConfigurationSchema.and(z.object({
-  oidcSubject: z.string().trim().min(1).max(300),
-  displayName: z.string().trim().min(2).max(200),
-}));
+export const createOrganizationMemberInputSchema = memberConfigurationSchema.and(
+  z.object({
+    oidcSubject: z.string().trim().min(1).max(300),
+    displayName: z.string().trim().min(2).max(200),
+  }),
+);
 
-export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and(z.object({
-  expectedVersion: z.number().int().positive(),
-  status: membershipStatusSchema,
-}));
+export const updateOrganizationMemberInputSchema = memberConfigurationSchema.and(
+  z.object({
+    expectedVersion: z.number().int().positive(),
+    status: membershipStatusSchema,
+  }),
+);
 
 export const createDirectoryGroupInputSchema = z.object({
-  provider: z.string().trim().min(2).max(50).regex(/^[a-z0-9][a-z0-9._-]*$/),
-  issuer: z.string().url().max(2_000).refine(
-    (value) => value.startsWith("https://"),
-    "issuer must use HTTPS.",
-  ),
+  provider: z
+    .string()
+    .trim()
+    .min(2)
+    .max(50)
+    .regex(/^[a-z0-9][a-z0-9._-]*$/),
+  issuer: z
+    .string()
+    .url()
+    .max(2_000)
+    .refine((value) => value.startsWith("https://"), "issuer must use HTTPS."),
   externalGroupId: z.string().trim().min(1).max(300),
   displayName: z.string().trim().min(2).max(200),
 });
 
 export const directoryGroupStatusSchema = z.enum(["active", "disabled"]);
-export const syncDirectoryGroupInputSchema = z.object({
-  expectedVersion: z.number().int().positive(),
-  sourceUpdatedAt: z.string().datetime({ offset: true }),
-  status: directoryGroupStatusSchema,
-  members: z.array(z.object({
-    subject: z.string().trim().min(1).max(300),
-    displayName: z.string().trim().min(2).max(200),
-  })).max(1_000),
-}).superRefine((value, context) => {
-  if (value.status === "disabled" && value.members.length > 0) {
-    context.addIssue({
-      code: "custom",
-      message: "Disabled provider groups must synchronize an empty member snapshot.",
-      path: ["members"],
-    });
-  }
-  const subjects = value.members.map((member) => member.subject);
-  if (new Set(subjects).size !== subjects.length) {
-    context.addIssue({
-      code: "custom",
-      message: "Directory member subjects must be unique.",
-      path: ["members"],
-    });
-  }
-});
-
-const serviceIdentityConfigurationSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  type: serviceIdentityTypeSchema,
-  roles: z.array(ownerRoleSchema).max(30).default([]),
-  allProjects: z.boolean().default(false),
-  projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
-  scopes: z.array(serviceCapabilityScopeSchema).min(1).max(30),
-  expiresAt: z.string().datetime({ offset: true }).optional(),
-}).superRefine((value, context) => {
-  const projectIds = new Set<string>();
-  for (const [index, membership] of value.projectMemberships.entries()) {
-    if (projectIds.has(membership.projectId)) {
+export const syncDirectoryGroupInputSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    sourceUpdatedAt: z.string().datetime({ offset: true }),
+    status: directoryGroupStatusSchema,
+    members: z
+      .array(
+        z.object({
+          subject: z.string().trim().min(1).max(300),
+          displayName: z.string().trim().min(2).max(200),
+        }),
+      )
+      .max(1_000),
+  })
+  .superRefine((value, context) => {
+    if (value.status === "disabled" && value.members.length > 0) {
       context.addIssue({
         code: "custom",
-        message: "Each project can appear only once.",
-        path: ["projectMemberships", index, "projectId"],
+        message: "Disabled provider groups must synchronize an empty member snapshot.",
+        path: ["members"],
       });
     }
-    projectIds.add(membership.projectId);
-  }
-});
+    const subjects = value.members.map((member) => member.subject);
+    if (new Set(subjects).size !== subjects.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Directory member subjects must be unique.",
+        path: ["members"],
+      });
+    }
+  });
+
+const serviceIdentityConfigurationSchema = z
+  .object({
+    name: z.string().trim().min(2).max(120),
+    type: serviceIdentityTypeSchema,
+    roles: z.array(ownerRoleSchema).max(30).default([]),
+    allProjects: z.boolean().default(false),
+    projectMemberships: z.array(projectMembershipConfigurationSchema).max(100).default([]),
+    scopes: z.array(serviceCapabilityScopeSchema).min(1).max(30),
+    expiresAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .superRefine((value, context) => {
+    const projectIds = new Set<string>();
+    for (const [index, membership] of value.projectMemberships.entries()) {
+      if (projectIds.has(membership.projectId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Each project can appear only once.",
+          path: ["projectMemberships", index, "projectId"],
+        });
+      }
+      projectIds.add(membership.projectId);
+    }
+  });
 
 export const createServiceIdentityInputSchema = serviceIdentityConfigurationSchema;
 export const revokeServiceIdentityInputSchema = z.object({
@@ -497,7 +531,8 @@ export const registerProjectInputSchema = z.object({
   decisionOwnerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
 });
 
-export const repositoryProviderSchema = z.string()
+export const repositoryProviderSchema = z
+  .string()
   .trim()
   .min(2)
   .max(50)
@@ -507,42 +542,55 @@ export const linkRepositoryInputSchema = z.object({
   provider: repositoryProviderSchema,
   owner: z.string().trim().min(1).max(200),
   name: z.string().trim().min(1).max(200),
-  canonicalUrl: z.string().url().max(2_000).refine(
-    (value) => value.startsWith("http://") || value.startsWith("https://"),
-    "canonicalUrl must use HTTP or HTTPS.",
-  ),
+  canonicalUrl: z
+    .string()
+    .url()
+    .max(2_000)
+    .refine(
+      (value) => value.startsWith("http://") || value.startsWith("https://"),
+      "canonicalUrl must use HTTP or HTTPS.",
+    ),
 });
 
 export const githubPullRequestStateSchema = z.enum(["open", "closed", "merged"]);
-export const syncGithubPullRequestInputSchema = z.object({
-  repositoryId: z.string().trim().min(1).max(100),
-  number: z.number().int().positive().max(2_147_483_647),
-  title: z.string().trim().min(1).max(500),
-  state: githubPullRequestStateSchema,
-  canonicalUrl: z.string().url().max(2_000).refine(
-    (value) => value.startsWith("https://github.com/"),
-    "canonicalUrl must be an HTTPS GitHub pull-request URL.",
-  ),
-  headBranch: z.string().trim().min(1).max(300),
-  baseBranch: z.string().trim().min(1).max(300),
-  headSha: z.string().trim().regex(/^[0-9a-f]{40}$/),
-  sourceUpdatedAt: z.string().datetime({ offset: true }),
-  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-}).superRefine((value, context) => {
-  for (const [field, values] of [
-    ["decisionIds", value.decisionIds],
-    ["artifactVersionIds", value.artifactVersionIds],
-  ] as const) {
-    if (new Set(values).size !== values.length) {
-      context.addIssue({
-        code: "custom",
-        message: `${field} values must be unique.`,
-        path: [field],
-      });
+export const syncGithubPullRequestInputSchema = z
+  .object({
+    repositoryId: z.string().trim().min(1).max(100),
+    number: z.number().int().positive().max(2_147_483_647),
+    title: z.string().trim().min(1).max(500),
+    state: githubPullRequestStateSchema,
+    canonicalUrl: z
+      .string()
+      .url()
+      .max(2_000)
+      .refine(
+        (value) => value.startsWith("https://github.com/"),
+        "canonicalUrl must be an HTTPS GitHub pull-request URL.",
+      ),
+    headBranch: z.string().trim().min(1).max(300),
+    baseBranch: z.string().trim().min(1).max(300),
+    headSha: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-f]{40}$/),
+    sourceUpdatedAt: z.string().datetime({ offset: true }),
+    decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  })
+  .superRefine((value, context) => {
+    for (const [field, values] of [
+      ["decisionIds", value.decisionIds],
+      ["artifactVersionIds", value.artifactVersionIds],
+    ] as const) {
+      if (new Set(values).size !== values.length) {
+        context.addIssue({
+          code: "custom",
+          message: `${field} values must be unique.`,
+          path: [field],
+        });
+      }
     }
-  }
-});
+  });
 
 export const githubPullRequestListQuerySchema = z.object({
   repositoryId: z.string().trim().min(1).max(100).optional(),
@@ -555,37 +603,38 @@ export const githubPullRequestContextQuerySchema = z.object({
 });
 
 export const githubIssueStateSchema = z.enum(["open", "closed"]);
-export const syncGithubIssueInputSchema = z.object({
-  repositoryId: z.string().trim().min(1).max(100),
-  number: z.number().int().positive().max(2_147_483_647),
-  title: z.string().trim().min(1).max(500),
-  state: githubIssueStateSchema,
-  canonicalUrl: z.string().url().max(2_000).refine(
-    (value) => value.startsWith("https://github.com/"),
-    "canonicalUrl must be an HTTPS GitHub issue URL.",
-  ),
-  labels: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-  sourceUpdatedAt: z.string().datetime({ offset: true }),
-  decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-  artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-}).superRefine((value, context) => {
-  for (const [field, values] of [
-    ["labels", value.labels],
-    ["decisionIds", value.decisionIds],
-    ["artifactVersionIds", value.artifactVersionIds],
-  ] as const) {
-    const normalized = field === "labels"
-      ? values.map((label) => label.toLocaleLowerCase("en"))
-      : values;
-    if (new Set(normalized).size !== values.length) {
-      context.addIssue({
-        code: "custom",
-        message: `${field} values must be unique.`,
-        path: [field],
-      });
+export const syncGithubIssueInputSchema = z
+  .object({
+    repositoryId: z.string().trim().min(1).max(100),
+    number: z.number().int().positive().max(2_147_483_647),
+    title: z.string().trim().min(1).max(500),
+    state: githubIssueStateSchema,
+    canonicalUrl: z
+      .string()
+      .url()
+      .max(2_000)
+      .refine((value) => value.startsWith("https://github.com/"), "canonicalUrl must be an HTTPS GitHub issue URL."),
+    labels: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    sourceUpdatedAt: z.string().datetime({ offset: true }),
+    decisionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+    artifactVersionIds: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  })
+  .superRefine((value, context) => {
+    for (const [field, values] of [
+      ["labels", value.labels],
+      ["decisionIds", value.decisionIds],
+      ["artifactVersionIds", value.artifactVersionIds],
+    ] as const) {
+      const normalized = field === "labels" ? values.map((label) => label.toLocaleLowerCase("en")) : values;
+      if (new Set(normalized).size !== values.length) {
+        context.addIssue({
+          code: "custom",
+          message: `${field} values must be unique.`,
+          path: [field],
+        });
+      }
     }
-  }
-});
+  });
 
 export const githubIssueListQuerySchema = z.object({
   repositoryId: z.string().trim().min(1).max(100).optional(),
@@ -599,7 +648,12 @@ export const githubIssueContextQuerySchema = z.object({
 });
 
 export const questionOptionInputSchema = z.object({
-  key: z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9_-]*$/),
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z0-9][a-z0-9_-]*$/),
   label: z.string().trim().min(1).max(500),
   tradeoffs: z.string().trim().min(1).max(2_000),
 });
@@ -622,11 +676,16 @@ export const createQuestionInputSchema = z
     options: z.array(questionOptionInputSchema).max(10).default([]),
     recommendationKey: z.string().trim().min(1).max(80).optional(),
     fallback: z.string().trim().min(1).max(2_000).nullable().optional(),
-    relatedLinks: z.array(z.object({
-      type: questionLinkTypeSchema,
-      label: z.string().trim().min(1).max(200),
-      url: z.string().url().max(2_000),
-    })).max(20).optional(),
+    relatedLinks: z
+      .array(
+        z.object({
+          type: questionLinkTypeSchema,
+          label: z.string().trim().min(1).max(200),
+          url: z.string().url().max(2_000),
+        }),
+      )
+      .max(20)
+      .optional(),
     scope: scopeSchema.default({}),
   })
   .superRefine((value, context) => {
@@ -736,27 +795,33 @@ export const questionReviewInputSchema = z.object({
   rationale: z.string().trim().min(10).max(5_000),
 });
 
-export const reassignQuestionInputSchema = z.object({
-  expectedVersion: z.number().int().positive(),
-  ownerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
-  ownerRoles: z.array(ownerRoleSchema).max(20).default([]),
-  reviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
-  reviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
-  reason: z.string().trim().min(10).max(2_000),
-}).superRefine((value, context) => {
-  for (const [field, values] of [
-    ["ownerIds", value.ownerIds],
-    ["reviewerIds", value.reviewerIds],
-  ] as const) {
-    const seen = new Set<string>();
-    for (const [index, id] of values.entries()) {
-      if (seen.has(id)) {
-        context.addIssue({ code: "custom", message: "Assignment principal IDs must be unique.", path: [field, index] });
+export const reassignQuestionInputSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    ownerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+    ownerRoles: z.array(ownerRoleSchema).max(20).default([]),
+    reviewerIds: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+    reviewerRoles: z.array(ownerRoleSchema).max(20).default([]),
+    reason: z.string().trim().min(10).max(2_000),
+  })
+  .superRefine((value, context) => {
+    for (const [field, values] of [
+      ["ownerIds", value.ownerIds],
+      ["reviewerIds", value.reviewerIds],
+    ] as const) {
+      const seen = new Set<string>();
+      for (const [index, id] of values.entries()) {
+        if (seen.has(id)) {
+          context.addIssue({
+            code: "custom",
+            message: "Assignment principal IDs must be unique.",
+            path: [field, index],
+          });
+        }
+        seen.add(id);
       }
-      seen.add(id);
     }
-  }
-});
+  });
 
 export const questionCommentInputSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -826,7 +891,11 @@ const auditFilterFields = {
   source: auditSourceSchema.optional(),
   subjectType: z.string().trim().min(1).max(100).optional(),
   subjectId: z.string().trim().min(1).max(100).optional(),
-  correlationId: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
+  correlationId: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
+    .optional(),
   createdFrom: z.string().datetime({ offset: true }).optional(),
   createdTo: z.string().datetime({ offset: true }).optional(),
 };
@@ -844,17 +913,21 @@ function validateAuditDateRange(
   }
 }
 
-export const auditListQuerySchema = z.object({
-  ...auditFilterFields,
-  offset: z.coerce.number().int().min(0).max(10_000).default(0),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-}).superRefine(validateAuditDateRange);
+export const auditListQuerySchema = z
+  .object({
+    ...auditFilterFields,
+    offset: z.coerce.number().int().min(0).max(10_000).default(0),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .superRefine(validateAuditDateRange);
 
-export const auditExportInputSchema = z.object({
-  ...auditFilterFields,
-  format: z.enum(["json", "csv"]).default("json"),
-  maxItems: z.number().int().min(1).max(5_000).default(1_000),
-}).superRefine(validateAuditDateRange);
+export const auditExportInputSchema = z
+  .object({
+    ...auditFilterFields,
+    format: z.enum(["json", "csv"]).default("json"),
+    maxItems: z.number().int().min(1).max(5_000).default(1_000),
+  })
+  .superRefine(validateAuditDateRange);
 
 export const projectDataExportInputSchema = z.object({
   decisionOffset: z.number().int().min(0).max(10_000).default(0),

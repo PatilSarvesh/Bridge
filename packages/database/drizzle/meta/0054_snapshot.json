@@ -1,6 +1,6 @@
 {
-  "id": "4ce8a77a-3927-4289-948c-f484fac05506",
-  "prevId": "f10474db-5ce3-449c-b1d9-573c7936eb53",
+  "id": "b3e22b65-853a-4d55-a24f-c6f1c4287272",
+  "prevId": "7ea68b3b-2f9e-4979-a15d-e3b38e6f3215",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -112,8 +112,14 @@
           "name": "bridge_adapter_diagnostics_project_fk",
           "tableFrom": "bridge_adapter_diagnostics",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -121,7 +127,11 @@
       "compositePrimaryKeys": {
         "bridge_adapter_diagnostics_organization_id_project_id_client_pk": {
           "name": "bridge_adapter_diagnostics_organization_id_project_id_client_pk",
-          "columns": ["organization_id", "project_id", "client"]
+          "columns": [
+            "organization_id",
+            "project_id",
+            "client"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -130,7 +140,9 @@
           "name": "bridge_adapter_diagnostics_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_adapter_diagnostics\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_adapter_diagnostics\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -348,8 +360,12 @@
           "name": "bridge_agent_runs_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_agent_runs",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -361,7 +377,9 @@
           "name": "bridge_agent_runs_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_agent_runs\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_agent_runs\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -540,8 +558,12 @@
           "name": "bridge_artifact_versions_artifact_id_bridge_artifacts_id_fk",
           "tableFrom": "bridge_artifact_versions",
           "tableTo": "bridge_artifacts",
-          "columnsFrom": ["artifact_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "artifact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -549,8 +571,12 @@
           "name": "bridge_artifact_versions_run_id_bridge_agent_runs_id_fk",
           "tableFrom": "bridge_artifact_versions",
           "tableTo": "bridge_agent_runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -562,7 +588,9 @@
           "name": "bridge_artifact_versions_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "exists (\n        select 1 from \"bridge_artifacts\"\n        where \"bridge_artifacts\".\"id\" = \"bridge_artifact_versions\".\"artifact_id\"\n          and \"bridge_artifacts\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )",
           "withCheck": "exists (\n        select 1 from \"bridge_artifacts\"\n        where \"bridge_artifacts\".\"id\" = \"bridge_artifact_versions\".\"artifact_id\"\n          and \"bridge_artifacts\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )"
         }
@@ -686,8 +714,12 @@
           "name": "bridge_artifacts_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_artifacts",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -699,7 +731,9 @@
           "name": "bridge_artifacts_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_artifacts\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_artifacts\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -915,8 +949,12 @@
           "name": "bridge_assumptions_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_assumptions",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -924,8 +962,12 @@
           "name": "bridge_assumptions_run_id_bridge_agent_runs_id_fk",
           "tableFrom": "bridge_assumptions",
           "tableTo": "bridge_agent_runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -933,8 +975,12 @@
           "name": "bridge_assumptions_confirmed_decision_id_bridge_decisions_id_fk",
           "tableFrom": "bridge_assumptions",
           "tableTo": "bridge_decisions",
-          "columnsFrom": ["confirmed_decision_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "confirmed_decision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -942,8 +988,12 @@
           "name": "bridge_assumptions_superseding_assumption_id_bridge_assumptions_id_fk",
           "tableFrom": "bridge_assumptions",
           "tableTo": "bridge_assumptions",
-          "columnsFrom": ["superseding_assumption_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "superseding_assumption_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -955,7 +1005,9 @@
           "name": "bridge_assumptions_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_assumptions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_assumptions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -1126,8 +1178,12 @@
           "name": "bridge_audit_events_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_audit_events",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1139,12 +1195,19 @@
           "name": "bridge_audit_events_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_audit_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_audit_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
       },
-      "checkConstraints": {},
+      "checkConstraints": {
+        "bridge_audit_events_subject_type_check": {
+          "name": "bridge_audit_events_subject_type_check",
+          "value": "\"bridge_audit_events\".\"subject_type\" IN ('project', 'repository', 'pull_request_context', 'work_item', 'ownership_configuration', 'policy_configuration', 'question', 'response', 'decision', 'assumption', 'artifact', 'artifact_version', 'context_snapshot', 'run', 'outbox_event', 'outbox_delivery', 'audit_export', 'project_export')"
+        }
+      },
       "isRLSEnabled": true
     },
     "public.bridge_context_snapshots": {
@@ -1228,8 +1291,12 @@
           "name": "bridge_context_snapshots_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_context_snapshots",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1237,8 +1304,12 @@
           "name": "bridge_context_snapshots_run_id_bridge_agent_runs_id_fk",
           "tableFrom": "bridge_context_snapshots",
           "tableTo": "bridge_agent_runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1250,7 +1321,9 @@
           "name": "bridge_context_snapshots_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_context_snapshots\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_context_snapshots\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -1458,8 +1531,12 @@
           "name": "bridge_decisions_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_decisions",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1467,8 +1544,12 @@
           "name": "bridge_decisions_question_id_bridge_questions_id_fk",
           "tableFrom": "bridge_decisions",
           "tableTo": "bridge_questions",
-          "columnsFrom": ["question_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1476,8 +1557,12 @@
           "name": "bridge_decisions_replacement_decision_id_bridge_decisions_id_fk",
           "tableFrom": "bridge_decisions",
           "tableTo": "bridge_decisions",
-          "columnsFrom": ["replacement_decision_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "replacement_decision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1485,8 +1570,16 @@
           "name": "bridge_decisions_replacement_scope_fk",
           "tableFrom": "bridge_decisions",
           "tableTo": "bridge_decisions",
-          "columnsFrom": ["organization_id", "project_id", "replacement_decision_id"],
-          "columnsTo": ["organization_id", "project_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id",
+            "replacement_decision_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "project_id",
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1498,7 +1591,9 @@
           "name": "bridge_decisions_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_decisions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_decisions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -1610,8 +1705,12 @@
           "name": "bridge_directory_group_members_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_directory_group_members",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1619,8 +1718,12 @@
           "name": "bridge_directory_group_members_group_id_bridge_directory_groups_id_fk",
           "tableFrom": "bridge_directory_group_members",
           "tableTo": "bridge_directory_groups",
-          "columnsFrom": ["group_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "group_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1628,8 +1731,12 @@
           "name": "bridge_directory_group_members_principal_id_bridge_principal_identities_id_fk",
           "tableFrom": "bridge_directory_group_members",
           "tableTo": "bridge_principal_identities",
-          "columnsFrom": ["principal_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1637,8 +1744,14 @@
           "name": "bridge_directory_group_members_organization_group_fk",
           "tableFrom": "bridge_directory_group_members",
           "tableTo": "bridge_directory_groups",
-          "columnsFrom": ["organization_id", "group_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "group_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1648,7 +1761,10 @@
         "bridge_directory_group_members_group_subject_unique": {
           "name": "bridge_directory_group_members_group_subject_unique",
           "nullsNotDistinct": false,
-          "columns": ["group_id", "external_subject"]
+          "columns": [
+            "group_id",
+            "external_subject"
+          ]
         }
       },
       "policies": {
@@ -1656,7 +1772,9 @@
           "name": "bridge_directory_group_members_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_directory_group_members\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_directory_group_members\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -1778,8 +1896,12 @@
           "name": "bridge_directory_groups_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_directory_groups",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1789,12 +1911,20 @@
         "bridge_directory_groups_provider_identity_unique": {
           "name": "bridge_directory_groups_provider_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["organization_id", "provider", "issuer", "external_group_id"]
+          "columns": [
+            "organization_id",
+            "provider",
+            "issuer",
+            "external_group_id"
+          ]
         },
         "bridge_directory_groups_org_id_unique": {
           "name": "bridge_directory_groups_org_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["organization_id", "id"]
+          "columns": [
+            "organization_id",
+            "id"
+          ]
         }
       },
       "policies": {
@@ -1802,7 +1932,9 @@
           "name": "bridge_directory_groups_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_directory_groups\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_directory_groups\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -1948,8 +2080,12 @@
           "name": "bridge_github_issues_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_github_issues",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1957,8 +2093,12 @@
           "name": "bridge_github_issues_repository_id_bridge_project_repositories_id_fk",
           "tableFrom": "bridge_github_issues",
           "tableTo": "bridge_project_repositories",
-          "columnsFrom": ["repository_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "repository_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1966,8 +2106,14 @@
           "name": "bridge_github_issues_organization_project_fk",
           "tableFrom": "bridge_github_issues",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1977,12 +2123,18 @@
         "bridge_github_issues_repository_number_unique": {
           "name": "bridge_github_issues_repository_number_unique",
           "nullsNotDistinct": false,
-          "columns": ["repository_id", "number"]
+          "columns": [
+            "repository_id",
+            "number"
+          ]
         },
         "bridge_github_issues_repository_reference_unique": {
           "name": "bridge_github_issues_repository_reference_unique",
           "nullsNotDistinct": false,
-          "columns": ["repository_id", "reference"]
+          "columns": [
+            "repository_id",
+            "reference"
+          ]
         }
       },
       "policies": {
@@ -1990,7 +2142,9 @@
           "name": "bridge_github_issues_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_github_issues\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_github_issues\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2146,8 +2300,12 @@
           "name": "bridge_github_pull_requests_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_github_pull_requests",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2155,8 +2313,12 @@
           "name": "bridge_github_pull_requests_repository_id_bridge_project_repositories_id_fk",
           "tableFrom": "bridge_github_pull_requests",
           "tableTo": "bridge_project_repositories",
-          "columnsFrom": ["repository_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "repository_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2164,8 +2326,14 @@
           "name": "bridge_github_pull_requests_organization_project_fk",
           "tableFrom": "bridge_github_pull_requests",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2175,7 +2343,10 @@
         "bridge_github_pull_requests_repository_number_unique": {
           "name": "bridge_github_pull_requests_repository_number_unique",
           "nullsNotDistinct": false,
-          "columns": ["repository_id", "number"]
+          "columns": [
+            "repository_id",
+            "number"
+          ]
         }
       },
       "policies": {
@@ -2183,7 +2354,9 @@
           "name": "bridge_github_pull_requests_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_github_pull_requests\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_github_pull_requests\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2290,8 +2463,12 @@
           "name": "bridge_idempotency_records_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_idempotency_records",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2299,7 +2476,10 @@
       "compositePrimaryKeys": {
         "bridge_idempotency_records_organization_id_key_pk": {
           "name": "bridge_idempotency_records_organization_id_key_pk",
-          "columns": ["organization_id", "key"]
+          "columns": [
+            "organization_id",
+            "key"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -2308,7 +2488,9 @@
           "name": "bridge_idempotency_records_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_idempotency_records\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_idempotency_records\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2379,8 +2561,14 @@
           "name": "bridge_notification_preferences_membership_fk",
           "tableFrom": "bridge_notification_preferences",
           "tableTo": "bridge_organization_memberships",
-          "columnsFrom": ["organization_id", "principal_id"],
-          "columnsTo": ["organization_id", "principal_id"],
+          "columnsFrom": [
+            "organization_id",
+            "principal_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "principal_id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2388,7 +2576,11 @@
       "compositePrimaryKeys": {
         "bridge_notification_preferences_organization_id_principal_id_channel_pk": {
           "name": "bridge_notification_preferences_organization_id_principal_id_channel_pk",
-          "columns": ["organization_id", "principal_id", "channel"]
+          "columns": [
+            "organization_id",
+            "principal_id",
+            "channel"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -2397,7 +2589,9 @@
           "name": "bridge_notification_preferences_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_notification_preferences\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_notification_preferences\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2534,8 +2728,12 @@
           "name": "bridge_notifications_project_fk",
           "tableFrom": "bridge_notifications",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2543,8 +2741,14 @@
           "name": "bridge_notifications_organization_project_fk",
           "tableFrom": "bridge_notifications",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2556,7 +2760,9 @@
           "name": "bridge_notifications_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_notifications\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_notifications\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2690,8 +2896,12 @@
           "name": "bridge_organization_audit_events_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_organization_audit_events",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2703,7 +2913,9 @@
           "name": "bridge_organization_audit_events_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_organization_audit_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_organization_audit_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2804,8 +3016,12 @@
           "name": "bridge_organization_memberships_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_organization_memberships",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2813,8 +3029,12 @@
           "name": "bridge_organization_memberships_principal_id_bridge_principal_identities_id_fk",
           "tableFrom": "bridge_organization_memberships",
           "tableTo": "bridge_principal_identities",
-          "columnsFrom": ["principal_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2822,7 +3042,10 @@
       "compositePrimaryKeys": {
         "bridge_organization_memberships_organization_id_principal_id_pk": {
           "name": "bridge_organization_memberships_organization_id_principal_id_pk",
-          "columns": ["organization_id", "principal_id"]
+          "columns": [
+            "organization_id",
+            "principal_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -2831,7 +3054,9 @@
           "name": "bridge_organization_memberships_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_organization_memberships\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_organization_memberships\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -2881,12 +3106,16 @@
         "bridge_organizations_external_identity_provider_id_unique": {
           "name": "bridge_organizations_external_identity_provider_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["external_identity_provider_id"]
+          "columns": [
+            "external_identity_provider_id"
+          ]
         },
         "bridge_organizations_slug_unique": {
           "name": "bridge_organizations_slug_unique",
           "nullsNotDistinct": false,
-          "columns": ["slug"]
+          "columns": [
+            "slug"
+          ]
         }
       },
       "policies": {},
@@ -3142,8 +3371,16 @@
           "name": "bridge_outbox_deliveries_event_scope_fk",
           "tableFrom": "bridge_outbox_deliveries",
           "tableTo": "bridge_outbox_events",
-          "columnsFrom": ["organization_id", "project_id", "outbox_event_id"],
-          "columnsTo": ["organization_id", "project_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id",
+            "outbox_event_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "project_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3153,7 +3390,10 @@
         "bridge_outbox_deliveries_event_channel_unique": {
           "name": "bridge_outbox_deliveries_event_channel_unique",
           "nullsNotDistinct": false,
-          "columns": ["outbox_event_id", "channel"]
+          "columns": [
+            "outbox_event_id",
+            "channel"
+          ]
         }
       },
       "policies": {
@@ -3161,7 +3401,9 @@
           "name": "bridge_outbox_deliveries_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_outbox_deliveries\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_outbox_deliveries\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3174,6 +3416,10 @@
         "bridge_outbox_deliveries_feedback_check": {
           "name": "bridge_outbox_deliveries_feedback_check",
           "value": "(\n        (\"bridge_outbox_deliveries\".\"feedback_provider\" IS NULL AND \"bridge_outbox_deliveries\".\"feedback_type\" IS NULL AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NULL)\n        OR (\n          \"bridge_outbox_deliveries\".\"feedback_provider\" IN ('ses', 'slack')\n          AND \"bridge_outbox_deliveries\".\"feedback_type\" IN ('bounce', 'complaint', 'provider_failure')\n          AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NOT NULL\n          AND (\n            (\"bridge_outbox_deliveries\".\"channel\" = 'email' AND \"bridge_outbox_deliveries\".\"feedback_provider\" = 'ses')\n            OR (\"bridge_outbox_deliveries\".\"channel\" = 'slack' AND \"bridge_outbox_deliveries\".\"feedback_provider\" = 'slack')\n          )\n        )\n      )"
+        },
+        "bridge_outbox_deliveries_result_check": {
+          "name": "bridge_outbox_deliveries_result_check",
+          "value": "(\n        (\n          \"bridge_outbox_deliveries\".\"status\" = 'delivered'\n          AND \"bridge_outbox_deliveries\".\"provider_message_id\" IS NOT NULL\n          AND length(trim(\"bridge_outbox_deliveries\".\"provider_message_id\")) > 0\n          AND \"bridge_outbox_deliveries\".\"last_error\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_provider\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_type\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NULL\n        )\n        OR (\n          \"bridge_outbox_deliveries\".\"status\" = 'failed'\n          AND \"bridge_outbox_deliveries\".\"provider_message_id\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"last_error\" IS NOT NULL\n          AND length(trim(\"bridge_outbox_deliveries\".\"last_error\")) > 0\n          AND \"bridge_outbox_deliveries\".\"feedback_provider\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_type\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NULL\n        )\n        OR (\n          \"bridge_outbox_deliveries\".\"status\" = 'failed'\n          AND \"bridge_outbox_deliveries\".\"provider_message_id\" IS NOT NULL\n          AND length(trim(\"bridge_outbox_deliveries\".\"provider_message_id\")) > 0\n          AND \"bridge_outbox_deliveries\".\"last_error\" IS NOT NULL\n          AND length(trim(\"bridge_outbox_deliveries\".\"last_error\")) > 0\n          AND \"bridge_outbox_deliveries\".\"feedback_provider\" IS NOT NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_type\" IS NOT NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NOT NULL\n        )\n        OR (\n          \"bridge_outbox_deliveries\".\"status\" IN ('suppressed', 'deferred')\n          AND \"bridge_outbox_deliveries\".\"provider_message_id\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"last_error\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_provider\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_type\" IS NULL\n          AND \"bridge_outbox_deliveries\".\"feedback_received_at\" IS NULL\n        )\n      )"
         }
       },
       "isRLSEnabled": true
@@ -3325,8 +3571,12 @@
           "name": "bridge_outbox_events_project_fk",
           "tableFrom": "bridge_outbox_events",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3334,8 +3584,14 @@
           "name": "bridge_outbox_events_organization_project_fk",
           "tableFrom": "bridge_outbox_events",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3345,7 +3601,11 @@
         "bridge_outbox_events_org_project_id_unique": {
           "name": "bridge_outbox_events_org_project_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["organization_id", "project_id", "id"]
+          "columns": [
+            "organization_id",
+            "project_id",
+            "id"
+          ]
         }
       },
       "policies": {
@@ -3353,7 +3613,9 @@
           "name": "bridge_outbox_events_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_outbox_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_outbox_events\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3410,7 +3672,10 @@
         "bridge_principal_identities_oidc_unique": {
           "name": "bridge_principal_identities_oidc_unique",
           "nullsNotDistinct": false,
-          "columns": ["oidc_issuer", "oidc_subject"]
+          "columns": [
+            "oidc_issuer",
+            "oidc_subject"
+          ]
         }
       },
       "policies": {},
@@ -3494,8 +3759,12 @@
           "name": "bridge_project_memberships_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_project_memberships",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3503,8 +3772,12 @@
           "name": "bridge_project_memberships_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_project_memberships",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3512,8 +3785,12 @@
           "name": "bridge_project_memberships_principal_id_bridge_principal_identities_id_fk",
           "tableFrom": "bridge_project_memberships",
           "tableTo": "bridge_principal_identities",
-          "columnsFrom": ["principal_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3521,8 +3798,14 @@
           "name": "bridge_project_memberships_organization_project_fk",
           "tableFrom": "bridge_project_memberships",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3530,7 +3813,11 @@
       "compositePrimaryKeys": {
         "bridge_project_memberships_organization_id_project_id_principal_id_pk": {
           "name": "bridge_project_memberships_organization_id_project_id_principal_id_pk",
-          "columns": ["organization_id", "project_id", "principal_id"]
+          "columns": [
+            "organization_id",
+            "project_id",
+            "principal_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -3539,7 +3826,9 @@
           "name": "bridge_project_memberships_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_project_memberships\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_project_memberships\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3628,8 +3917,14 @@
           "name": "bridge_project_ownership_configurations_project_fk",
           "tableFrom": "bridge_project_ownership_configurations",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3637,7 +3932,10 @@
       "compositePrimaryKeys": {
         "bridge_project_ownership_configurations_organization_id_project_id_pk": {
           "name": "bridge_project_ownership_configurations_organization_id_project_id_pk",
-          "columns": ["organization_id", "project_id"]
+          "columns": [
+            "organization_id",
+            "project_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -3646,7 +3944,9 @@
           "name": "bridge_project_ownership_configurations_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_project_ownership_configurations\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_project_ownership_configurations\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3728,8 +4028,14 @@
           "name": "bridge_project_policy_configurations_project_fk",
           "tableFrom": "bridge_project_policy_configurations",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3737,7 +4043,10 @@
       "compositePrimaryKeys": {
         "bridge_project_policy_configurations_organization_id_project_id_pk": {
           "name": "bridge_project_policy_configurations_organization_id_project_id_pk",
-          "columns": ["organization_id", "project_id"]
+          "columns": [
+            "organization_id",
+            "project_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -3746,7 +4055,9 @@
           "name": "bridge_project_policy_configurations_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_project_policy_configurations\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_project_policy_configurations\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3840,8 +4151,12 @@
           "name": "bridge_project_repositories_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_project_repositories",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3849,8 +4164,14 @@
           "name": "bridge_project_repositories_organization_project_fk",
           "tableFrom": "bridge_project_repositories",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["organization_id", "project_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": [
+            "organization_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3860,7 +4181,12 @@
         "bridge_project_repositories_org_provider_owner_name_unique": {
           "name": "bridge_project_repositories_org_provider_owner_name_unique",
           "nullsNotDistinct": false,
-          "columns": ["organization_id", "provider", "owner", "name"]
+          "columns": [
+            "organization_id",
+            "provider",
+            "owner",
+            "name"
+          ]
         }
       },
       "policies": {
@@ -3868,7 +4194,9 @@
           "name": "bridge_project_repositories_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_project_repositories\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_project_repositories\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -3911,8 +4239,12 @@
           "name": "bridge_projects_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_projects",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -3924,7 +4256,9 @@
           "name": "bridge_projects_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_projects\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_projects\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -4028,8 +4362,12 @@
           "name": "bridge_question_responses_question_id_bridge_questions_id_fk",
           "tableFrom": "bridge_question_responses",
           "tableTo": "bridge_questions",
-          "columnsFrom": ["question_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4041,7 +4379,9 @@
           "name": "bridge_question_responses_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "exists (\n        select 1 from \"bridge_questions\"\n        where \"bridge_questions\".\"id\" = \"bridge_question_responses\".\"question_id\"\n          and \"bridge_questions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )",
           "withCheck": "exists (\n        select 1 from \"bridge_questions\"\n        where \"bridge_questions\".\"id\" = \"bridge_question_responses\".\"question_id\"\n          and \"bridge_questions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )"
         }
@@ -4437,8 +4777,12 @@
           "name": "bridge_questions_project_id_bridge_projects_id_fk",
           "tableFrom": "bridge_questions",
           "tableTo": "bridge_projects",
-          "columnsFrom": ["project_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4446,8 +4790,12 @@
           "name": "bridge_questions_run_id_bridge_agent_runs_id_fk",
           "tableFrom": "bridge_questions",
           "tableTo": "bridge_agent_runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4459,7 +4807,9 @@
           "name": "bridge_questions_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "\"bridge_questions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')",
           "withCheck": "\"bridge_questions\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')"
         }
@@ -4512,8 +4862,12 @@
           "name": "bridge_run_continuation_locators_run_id_bridge_agent_runs_id_fk",
           "tableFrom": "bridge_run_continuation_locators",
           "tableTo": "bridge_agent_runs",
-          "columnsFrom": ["run_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4523,7 +4877,9 @@
         "bridge_run_continuation_locators_resume_context_key_unique": {
           "name": "bridge_run_continuation_locators_resume_context_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["resume_context_key"]
+          "columns": [
+            "resume_context_key"
+          ]
         }
       },
       "policies": {
@@ -4531,7 +4887,9 @@
           "name": "bridge_run_continuation_locators_tenant",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": ["public"],
+          "to": [
+            "public"
+          ],
           "using": "exists (\n        select 1 from \"bridge_agent_runs\"\n        where \"bridge_agent_runs\".\"id\" = \"bridge_run_continuation_locators\".\"run_id\"\n          and \"bridge_agent_runs\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )",
           "withCheck": "exists (\n        select 1 from \"bridge_agent_runs\"\n        where \"bridge_agent_runs\".\"id\" = \"bridge_run_continuation_locators\".\"run_id\"\n          and \"bridge_agent_runs\".\"organization_id\" = nullif(current_setting('bridge.organization_id', true), '')\n      )"
         }
@@ -4674,8 +5032,12 @@
           "name": "bridge_service_credentials_organization_id_bridge_organizations_id_fk",
           "tableFrom": "bridge_service_credentials",
           "tableTo": "bridge_organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4683,8 +5045,12 @@
           "name": "bridge_service_credentials_principal_id_bridge_principal_identities_id_fk",
           "tableFrom": "bridge_service_credentials",
           "tableTo": "bridge_principal_identities",
-          "columnsFrom": ["principal_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4700,77 +5066,156 @@
     "public.bridge_agent_run_capability": {
       "name": "bridge_agent_run_capability",
       "schema": "public",
-      "values": ["instructions", "cli", "mcp", "hooks", "orchestrated"]
+      "values": [
+        "instructions",
+        "cli",
+        "mcp",
+        "hooks",
+        "orchestrated"
+      ]
     },
     "public.bridge_agent_run_client": {
       "name": "bridge_agent_run_client",
       "schema": "public",
-      "values": ["codex", "claude_code", "cursor", "copilot", "custom", "unknown"]
+      "values": [
+        "codex",
+        "claude_code",
+        "cursor",
+        "copilot",
+        "custom",
+        "unknown"
+      ]
     },
     "public.bridge_agent_run_status": {
       "name": "bridge_agent_run_status",
       "schema": "public",
-      "values": ["running", "waiting_for_human", "completed", "failed", "cancelled"]
+      "values": [
+        "running",
+        "waiting_for_human",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
     },
     "public.bridge_artifact_type": {
       "name": "bridge_artifact_type",
       "schema": "public",
-      "values": ["prd", "adr", "api_contract", "test_plan"]
+      "values": [
+        "prd",
+        "adr",
+        "api_contract",
+        "test_plan"
+      ]
     },
     "public.bridge_artifact_version_status": {
       "name": "bridge_artifact_version_status",
       "schema": "public",
-      "values": ["draft", "in_review", "approved", "superseded"]
+      "values": [
+        "draft",
+        "in_review",
+        "approved",
+        "superseded"
+      ]
     },
     "public.bridge_assumption_confidence": {
       "name": "bridge_assumption_confidence",
       "schema": "public",
-      "values": ["low", "medium", "high"]
+      "values": [
+        "low",
+        "medium",
+        "high"
+      ]
     },
     "public.bridge_assumption_status": {
       "name": "bridge_assumption_status",
       "schema": "public",
-      "values": ["active", "confirmed", "rejected", "expired", "superseded"]
+      "values": [
+        "active",
+        "confirmed",
+        "rejected",
+        "expired",
+        "superseded"
+      ]
     },
     "public.bridge_decision_status": {
       "name": "bridge_decision_status",
       "schema": "public",
-      "values": ["active", "superseded", "expired", "revoked"]
+      "values": [
+        "active",
+        "superseded",
+        "expired",
+        "revoked"
+      ]
     },
     "public.bridge_idempotency_kind": {
       "name": "bridge_idempotency_kind",
       "schema": "public",
-      "values": ["question", "artifact_version", "run", "assumption"]
+      "values": [
+        "question",
+        "artifact_version",
+        "run",
+        "assumption"
+      ]
     },
     "public.bridge_membership_provisioning": {
       "name": "bridge_membership_provisioning",
       "schema": "public",
-      "values": ["manual", "directory"]
+      "values": [
+        "manual",
+        "directory"
+      ]
     },
     "public.bridge_membership_status": {
       "name": "bridge_membership_status",
       "schema": "public",
-      "values": ["active", "disabled"]
+      "values": [
+        "active",
+        "disabled"
+      ]
     },
     "public.bridge_principal_type": {
       "name": "bridge_principal_type",
       "schema": "public",
-      "values": ["human", "agent", "ci", "integration"]
+      "values": [
+        "human",
+        "agent",
+        "ci",
+        "integration"
+      ]
     },
     "public.bridge_question_status": {
       "name": "bridge_question_status",
       "schema": "public",
-      "values": ["open", "in_discussion", "accepted", "duplicate", "cancelled", "expired"]
+      "values": [
+        "open",
+        "in_discussion",
+        "accepted",
+        "duplicate",
+        "cancelled",
+        "expired"
+      ]
     },
     "public.bridge_question_type": {
       "name": "bridge_question_type",
       "schema": "public",
-      "values": ["information", "decision", "approval", "review", "assumption_challenge", "blocker"]
+      "values": [
+        "information",
+        "decision",
+        "approval",
+        "review",
+        "assumption_challenge",
+        "blocker"
+      ]
     },
     "public.bridge_risk": {
       "name": "bridge_risk",
       "schema": "public",
-      "values": ["low", "medium", "high", "protected"]
+      "values": [
+        "low",
+        "medium",
+        "high",
+        "protected"
+      ]
     }
   },
   "schemas": {},

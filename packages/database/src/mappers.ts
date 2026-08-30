@@ -33,7 +33,7 @@ import {
   type ServiceCredential,
 } from "@bridge/domain";
 
-import {
+import type {
   agentRuns,
   adapterDiagnostics,
   assumptions,
@@ -107,9 +107,7 @@ export function organizationFromRow(row: OrganizationRow): Organization {
   return { ...row };
 }
 
-export function principalIdentityToRow(
-  identity: PrincipalIdentity,
-): typeof principalIdentities.$inferInsert {
+export function principalIdentityToRow(identity: PrincipalIdentity): typeof principalIdentities.$inferInsert {
   return { ...identity };
 }
 
@@ -123,9 +121,7 @@ export function organizationMembershipToRow(
   return { ...membership };
 }
 
-export function organizationMembershipFromRow(
-  row: OrganizationMembershipRow,
-): OrganizationMembership {
+export function organizationMembershipFromRow(row: OrganizationMembershipRow): OrganizationMembership {
   return { ...row };
 }
 
@@ -138,21 +134,15 @@ export function directoryGroupFromRow(row: DirectoryGroupRow): DirectoryGroup {
   return { ...group, ...(sourceUpdatedAt === null ? {} : { sourceUpdatedAt }) };
 }
 
-export function directoryGroupMemberToRow(
-  member: DirectoryGroupMember,
-): typeof directoryGroupMembers.$inferInsert {
+export function directoryGroupMemberToRow(member: DirectoryGroupMember): typeof directoryGroupMembers.$inferInsert {
   return { ...member };
 }
 
-export function directoryGroupMemberFromRow(
-  row: DirectoryGroupMemberRow,
-): DirectoryGroupMember {
+export function directoryGroupMemberFromRow(row: DirectoryGroupMemberRow): DirectoryGroupMember {
   return { ...row };
 }
 
-export function projectMembershipToRow(
-  membership: ProjectMembership,
-): typeof projectMemberships.$inferInsert {
+export function projectMembershipToRow(membership: ProjectMembership): typeof projectMemberships.$inferInsert {
   return { ...membership };
 }
 
@@ -209,9 +199,7 @@ export function projectPolicyConfigurationToRow(
   };
 }
 
-export function projectPolicyConfigurationFromRow(
-  row: ProjectPolicyConfigurationRow,
-): ProjectPolicyConfiguration {
+export function projectPolicyConfigurationFromRow(row: ProjectPolicyConfigurationRow): ProjectPolicyConfiguration {
   return {
     organizationId: row.organizationId,
     projectId: row.projectId,
@@ -222,9 +210,7 @@ export function projectPolicyConfigurationFromRow(
   };
 }
 
-export function serviceCredentialToRow(
-  credential: ServiceCredential,
-): typeof serviceCredentials.$inferInsert {
+export function serviceCredentialToRow(credential: ServiceCredential): typeof serviceCredentials.$inferInsert {
   return {
     id: credential.id,
     organizationId: credential.organizationId,
@@ -262,9 +248,7 @@ export function organizationAuditEventToRow(
   return { ...event };
 }
 
-export function organizationAuditEventFromRow(
-  row: OrganizationAuditEventRow,
-): OrganizationAuditEvent {
+export function organizationAuditEventFromRow(row: OrganizationAuditEventRow): OrganizationAuditEvent {
   const { source, beforeVersion, afterVersion, ...event } = row;
   return {
     ...event,
@@ -323,9 +307,7 @@ export function notificationPreferenceToRow(
   return { ...preference };
 }
 
-export function notificationPreferenceFromRow(
-  row: NotificationPreferenceRow,
-): NotificationPreference {
+export function notificationPreferenceFromRow(row: NotificationPreferenceRow): NotificationPreference {
   return {
     ...row,
     channel: "email",
@@ -432,9 +414,7 @@ export function projectFromRow(row: ProjectRow): Project {
   };
 }
 
-export function repositoryRecordToRow(
-  repository: RepositoryRecord,
-): typeof projectRepositories.$inferInsert {
+export function repositoryRecordToRow(repository: RepositoryRecord): typeof projectRepositories.$inferInsert {
   return { ...repository };
 }
 
@@ -442,9 +422,7 @@ export function repositoryRecordFromRow(row: RepositoryRecordRow): RepositoryRec
   return { ...row };
 }
 
-export function githubPullRequestToRow(
-  pullRequest: GithubPullRequestContext,
-): typeof githubPullRequests.$inferInsert {
+export function githubPullRequestToRow(pullRequest: GithubPullRequestContext): typeof githubPullRequests.$inferInsert {
   return { ...pullRequest };
 }
 
@@ -516,9 +494,7 @@ export function runFromRow(row: AgentRunRow): AgentRun {
   };
 }
 
-export function adapterDiagnosticToRow(
-  diagnostic: AdapterDiagnostic,
-): typeof adapterDiagnostics.$inferInsert {
+export function adapterDiagnosticToRow(diagnostic: AdapterDiagnostic): typeof adapterDiagnostics.$inferInsert {
   return {
     organizationId: diagnostic.organizationId,
     projectId: diagnostic.projectId,
@@ -605,9 +581,7 @@ export function assumptionFromRow(row: AssumptionRow): Assumption {
     ...(row.resolvedAt === null ? {} : { resolvedAt: row.resolvedAt }),
     ...(row.resolutionRationale === null ? {} : { resolutionRationale: row.resolutionRationale }),
     ...(row.confirmedDecisionId === null ? {} : { confirmedDecisionId: row.confirmedDecisionId }),
-    ...(row.supersedingAssumptionId === null
-      ? {}
-      : { supersedingAssumptionId: row.supersedingAssumptionId }),
+    ...(row.supersedingAssumptionId === null ? {} : { supersedingAssumptionId: row.supersedingAssumptionId }),
     version: row.version,
   };
 }
@@ -688,10 +662,7 @@ export function responseFromRow(row: QuestionResponseRow): QuestionResponse {
   };
 }
 
-export function questionFromRows(
-  row: QuestionRow,
-  responseRows: readonly QuestionResponseRow[],
-): Question {
+export function questionFromRows(row: QuestionRow, responseRows: readonly QuestionResponseRow[]): Question {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -806,9 +777,7 @@ export function artifactToRow(artifact: Artifact): typeof artifacts.$inferInsert
   };
 }
 
-export function artifactVersionToRow(
-  version: ArtifactVersion,
-): typeof artifactVersions.$inferInsert {
+export function artifactVersionToRow(version: ArtifactVersion): typeof artifactVersions.$inferInsert {
   return {
     id: version.id,
     artifactId: version.artifactId,
@@ -846,9 +815,7 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
     createdAt: row.createdAt,
     reviews: row.reviews,
     requiredApprovals: row.requiredApprovals,
-    ...(row.reviewerAssignment === null
-      ? {}
-      : { reviewerAssignment: row.reviewerAssignment }),
+    ...(row.reviewerAssignment === null ? {} : { reviewerAssignment: row.reviewerAssignment }),
     ...(row.runId === null ? {} : { runId: row.runId }),
     ...(row.approvedById === null ? {} : { approvedById: row.approvedById }),
     ...(row.approvalRationale === null ? {} : { approvalRationale: row.approvalRationale }),
@@ -857,10 +824,7 @@ export function artifactVersionFromRow(row: ArtifactVersionRow): ArtifactVersion
   return { ...version, approvalStatus: artifactApprovalStatus(version) };
 }
 
-export function artifactFromRows(
-  row: ArtifactRow,
-  versionRows: readonly ArtifactVersionRow[],
-): Artifact {
+export function artifactFromRows(row: ArtifactRow, versionRows: readonly ArtifactVersionRow[]): Artifact {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -881,9 +845,7 @@ export function artifactFromRows(
   };
 }
 
-export function contextSnapshotToRow(
-  snapshot: ContextSnapshot,
-): typeof contextSnapshots.$inferInsert {
+export function contextSnapshotToRow(snapshot: ContextSnapshot): typeof contextSnapshots.$inferInsert {
   return {
     id: snapshot.id,
     organizationId: snapshot.organizationId,

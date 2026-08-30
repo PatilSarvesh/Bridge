@@ -1332,13 +1332,15 @@ describe("Bridge API vertical slice", () => {
       updatedCount: 1,
       deliveryIds: ["odl_api_feedback"],
     });
-    expect(await runtime.repository.listOutboxDeliveries(demoProject.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: "odl_api_feedback",
-        status: "failed",
-        feedback: { provider: "ses", type: "complaint", receivedAt: payload.receivedAt },
-      }),
-    ]));
+    expect(await runtime.repository.listOutboxDeliveries(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "odl_api_feedback",
+          status: "failed",
+          feedback: { provider: "ses", type: "complaint", receivedAt: payload.receivedAt },
+        }),
+      ]),
+    );
 
     const replay = await app.inject({
       method: "POST",
@@ -1359,9 +1361,15 @@ describe("Bridge API vertical slice", () => {
       mode: "oidc",
       publicConfiguration: () => ({ mode: "oidc" }),
       authenticateRequest: async () => scopedPrincipal,
-      beginWebLogin: async () => { throw new Error("not used"); },
-      completeWebLogin: async () => { throw new Error("not used"); },
-      endWebSession: () => { throw new Error("not used"); },
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
     };
     const scopedApp = await buildApp({
       service: runtime.service,

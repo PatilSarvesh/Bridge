@@ -45,12 +45,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-export const principalTypeEnum = pgEnum("bridge_principal_type", [
-  "human",
-  "agent",
-  "ci",
-  "integration",
-]);
+export const principalTypeEnum = pgEnum("bridge_principal_type", ["human", "agent", "ci", "integration"]);
 export const questionTypeEnum = pgEnum("bridge_question_type", [
   "information",
   "decision",
@@ -68,18 +63,8 @@ export const questionStatusEnum = pgEnum("bridge_question_status", [
   "cancelled",
   "expired",
 ]);
-export const decisionStatusEnum = pgEnum("bridge_decision_status", [
-  "active",
-  "superseded",
-  "expired",
-  "revoked",
-]);
-export const artifactTypeEnum = pgEnum("bridge_artifact_type", [
-  "prd",
-  "adr",
-  "api_contract",
-  "test_plan",
-]);
+export const decisionStatusEnum = pgEnum("bridge_decision_status", ["active", "superseded", "expired", "revoked"]);
+export const artifactTypeEnum = pgEnum("bridge_artifact_type", ["prd", "adr", "api_contract", "test_plan"]);
 export const artifactVersionStatusEnum = pgEnum("bridge_artifact_version_status", [
   "draft",
   "in_review",
@@ -114,11 +99,7 @@ export const agentRunStatusEnum = pgEnum("bridge_agent_run_status", [
   "failed",
   "cancelled",
 ]);
-export const assumptionConfidenceEnum = pgEnum("bridge_assumption_confidence", [
-  "low",
-  "medium",
-  "high",
-]);
+export const assumptionConfidenceEnum = pgEnum("bridge_assumption_confidence", ["low", "medium", "high"]);
 export const assumptionStatusEnum = pgEnum("bridge_assumption_status", [
   "active",
   "confirmed",
@@ -151,10 +132,7 @@ function relatedTenantPolicy(name: string, matchesTenant: ReturnType<typeof sql>
 }
 
 export const membershipStatusEnum = pgEnum("bridge_membership_status", ["active", "disabled"]);
-export const membershipProvisioningEnum = pgEnum("bridge_membership_provisioning", [
-  "manual",
-  "directory",
-]);
+export const membershipProvisioningEnum = pgEnum("bridge_membership_provisioning", ["manual", "directory"]);
 
 export const organizations = pgTable("bridge_organizations", {
   id: text("id").primaryKey(),
@@ -174,9 +152,7 @@ export const principalIdentities = pgTable(
     oidcSubject: text("oidc_subject").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [
-    unique("bridge_principal_identities_oidc_unique").on(table.oidcIssuer, table.oidcSubject),
-  ],
+  (table) => [unique("bridge_principal_identities_oidc_unique").on(table.oidcIssuer, table.oidcSubject)],
 );
 
 export const serviceCredentials = pgTable(
@@ -254,11 +230,7 @@ export const directoryGroups = pgTable(
       table.externalGroupId,
     ),
     unique("bridge_directory_groups_org_id_unique").on(table.organizationId, table.id),
-    index("bridge_directory_groups_org_status_name_idx").on(
-      table.organizationId,
-      table.status,
-      table.displayName,
-    ),
+    index("bridge_directory_groups_org_status_name_idx").on(table.organizationId, table.status, table.displayName),
     check("bridge_directory_groups_status_check", sql`${table.status} IN ('active', 'disabled')`),
     check("bridge_directory_groups_version_check", sql`${table.version} > 0`),
     tenantPolicy("bridge_directory_groups_tenant", table.organizationId),
@@ -286,19 +258,13 @@ export const directoryGroupMembers = pgTable(
     version: integer("version").notNull(),
   },
   (table) => [
-    unique("bridge_directory_group_members_group_subject_unique").on(
-      table.groupId,
-      table.externalSubject,
-    ),
+    unique("bridge_directory_group_members_group_subject_unique").on(table.groupId, table.externalSubject),
     index("bridge_directory_group_members_principal_status_idx").on(
       table.organizationId,
       table.principalId,
       table.status,
     ),
-    check(
-      "bridge_directory_group_members_status_check",
-      sql`${table.status} IN ('active', 'removed')`,
-    ),
+    check("bridge_directory_group_members_status_check", sql`${table.status} IN ('active', 'removed')`),
     check("bridge_directory_group_members_version_check", sql`${table.version} > 0`),
     foreignKey({
       name: "bridge_directory_group_members_organization_group_fk",
@@ -379,19 +345,10 @@ export const githubPullRequests = pgTable(
     version: integer("version").notNull(),
   },
   (table) => [
-    unique("bridge_github_pull_requests_repository_number_unique").on(
-      table.repositoryId,
-      table.number,
-    ),
-    index("bridge_github_pull_requests_project_source_updated_idx").on(
-      table.projectId,
-      table.sourceUpdatedAt,
-    ),
+    unique("bridge_github_pull_requests_repository_number_unique").on(table.repositoryId, table.number),
+    index("bridge_github_pull_requests_project_source_updated_idx").on(table.projectId, table.sourceUpdatedAt),
     check("bridge_github_pull_requests_number_check", sql`${table.number} > 0`),
-    check(
-      "bridge_github_pull_requests_state_check",
-      sql`${table.state} IN ('open', 'closed', 'merged')`,
-    ),
+    check("bridge_github_pull_requests_state_check", sql`${table.state} IN ('open', 'closed', 'merged')`),
     check("bridge_github_pull_requests_version_check", sql`${table.version} > 0`),
     foreignKey({
       name: "bridge_github_pull_requests_organization_project_fk",
@@ -428,14 +385,8 @@ export const githubIssues = pgTable(
   },
   (table) => [
     unique("bridge_github_issues_repository_number_unique").on(table.repositoryId, table.number),
-    unique("bridge_github_issues_repository_reference_unique").on(
-      table.repositoryId,
-      table.reference,
-    ),
-    index("bridge_github_issues_project_source_updated_idx").on(
-      table.projectId,
-      table.sourceUpdatedAt,
-    ),
+    unique("bridge_github_issues_repository_reference_unique").on(table.repositoryId, table.reference),
+    index("bridge_github_issues_project_source_updated_idx").on(table.projectId, table.sourceUpdatedAt),
     check("bridge_github_issues_number_check", sql`${table.number} > 0`),
     check("bridge_github_issues_state_check", sql`${table.state} IN ('open', 'closed')`),
     check("bridge_github_issues_version_check", sql`${table.version} > 0`),
@@ -492,10 +443,7 @@ export const projectOwnershipConfigurations = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.organizationId, table.projectId] }),
-    index("bridge_project_ownership_configurations_project_updated_idx").on(
-      table.projectId,
-      table.updatedAt,
-    ),
+    index("bridge_project_ownership_configurations_project_updated_idx").on(table.projectId, table.updatedAt),
     check("bridge_project_ownership_configurations_version_check", sql`${table.version} > 0`),
     foreignKey({
       name: "bridge_project_ownership_configurations_project_fk",
@@ -595,10 +543,7 @@ export const adapterDiagnostics = pgTable(
       "bridge_adapter_diagnostics_mcp_status_check",
       sql`${table.mcpStatus} IN ('ready', 'failed', 'not_configured')`,
     ),
-    check(
-      "bridge_adapter_diagnostics_status_check",
-      sql`${table.status} IN ('pass', 'fail')`,
-    ),
+    check("bridge_adapter_diagnostics_status_check", sql`${table.status} IN ('pass', 'fail')`),
     check(
       "bridge_adapter_diagnostics_history_shape_check",
       sql`jsonb_typeof(${table.history}) = 'array' AND jsonb_array_length(${table.history}) <= 20`,
@@ -666,7 +611,10 @@ export const questions = pgTable(
     reviewerIds: jsonb("reviewer_ids").$type<readonly string[]>().default([]).notNull(),
     reviewerRoles: jsonb("reviewer_roles").$type<readonly string[]>().default([]).notNull(),
     requiredReviewerRoles: jsonb("required_reviewer_roles").$type<readonly string[]>().default([]).notNull(),
-    requiredReviewerQuorum: jsonb("required_reviewer_quorum").$type<Readonly<Record<string, number>>>().default({}).notNull(),
+    requiredReviewerQuorum: jsonb("required_reviewer_quorum")
+      .$type<Readonly<Record<string, number>>>()
+      .default({})
+      .notNull(),
     routing: jsonb("routing").$type<QuestionRoutingExplanation>().notNull(),
     assignmentHistory: jsonb("assignment_history").$type<readonly QuestionAssignmentHistoryEntry[]>().notNull(),
     options: jsonb("options").$type<readonly QuestionOption[]>().notNull(),
@@ -689,11 +637,14 @@ export const questions = pgTable(
     index("bridge_questions_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_questions_project_status_idx").on(table.projectId, table.status),
     index("bridge_questions_project_due_idx").on(table.projectId, table.dueAt),
-    index("bridge_questions_full_text_idx").using("gin", sql`(
+    index("bridge_questions_full_text_idx").using(
+      "gin",
+      sql`(
       setweight(to_tsvector('simple', coalesce(${table.projectId}, '')), 'D') ||
       setweight(to_tsvector('simple', coalesce(${table.title}, '')), 'A') ||
       setweight(to_tsvector('simple', coalesce(${table.context}, '')), 'B')
-    )`),
+    )`,
+    ),
     index("bridge_questions_title_trigram_idx").using(
       "gin",
       sql`lower(${table.projectId} || ':' || ${table.title}) gin_trgm_ops`,
@@ -759,8 +710,7 @@ export const decisions = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
-    questionId: text("question_id")
-      .references(() => questions.id, { onDelete: "restrict" }),
+    questionId: text("question_id").references(() => questions.id, { onDelete: "restrict" }),
     answer: text("answer").notNull(),
     rationale: text("rationale").notNull(),
     category: text("category").notNull(),
@@ -773,19 +723,14 @@ export const decisions = pgTable(
     lifecycleRationale: text("lifecycle_rationale"),
     lifecycleChangedById: text("lifecycle_changed_by_id"),
     lifecycleChangedAt: timestamp("lifecycle_changed_at", { withTimezone: true, mode: "string" }),
-    replacementDecisionId: text("replacement_decision_id").references(
-      (): AnyPgColumn => decisions.id,
-      { onDelete: "restrict" },
-    ),
+    replacementDecisionId: text("replacement_decision_id").references((): AnyPgColumn => decisions.id, {
+      onDelete: "restrict",
+    }),
     version: integer("version").default(1).notNull(),
   },
   (table) => [
     uniqueIndex("bridge_decisions_question_unique").on(table.questionId),
-    uniqueIndex("bridge_decisions_organization_project_id_unique").on(
-      table.organizationId,
-      table.projectId,
-      table.id,
-    ),
+    uniqueIndex("bridge_decisions_organization_project_id_unique").on(table.organizationId, table.projectId, table.id),
     index("bridge_decisions_project_status_idx").on(table.projectId, table.status),
     index("bridge_decisions_full_text_idx").using(
       "gin",
@@ -837,19 +782,14 @@ export const assumptions = pgTable(
     confirmedDecisionId: text("confirmed_decision_id").references(() => decisions.id, {
       onDelete: "restrict",
     }),
-    supersedingAssumptionId: text("superseding_assumption_id").references(
-      (): AnyPgColumn => assumptions.id,
-      { onDelete: "restrict" },
-    ),
+    supersedingAssumptionId: text("superseding_assumption_id").references((): AnyPgColumn => assumptions.id, {
+      onDelete: "restrict",
+    }),
     version: integer("version").notNull(),
   },
   (table) => [
     index("bridge_assumptions_project_created_idx").on(table.projectId, table.createdAt),
-    index("bridge_assumptions_project_status_expiry_idx").on(
-      table.projectId,
-      table.status,
-      table.expiresAt,
-    ),
+    index("bridge_assumptions_project_status_expiry_idx").on(table.projectId, table.status, table.expiresAt),
     tenantPolicy("bridge_assumptions_tenant", table.organizationId),
   ],
 ).enableRLS();
@@ -905,10 +845,7 @@ export const artifactVersions = pgTable(
   (table) => [
     uniqueIndex("bridge_artifact_versions_number_unique").on(table.artifactId, table.version),
     index("bridge_artifact_versions_artifact_status_idx").on(table.artifactId, table.status),
-    check(
-      "bridge_artifact_versions_required_approvals_check",
-      sql`${table.requiredApprovals} between 1 and 20`,
-    ),
+    check("bridge_artifact_versions_required_approvals_check", sql`${table.requiredApprovals} between 1 and 20`),
     check(
       "bridge_artifact_versions_reviewer_assignment_shape_check",
       sql`${table.reviewerAssignment} is null or (
@@ -1005,10 +942,7 @@ export const organizationAuditEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
-    index("bridge_organization_audit_events_org_created_idx").on(
-      table.organizationId,
-      table.createdAt,
-    ),
+    index("bridge_organization_audit_events_org_created_idx").on(table.organizationId, table.createdAt),
     index("bridge_organization_audit_events_correlation_idx").on(table.correlationId),
     check(
       "bridge_organization_audit_events_action_check",
@@ -1027,8 +961,7 @@ export const notifications = pgTable(
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id").notNull(),
-    projectId: text("project_id")
-      .notNull(),
+    projectId: text("project_id").notNull(),
     recipientId: text("recipient_id").notNull(),
     type: text("type").notNull(),
     title: text("title").notNull(),
@@ -1070,19 +1003,13 @@ export const notificationPreferences = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.organizationId, table.principalId, table.channel] }),
-    index("bridge_notification_preferences_principal_idx").on(
-      table.organizationId,
-      table.principalId,
-    ),
+    index("bridge_notification_preferences_principal_idx").on(table.organizationId, table.principalId),
     foreignKey({
       name: "bridge_notification_preferences_membership_fk",
       columns: [table.organizationId, table.principalId],
       foreignColumns: [organizationMemberships.organizationId, organizationMemberships.principalId],
     }).onDelete("cascade"),
-    check(
-      "bridge_notification_preferences_channel_check",
-      sql`${table.channel} IN ('email')`,
-    ),
+    check("bridge_notification_preferences_channel_check", sql`${table.channel} IN ('email')`),
     check(
       "bridge_notification_preferences_preference_check",
       sql`${table.preference} IN ('immediate', 'digest', 'muted')`,
@@ -1097,8 +1024,7 @@ export const outboxEvents = pgTable(
     id: text("id").primaryKey(),
     correlationId: text("correlation_id").notNull(),
     organizationId: text("organization_id").notNull(),
-    projectId: text("project_id")
-      .notNull(),
+    projectId: text("project_id").notNull(),
     type: text("type").notNull(),
     payload: jsonb("payload").$type<OutboxPayload>().notNull(),
     status: text("status").notNull(),
@@ -1113,11 +1039,7 @@ export const outboxEvents = pgTable(
     index("bridge_outbox_status_available_idx").on(table.status, table.availableAt),
     index("bridge_outbox_project_created_idx").on(table.projectId, table.createdAt),
     index("bridge_outbox_correlation_idx").on(table.correlationId),
-    unique("bridge_outbox_events_org_project_id_unique").on(
-      table.organizationId,
-      table.projectId,
-      table.id,
-    ),
+    unique("bridge_outbox_events_org_project_id_unique").on(table.organizationId, table.projectId, table.id),
     foreignKey({
       name: "bridge_outbox_events_project_fk",
       columns: [table.projectId],
@@ -1159,16 +1081,8 @@ export const outboxDeliveries = pgTable(
     unique("bridge_outbox_deliveries_event_channel_unique").on(table.outboxEventId, table.channel),
     index("bridge_outbox_deliveries_project_updated_idx").on(table.projectId, table.updatedAt),
     index("bridge_outbox_deliveries_status_updated_idx").on(table.status, table.updatedAt),
-    index("bridge_outbox_deliveries_digest_available_idx").on(
-      table.status,
-      table.channel,
-      table.digestAvailableAt,
-    ),
-    index("bridge_outbox_deliveries_project_channel_dedupe_idx").on(
-      table.projectId,
-      table.channel,
-      table.dedupeKey,
-    ),
+    index("bridge_outbox_deliveries_digest_available_idx").on(table.status, table.channel, table.digestAvailableAt),
+    index("bridge_outbox_deliveries_project_channel_dedupe_idx").on(table.projectId, table.channel, table.dedupeKey),
     index("bridge_outbox_deliveries_project_channel_provider_idx").on(
       table.projectId,
       table.channel,
@@ -1187,6 +1101,47 @@ export const outboxDeliveries = pgTable(
             (${table.channel} = 'email' AND ${table.feedbackProvider} = 'ses')
             OR (${table.channel} = 'slack' AND ${table.feedbackProvider} = 'slack')
           )
+        )
+      )`,
+    ),
+    check(
+      "bridge_outbox_deliveries_result_check",
+      sql`(
+        (
+          ${table.status} = 'delivered'
+          AND ${table.providerMessageId} IS NOT NULL
+          AND length(trim(${table.providerMessageId})) > 0
+          AND ${table.lastError} IS NULL
+          AND ${table.feedbackProvider} IS NULL
+          AND ${table.feedbackType} IS NULL
+          AND ${table.feedbackReceivedAt} IS NULL
+        )
+        OR (
+          ${table.status} = 'failed'
+          AND ${table.providerMessageId} IS NULL
+          AND ${table.lastError} IS NOT NULL
+          AND length(trim(${table.lastError})) > 0
+          AND ${table.feedbackProvider} IS NULL
+          AND ${table.feedbackType} IS NULL
+          AND ${table.feedbackReceivedAt} IS NULL
+        )
+        OR (
+          ${table.status} = 'failed'
+          AND ${table.providerMessageId} IS NOT NULL
+          AND length(trim(${table.providerMessageId})) > 0
+          AND ${table.lastError} IS NOT NULL
+          AND length(trim(${table.lastError})) > 0
+          AND ${table.feedbackProvider} IS NOT NULL
+          AND ${table.feedbackType} IS NOT NULL
+          AND ${table.feedbackReceivedAt} IS NOT NULL
+        )
+        OR (
+          ${table.status} IN ('suppressed', 'deferred')
+          AND ${table.providerMessageId} IS NULL
+          AND ${table.lastError} IS NULL
+          AND ${table.feedbackProvider} IS NULL
+          AND ${table.feedbackType} IS NULL
+          AND ${table.feedbackReceivedAt} IS NULL
         )
       )`,
     ),

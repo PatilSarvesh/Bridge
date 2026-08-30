@@ -379,6 +379,13 @@
       "when": 1788077088844,
       "tag": "0053_organic_carmella_unuscione",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788078348318,
+      "tag": "0054_little_talisman",
+      "breakpoints": true
     }
   ]
 }

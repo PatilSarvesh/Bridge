@@ -39,12 +39,14 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           name: `RLS Organization ${index + 1}`,
           createdAt: "2026-01-01T00:00:00.000Z",
         });
-        await inTenant(store.repository, organizationId, (repository) => repository.saveProject({
-          id: projectIds[index]!,
-          organizationId,
-          name: `RLS Project ${index + 1}`,
-          decisionOwnerIds: [],
-        }));
+        await inTenant(store.repository, organizationId, (repository) =>
+          repository.saveProject({
+            id: projectIds[index]!,
+            organizationId,
+            name: `RLS Project ${index + 1}`,
+            decisionOwnerIds: [],
+          }),
+        );
       }
 
       const protectedTables = [
@@ -76,11 +78,13 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         "bridge_questions",
         "bridge_run_continuation_locators",
       ];
-      const policyState = await client<{
-        relname: string;
-        enabled: boolean;
-        forced: boolean;
-      }[]>`
+      const policyState = await client<
+        {
+          relname: string;
+          enabled: boolean;
+          forced: boolean;
+        }[]
+      >`
         select relname, relrowsecurity as enabled, relforcerowsecurity as forced
         from pg_class
         where relname in ${client(protectedTables)}
@@ -101,10 +105,11 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         await client`grant select, insert, update on table bridge_projects to ${client(testRole)}`;
       }
 
-      await expect(client.begin(async (transaction) => {
-        if (testRole) await transaction`set local role ${transaction(testRole)}`;
-        await transaction`select set_config('bridge.organization_id', ${organizationIds[0]}, true)`;
-        await transaction`
+      await expect(
+        client.begin(async (transaction) => {
+          if (testRole) await transaction`set local role ${transaction(testRole)}`;
+          await transaction`select set_config('bridge.organization_id', ${organizationIds[0]}, true)`;
+          await transaction`
           insert into bridge_projects (id, organization_id, name, decision_owner_ids)
           values (
             ${`prj_rls_cross_write_${suffix}`},
@@ -113,7 +118,8 @@ describeWithDatabase("PostgresBridgeRepository", () => {
             '[]'::jsonb
           )
         `;
-      })).rejects.toMatchObject({ code: "42501" });
+        }),
+      ).rejects.toMatchObject({ code: "42501" });
 
       await client.begin(async (transaction) => {
         if (testRole) await transaction`set local role ${transaction(testRole)}`;
@@ -143,14 +149,15 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         expect(secondTenant).toEqual([{ id: projectIds[1] }]);
       });
 
-      await expect(store.repository.transaction(
-        () => Promise.resolve(undefined),
-        { organizationId: organizationIds[0], maintenance: true },
-      )).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
-      await expect(store.repository.transaction(
-        () => Promise.resolve(undefined),
-        { maintenance: true },
-      )).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        store.repository.transaction(() => Promise.resolve(undefined), {
+          organizationId: organizationIds[0],
+          maintenance: true,
+        }),
+      ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      await expect(
+        store.repository.transaction(() => Promise.resolve(undefined), { maintenance: true }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
     } finally {
       if (testRole) {
         await client`drop owned by ${client(testRole)}`;
@@ -189,17 +196,19 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         oidcSubject: `bootstrap|${suffix}`,
         createdAt: "2026-01-01T00:00:00.000Z",
       });
-      await inTenant(store.repository, organizationId, (repository) => repository.saveOrganizationMembership({
-        organizationId,
-        principalId,
-        status: "active",
-        roles: ["agent"],
-        allProjects: true,
-        provisioning: "manual",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        version: 1,
-      }));
+      await inTenant(store.repository, organizationId, (repository) =>
+        repository.saveOrganizationMembership({
+          organizationId,
+          principalId,
+          status: "active",
+          roles: ["agent"],
+          allProjects: true,
+          provisioning: "manual",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          version: 1,
+        }),
+      );
       await store.repository.saveServiceCredential({
         id: credentialId,
         organizationId,
@@ -212,19 +221,17 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         version: 1,
       });
 
-      expect((await store.repository.getOrganizationByExternalId(externalIdentityProviderId))?.id)
-        .toBe(organizationId);
-      expect((await store.repository.getPrincipalIdentityByOidc(
-        "https://identity.example/",
-        `bootstrap|${suffix}`,
-      ))?.id).toBe(principalId);
-      expect((await store.repository.getServiceCredentialByTokenHash(tokenHash))?.id)
-        .toBe(credentialId);
+      expect((await store.repository.getOrganizationByExternalId(externalIdentityProviderId))?.id).toBe(organizationId);
+      expect(
+        (await store.repository.getPrincipalIdentityByOidc("https://identity.example/", `bootstrap|${suffix}`))?.id,
+      ).toBe(principalId);
+      expect((await store.repository.getServiceCredentialByTokenHash(tokenHash))?.id).toBe(credentialId);
       await inTenant(store.repository, organizationId, async (repository) => {
         expect((await repository.getPrincipalIdentity(principalId))?.id).toBe(principalId);
         expect((await repository.getServiceCredential(credentialId))?.id).toBe(credentialId);
-        expect((await repository.listServiceCredentials(organizationId)).map((credential) => credential.id))
-          .toEqual([credentialId]);
+        expect((await repository.listServiceCredentials(organizationId)).map((credential) => credential.id)).toEqual([
+          credentialId,
+        ]);
       });
 
       const [runtimeRole] = await client<{ bypassesRls: boolean; canCreateRole: boolean }[]>`
@@ -244,15 +251,13 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         await client`grant execute on function public.bridge_get_service_credential(text) to ${client(testRoleName)}`;
         await client`grant execute on function public.bridge_list_service_credentials(text) to ${client(testRoleName)}`;
 
-        for (const table of [
-          "bridge_organizations",
-          "bridge_principal_identities",
-          "bridge_service_credentials",
-        ]) {
-          await expect(client.begin(async (transaction) => {
-            await transaction`set local role ${transaction(testRoleName)}`;
-            await transaction.unsafe(`select id from public.${table} limit 1`);
-          })).rejects.toMatchObject({ code: "42501" });
+        for (const table of ["bridge_organizations", "bridge_principal_identities", "bridge_service_credentials"]) {
+          await expect(
+            client.begin(async (transaction) => {
+              await transaction`set local role ${transaction(testRoleName)}`;
+              await transaction.unsafe(`select id from public.${table} limit 1`);
+            }),
+          ).rejects.toMatchObject({ code: "42501" });
         }
 
         await client.begin(async (transaction) => {
@@ -332,8 +337,7 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         name: "PostgreSQL Integration Organization",
         createdAt: "2026-01-01T00:00:00.000Z",
       });
-      await inTenant(firstStore.repository, project.organizationId, (repository) =>
-        repository.saveProject(project));
+      await inTenant(firstStore.repository, project.organizationId, (repository) => repository.saveProject(project));
       await firstStore.repository.savePrincipalIdentity({
         id: owner.id,
         type: owner.type,
@@ -344,91 +348,111 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       });
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveOrganizationMembership({
-        organizationId: project.organizationId,
-        principalId: owner.id,
-        status: "active",
-        roles: ["organization-member"],
-        allProjects: false,
-        provisioning: "manual",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        version: 1,
-        }));
+          organizationId: project.organizationId,
+          principalId: owner.id,
+          status: "active",
+          roles: ["organization-member"],
+          allProjects: false,
+          provisioning: "manual",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          version: 1,
+        }),
+      );
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveProjectMembership({
-        organizationId: project.organizationId,
-        projectId: project.id,
-        principalId: owner.id,
-        status: "active",
-        roles: owner.roles,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        version: 1,
-        }));
-      expect(await inTenant(firstStore.repository, project.organizationId, (repository) =>
-        repository.saveOrganizationMembership({
-        organizationId: project.organizationId,
-        principalId: owner.id,
-        status: "active",
-        roles: ["organization-member", "project-admin"],
-        allProjects: false,
-        provisioning: "manual",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-02T00:00:00.000Z",
-        version: 2,
-        }, 1))).toBe(true);
-      expect(await inTenant(firstStore.repository, project.organizationId, (repository) =>
-        repository.saveOrganizationMembership({
-        organizationId: project.organizationId,
-        principalId: owner.id,
-        status: "disabled",
-        roles: [],
-        allProjects: false,
-        provisioning: "manual",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-03T00:00:00.000Z",
-        version: 3,
-        }, 1))).toBe(false);
+          organizationId: project.organizationId,
+          projectId: project.id,
+          principalId: owner.id,
+          status: "active",
+          roles: owner.roles,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          version: 1,
+        }),
+      );
+      expect(
+        await inTenant(firstStore.repository, project.organizationId, (repository) =>
+          repository.saveOrganizationMembership(
+            {
+              organizationId: project.organizationId,
+              principalId: owner.id,
+              status: "active",
+              roles: ["organization-member", "project-admin"],
+              allProjects: false,
+              provisioning: "manual",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-02T00:00:00.000Z",
+              version: 2,
+            },
+            1,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        await inTenant(firstStore.repository, project.organizationId, (repository) =>
+          repository.saveOrganizationMembership(
+            {
+              organizationId: project.organizationId,
+              principalId: owner.id,
+              status: "disabled",
+              roles: [],
+              allProjects: false,
+              provisioning: "manual",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-03T00:00:00.000Z",
+              version: 3,
+            },
+            1,
+          ),
+        ),
+      ).toBe(false);
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveOrganizationAuditEvent({
-        id: `oaud_${suffix}`,
-        correlationId: `cor_${suffix}`,
-        organizationId: project.organizationId,
-        actorId: owner.id,
-        actorType: "human",
-        action: "organization_member.updated",
-        subjectType: "organization_membership",
-        subjectId: owner.id,
-        source: "api",
-        createdAt: "2026-01-02T00:00:00.000Z",
-        }));
+          id: `oaud_${suffix}`,
+          correlationId: `cor_${suffix}`,
+          organizationId: project.organizationId,
+          actorId: owner.id,
+          actorType: "human",
+          action: "organization_member.updated",
+          subjectType: "organization_membership",
+          subjectId: owner.id,
+          source: "api",
+          createdAt: "2026-01-02T00:00:00.000Z",
+        }),
+      );
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveOrganizationAuditEvent({
-        id: `oaud_export_${suffix}`,
-        correlationId: `cor_export_${suffix}`,
-        organizationId: project.organizationId,
-        actorId: owner.id,
-        actorType: "human",
-        action: "audit.exported",
-        subjectType: "audit_export",
-        subjectId: `aex_${suffix}`,
-        createdAt: "2026-01-03T00:00:00.000Z",
-        }));
+          id: `oaud_export_${suffix}`,
+          correlationId: `cor_export_${suffix}`,
+          organizationId: project.organizationId,
+          actorId: owner.id,
+          actorType: "human",
+          action: "audit.exported",
+          subjectType: "audit_export",
+          subjectId: `aex_${suffix}`,
+          createdAt: "2026-01-03T00:00:00.000Z",
+        }),
+      );
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveOrganizationAuditEvent({
-        id: `oaud_authentication_${suffix}`,
-        correlationId: `cor_authentication_${suffix}`,
-        organizationId: project.organizationId,
-        actorId: owner.id,
-        actorType: "human",
-        action: "authentication.succeeded",
-        subjectType: "principal_identity",
-        subjectId: owner.id,
-        createdAt: "2026-01-04T00:00:00.000Z",
-        }));
-      await expect(inTenant(firstStore.repository, project.organizationId, (repository) =>
-        repository.listOrganizationAuditEvents(project.organizationId)))
-        .resolves.toEqual(expect.arrayContaining([
+          id: `oaud_authentication_${suffix}`,
+          correlationId: `cor_authentication_${suffix}`,
+          organizationId: project.organizationId,
+          actorId: owner.id,
+          actorType: "human",
+          action: "authentication.succeeded",
+          subjectType: "principal_identity",
+          subjectId: owner.id,
+          createdAt: "2026-01-04T00:00:00.000Z",
+        }),
+      );
+      await expect(
+        inTenant(firstStore.repository, project.organizationId, (repository) =>
+          repository.listOrganizationAuditEvents(project.organizationId),
+        ),
+      ).resolves.toEqual(
+        expect.arrayContaining([
           expect.objectContaining({
             subjectId: owner.id,
             action: "organization_member.updated",
@@ -436,7 +460,8 @@ describeWithDatabase("PostgresBridgeRepository", () => {
           }),
           expect.objectContaining({ subjectId: `aex_${suffix}`, action: "audit.exported" }),
           expect.objectContaining({ subjectId: owner.id, action: "authentication.succeeded" }),
-        ]));
+        ]),
+      );
       const service = new BridgeService(firstStore.repository);
       const registration = await service.startRun(agent, project.id, {
         idempotencyKey: `run-${suffix}`,
@@ -468,16 +493,16 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         scope: { component: "persistence" },
       });
       questionId = question.id;
-      await expect(service.findQuestionMatches(agent, project.id, {
-        title: "Which durabel reposittory sholud Brigde use for this projet?",
-        type: "decision",
-        category: "architecture",
-        context: "The integratoin test must presrve acepted contex after reconecting.",
-        scope: { component: "persistence" },
-        maxItems: 5,
-      })).resolves.toEqual([
-        expect.objectContaining({ questionId, matchKind: "related" }),
-      ]);
+      await expect(
+        service.findQuestionMatches(agent, project.id, {
+          title: "Which durabel reposittory sholud Brigde use for this projet?",
+          type: "decision",
+          category: "architecture",
+          context: "The integratoin test must presrve acepted contex after reconecting.",
+          scope: { component: "persistence" },
+          maxItems: 5,
+        }),
+      ).resolves.toEqual([expect.objectContaining({ questionId, matchKind: "related" })]);
       const decision = await service.acceptAnswer(owner, question.id, {
         optionKey: "postgres",
         rationale: "PostgreSQL provides durable transactions and concurrency controls.",
@@ -553,8 +578,16 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         reversible: false,
         blocking: true,
         options: [
-          { key: "postgres-ha", label: "Highly available PostgreSQL", tradeoffs: "Adds operational cost and resilience." },
-          { key: "postgres-single", label: "Single-node PostgreSQL", tradeoffs: "Costs less with a larger recovery window." },
+          {
+            key: "postgres-ha",
+            label: "Highly available PostgreSQL",
+            tradeoffs: "Adds operational cost and resilience.",
+          },
+          {
+            key: "postgres-single",
+            label: "Single-node PostgreSQL",
+            tradeoffs: "Costs less with a larger recovery window.",
+          },
         ],
         recommendationKey: "postgres-ha",
         scope: { component: "persistence" },
@@ -562,7 +595,8 @@ describeWithDatabase("PostgresBridgeRepository", () => {
       replacementQuestionId = replacementQuestion.id;
       const replacement = await service.acceptAnswer(owner, replacementQuestion.id, {
         optionKey: "postgres-ha",
-        rationale: "Highly available PostgreSQL preserves the required durable transaction boundary during node failure.",
+        rationale:
+          "Highly available PostgreSQL preserves the required durable transaction boundary during node failure.",
       });
       replacementDecisionId = replacement.id;
       const lifecycle = await service.changeDecisionLifecycle(owner, decision.id, {
@@ -575,26 +609,29 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         decision: { status: "superseded", version: 2, replacementDecisionId: replacement.id },
         impact: { artifactIds: [publication.artifact.id], runIds: [runId, contextConsumerRunId] },
       });
-      const deliveryEvent = (await inTenant(firstStore.repository, project.organizationId, (repository) =>
-        repository.listOutboxEvents(project.id)))
-        .find((event) => event.type === "notification.created");
+      const deliveryEvent = (
+        await inTenant(firstStore.repository, project.organizationId, (repository) =>
+          repository.listOutboxEvents(project.id),
+        )
+      ).find((event) => event.type === "notification.created");
       if (!deliveryEvent) throw new Error("Expected a notification delivery event.");
       deliveryEventId = deliveryEvent.id;
       await inTenant(firstStore.repository, project.organizationId, (repository) =>
         repository.saveOutboxDelivery({
-        id: `odl_${suffix}`,
-        organizationId: project.organizationId,
-        projectId: project.id,
-        outboxEventId: deliveryEvent.id,
-        channel: "email",
-        destinationHash: "c".repeat(64),
-        status: "delivered",
-        attemptCount: 1,
-        preference: "immediate",
-        providerMessageId: `provider-${suffix}`,
-        createdAt: deliveryEvent.createdAt,
-        updatedAt: deliveryEvent.createdAt,
-        }));
+          id: `odl_${suffix}`,
+          organizationId: project.organizationId,
+          projectId: project.id,
+          outboxEventId: deliveryEvent.id,
+          channel: "email",
+          destinationHash: "c".repeat(64),
+          status: "delivered",
+          attemptCount: 1,
+          preference: "immediate",
+          providerMessageId: `provider-${suffix}`,
+          createdAt: deliveryEvent.createdAt,
+          updatedAt: deliveryEvent.createdAt,
+        }),
+      );
       await new BridgeService(firstStore.repository, {
         now: () => new Date("2026-08-30T00:00:00.000Z"),
       }).recordOutboxDeliveryFeedback(owner, project.id, {
@@ -611,11 +648,13 @@ describeWithDatabase("PostgresBridgeRepository", () => {
     const secondStore = createPostgresBridgeStore(databaseUrl);
     try {
       const service = new BridgeService(secondStore.repository);
-      await expect(secondStore.repository.resolveOidcPrincipal({
-        issuer: "https://identity.example/",
-        subject: `auth0|${owner.id}`,
-        organizationExternalId: `auth0-${project.organizationId}`,
-      })).resolves.toMatchObject({
+      await expect(
+        secondStore.repository.resolveOidcPrincipal({
+          issuer: "https://identity.example/",
+          subject: `auth0|${owner.id}`,
+          organizationExternalId: `auth0-${project.organizationId}`,
+        }),
+      ).resolves.toMatchObject({
         id: owner.id,
         projectIds: [project.id],
         projectRoles: { [project.id]: owner.roles },
@@ -638,58 +677,70 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         expect.arrayContaining([replacementDecisionId, artifactVersionId, assumptionId]),
       );
       expect(context.items.map((item) => item.id)).not.toContain(decisionId);
-      expect(await service.listDecisions(owner, project.id, { includeHistory: true, scope: {} })).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          id: decisionId,
-          status: "superseded",
-          replacementDecisionId,
-          version: 2,
-        }),
-      ]));
-      expect(await service.listDecisions(owner, project.id, {
-        includeHistory: false,
-        search: "node failure",
-        scope: {},
-      })).toEqual([expect.objectContaining({ id: replacementDecisionId, status: "active" })]);
-      expect(await service.listDecisions(owner, project.id, {
-        includeHistory: false,
-        search: "concurrency controls",
-        scope: {},
-      })).toEqual([]);
-      expect(await service.listDecisions(owner, project.id, {
-        includeHistory: true,
-        search: "concurrency controls",
-        scope: {},
-      })).toEqual([expect.objectContaining({ id: decisionId, status: "superseded" })]);
-      expect(await service.getArtifact(owner, artifactId)).toMatchObject({
-        versions: [expect.objectContaining({
-          id: artifactVersionId,
-          reviewerAssignment: expect.objectContaining({
-            id: expect.stringMatching(/^ara_/),
-            reviewerIds: [owner.id],
-            routeSource: "explicit_reviewer",
+      expect(await service.listDecisions(owner, project.id, { includeHistory: true, scope: {} })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: decisionId,
+            status: "superseded",
+            replacementDecisionId,
+            version: 2,
           }),
-          reviews: expect.arrayContaining([
-            expect.objectContaining({ status: "commented", reviewerId: owner.id }),
-          ]),
-        })],
+        ]),
+      );
+      expect(
+        await service.listDecisions(owner, project.id, {
+          includeHistory: false,
+          search: "node failure",
+          scope: {},
+        }),
+      ).toEqual([expect.objectContaining({ id: replacementDecisionId, status: "active" })]);
+      expect(
+        await service.listDecisions(owner, project.id, {
+          includeHistory: false,
+          search: "concurrency controls",
+          scope: {},
+        }),
+      ).toEqual([]);
+      expect(
+        await service.listDecisions(owner, project.id, {
+          includeHistory: true,
+          search: "concurrency controls",
+          scope: {},
+        }),
+      ).toEqual([expect.objectContaining({ id: decisionId, status: "superseded" })]);
+      expect(await service.getArtifact(owner, artifactId)).toMatchObject({
+        versions: [
+          expect.objectContaining({
+            id: artifactVersionId,
+            reviewerAssignment: expect.objectContaining({
+              id: expect.stringMatching(/^ara_/),
+              reviewerIds: [owner.id],
+              routeSource: "explicit_reviewer",
+            }),
+            reviews: expect.arrayContaining([expect.objectContaining({ status: "commented", reviewerId: owner.id })]),
+          }),
+        ],
       });
       const persistedOutbox = await inTenant(secondStore.repository, project.organizationId, (repository) =>
-        repository.listOutboxEvents(project.id));
-      expect(persistedOutbox).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          type: "decision.lifecycle_changed",
-          payload: expect.objectContaining({ decisionId, replacementDecisionId }),
-        }),
-      ]));
-      const questionEvent = persistedOutbox.find((event) =>
-        event.type === "notification.created" &&
-        "targetId" in event.payload &&
-        event.payload.targetId === questionId,
+        repository.listOutboxEvents(project.id),
       );
-      const questionAudit = (await inTenant(secondStore.repository, project.organizationId, (repository) =>
-        repository.listAuditEvents(project.id)))
-        .find((event) => event.action === "question.created" && event.subjectId === questionId);
+      expect(persistedOutbox).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "decision.lifecycle_changed",
+            payload: expect.objectContaining({ decisionId, replacementDecisionId }),
+          }),
+        ]),
+      );
+      const questionEvent = persistedOutbox.find(
+        (event) =>
+          event.type === "notification.created" && "targetId" in event.payload && event.payload.targetId === questionId,
+      );
+      const questionAudit = (
+        await inTenant(secondStore.repository, project.organizationId, (repository) =>
+          repository.listAuditEvents(project.id),
+        )
+      ).find((event) => event.action === "question.created" && event.subjectId === questionId);
       expect(questionAudit).toMatchObject({
         correlationId: expect.stringMatching(/^cor_[0-9a-f]{32}$/),
         source: "application",
@@ -699,8 +750,11 @@ describeWithDatabase("PostgresBridgeRepository", () => {
         reviewerRouteSource: expect.any(String),
       });
       expect(questionEvent?.correlationId).toBe(questionAudit?.correlationId);
-      expect(await inTenant(secondStore.repository, project.organizationId, (repository) =>
-        repository.listOutboxDeliveries(project.id))).toEqual([
+      expect(
+        await inTenant(secondStore.repository, project.organizationId, (repository) =>
+          repository.listOutboxDeliveries(project.id),
+        ),
+      ).toEqual([
         expect.objectContaining({
           outboxEventId: deliveryEventId,
           channel: "email",

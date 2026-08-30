@@ -182,7 +182,9 @@ function assumptionInput(overrides: Partial<RecordAssumptionInput> = {}): Record
   };
 }
 
-async function runtime(metrics?: BridgeMetrics): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
+async function runtime(
+  metrics?: BridgeMetrics,
+): Promise<{ repository: InMemoryBridgeRepository; service: BridgeService }> {
   const repository = new InMemoryBridgeRepository(metrics);
   await repository.saveProject(project);
   return {
@@ -270,10 +272,7 @@ async function seedOwnershipMembers(repository: InMemoryBridgeRepository): Promi
   }
 }
 
-async function seedProjectMember(
-  repository: InMemoryBridgeRepository,
-  principal: Principal,
-): Promise<void> {
+async function seedProjectMember(repository: InMemoryBridgeRepository, principal: Principal): Promise<void> {
   const timestamp = "2026-01-01T00:00:00.000Z";
   await repository.savePrincipalIdentity({
     id: principal.id,
@@ -351,12 +350,16 @@ describe("Bridge decision workflow", () => {
       ],
     });
 
-    const explicit = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "route-explicit-owner",
-      category: "quality",
-      risk: "medium",
-      blocking: false,
-    }));
+    const explicit = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "route-explicit-owner",
+        category: "quality",
+        risk: "medium",
+        blocking: false,
+      }),
+    );
     expect(explicit.routing).toMatchObject({
       ownerSource: "explicit_owner",
       reviewerSource: "scoped_ownership",
@@ -366,15 +369,19 @@ describe("Bridge decision workflow", () => {
     expect(explicit.reviewerRoles).toEqual(["architecture-reviewer"]);
     expect(explicit.assignmentHistory).toHaveLength(1);
 
-    const scoped = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "route-scoped-owner",
-      title: "Who should own transfer quality readiness?",
-      category: "quality",
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-      risk: "medium",
-      blocking: false,
-    }));
+    const scoped = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "route-scoped-owner",
+        title: "Who should own transfer quality readiness?",
+        category: "quality",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
     expect(scoped).toMatchObject({
       ownerIds: [qaLead.id],
       reviewerRoles: ["architecture-reviewer"],
@@ -385,34 +392,46 @@ describe("Bridge decision workflow", () => {
         reviewerRuleKey: "transfer-quality",
       },
     });
-    expect((await service.listQuestionInbox(architectureReviewer, project.id, {
-      role: "architecture-reviewer",
-    })).map((question) => question.id)).toEqual(expect.arrayContaining([explicit.id, scoped.id]));
+    expect(
+      (
+        await service.listQuestionInbox(architectureReviewer, project.id, {
+          role: "architecture-reviewer",
+        })
+      ).map((question) => question.id),
+    ).toEqual(expect.arrayContaining([explicit.id, scoped.id]));
 
-    const category = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "route-category-owner",
-      title: "Who should own documentation quality readiness?",
-      category: "quality",
-      scope: { component: "documentation" },
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-      risk: "medium",
-      blocking: false,
-    }));
+    const category = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "route-category-owner",
+        title: "Who should own documentation quality readiness?",
+        category: "quality",
+        scope: { component: "documentation" },
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
     expect(category).toMatchObject({
       ownerRoles: ["qa-lead"],
       routing: { ownerSource: "category_role", ownerRuleKey: "quality-category" },
     });
 
-    const projectRouted = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "route-project-default",
-      title: "Who should own operational readiness?",
-      category: "operations",
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-      risk: "medium",
-      blocking: false,
-    }));
+    const projectRouted = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "route-project-default",
+        title: "Who should own operational readiness?",
+        category: "operations",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
     expect(projectRouted).toMatchObject({
       ownerIds: [owner.id],
       routing: { ownerSource: "project_default", ownerRuleKey: "project-default" },
@@ -426,15 +445,19 @@ describe("Bridge decision workflow", () => {
     };
     await repository.saveProject(noOwnerProject);
     const projectAgent = { ...agent, projectIds: [...agent.projectIds, noOwnerProject.id] };
-    const unrouted = await service.createQuestion(projectAgent, noOwnerProject.id, questionInput({
-      idempotencyKey: "route-admin-fallback",
-      title: "Who should own this unresolved operational decision?",
-      category: "operations",
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-      risk: "medium",
-      blocking: false,
-    }));
+    const unrouted = await service.createQuestion(
+      projectAgent,
+      noOwnerProject.id,
+      questionInput({
+        idempotencyKey: "route-admin-fallback",
+        title: "Who should own this unresolved operational decision?",
+        category: "operations",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
     expect(unrouted).toMatchObject({
       ownerIds: [],
       ownerRoles: [],
@@ -447,14 +470,21 @@ describe("Bridge decision workflow", () => {
   it("reassigns unresolved questions with versioned history, audit, notifications, and an outbox event", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "reassign-question",
-      intendedOwnerIds: [qaLead.id],
-      risk: "medium",
-      blocking: false,
-    }));
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "question.created" && event.subjectId === question.id)).toMatchObject({
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "reassign-question",
+        intendedOwnerIds: [qaLead.id],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "question.created" && event.subjectId === question.id,
+      ),
+    ).toMatchObject({
       source: "application",
       policyVersion: question.policyVersion,
       policyRuleKey: question.policyRuleKey,
@@ -462,22 +492,26 @@ describe("Bridge decision workflow", () => {
       ownerRouteSource: question.routing.ownerSource,
       reviewerRouteSource: question.routing.reviewerSource,
     });
-    await expect(service.reassignQuestion(agent, question.id, {
-      expectedVersion: question.version,
-      ownerIds: [owner.id],
-      ownerRoles: [],
-      reviewerIds: [],
-      reviewerRoles: [],
-      reason: "An agent must never control the accountable human assignment lane.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.reassignQuestion(contributor, question.id, {
-      expectedVersion: question.version,
-      ownerIds: [owner.id],
-      ownerRoles: [],
-      reviewerIds: [qaLead.id],
-      reviewerRoles: [],
-      reason: "The contributor must not be able to change accountable ownership.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.reassignQuestion(agent, question.id, {
+        expectedVersion: question.version,
+        ownerIds: [owner.id],
+        ownerRoles: [],
+        reviewerIds: [],
+        reviewerRoles: [],
+        reason: "An agent must never control the accountable human assignment lane.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.reassignQuestion(contributor, question.id, {
+        expectedVersion: question.version,
+        ownerIds: [owner.id],
+        ownerRoles: [],
+        reviewerIds: [qaLead.id],
+        reviewerRoles: [],
+        reason: "The contributor must not be able to change accountable ownership.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const reassigned = await service.reassignQuestion(owner, question.id, {
       expectedVersion: question.version,
@@ -501,27 +535,34 @@ describe("Bridge decision workflow", () => {
       reason: "Architecture owns the decision while quality provides an independent review.",
       questionVersion: question.version + 1,
     });
-    await expect(service.reassignQuestion(owner, question.id, {
-      expectedVersion: question.version,
-      ownerIds: [owner.id],
-      ownerRoles: [],
-      reviewerIds: [],
-      reviewerRoles: [],
-      reason: "This stale command must lose the optimistic concurrency race.",
-    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: question.version + 1 } });
-    await expect(service.reassignQuestion(owner, question.id, {
-      expectedVersion: reassigned.version,
-      ownerIds: [agent.id],
-      ownerRoles: [],
-      reviewerIds: [],
-      reviewerRoles: [],
-      reason: "A non-human principal cannot become a human question owner.",
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { principalId: agent.id } });
+    await expect(
+      service.reassignQuestion(owner, question.id, {
+        expectedVersion: question.version,
+        ownerIds: [owner.id],
+        ownerRoles: [],
+        reviewerIds: [],
+        reviewerRoles: [],
+        reason: "This stale command must lose the optimistic concurrency race.",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: question.version + 1 } });
+    await expect(
+      service.reassignQuestion(owner, question.id, {
+        expectedVersion: reassigned.version,
+        ownerIds: [agent.id],
+        ownerRoles: [],
+        reviewerIds: [],
+        reviewerRoles: [],
+        reason: "A non-human principal cannot become a human question owner.",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { principalId: agent.id } });
 
     const qaInbox = await service.listQuestionInbox(qaLead, project.id, {});
     expect(qaInbox.find((item) => item.id === question.id)?.inboxReasons).toContain("direct_reviewer");
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "question.reassigned" && event.subjectId === question.id)).toMatchObject({
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "question.reassigned" && event.subjectId === question.id,
+      ),
+    ).toMatchObject({
       source: "application",
       policyRuleKey: question.policyRuleKey,
       assignmentId: reassigned.assignmentHistory[1]?.id,
@@ -530,10 +571,16 @@ describe("Bridge decision workflow", () => {
       beforeVersion: question.version,
       afterVersion: reassigned.version,
     });
-    expect((await repository.listOutboxEvents(project.id)).some((event) =>
-      event.type === "question.reassigned" && "assignmentId" in event.payload)).toBe(true);
-    expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id)).some((notification) =>
-      notification.targetId === question.id && notification.title === "Question assignment changed")).toBe(true);
+    expect(
+      (await repository.listOutboxEvents(project.id)).some(
+        (event) => event.type === "question.reassigned" && "assignmentId" in event.payload,
+      ),
+    ).toBe(true);
+    expect(
+      (await repository.listNotifications(project.organizationId, qaLead.id, project.id)).some(
+        (notification) => notification.targetId === question.id && notification.title === "Question assignment changed",
+      ),
+    ).toBe(true);
 
     const reviewReassigned = await service.reassignQuestion(owner, question.id, {
       expectedVersion: reassigned.version,
@@ -548,10 +595,14 @@ describe("Bridge decision workflow", () => {
       reviewerIds: [owner.id],
       version: reassigned.version + 1,
     });
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "question.review_reassigned" &&
-      event.subjectId === question.id &&
-      event.reason === "A second human reviewer now owns the independent architecture review lane.")).toMatchObject({
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) =>
+          event.action === "question.review_reassigned" &&
+          event.subjectId === question.id &&
+          event.reason === "A second human reviewer now owns the independent architecture review lane.",
+      ),
+    ).toMatchObject({
       beforeVersion: reassigned.version,
       afterVersion: reviewReassigned.version,
     });
@@ -568,22 +619,28 @@ describe("Bridge decision workflow", () => {
         return () => String(++next);
       })(),
     });
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "rollback-reassignment",
-      intendedOwnerIds: [qaLead.id],
-      risk: "medium",
-      blocking: false,
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "rollback-reassignment",
+        intendedOwnerIds: [qaLead.id],
+        risk: "medium",
+        blocking: false,
+      }),
+    );
 
     repository.failAction = "question.reassigned";
-    await expect(service.reassignQuestion(owner, question.id, {
-      expectedVersion: question.version,
-      ownerIds: [owner.id],
-      ownerRoles: [],
-      reviewerIds: [qaLead.id],
-      reviewerRoles: [],
-      reason: "The injected audit failure must roll the full assignment transaction back.",
-    })).rejects.toThrow("Injected failure for question.reassigned");
+    await expect(
+      service.reassignQuestion(owner, question.id, {
+        expectedVersion: question.version,
+        ownerIds: [owner.id],
+        ownerRoles: [],
+        reviewerIds: [qaLead.id],
+        reviewerRoles: [],
+        reason: "The injected audit failure must roll the full assignment transaction back.",
+      }),
+    ).rejects.toThrow("Injected failure for question.reassigned");
 
     expect(await repository.getQuestion(question.id)).toMatchObject({
       ownerIds: [qaLead.id],
@@ -591,21 +648,24 @@ describe("Bridge decision workflow", () => {
       version: question.version,
       assignmentHistory: [{ kind: "initial", questionVersion: question.version }],
     });
-    expect((await repository.listOutboxEvents(project.id)).some((event) =>
-      event.type === "question.reassigned")).toBe(false);
+    expect((await repository.listOutboxEvents(project.id)).some((event) => event.type === "question.reassigned")).toBe(
+      false,
+    );
   });
 
   it("manages versioned project policy and applies only risk-elevating scoped rules", async () => {
     const { repository, service } = await runtime();
-    await expect(service.getProjectPolicyConfiguration(contributor, project.id))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.getProjectPolicyConfiguration(outsider, project.id))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.getProjectPolicyConfiguration(contributor, project.id)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.getProjectPolicyConfiguration(outsider, project.id)).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
     const initial = await service.getProjectPolicyConfiguration(owner, project.id);
     expect(initial).toMatchObject({ projectId: project.id, version: 0, rules: [] });
-    expect(initial.defaultRules).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: "bridge-authentication", action: "protected_approval" }),
-    ]));
+    expect(initial.defaultRules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: "bridge-authentication", action: "protected_approval" })]),
+    );
 
     const input: ReplaceProjectPolicyInput = {
       expectedVersion: 0,
@@ -650,25 +710,35 @@ describe("Bridge decision workflow", () => {
     expect(configured).toMatchObject({
       version: 1,
       updatedById: owner.id,
-      rules: expect.arrayContaining([expect.objectContaining({
-        key: "quality-transfer",
-        minimumRisk: "high",
-        requiredOwnerRoles: ["qa-lead"],
-        requiredReviewerRoles: [],
-      })]),
+      rules: expect.arrayContaining([
+        expect.objectContaining({
+          key: "quality-transfer",
+          minimumRisk: "high",
+          requiredOwnerRoles: ["qa-lead"],
+          requiredReviewerRoles: [],
+        }),
+      ]),
     });
-    expect(configured.rules).toEqual(expect.arrayContaining([expect.objectContaining({
-      key: "release-protected",
-      reviewerQuorum: { "architecture-reviewer": 2 },
-    })]));
+    expect(configured.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "release-protected",
+          reviewerQuorum: { "architecture-reviewer": 2 },
+        }),
+      ]),
+    );
 
-    const governed = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "policy-quality-question",
-      category: "quality",
-      risk: "low",
-      reversible: true,
-      blocking: false,
-    }));
+    const governed = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "policy-quality-question",
+        category: "quality",
+        risk: "low",
+        reversible: true,
+        blocking: false,
+      }),
+    );
     expect(governed).toMatchObject({
       risk: "high",
       blocking: true,
@@ -678,13 +748,17 @@ describe("Bridge decision workflow", () => {
       requiredReviewerRoles: [],
     });
     expect(governed.ownerRoles).toContain("qa-lead");
-    const notLowered = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "policy-no-lower-question",
-      category: "quality",
-      scope: { component: "documentation" },
-      risk: "high",
-      blocking: false,
-    }));
+    const notLowered = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "policy-no-lower-question",
+        category: "quality",
+        scope: { component: "documentation" },
+        risk: "high",
+        blocking: false,
+      }),
+    );
     expect(notLowered).toMatchObject({
       risk: "high",
       blocking: true,
@@ -692,13 +766,17 @@ describe("Bridge decision workflow", () => {
       policyRuleKey: "bridge-question-blocking",
       policyVersion: 1,
     });
-    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "policy-protected-release",
-      category: "release",
-      scope: { environment: "production" },
-      risk: "low",
-      blocking: false,
-    }));
+    const protectedQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "policy-protected-release",
+        category: "release",
+        scope: { environment: "production" },
+        risk: "low",
+        blocking: false,
+      }),
+    );
     expect(protectedQuestion).toMatchObject({
       risk: "protected",
       blocking: true,
@@ -706,11 +784,13 @@ describe("Bridge decision workflow", () => {
       requiredReviewerRoles: ["architecture-reviewer"],
       requiredReviewerQuorum: { "architecture-reviewer": 2 },
     });
-    await expect(service.reviewQuestion(securityReviewer, protectedQuestion.id, {
-      expectedVersion: protectedQuestion.version,
-      status: "approved",
-      rationale: "Security authority alone does not satisfy the configured architecture role.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.reviewQuestion(securityReviewer, protectedQuestion.id, {
+        expectedVersion: protectedQuestion.version,
+        status: "approved",
+        rationale: "Security authority alone does not satisfy the configured architecture role.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const review = await service.reviewQuestion(architectureReviewer, protectedQuestion.id, {
       expectedVersion: protectedQuestion.version,
       status: "approved",
@@ -724,10 +804,12 @@ describe("Bridge decision workflow", () => {
         requirements: [{ role: "architecture-reviewer", approvedCount: 1, requiredCount: 2, remainingCount: 1 }],
       },
     });
-    await expect(service.acceptAnswer(owner, protectedQuestion.id, {
-      optionKey: "transient",
-      rationale: "A direct assignment does not replace the policy-required component-owner role.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.acceptAnswer(owner, protectedQuestion.id, {
+        optionKey: "transient",
+        rationale: "A direct assignment does not replace the policy-required component-owner role.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await service.reviewQuestion(secondArchitectureReviewer, protectedQuestion.id, {
       expectedVersion: afterFirstReview.version,
       status: "approved",
@@ -738,51 +820,69 @@ describe("Bridge decision workflow", () => {
       rationale: "The component owner accepts after the architecture reviewer approved the protected release.",
     });
     expect(protectedDecision.ownerId).toBe(componentOwner.id);
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "question.created" && event.subjectId === governed.id))
-      .toMatchObject({ policyVersion: 1 });
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "project.policy_configured" && event.subjectId === project.id))
-      .toMatchObject({ policyVersion: 1, beforeVersion: 0, afterVersion: 1 });
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "question.created" && event.subjectId === governed.id,
+      ),
+    ).toMatchObject({ policyVersion: 1 });
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "project.policy_configured" && event.subjectId === project.id,
+      ),
+    ).toMatchObject({ policyVersion: 1, beforeVersion: 0, afterVersion: 1 });
 
-    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, input))
-      .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
-    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
-      expectedVersion: 1,
-      rules: [{
-        key: "weaken-authentication",
-        name: "Weaken authentication policy",
-        priority: 10,
-        category: "authentication",
-        scope: {},
-        action: "block",
-        minimumRisk: "high",
-        requiredOwnerRoles: [],
-        requiredReviewerRoles: [],
-      }],
-    })).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
-    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
-      expectedVersion: 1,
-      rules: [
-        input.rules[0]!,
-        { ...input.rules[0]!, key: "quality-project", name: "Project quality", scope: {} },
-      ],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { ruleKeys: expect.any(Array) } });
-    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
-      expectedVersion: 1,
-      rules: [{ ...input.rules[0]!, requiredReviewerRoles: ["architecture-reviewer"] }],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, input)).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { currentVersion: 1 },
+    });
+    await expect(
+      service.replaceProjectPolicyConfiguration(owner, project.id, {
+        expectedVersion: 1,
+        rules: [
+          {
+            key: "weaken-authentication",
+            name: "Weaken authentication policy",
+            priority: 10,
+            category: "authentication",
+            scope: {},
+            action: "block",
+            minimumRisk: "high",
+            requiredOwnerRoles: [],
+            requiredReviewerRoles: [],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+    await expect(
+      service.replaceProjectPolicyConfiguration(owner, project.id, {
+        expectedVersion: 1,
+        rules: [input.rules[0]!, { ...input.rules[0]!, key: "quality-project", name: "Project quality", scope: {} }],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { ruleKeys: expect.any(Array) } });
+    await expect(
+      service.replaceProjectPolicyConfiguration(owner, project.id, {
+        expectedVersion: 1,
+        rules: [{ ...input.rules[0]!, requiredReviewerRoles: ["architecture-reviewer"] }],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
   });
 
   it("manages versioned project roles, teams, and unambiguous ownership rules", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
-    await expect(service.getProjectOwnershipConfiguration(contributor, project.id))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.getProjectOwnershipConfiguration(outsider, project.id))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
-    await expect(service.getProjectOwnershipConfiguration(owner, project.id))
-      .resolves.toMatchObject({ projectId: project.id, version: 0, roles: [], teams: [], rules: [] });
+    await expect(service.getProjectOwnershipConfiguration(contributor, project.id)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.getProjectOwnershipConfiguration(outsider, project.id)).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
+    await expect(service.getProjectOwnershipConfiguration(owner, project.id)).resolves.toMatchObject({
+      projectId: project.id,
+      version: 0,
+      roles: [],
+      teams: [],
+      rules: [],
+    });
 
     const input: ReplaceProjectOwnershipInput = {
       expectedVersion: 0,
@@ -808,37 +908,42 @@ describe("Bridge decision workflow", () => {
       projectId: project.id,
       version: 1,
       updatedById: owner.id,
-      roles: [
-        { name: "architecture-reviewer" },
-        { name: "qa-lead" },
-      ],
+      roles: [{ name: "architecture-reviewer" }, { name: "qa-lead" }],
       teams: [{ key: "quality", memberIds: [qaLead.id] }],
       rules: [{ key: "transfer-quality", priority: 10 }],
     });
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "project.ownership_configured" && event.subjectType === "ownership_configuration"))
-      .toMatchObject({ beforeVersion: 0, afterVersion: 1 });
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "project.ownership_configured" && event.subjectType === "ownership_configuration",
+      ),
+    ).toMatchObject({ beforeVersion: 0, afterVersion: 1 });
 
-    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, input))
-      .rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
-    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
-      ...input,
-      expectedVersion: 1,
-      rules: [
-        input.rules[0]!,
-        {
-          ...input.rules[0]!,
-          key: "project-quality-fallback",
-          name: "Project quality fallback",
-          component: undefined,
-        },
-      ],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { responsibility: "owner" } });
-    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
-      ...input,
-      expectedVersion: 1,
-      teams: [{ key: "quality", name: "Quality", memberIds: [agent.id] }],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { memberId: agent.id } });
+    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, input)).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { currentVersion: 1 },
+    });
+    await expect(
+      service.replaceProjectOwnershipConfiguration(owner, project.id, {
+        ...input,
+        expectedVersion: 1,
+        rules: [
+          input.rules[0]!,
+          {
+            ...input.rules[0]!,
+            key: "project-quality-fallback",
+            name: "Project quality fallback",
+            component: undefined,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { responsibility: "owner" } });
+    await expect(
+      service.replaceProjectOwnershipConfiguration(owner, project.id, {
+        ...input,
+        expectedVersion: 1,
+        teams: [{ key: "quality", name: "Quality", memberIds: [agent.id] }],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED", details: { memberId: agent.id } });
 
     const updated = await service.replaceProjectOwnershipConfiguration(owner, project.id, {
       ...input,
@@ -846,9 +951,11 @@ describe("Bridge decision workflow", () => {
       roles: [...input.roles, { name: "Product Owner", description: "Owns product behavior decisions." }],
     });
     expect(updated.version).toBe(2);
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "project.ownership_configured" && event.afterVersion === 2))
-      .toMatchObject({ beforeVersion: 1, afterVersion: 2 });
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "project.ownership_configured" && event.afterVersion === 2,
+      ),
+    ).toMatchObject({ beforeVersion: 1, afterVersion: 2 });
   });
 
   it("rolls back project ownership configuration when its audit write fails", async () => {
@@ -860,12 +967,14 @@ describe("Bridge decision workflow", () => {
       now: () => new Date("2026-01-01T00:00:00.000Z"),
       id: () => "ownership-audit",
     });
-    await expect(service.replaceProjectOwnershipConfiguration(owner, project.id, {
-      expectedVersion: 0,
-      roles: [{ name: "QA Lead", description: "Owns product quality decisions." }],
-      teams: [],
-      rules: [],
-    })).rejects.toThrow("Injected failure");
+    await expect(
+      service.replaceProjectOwnershipConfiguration(owner, project.id, {
+        expectedVersion: 0,
+        roles: [{ name: "QA Lead", description: "Owns product quality decisions." }],
+        teams: [],
+        rules: [],
+      }),
+    ).rejects.toThrow("Injected failure");
     await expect(repository.getProjectOwnershipConfiguration(project.id)).resolves.toBeUndefined();
   });
 
@@ -877,10 +986,12 @@ describe("Bridge decision workflow", () => {
       now: () => new Date("2026-01-01T00:00:00.000Z"),
       id: () => "policy-audit",
     });
-    await expect(service.replaceProjectPolicyConfiguration(owner, project.id, {
-      expectedVersion: 0,
-      rules: [],
-    })).rejects.toThrow("Injected failure");
+    await expect(
+      service.replaceProjectPolicyConfiguration(owner, project.id, {
+        expectedVersion: 0,
+        rules: [],
+      }),
+    ).rejects.toThrow("Injected failure");
     await expect(repository.getProjectPolicyConfiguration(project.id)).resolves.toBeUndefined();
   });
 
@@ -913,10 +1024,7 @@ describe("Bridge decision workflow", () => {
       },
     });
     expect(replay).toEqual({ ...first, disposition: "idempotent_replay" });
-    expect(await service.listProjects(agent)).toEqual([
-      first.project,
-      project,
-    ]);
+    expect(await service.listProjects(agent)).toEqual([first.project, project]);
     expect(await service.listProjects(outsider)).toEqual([]);
   });
 
@@ -949,14 +1057,22 @@ describe("Bridge decision workflow", () => {
       disposition: "idempotent_replay",
     });
     await expect(service.listProjectRepositories(agent, project.id)).resolves.toEqual([created.repository]);
-    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "repository.linked", subjectType: "repository", subjectId: created.repository.id }),
-    ]));
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "repository.linked",
+          subjectType: "repository",
+          subjectId: created.repository.id,
+        }),
+      ]),
+    );
 
     const otherProject = { ...project, id: "prj_two", name: "Project Two" };
     await repository.saveProject(otherProject);
     await expect(service.linkRepository(owner, otherProject.id, input)).rejects.toMatchObject({ code: "CONFLICT" });
-    await expect(service.listProjectRepositories(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.listProjectRepositories(outsider, project.id)).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
   });
 
   it("synchronizes read-only GitHub pull-request metadata with approved guidance", async () => {
@@ -968,17 +1084,25 @@ describe("Bridge decision workflow", () => {
       name: "bridge",
       canonicalUrl: "https://github.com/bridge-org/bridge",
     });
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "github-context-decision-001",
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "github-context-decision-001",
+      }),
+    );
     const decision = await service.acceptAnswer(owner, question.id, {
       optionKey: "transient",
       rationale: "Transient failures are bounded and preserve idempotency.",
     });
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "github-context-artifact-001",
-      citedDecisionIds: [decision.id],
-    }));
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "github-context-artifact-001",
+        citedDecisionIds: [decision.id],
+      }),
+    );
     await service.approveArtifactVersion(owner, publication.version.id, {
       rationale: "The specification faithfully captures the accepted decision.",
     });
@@ -1014,10 +1138,12 @@ describe("Bridge decision workflow", () => {
       ...created,
       disposition: "idempotent_replay",
     });
-    await expect(service.syncGithubPullRequest(githubIntegration, project.id, {
-      ...input,
-      title: "Conflicting provider event",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.syncGithubPullRequest(githubIntegration, project.id, {
+        ...input,
+        title: "Conflicting provider event",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
 
     const updated = await service.syncGithubPullRequest(githubIntegration, project.id, {
       ...input,
@@ -1025,31 +1151,39 @@ describe("Bridge decision workflow", () => {
       sourceUpdatedAt: "2026-01-01T02:00:00.000Z",
     });
     expect(updated).toMatchObject({ disposition: "updated", pullRequest: { state: "merged", version: 2 } });
-    await expect(service.listGithubPullRequests(agent, project.id, {
-      limit: 100,
-      repositoryId: linked.repository.id,
-    })).resolves.toEqual([
+    await expect(
+      service.listGithubPullRequests(agent, project.id, {
+        limit: 100,
+        repositoryId: linked.repository.id,
+      }),
+    ).resolves.toEqual([
       expect.objectContaining({
         pullRequest: expect.objectContaining({ number: 42, state: "merged" }),
         trustLevel: "untrusted_data",
         decisions: [expect.objectContaining({ id: decision.id, status: "active" })],
-        artifactVersions: [expect.objectContaining({
-          versionId: publication.version.id,
-          status: "approved",
-          trustLevel: "untrusted_data",
-        })],
+        artifactVersions: [
+          expect.objectContaining({
+            versionId: publication.version.id,
+            status: "approved",
+            trustLevel: "untrusted_data",
+          }),
+        ],
         humanApprovalChanged: false,
       }),
     ]);
-    await expect(service.getGithubPullRequestContext(agent, project.id, 42, {
-      repositoryId: linked.repository.id,
-    })).resolves.toMatchObject({ pullRequest: { number: 42 }, trustLevel: "untrusted_data" });
-    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "integration.pull_request_synced",
-        subjectType: "pull_request_context",
+    await expect(
+      service.getGithubPullRequestContext(agent, project.id, 42, {
+        repositoryId: linked.repository.id,
       }),
-    ]));
+    ).resolves.toMatchObject({ pullRequest: { number: 42 }, trustLevel: "untrusted_data" });
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "integration.pull_request_synced",
+          subjectType: "pull_request_context",
+        }),
+      ]),
+    );
   });
 
   it("synchronizes GitHub Issues and prioritizes their explicit work-item guidance", async () => {
@@ -1061,18 +1195,26 @@ describe("Bridge decision workflow", () => {
       name: "bridge",
       canonicalUrl: "https://github.com/bridge-org/bridge",
     });
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "github-issue-decision-001",
-      title: "Which retry behavior should issue 77 implement?",
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "github-issue-decision-001",
+        title: "Which retry behavior should issue 77 implement?",
+      }),
+    );
     const decision = await service.acceptAnswer(owner, question.id, {
       optionKey: "transient",
       rationale: "Issue 77 must preserve bounded retries and idempotency.",
     });
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "github-issue-artifact-001",
-      citedDecisionIds: [decision.id],
-    }));
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "github-issue-artifact-001",
+        citedDecisionIds: [decision.id],
+      }),
+    );
     await service.approveArtifactVersion(owner, publication.version.id, {
       rationale: "The approved specification records the work-item behavior.",
     });
@@ -1105,25 +1247,33 @@ describe("Bridge decision workflow", () => {
       ...created,
       disposition: "idempotent_replay",
     });
-    await expect(service.syncGithubIssue(githubIntegration, project.id, {
-      ...input,
-      title: "Conflicting provider event",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
-    await expect(service.listGithubIssues(agent, project.id, {
-      limit: 100,
-      label: "backend",
-    })).resolves.toEqual([
+    await expect(
+      service.syncGithubIssue(githubIntegration, project.id, {
+        ...input,
+        title: "Conflicting provider event",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.listGithubIssues(agent, project.id, {
+        limit: 100,
+        label: "backend",
+      }),
+    ).resolves.toEqual([
       expect.objectContaining({
         issue: expect.objectContaining({ number: 77 }),
         trustLevel: "untrusted_data",
         decisions: [expect.objectContaining({ id: decision.id, trustLevel: "untrusted_data" })],
-        artifactVersions: [expect.objectContaining({ versionId: publication.version.id, trustLevel: "untrusted_data" })],
+        artifactVersions: [
+          expect.objectContaining({ versionId: publication.version.id, trustLevel: "untrusted_data" }),
+        ],
         humanApprovalChanged: false,
       }),
     ]);
-    await expect(service.getGithubIssueContext(agent, project.id, 77, {
-      repositoryId: linked.repository.id,
-    })).resolves.toMatchObject({ issue: { reference: created.issue.reference }, trustLevel: "untrusted_data" });
+    await expect(
+      service.getGithubIssueContext(agent, project.id, 77, {
+        repositoryId: linked.repository.id,
+      }),
+    ).resolves.toMatchObject({ issue: { reference: created.issue.reference }, trustLevel: "untrusted_data" });
 
     const context = await service.getContext(agent, project.id, {
       task: "Implement the selected work item",
@@ -1139,9 +1289,11 @@ describe("Bridge decision workflow", () => {
       sourceUpdatedAt: "2026-01-01T04:00:00.000Z",
     });
     expect(updated).toMatchObject({ disposition: "updated", issue: { state: "closed", version: 2 } });
-    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "integration.work_item_synced", subjectType: "work_item" }),
-    ]));
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "integration.work_item_synced", subjectType: "work_item" }),
+      ]),
+    );
   });
 
   it("creates, lists, audits, and version-updates organization members", async () => {
@@ -1164,12 +1316,14 @@ describe("Bridge decision workflow", () => {
         roles: ["organization-member"],
         allProjects: false,
         version: 1,
-        projectMemberships: [{
-          projectId: project.id,
-          status: "active",
-          roles: ["qa-lead"],
-          version: 1,
-        }],
+        projectMemberships: [
+          {
+            projectId: project.id,
+            status: "active",
+            roles: ["qa-lead"],
+            version: 1,
+          },
+        ],
       },
     });
     await expect(service.createOrganizationMember(organizationAdmin, input)).resolves.toEqual({
@@ -1201,13 +1355,15 @@ describe("Bridge decision workflow", () => {
       allProjects: true,
       projectMemberships: [{ status: "active", roles: ["project-admin"], version: 2 }],
     });
-    await expect(service.updateOrganizationMember(organizationAdmin, created.member.id, {
-      expectedVersion: 1,
-      status: "disabled",
-      roles: [],
-      allProjects: false,
-      projectMemberships: [],
-    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 2 } });
+    await expect(
+      service.updateOrganizationMember(organizationAdmin, created.member.id, {
+        expectedVersion: 1,
+        status: "disabled",
+        roles: [],
+        allProjects: false,
+        projectMemberships: [],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 2 } });
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1224,12 +1380,14 @@ describe("Bridge decision workflow", () => {
   it("provisions bounded directory groups without granting roles or overriding manual access", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);
-    await expect(service.createDirectoryGroup(contributor, {
-      provider: "auth0",
-      issuer: "https://identity.example/",
-      externalGroupId: "engineering",
-      displayName: "Engineering",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.createDirectoryGroup(contributor, {
+        provider: "auth0",
+        issuer: "https://identity.example/",
+        externalGroupId: "engineering",
+        displayName: "Engineering",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const registration = await service.createDirectoryGroup(organizationAdmin, {
       provider: "auth0",
       issuer: "https://identity.example/",
@@ -1241,12 +1399,14 @@ describe("Bridge decision workflow", () => {
       group: { id: expect.stringMatching(/^dgr_/), status: "active", version: 1 },
       members: [],
     });
-    await expect(service.createDirectoryGroup(organizationAdmin, {
-      provider: "auth0",
-      issuer: "https://identity.example/",
-      externalGroupId: "engineering",
-      displayName: "Engineering",
-    })).resolves.toEqual({ ...registration, disposition: "idempotent_replay" });
+    await expect(
+      service.createDirectoryGroup(organizationAdmin, {
+        provider: "auth0",
+        issuer: "https://identity.example/",
+        externalGroupId: "engineering",
+        displayName: "Engineering",
+      }),
+    ).resolves.toEqual({ ...registration, disposition: "idempotent_replay" });
 
     const initialSync: SyncDirectoryGroupInput = {
       expectedVersion: 1,
@@ -1257,13 +1417,10 @@ describe("Bridge decision workflow", () => {
         { subject: "auth0|directory-two", displayName: "Directory Two" },
       ],
     };
-    await expect(service.syncDirectoryGroup(agent, registration.group.id, initialSync))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    const synced = await service.syncDirectoryGroup(
-      githubIntegration,
-      registration.group.id,
-      initialSync,
-    );
+    await expect(service.syncDirectoryGroup(agent, registration.group.id, initialSync)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const synced = await service.syncDirectoryGroup(githubIntegration, registration.group.id, initialSync);
     expect(synced).toMatchObject({
       disposition: "updated",
       group: { status: "active", sourceUpdatedAt: initialSync.sourceUpdatedAt, version: 2 },
@@ -1272,25 +1429,22 @@ describe("Bridge decision workflow", () => {
     });
     expect(synced.members).toHaveLength(2);
     for (const member of synced.members) {
-      await expect(repository.getOrganizationMembership(project.organizationId, member.principalId))
-        .resolves.toMatchObject({
-          status: "active",
-          roles: [],
-          allProjects: false,
-          provisioning: "directory",
-          version: 1,
-        });
-      await expect(repository.listProjectMemberships(project.organizationId, member.principalId))
-        .resolves.toEqual([]);
+      await expect(
+        repository.getOrganizationMembership(project.organizationId, member.principalId),
+      ).resolves.toMatchObject({
+        status: "active",
+        roles: [],
+        allProjects: false,
+        provisioning: "directory",
+        version: 1,
+      });
+      await expect(repository.listProjectMemberships(project.organizationId, member.principalId)).resolves.toEqual([]);
     }
-    await expect(service.syncDirectoryGroup(
-      githubIntegration,
-      registration.group.id,
-      initialSync,
-    )).resolves.toMatchObject({ disposition: "idempotent_replay", group: { version: 2 } });
+    await expect(
+      service.syncDirectoryGroup(githubIntegration, registration.group.id, initialSync),
+    ).resolves.toMatchObject({ disposition: "idempotent_replay", group: { version: 2 } });
 
-    const manuallyManaged = synced.members.find((member) =>
-      member.externalSubject === "auth0|directory-one")!;
+    const manuallyManaged = synced.members.find((member) => member.externalSubject === "auth0|directory-one")!;
     await service.updateOrganizationMember(organizationAdmin, manuallyManaged.principalId, {
       expectedVersion: 1,
       status: "active",
@@ -1305,17 +1459,15 @@ describe("Bridge decision workflow", () => {
       members: [{ subject: "auth0|directory-two", displayName: "Directory Two" }],
     });
     expect(reduced.membershipChanges).toMatchObject({ disabled: 0, preserved: 1 });
-    await expect(repository.getOrganizationMembership(
-      project.organizationId,
-      manuallyManaged.principalId,
-    )).resolves.toMatchObject({
+    await expect(
+      repository.getOrganizationMembership(project.organizationId, manuallyManaged.principalId),
+    ).resolves.toMatchObject({
       status: "active",
       roles: ["contributor"],
       provisioning: "manual",
     });
 
-    const directoryManaged = synced.members.find((member) =>
-      member.externalSubject === "auth0|directory-two")!;
+    const directoryManaged = synced.members.find((member) => member.externalSubject === "auth0|directory-two")!;
     const disabled = await service.syncDirectoryGroup(githubIntegration, registration.group.id, {
       expectedVersion: 3,
       sourceUpdatedAt: "2026-01-01T03:00:00.000Z",
@@ -1327,10 +1479,9 @@ describe("Bridge decision workflow", () => {
       membershipChanges: { disabled: 1 },
       humanApprovalChanged: false,
     });
-    await expect(repository.getOrganizationMembership(
-      project.organizationId,
-      directoryManaged.principalId,
-    )).resolves.toMatchObject({ status: "disabled", provisioning: "directory" });
+    await expect(
+      repository.getOrganizationMembership(project.organizationId, directoryManaged.principalId),
+    ).resolves.toMatchObject({ status: "disabled", provisioning: "directory" });
     await expect(service.listDirectoryGroups(organizationAdmin)).resolves.toEqual([
       expect.objectContaining({ group: expect.objectContaining({ id: registration.group.id }) }),
     ]);
@@ -1358,8 +1509,9 @@ describe("Bridge decision workflow", () => {
     await service.recordAuthenticationEvent(owner, "authentication.succeeded");
     await service.recordAuthenticationEvent(owner, "authentication.logged_out");
 
-    await expect(service.recordAuthenticationEvent(agent, "authentication.succeeded"))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.recordAuthenticationEvent(agent, "authentication.succeeded")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1382,39 +1534,49 @@ describe("Bridge decision workflow", () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);
     await expect(service.listOrganizationMembers(owner)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.createOrganizationMember(agent, {
-      oidcSubject: "auth0|blocked",
-      displayName: "Blocked Member",
-      roles: [],
-      allProjects: false,
-      projectMemberships: [],
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.createOrganizationMember(agent, {
+        oidcSubject: "auth0|blocked",
+        displayName: "Blocked Member",
+        roles: [],
+        allProjects: false,
+        projectMemberships: [],
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     await repository.saveProject({ ...project, id: "prj_other", organizationId: "org_two" });
-    await expect(service.createOrganizationMember(organizationAdmin, {
-      oidcSubject: "auth0|cross-tenant",
-      displayName: "Cross Tenant",
-      roles: [],
-      allProjects: false,
-      projectMemberships: [{ projectId: "prj_other", roles: ["contributor"] }],
-    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(
+      service.createOrganizationMember(organizationAdmin, {
+        oidcSubject: "auth0|cross-tenant",
+        displayName: "Cross Tenant",
+        roles: [],
+        allProjects: false,
+        projectMemberships: [{ projectId: "prj_other", roles: ["contributor"] }],
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
 
-    await expect(service.updateOrganizationMember(organizationAdmin, organizationAdmin.id, {
-      expectedVersion: 1,
-      status: "disabled",
-      roles: [],
-      allProjects: false,
-      projectMemberships: [],
-    })).rejects.toMatchObject({ code: "LAST_ORGANIZATION_ADMIN" });
+    await expect(
+      service.updateOrganizationMember(organizationAdmin, organizationAdmin.id, {
+        expectedVersion: 1,
+        status: "disabled",
+        roles: [],
+        allProjects: false,
+        projectMemberships: [],
+      }),
+    ).rejects.toMatchObject({ code: "LAST_ORGANIZATION_ADMIN" });
   });
 
   it("provides tenant-scoped audit browsing and self-auditing metadata-only exports", async () => {
     const { repository, service } = await runtime();
     await seedOrganizationAdministrator(repository);
-    const createdQuestion = await service.createQuestion(agent, project.id, questionInput({
-      title: "Sensitive product body that must never enter the audit export",
-      context: "Customer workflow details belong only to the governed question record.",
-    }));
+    const createdQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        title: "Sensitive product body that must never enter the audit export",
+        context: "Customer workflow details belong only to the governed question record.",
+      }),
+    );
     await service.createOrganizationMember(organizationAdmin, {
       oidcSubject: "auth0|audit-member",
       displayName: "Audit Member",
@@ -1433,19 +1595,23 @@ describe("Bridge decision workflow", () => {
       totalMatching: 1,
       offset: 0,
       limit: 1,
-      items: [{
-        scope: "project",
-        subjectId: createdQuestion.id,
-        action: "question.created",
-        source: "application",
-        policyRuleKey: createdQuestion.policyRuleKey,
-        assignmentId: createdQuestion.assignmentHistory[0]?.id,
-      }],
+      items: [
+        {
+          scope: "project",
+          subjectId: createdQuestion.id,
+          action: "question.created",
+          source: "application",
+          policyRuleKey: createdQuestion.policyRuleKey,
+          assignmentId: createdQuestion.assignmentHistory[0]?.id,
+        },
+      ],
     });
-    await expect(service.listProjectAudit(contributor, project.id, { offset: 0, limit: 50 }))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.listProjectAudit(outsider, project.id, { offset: 0, limit: 50 }))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.listProjectAudit(contributor, project.id, { offset: 0, limit: 50 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.listProjectAudit(outsider, project.id, { offset: 0, limit: 50 })).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
 
     const projectExport = await service.exportProjectAudit(owner, project.id, {
       format: "json",
@@ -1457,20 +1623,25 @@ describe("Bridge decision workflow", () => {
     expect(projectExport.body).toContain(createdQuestion.assignmentHistory[0]?.id ?? "missing-assignment");
     expect(projectExport.body).not.toContain(createdQuestion.title);
     expect(projectExport.body).not.toContain(createdQuestion.context);
-    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "audit.exported", subjectType: "audit_export", actorId: owner.id }),
-    ]));
+    await expect(repository.listAuditEvents(project.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "audit.exported", subjectType: "audit_export", actorId: owner.id }),
+      ]),
+    );
 
     const organizationPage = await service.listOrganizationAudit(organizationAdmin, {
       actorId: organizationAdmin.id,
       offset: 0,
       limit: 50,
     });
-    expect(organizationPage.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ scope: "organization", action: "organization_member.created" }),
-    ]));
-    await expect(service.listOrganizationAudit(owner, { offset: 0, limit: 50 }))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(organizationPage.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ scope: "organization", action: "organization_member.created" }),
+      ]),
+    );
+    await expect(service.listOrganizationAudit(owner, { offset: 0, limit: 50 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
     const organizationExport = await service.exportOrganizationAudit(organizationAdmin, {
       format: "csv",
       maxItems: 1_000,
@@ -1478,25 +1649,31 @@ describe("Bridge decision workflow", () => {
     expect(organizationExport.contentType).toBe("text/csv; charset=utf-8");
     expect(organizationExport.body).toContain("organization_member.created");
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" })]),
     );
   });
 
   it("exports bounded governed project data without changing human approval state", async () => {
     const { repository, service } = await runtime();
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "project-export-question-001",
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "project-export-question-001",
+      }),
+    );
     const decision = await service.acceptAnswer(owner, question.id, {
       optionKey: "transient",
       rationale: "A human owner selected bounded transient retries for the governed export fixture.",
     });
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "project-export-artifact-001",
-      citedDecisionIds: [decision.id],
-    }));
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "project-export-artifact-001",
+        citedDecisionIds: [decision.id],
+      }),
+    );
     await service.approveArtifactVersion(owner, publication.version.id, {
       rationale: "The approved specification accurately records the human decision.",
     });
@@ -1511,10 +1688,12 @@ describe("Bridge decision workflow", () => {
       maxAuditItems: 5_000,
     };
 
-    await expect(service.exportProjectData(contributor, project.id, input))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.exportProjectData(outsider, project.id, input))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.exportProjectData(contributor, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.exportProjectData(outsider, project.id, input)).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
 
     const exported = await service.exportProjectData(owner, project.id, input);
     const body = JSON.parse(exported.body) as {
@@ -1548,23 +1727,29 @@ describe("Bridge decision workflow", () => {
       project: { id: project.id, organizationId: project.organizationId },
       humanApprovalChanged: false,
       decisions: [expect.objectContaining({ id: decision.id, answer: "Retry transient failures" })],
-      artifacts: [expect.objectContaining({
-        id: publication.artifact.id,
-        approvedVersionId: publication.version.id,
-        versions: [expect.objectContaining({
-          id: publication.version.id,
-          body: artifactInput().body,
-          status: "approved",
-        })],
-      })],
+      artifacts: [
+        expect.objectContaining({
+          id: publication.artifact.id,
+          approvedVersionId: publication.version.id,
+          versions: [
+            expect.objectContaining({
+              id: publication.version.id,
+              body: artifactInput().body,
+              status: "approved",
+            }),
+          ],
+        }),
+      ],
     });
-    expect(body.auditEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "project.exported",
-        subjectType: "project_export",
-        actorId: owner.id,
-      }),
-    ]));
+    expect(body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "project.exported",
+          subjectType: "project_export",
+          actorId: owner.id,
+        }),
+      ]),
+    );
     expect(body.counts.auditEvents.total).toBeGreaterThan(0);
     expect(body.counts.auditEvents.included).toBe(body.auditEvents.length);
     await expect(repository.getDecision(decision.id)).resolves.toEqual(decisionBeforeExport);
@@ -1612,12 +1797,12 @@ describe("Bridge decision workflow", () => {
       serviceIdentity: { version: 2, rotatedAt: expect.any(String) },
       token: expect.stringMatching(/^brg_srv_[A-Za-z0-9_-]{43}$/),
     });
-    await expect(repository.resolveServiceToken(
-      createHash("sha256").update(registration.token).digest("hex"),
-    )).resolves.toBeUndefined();
-    await expect(repository.resolveServiceToken(
-      createHash("sha256").update(rotated.token).digest("hex"),
-    )).resolves.toMatchObject({ credential: { version: 2, rotatedAt: expect.any(String) } });
+    await expect(
+      repository.resolveServiceToken(createHash("sha256").update(registration.token).digest("hex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.resolveServiceToken(createHash("sha256").update(rotated.token).digest("hex")),
+    ).resolves.toMatchObject({ credential: { version: 2, rotatedAt: expect.any(String) } });
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1634,20 +1819,24 @@ describe("Bridge decision workflow", () => {
         }),
       ]),
     );
-    await expect(service.rotateServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
-      expectedVersion: 1,
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.rotateServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
 
     const revoked = await service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
       expectedVersion: 2,
     });
     expect(revoked).toMatchObject({ version: 3, revokedAt: expect.any(String), rotatedAt: expect.any(String) });
-    await expect(repository.resolveServiceToken(
-      createHash("sha256").update(rotated.token).digest("hex"),
-    )).resolves.toBeUndefined();
-    await expect(service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
-      expectedVersion: 2,
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      repository.resolveServiceToken(createHash("sha256").update(rotated.token).digest("hex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.revokeServiceIdentity(organizationAdmin, registration.serviceIdentity.id, {
+        expectedVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(repository.listOrganizationAuditEvents(project.organizationId)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1670,14 +1859,16 @@ describe("Bridge decision workflow", () => {
     const privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----";
     const secretUrl = `https://example.test/callback?access_token=${"C".repeat(32)}`;
 
-    await expect(service.createServiceIdentity(organizationAdmin, {
-      name: bridgeToken,
-      type: "ci",
-      roles: [],
-      allProjects: false,
-      projectMemberships: [],
-      scopes: ["bridge:read"],
-    })).rejects.toMatchObject({
+    await expect(
+      service.createServiceIdentity(organizationAdmin, {
+        name: bridgeToken,
+        type: "ci",
+        roles: [],
+        allProjects: false,
+        projectMemberships: [],
+        scopes: ["bridge:read"],
+      }),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       statusCode: 422,
       details: {
@@ -1686,24 +1877,32 @@ describe("Bridge decision workflow", () => {
         secretType: "bridge_service_token",
       },
     });
-    await expect(service.startRun(agent, project.id, {
-      idempotencyKey: "secret-run-001",
-      client: "codex",
-      capability: "cli",
-      taskSummary: `Use ${bridgeToken} while implementing retries`,
-      scope: { component: "transfers" },
-      externalLinks: [],
-    })).rejects.toMatchObject({
+    await expect(
+      service.startRun(agent, project.id, {
+        idempotencyKey: "secret-run-001",
+        client: "codex",
+        capability: "cli",
+        taskSummary: `Use ${bridgeToken} while implementing retries`,
+        scope: { component: "transfers" },
+        externalLinks: [],
+      }),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       details: { contentType: "run", fieldPath: "content.taskSummary" },
     });
-    await expect(service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "secret-question-001",
-      options: [
-        { key: "transient", label: "Retry transient failures", tradeoffs: `Requires ${githubToken}` },
-        { key: "all", label: "Retry every failure", tradeoffs: "Can retry permanent failures." },
-      ],
-    }))).rejects.toMatchObject({
+    await expect(
+      service.createQuestion(
+        agent,
+        project.id,
+        questionInput({
+          idempotencyKey: "secret-question-001",
+          options: [
+            { key: "transient", label: "Retry transient failures", tradeoffs: `Requires ${githubToken}` },
+            { key: "all", label: "Retry every failure", tradeoffs: "Can retry permanent failures." },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       details: {
         contentType: "question",
@@ -1711,10 +1910,16 @@ describe("Bridge decision workflow", () => {
         secretType: "github_token",
       },
     });
-    await expect(service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "secret-assumption-001",
-      rationale: `The deployment notes referenced ${awsAccessKey}.`,
-    }))).rejects.toMatchObject({
+    await expect(
+      service.recordAssumption(
+        agent,
+        project.id,
+        assumptionInput({
+          idempotencyKey: "secret-assumption-001",
+          rationale: `The deployment notes referenced ${awsAccessKey}.`,
+        }),
+      ),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       details: {
         contentType: "assumption",
@@ -1722,19 +1927,27 @@ describe("Bridge decision workflow", () => {
         secretType: "aws_access_key",
       },
     });
-    await expect(service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "secret-artifact-001",
-      body: `# Unsafe specification\n\n${privateKey}`,
-    }))).rejects.toMatchObject({
+    await expect(
+      service.publishArtifact(
+        agent,
+        project.id,
+        artifactInput({
+          idempotencyKey: "secret-artifact-001",
+          body: `# Unsafe specification\n\n${privateKey}`,
+        }),
+      ),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       details: { contentType: "artifact", fieldPath: "content.body", secretType: "private_key" },
     });
-    await expect(service.getContext(agent, project.id, {
-      task: `Review callback ${secretUrl}`,
-      scope: {},
-      categories: [],
-      maxItems: 20,
-    })).rejects.toMatchObject({
+    await expect(
+      service.getContext(agent, project.id, {
+        task: `Review callback ${secretUrl}`,
+        scope: {},
+        categories: [],
+        maxItems: 20,
+      }),
+    ).rejects.toMatchObject({
       code: "SECRET_DETECTED",
       details: { contentType: "context", fieldPath: "content.task", secretType: "secret_url_parameter" },
     });
@@ -1745,38 +1958,40 @@ describe("Bridge decision workflow", () => {
     expect(await repository.listQuestions(project.id)).toEqual([]);
     expect(await repository.listArtifacts(project.id)).toEqual([]);
     expect(await repository.listContextSnapshots(project.id)).toEqual([]);
-    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "administration", secret_type: "bridge_service_token" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "run", secret_type: "bridge_service_token" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "question", secret_type: "github_token" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "assumption", secret_type: "aws_access_key" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "artifact", secret_type: "private_key" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_content_secret_detections_total",
-        labels: { content_type: "context", secret_type: "secret_url_parameter" },
-        value: 1,
-      }),
-    ]));
+    expect(metrics.snapshot().counters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "administration", secret_type: "bridge_service_token" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "run", secret_type: "bridge_service_token" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "question", secret_type: "github_token" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "assumption", secret_type: "aws_access_key" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "artifact", secret_type: "private_key" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_content_secret_detections_total",
+          labels: { content_type: "context", secret_type: "secret_url_parameter" },
+          value: 1,
+        }),
+      ]),
+    );
   });
 
   it("enforces secret blocking across run, assumption, decision, discussion, and review mutations", async () => {
@@ -1790,41 +2005,59 @@ describe("Bridge decision workflow", () => {
       scope: { component: "transfers" },
       externalLinks: [],
     });
-    await expect(service.reportRun(agent, run.run.id, {
-      expectedVersion: 1,
-      status: "failed",
-      summary: `Failure output included ${secret}`,
-      resultLinks: [],
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "run" } });
+    await expect(
+      service.reportRun(agent, run.run.id, {
+        expectedVersion: 1,
+        status: "failed",
+        summary: `Failure output included ${secret}`,
+        resultLinks: [],
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "run" } });
     expect(await repository.getRun(run.run.id)).toMatchObject({ status: "running", version: 1 });
 
-    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "secret-mutation-assumption-001",
-      runId: run.run.id,
-    }));
-    await expect(service.resolveAssumption(owner, assumption.id, {
-      expectedVersion: 1,
-      status: "rejected",
-      rationale: `The validation notes included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "assumption" } });
+    const assumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "secret-mutation-assumption-001",
+        runId: run.run.id,
+      }),
+    );
+    await expect(
+      service.resolveAssumption(owner, assumption.id, {
+        expectedVersion: 1,
+        status: "rejected",
+        rationale: `The validation notes included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "assumption" } });
     expect(await repository.getAssumption(assumption.id)).toMatchObject({ status: "active", version: 1 });
 
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "secret-mutation-question-001",
-    }));
-    await expect(service.addQuestionComment(owner, question.id, {
-      expectedVersion: 1,
-      body: `Clarification included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
-    await expect(service.proposeAnswer(owner, question.id, {
-      answer: "Retry transient failures only.",
-      rationale: `The evidence included ${secret}`,
-      optionKey: "transient",
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
-    await expect(service.acceptAnswer(owner, question.id, {
-      optionKey: "transient",
-      rationale: `The approval notes included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "secret-mutation-question-001",
+      }),
+    );
+    await expect(
+      service.addQuestionComment(owner, question.id, {
+        expectedVersion: 1,
+        body: `Clarification included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    await expect(
+      service.proposeAnswer(owner, question.id, {
+        answer: "Retry transient failures only.",
+        rationale: `The evidence included ${secret}`,
+        optionKey: "transient",
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    await expect(
+      service.acceptAnswer(owner, question.id, {
+        optionKey: "transient",
+        rationale: `The approval notes included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
     expect(await repository.getQuestion(question.id)).toMatchObject({
       status: "open",
       version: 1,
@@ -1833,44 +2066,64 @@ describe("Bridge decision workflow", () => {
     });
     expect(await repository.listDecisions(project.id)).toEqual([]);
 
-    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "secret-mutation-protected-question-001",
-      title: "Which credential retention policy should protect the worker?",
-      category: "security",
-      risk: "protected",
-    }));
-    await expect(service.reviewQuestion(owner, protectedQuestion.id, {
-      expectedVersion: 1,
-      status: "approved",
-      rationale: `The security review included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
+    const protectedQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "secret-mutation-protected-question-001",
+        title: "Which credential retention policy should protect the worker?",
+        category: "security",
+        risk: "protected",
+      }),
+    );
+    await expect(
+      service.reviewQuestion(owner, protectedQuestion.id, {
+        expectedVersion: 1,
+        status: "approved",
+        rationale: `The security review included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "question" } });
     expect(await repository.getQuestion(protectedQuestion.id)).toMatchObject({ version: 1, reviews: [] });
 
-    const decisionQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "secret-mutation-decision-question-001",
-      title: "Which retry policy should govern the settlement worker?",
-    }));
+    const decisionQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "secret-mutation-decision-question-001",
+        title: "Which retry policy should govern the settlement worker?",
+      }),
+    );
     const decision = await service.acceptAnswer(owner, decisionQuestion.id, {
       optionKey: "transient",
       rationale: "Only transient failures should be retried with bounded exponential backoff.",
     });
-    await expect(service.changeDecisionLifecycle(owner, decision.id, {
-      expectedVersion: 1,
-      status: "revoked",
-      rationale: `The retirement rationale included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
+    await expect(
+      service.changeDecisionLifecycle(owner, decision.id, {
+        expectedVersion: 1,
+        status: "revoked",
+        rationale: `The retirement rationale included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "decision" } });
     expect(await repository.getDecision(decision.id)).toMatchObject({ status: "active", version: 1 });
 
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "secret-mutation-artifact-001",
-    }));
-    await expect(service.reviewArtifactVersion(owner, publication.version.id, {
-      status: "commented",
-      body: `The review included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
-    await expect(service.approveArtifactVersion(owner, publication.version.id, {
-      rationale: `The approval included ${secret}`,
-    })).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "secret-mutation-artifact-001",
+      }),
+    );
+    await expect(
+      service.reviewArtifactVersion(owner, publication.version.id, {
+        status: "commented",
+        body: `The review included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
+    await expect(
+      service.approveArtifactVersion(owner, publication.version.id, {
+        rationale: `The approval included ${secret}`,
+      }),
+    ).rejects.toMatchObject({ code: "SECRET_DETECTED", details: { contentType: "artifact" } });
     expect(await repository.getArtifact(publication.artifact.id)).toMatchObject({
       versions: [expect.objectContaining({ status: "in_review", reviews: [] })],
     });
@@ -1917,21 +2170,25 @@ describe("Bridge decision workflow", () => {
       }),
     ]);
     expect(new URL(context.items[0]!.sourceUrl).searchParams.get("assumptionId")).toBe(assumption.id);
-    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: "bridge_context_requests_total",
-        labels: { outcome: "success" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_database_transactions_total",
-        labels: { backend: "memory", outcome: "success" },
-      }),
-    ]));
-    expect(metrics.snapshot().histograms).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "bridge_context_result_count", count: 1, sum: 1 }),
-      expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 1 }),
-    ]));
+    expect(metrics.snapshot().counters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "bridge_context_requests_total",
+          labels: { outcome: "success" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_database_transactions_total",
+          labels: { backend: "memory", outcome: "success" },
+        }),
+      ]),
+    );
+    expect(metrics.snapshot().histograms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "bridge_context_result_count", count: 1, sum: 1 }),
+        expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 1 }),
+      ]),
+    );
     await expect(
       service.resolveAssumption(agent, assumption.id, {
         expectedVersion: 1,
@@ -1994,11 +2251,15 @@ describe("Bridge decision workflow", () => {
       scope: { component: "transfers" },
       externalLinks: [],
     });
-    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "assumption-expiry-001",
-      runId: registration.run.id,
-      expiresAt: "2026-01-02T00:00:00.000Z",
-    }));
+    const assumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "assumption-expiry-001",
+        runId: registration.run.id,
+        expiresAt: "2026-01-02T00:00:00.000Z",
+      }),
+    );
     const laterService = new BridgeService(repository, {
       now: () => new Date("2026-01-03T00:00:00.000Z"),
       id: (() => {
@@ -2016,9 +2277,11 @@ describe("Bridge decision workflow", () => {
         targetId: assumption.id,
       }),
     ]);
-    expect((await repository.listOutboxEvents(project.id)).filter((event) => event.type === "notification.created")).toHaveLength(2);
+    expect(
+      (await repository.listOutboxEvents(project.id)).filter((event) => event.type === "notification.created"),
+    ).toHaveLength(2);
     await expect(laterService.expireDueAssumptions()).resolves.toEqual({ expiredCount: 0 });
-    expect((await repository.listNotifications(project.organizationId, owner.id, project.id))).toHaveLength(1);
+    expect(await repository.listNotifications(project.organizationId, owner.id, project.id)).toHaveLength(1);
   });
 
   it("escalates each overdue blocking question once without changing human authority", async () => {
@@ -2032,31 +2295,47 @@ describe("Bridge decision workflow", () => {
     });
     await seedProjectMember(repository, owner);
     await seedProjectMember(repository, qaLead);
-    const overdue = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-blocking-escalation-overdue",
-      title: "Which overdue release blocker needs a human decision?",
-      category: "privacy",
-      dueAt: "2026-01-02T00:00:00.000Z",
-    }));
-    await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-blocking-escalation-future",
-      title: "Which future release blocker needs a human decision?",
-      dueAt: "2026-01-04T00:00:00.000Z",
-    }));
-    await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-blocking-escalation-nonblocking",
-      title: "Which overdue non-blocking follow-up should be reviewed?",
-      category: "observability",
-      risk: "low",
-      reversible: true,
-      blocking: false,
-      dueAt: "2026-01-02T00:00:00.000Z",
-    }));
-    const cancelled = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-blocking-escalation-cancelled",
-      title: "Which cancelled blocker must stay closed?",
-      dueAt: "2026-01-02T00:00:00.000Z",
-    }));
+    const overdue = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-blocking-escalation-overdue",
+        title: "Which overdue release blocker needs a human decision?",
+        category: "privacy",
+        dueAt: "2026-01-02T00:00:00.000Z",
+      }),
+    );
+    await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-blocking-escalation-future",
+        title: "Which future release blocker needs a human decision?",
+        dueAt: "2026-01-04T00:00:00.000Z",
+      }),
+    );
+    await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-blocking-escalation-nonblocking",
+        title: "Which overdue non-blocking follow-up should be reviewed?",
+        category: "observability",
+        risk: "low",
+        reversible: true,
+        blocking: false,
+        dueAt: "2026-01-02T00:00:00.000Z",
+      }),
+    );
+    const cancelled = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-blocking-escalation-cancelled",
+        title: "Which cancelled blocker must stay closed?",
+        dueAt: "2026-01-02T00:00:00.000Z",
+      }),
+    );
     await repository.saveQuestion({ ...cancelled, status: "cancelled" });
 
     const laterService = new BridgeService(repository, {
@@ -2075,29 +2354,31 @@ describe("Bridge decision workflow", () => {
     const escalations = (await repository.listOutboxEvents(project.id)).flatMap((event) => {
       const payload = event.payload;
       return event.type === "notification.created" &&
-          "notificationType" in payload &&
-          payload.notificationType === "question_blocking_escalation"
+        "notificationType" in payload &&
+        payload.notificationType === "question_blocking_escalation"
         ? [payload]
         : [];
     });
     expect(escalations).toHaveLength(2);
-    expect(escalations.map((payload) => payload.recipientId).sort()).toEqual(
-      [owner.id, qaLead.id].sort(),
-    );
+    expect(escalations.map((payload) => payload.recipientId).sort()).toEqual([owner.id, qaLead.id].sort());
     expect(escalations.every((payload) => payload.targetId === overdue.id)).toBe(true);
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "question.blocking_escalated", subjectId: overdue.id }),
-    ]));
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "question.blocking_escalated", subjectId: overdue.id }),
+      ]),
+    );
 
     await expect(laterService.escalateDueBlockingQuestions()).resolves.toEqual({ escalatedCount: 0 });
-    expect((await repository.listOutboxEvents(project.id)).flatMap((event) => {
-      const payload = event.payload;
-      return event.type === "notification.created" &&
+    expect(
+      (await repository.listOutboxEvents(project.id)).flatMap((event) => {
+        const payload = event.payload;
+        return event.type === "notification.created" &&
           "notificationType" in payload &&
           payload.notificationType === "question_blocking_escalation"
-        ? [payload]
-        : [];
-    })).toHaveLength(2);
+          ? [payload]
+          : [];
+      }),
+    ).toHaveLength(2);
   });
 
   it("blocks protected, irreversible, excessive-expiry, and decision-conflicting assumptions", async () => {
@@ -2118,11 +2399,7 @@ describe("Bridge decision workflow", () => {
       ),
     ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
     await expect(
-      service.recordAssumption(
-        agent,
-        project.id,
-        assumptionInput({ runId: registration.run.id, reversible: false }),
-      ),
+      service.recordAssumption(agent, project.id, assumptionInput({ runId: registration.run.id, reversible: false })),
     ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
     await expect(
       service.recordAssumption(
@@ -2203,11 +2480,7 @@ describe("Bridge decision workflow", () => {
       }),
     ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
 
-    const blocked = await service.getContinuation(
-      agent,
-      registration.run.id,
-      registration.resumeContextKey,
-    );
+    const blocked = await service.getContinuation(agent, registration.run.id, registration.resumeContextKey);
     expect(blocked).toMatchObject({ canContinue: false, remainingQuestionIds: [question.id] });
     await expect(
       service.startRun(agent, project.id, {
@@ -2226,11 +2499,7 @@ describe("Bridge decision workflow", () => {
       optionKey: "transient",
       rationale: "Retry transient failures only with bounded exponential backoff.",
     });
-    const ready = await service.getContinuation(
-      agent,
-      registration.run.id,
-      registration.resumeContextKey,
-    );
+    const ready = await service.getContinuation(agent, registration.run.id, registration.resumeContextKey);
     expect(ready).toMatchObject({
       canContinue: true,
       remainingQuestionIds: [],
@@ -2295,54 +2564,64 @@ describe("Bridge decision workflow", () => {
     });
     expect(registration.run).not.toHaveProperty("vendorSessionId");
     expect(await repository.getRunVendorSessionId(registration.run.id)).toBe(vendorSessionId);
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "automatic-continuation-question-001",
-      runId: registration.run.id,
-    }));
-    expect(await repository.listOutboxEvents(project.id)).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "run.continuation_ready" }),
-    ]));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "automatic-continuation-question-001",
+        runId: registration.run.id,
+      }),
+    );
+    expect(await repository.listOutboxEvents(project.id)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "run.continuation_ready" })]),
+    );
 
     const decision = await service.acceptAnswer(owner, question.id, {
       optionKey: "transient",
       rationale: "The human owner selected bounded retries before the Codex session may continue.",
     });
 
-    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "run.continuation_ready",
-        payload: {
-          runId: registration.run.id,
-          client: "codex",
-          vendorSessionId,
-          triggeringDecisionId: decision.id,
-          runVersion: 2,
-        },
-      }),
-    ]));
+    expect(await repository.listOutboxEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.continuation_ready",
+          payload: {
+            runId: registration.run.id,
+            client: "codex",
+            vendorSessionId,
+            triggeringDecisionId: decision.id,
+            runVersion: 2,
+          },
+        }),
+      ]),
+    );
     expect(await service.getRun(agent, registration.run.id)).toMatchObject({
       status: "waiting_for_human",
       continuationMode: "automatic",
       version: 2,
     });
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "run.continuation_queued",
-        subjectType: "run",
-        subjectId: registration.run.id,
-      }),
-    ]));
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "run.continuation_queued",
+          subjectType: "run",
+          subjectId: registration.run.id,
+        }),
+      ]),
+    );
 
-    await expect(service.startRun(agent, project.id, {
-      idempotencyKey: "unsupported-automatic-continuation",
-      client: "claude_code",
-      capability: "orchestrated",
-      continuationMode: "automatic",
-      vendorSessionId,
-      taskSummary: "Attempt unsupported automatic continuation",
-      scope: {},
-      externalLinks: [],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.startRun(agent, project.id, {
+        idempotencyKey: "unsupported-automatic-continuation",
+        client: "claude_code",
+        capability: "orchestrated",
+        continuationMode: "automatic",
+        vendorSessionId,
+        taskSummary: "Attempt unsupported automatic continuation",
+        scope: {},
+        externalLinks: [],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
   });
 
   it("rolls back every related write when an atomic workflow fails", async () => {
@@ -2381,11 +2660,11 @@ describe("Bridge decision workflow", () => {
     ).toBeUndefined();
 
     repository.failAction = "question.created";
-    await expect(service.createQuestion(agent, project.id, questionInput())).rejects.toThrow(
-      "Injected failure",
-    );
+    await expect(service.createQuestion(agent, project.id, questionInput())).rejects.toThrow("Injected failure");
     expect(await repository.listQuestions(project.id)).toEqual([]);
-    expect(await repository.findIdempotentQuestion(`${agent.organizationId}:${agent.id}:question-key-001`)).toBeUndefined();
+    expect(
+      await repository.findIdempotentQuestion(`${agent.organizationId}:${agent.id}:question-key-001`),
+    ).toBeUndefined();
 
     repository.failAction = undefined;
     const question = await service.createQuestion(agent, project.id, questionInput());
@@ -2400,9 +2679,7 @@ describe("Bridge decision workflow", () => {
     expect(await repository.getQuestion(question.id)).toMatchObject({ status: "open", version: 1 });
 
     repository.failAction = "artifact.version_published";
-    await expect(service.publishArtifact(agent, project.id, artifactInput())).rejects.toThrow(
-      "Injected failure",
-    );
+    await expect(service.publishArtifact(agent, project.id, artifactInput())).rejects.toThrow("Injected failure");
     expect(await repository.listArtifacts(project.id)).toEqual([]);
 
     repository.failAction = undefined;
@@ -2433,24 +2710,26 @@ describe("Bridge decision workflow", () => {
       service.createQuestion(agent, project.id, questionInput({ title: "A different question using the same key" })),
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
 
-    expect(metrics.snapshot().counters).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        name: "bridge_idempotency_operations_total",
-        labels: { operation: "question_submit", outcome: "created" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_idempotency_operations_total",
-        labels: { operation: "question_submit", outcome: "replayed" },
-        value: 1,
-      }),
-      expect.objectContaining({
-        name: "bridge_idempotency_operations_total",
-        labels: { operation: "question_submit", outcome: "conflict" },
-        value: 1,
-      }),
-      expect.objectContaining({ name: "bridge_conflicts_total", labels: {}, value: 1 }),
-    ]));
+    expect(metrics.snapshot().counters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "bridge_idempotency_operations_total",
+          labels: { operation: "question_submit", outcome: "created" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_idempotency_operations_total",
+          labels: { operation: "question_submit", outcome: "replayed" },
+          value: 1,
+        }),
+        expect.objectContaining({
+          name: "bridge_idempotency_operations_total",
+          labels: { operation: "question_submit", outcome: "conflict" },
+          value: 1,
+        }),
+        expect.objectContaining({ name: "bridge_conflicts_total", labels: {}, value: 1 }),
+      ]),
+    );
   });
 
   it("suggests related questions and reuses exact questions across agent runs", async () => {
@@ -2479,9 +2758,7 @@ describe("Bridge decision workflow", () => {
       scope: firstInput.scope,
       maxItems: 5,
     });
-    expect(matches).toEqual([
-      expect.objectContaining({ questionId: first.id, matchKind: "exact", score: 100 }),
-    ]);
+    expect(matches).toEqual([expect.objectContaining({ questionId: first.id, matchKind: "exact", score: 100 })]);
     const typoMatches = await service.findQuestionMatches(agent, project.id, {
       title: "Whcih reetry polciy sholud the wroker use?",
       type: firstInput.type,
@@ -2562,7 +2839,8 @@ describe("Bridge decision workflow", () => {
     const input = questionInput({
       title: "Which release evidence should be required before enabling transfer retries?",
       context: "The transfer retry change needs a release evidence threshold before it reaches production.",
-      whyItMatters: "Insufficient evidence can ship duplicate-transfer defects while excessive gates delay recovery work.",
+      whyItMatters:
+        "Insufficient evidence can ship duplicate-transfer defects while excessive gates delay recovery work.",
     });
     const question = await service.createQuestion(agent, project.id, input);
 
@@ -2616,21 +2894,23 @@ describe("Bridge decision workflow", () => {
 
   it("groups only related low-risk routed questions into human decision digests", async () => {
     const { service } = await runtime();
-    const createDigestQuestion = async (
-      suffix: string,
-      overrides: Partial<CreateQuestionInput> = {},
-    ) => service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: `question-digest-${suffix}`,
-      title: `Which transfer dashboard detail should use the ${suffix} presentation?`,
-      context: `The transfer dashboard needs a bounded ${suffix} presentation for routine operator review.`,
-      whyItMatters: `A consistent ${suffix} presentation keeps low-risk operator choices understandable.`,
-      category: "product-experience",
-      risk: "low",
-      reversible: true,
-      blocking: false,
-      scope: { component: "transfer-dashboard" },
-      ...overrides,
-    }));
+    const createDigestQuestion = async (suffix: string, overrides: Partial<CreateQuestionInput> = {}) =>
+      service.createQuestion(
+        agent,
+        project.id,
+        questionInput({
+          idempotencyKey: `question-digest-${suffix}`,
+          title: `Which transfer dashboard detail should use the ${suffix} presentation?`,
+          context: `The transfer dashboard needs a bounded ${suffix} presentation for routine operator review.`,
+          whyItMatters: `A consistent ${suffix} presentation keeps low-risk operator choices understandable.`,
+          category: "product-experience",
+          risk: "low",
+          reversible: true,
+          blocking: false,
+          scope: { component: "transfer-dashboard" },
+          ...overrides,
+        }),
+      );
     const first = await createDigestQuestion("summary", { dueAt: "2026-01-03T00:00:00.000Z" });
     const second = await createDigestQuestion("compact");
     const third = await createDigestQuestion("expanded", { dueAt: "2026-01-02T00:00:00.000Z" });
@@ -2656,14 +2936,18 @@ describe("Bridge decision workflow", () => {
     expect(digests[0]!.questions.map((question) => question.id)).not.toEqual(
       expect.arrayContaining([highRisk.id, otherScope.id]),
     );
-    expect(await service.listQuestionDecisionDigests(contributor, project.id, {
-      maxDigests: 10,
-      maxQuestionsPerDigest: 10,
-    })).toEqual([]);
-    await expect(service.listQuestionDecisionDigests(outsider, project.id, {
-      maxDigests: 10,
-      maxQuestionsPerDigest: 10,
-    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
+    expect(
+      await service.listQuestionDecisionDigests(contributor, project.id, {
+        maxDigests: 10,
+        maxQuestionsPerDigest: 10,
+      }),
+    ).toEqual([]);
+    await expect(
+      service.listQuestionDecisionDigests(outsider, project.id, {
+        maxDigests: 10,
+        maxQuestionsPerDigest: 10,
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
 
     await service.acceptAnswer(owner, third.id, {
       optionKey: "transient",
@@ -2715,18 +2999,18 @@ describe("Bridge decision workflow", () => {
 
   it("detects advisory conflicts between active decisions with overlapping scopes", async () => {
     const { service } = await runtime();
-    const createDecision = async (
-      suffix: string,
-      answer: string,
-      scope: CreateQuestionInput["scope"],
-    ) => {
-      const question = await service.createQuestion(agent, project.id, questionInput({
-        idempotencyKey: `decision-conflict-${suffix}`,
-        title: `Which ${suffix} operating rule should govern transfer processing?`,
-        context: `The transfer system needs a durable ${suffix} operating rule for the selected scope.`,
-        whyItMatters: `Competing ${suffix} rules can make agent and human implementation choices inconsistent.`,
-        scope,
-      }));
+    const createDecision = async (suffix: string, answer: string, scope: CreateQuestionInput["scope"]) => {
+      const question = await service.createQuestion(
+        agent,
+        project.id,
+        questionInput({
+          idempotencyKey: `decision-conflict-${suffix}`,
+          title: `Which ${suffix} operating rule should govern transfer processing?`,
+          context: `The transfer system needs a durable ${suffix} operating rule for the selected scope.`,
+          whyItMatters: `Competing ${suffix} rules can make agent and human implementation choices inconsistent.`,
+          scope,
+        }),
+      );
       return service.acceptAnswer(owner, question.id, {
         answer,
         rationale: `This records the ${suffix} rule so downstream work can use one explicit direction.`,
@@ -2734,12 +3018,13 @@ describe("Bridge decision workflow", () => {
     };
     const enabled = await createDecision("retry-enabled", "Enable automatic retries", { component: "transfers" });
     const disabled = await createDecision("retry-disabled", "Disable automatic retries", { component: "transfers" });
-    const broadRetention = await createDecision("repository-retention", "Always retain transfer receipts", { repository: "bridge" });
-    const narrowRetention = await createDecision(
-      "component-retention",
-      "Never retain transfer receipts",
-      { repository: "bridge", component: "transfers" },
-    );
+    const broadRetention = await createDecision("repository-retention", "Always retain transfer receipts", {
+      repository: "bridge",
+    });
+    const narrowRetention = await createDecision("component-retention", "Never retain transfer receipts", {
+      repository: "bridge",
+      component: "transfers",
+    });
     await createDecision("unrelated-component", "Disable automatic retries", { component: "billing" });
 
     const conflicts = await service.listDecisionConflicts(owner, project.id, {
@@ -2755,9 +3040,7 @@ describe("Bridge decision workflow", () => {
       advisory: true,
       humanResolutionRequired: true,
     });
-    expect([exactConflict.left.id, exactConflict.right.id]).toEqual(
-      expect.arrayContaining([enabled.id, disabled.id]),
-    );
+    expect([exactConflict.left.id, exactConflict.right.id]).toEqual(expect.arrayContaining([enabled.id, disabled.id]));
     const inheritedConflict = conflicts.find((conflict) => conflict.scopeRelation === "ancestor_descendant")!;
     expect(inheritedConflict).toMatchObject({
       confidence: "medium",
@@ -2767,14 +3050,18 @@ describe("Bridge decision workflow", () => {
     expect([inheritedConflict.left.id, inheritedConflict.right.id]).toEqual(
       expect.arrayContaining([broadRetention.id, narrowRetention.id]),
     );
-    expect(await service.listDecisionConflicts(owner, project.id, {
-      scope: { component: "billing" },
-      maxItems: 50,
-    })).toEqual([]);
-    await expect(service.listDecisionConflicts(outsider, project.id, {
-      scope: {},
-      maxItems: 50,
-    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
+    expect(
+      await service.listDecisionConflicts(owner, project.id, {
+        scope: { component: "billing" },
+        maxItems: 50,
+      }),
+    ).toEqual([]);
+    await expect(
+      service.listDecisionConflicts(outsider, project.id, {
+        scope: {},
+        maxItems: 50,
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", statusCode: 404 });
 
     await service.changeDecisionLifecycle(owner, disabled.id, {
       expectedVersion: disabled.version,
@@ -2802,11 +3089,15 @@ describe("Bridge decision workflow", () => {
       externalLinks: [],
     });
     const scope = { component: "transfers", workItem: "PAY-42" };
-    const originalQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "decision-lifecycle-original",
-      runId: run.run.id,
-      scope,
-    }));
+    const originalQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "decision-lifecycle-original",
+        runId: run.run.id,
+        scope,
+      }),
+    );
     const original = await service.acceptAnswer(owner, originalQuestion.id, {
       optionKey: "transient",
       rationale: "Only transient failures should initially be retried with bounded backoff.",
@@ -2826,27 +3117,39 @@ describe("Bridge decision workflow", () => {
       categories: ["architecture"],
       maxItems: 20,
     });
-    const replacementQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "decision-lifecycle-replacement",
-      title: "Which bounded retry policy should replace the initial transfer rule?",
-      context: "New production evidence requires a narrower and observable transfer retry policy.",
-      whyItMatters: "The initial accepted policy is now too broad for current operational evidence.",
-      scope,
-    }));
+    const replacementQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "decision-lifecycle-replacement",
+        title: "Which bounded retry policy should replace the initial transfer rule?",
+        context: "New production evidence requires a narrower and observable transfer retry policy.",
+        whyItMatters: "The initial accepted policy is now too broad for current operational evidence.",
+        scope,
+      }),
+    );
     const replacement = await service.acceptAnswer(owner, replacementQuestion.id, {
       answer: "Retry transient failures once before dead-lettering.",
       rationale: "Production evidence shows that one bounded retry prevents loops while preserving recovery.",
     });
-    expect((await service.listDecisions(owner, project.id, {
-      includeHistory: true,
-      search: "transient failures",
-      scope: {},
-    })).map((decision) => decision.id)).toEqual([original.id, replacement.id]);
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "decision-lifecycle-artifact",
-      citedDecisionIds: [original.id],
-      scope,
-    }));
+    expect(
+      (
+        await service.listDecisions(owner, project.id, {
+          includeHistory: true,
+          search: "transient failures",
+          scope: {},
+        })
+      ).map((decision) => decision.id),
+    ).toEqual([original.id, replacement.id]);
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "decision-lifecycle-artifact",
+        citedDecisionIds: [original.id],
+        scope,
+      }),
+    );
     await service.approveArtifactVersion(owner, publication.version.id, {
       rationale: "The specification accurately records the accepted transfer retry decision.",
     });
@@ -2866,13 +3169,18 @@ describe("Bridge decision workflow", () => {
       maxItems: 20,
     });
     expect(artifactContext.items.map((item) => item.id)).toContain(publication.version.id);
-    const downstreamAssumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "decision-impact-downstream-assumption",
-      runId: artifactConsumerRun.run.id,
-      statement: "The approved retry specification can use the existing transfer telemetry namespace.",
-      rationale: "The implementation run consumed the approved specification and needs a reversible telemetry choice.",
-      scope,
-    }));
+    const downstreamAssumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "decision-impact-downstream-assumption",
+        runId: artifactConsumerRun.run.id,
+        statement: "The approved retry specification can use the existing transfer telemetry namespace.",
+        rationale:
+          "The implementation run consumed the approved specification and needs a reversible telemetry choice.",
+        scope,
+      }),
+    );
 
     const preview = await service.analyzeDecisionImpact(owner, original.id, {
       maxDepth: 8,
@@ -2886,11 +3194,13 @@ describe("Bridge decision workflow", () => {
       runIds: expect.arrayContaining([run.run.id, consumerRun.run.id, artifactConsumerRun.run.id]),
       workItems: ["PAY-42"],
       repositories: [],
-      links: [expect.objectContaining({
-        sourceId: artifactConsumerRun.run.id,
-        type: "run_external",
-        url: "https://github.com/bridge/example/pull/42",
-      })],
+      links: [
+        expect.objectContaining({
+          sourceId: artifactConsumerRun.run.id,
+          type: "run_external",
+          url: "https://github.com/bridge/example/pull/42",
+        }),
+      ],
       truncated: false,
     });
     expect(preview.nodes.find((node) => node.id === downstreamAssumption.id)).toMatchObject({
@@ -2905,18 +3215,20 @@ describe("Bridge decision workflow", () => {
         downstreamAssumption.id,
       ],
     });
-    expect(preview.edges).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        fromId: publication.version.id,
-        toId: artifactContext.contextSnapshotId,
-        relation: "consumed_in_context",
-      }),
-      expect.objectContaining({
-        fromId: artifactConsumerRun.run.id,
-        toId: downstreamAssumption.id,
-        relation: "produced_assumption",
-      }),
-    ]));
+    expect(preview.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromId: publication.version.id,
+          toId: artifactContext.contextSnapshotId,
+          relation: "consumed_in_context",
+        }),
+        expect.objectContaining({
+          fromId: artifactConsumerRun.run.id,
+          toId: downstreamAssumption.id,
+          relation: "produced_assumption",
+        }),
+      ]),
+    );
     expect((await repository.getDecision(original.id))?.version).toBe(original.version);
     const boundedPreview = await service.analyzeDecisionImpact(owner, original.id, {
       maxDepth: 2,
@@ -2924,23 +3236,29 @@ describe("Bridge decision workflow", () => {
     });
     expect(boundedPreview.truncated).toBe(true);
     expect(boundedPreview.maxDepthReached).toBe(2);
-    await expect(service.analyzeDecisionImpact(outsider, original.id, {
-      maxDepth: 5,
-      maxNodes: 200,
-    })).rejects.toMatchObject({ code: "DECISION_NOT_FOUND", statusCode: 404 });
+    await expect(
+      service.analyzeDecisionImpact(outsider, original.id, {
+        maxDepth: 5,
+        maxNodes: 200,
+      }),
+    ).rejects.toMatchObject({ code: "DECISION_NOT_FOUND", statusCode: 404 });
 
-    await expect(service.changeDecisionLifecycle(contributor, original.id, {
-      expectedVersion: original.version,
-      status: "superseded",
-      rationale: "A contributor cannot replace an owner-controlled project decision.",
-      replacementDecisionId: replacement.id,
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.changeDecisionLifecycle(owner, original.id, {
-      expectedVersion: original.version + 1,
-      status: "superseded",
-      rationale: "This stale edit must fail optimistic concurrency validation.",
-      replacementDecisionId: replacement.id,
-    })).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
+    await expect(
+      service.changeDecisionLifecycle(contributor, original.id, {
+        expectedVersion: original.version,
+        status: "superseded",
+        rationale: "A contributor cannot replace an owner-controlled project decision.",
+        replacementDecisionId: replacement.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.changeDecisionLifecycle(owner, original.id, {
+        expectedVersion: original.version + 1,
+        status: "superseded",
+        rationale: "This stale edit must fail optimistic concurrency validation.",
+        replacementDecisionId: replacement.id,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT", details: { currentVersion: 1 } });
 
     const changed = await service.changeDecisionLifecycle(owner, original.id, {
       expectedVersion: original.version,
@@ -2974,72 +3292,96 @@ describe("Bridge decision workflow", () => {
     });
     expect(context.items.map((item) => item.id)).toContain(replacement.id);
     expect(context.items.map((item) => item.id)).not.toContain(original.id);
-    expect((await service.listDecisions(owner, project.id)).map((decision) => decision.id)).toEqual([
-      replacement.id,
-    ]);
-    expect((await service.listDecisions(owner, project.id, {
-      includeHistory: false,
-      search: "production evidence",
-      scope: {},
-    })).map((decision) => decision.id)).toEqual([replacement.id]);
-    expect(await service.listDecisions(owner, project.id, {
-      includeHistory: false,
-      search: "initially retried",
-      scope: {},
-    })).toEqual([]);
-    expect((await service.listDecisions(owner, project.id, {
-      includeHistory: true,
-      search: "initially retried",
-      scope: {},
-    })).map((decision) => decision.id)).toEqual([original.id]);
-    await expect(service.listDecisions(outsider, project.id, {
-      includeHistory: true,
-      search: "transient failures",
-      scope: {},
-    })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
-    expect((await service.listDecisions(owner, project.id, {
-      includeHistory: true,
-      scope: {},
-    })).map((decision) => decision.id)).toEqual(expect.arrayContaining([original.id, replacement.id]));
-    expect(await service.listDecisions(owner, project.id, {
-      includeHistory: true,
-      status: "superseded",
-      category: "Architecture",
-      ownerId: owner.id,
-      createdFrom: "2026-01-01T00:00:00.000Z",
-      createdTo: "2026-01-01T23:59:59.999Z",
-      scope: { component: "transfers", workItem: "PAY-42" },
-    })).toEqual([expect.objectContaining({ id: original.id, status: "superseded" })]);
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "decision.superseded", subjectId: original.id }),
-    ]));
-    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "decision.lifecycle_changed",
-        payload: expect.objectContaining({
-          decisionId: original.id,
-          status: "superseded",
-          replacementDecisionId: replacement.id,
-          changedById: owner.id,
+    expect((await service.listDecisions(owner, project.id)).map((decision) => decision.id)).toEqual([replacement.id]);
+    expect(
+      (
+        await service.listDecisions(owner, project.id, {
+          includeHistory: false,
+          search: "production evidence",
+          scope: {},
+        })
+      ).map((decision) => decision.id),
+    ).toEqual([replacement.id]);
+    expect(
+      await service.listDecisions(owner, project.id, {
+        includeHistory: false,
+        search: "initially retried",
+        scope: {},
+      }),
+    ).toEqual([]);
+    expect(
+      (
+        await service.listDecisions(owner, project.id, {
+          includeHistory: true,
+          search: "initially retried",
+          scope: {},
+        })
+      ).map((decision) => decision.id),
+    ).toEqual([original.id]);
+    await expect(
+      service.listDecisions(outsider, project.id, {
+        includeHistory: true,
+        search: "transient failures",
+        scope: {},
+      }),
+    ).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    expect(
+      (
+        await service.listDecisions(owner, project.id, {
+          includeHistory: true,
+          scope: {},
+        })
+      ).map((decision) => decision.id),
+    ).toEqual(expect.arrayContaining([original.id, replacement.id]));
+    expect(
+      await service.listDecisions(owner, project.id, {
+        includeHistory: true,
+        status: "superseded",
+        category: "Architecture",
+        ownerId: owner.id,
+        createdFrom: "2026-01-01T00:00:00.000Z",
+        createdTo: "2026-01-01T23:59:59.999Z",
+        scope: { component: "transfers", workItem: "PAY-42" },
+      }),
+    ).toEqual([expect.objectContaining({ id: original.id, status: "superseded" })]);
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action: "decision.superseded", subjectId: original.id })]),
+    );
+    expect(await repository.listOutboxEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "decision.lifecycle_changed",
+          payload: expect.objectContaining({
+            decisionId: original.id,
+            status: "superseded",
+            replacementDecisionId: replacement.id,
+            changedById: owner.id,
+          }),
         }),
+        expect.objectContaining({
+          type: "notification.created",
+          payload: expect.objectContaining({ notificationType: "decision_lifecycle", targetId: original.id }),
+        }),
+      ]),
+    );
+    await expect(
+      service.changeDecisionLifecycle(owner, original.id, {
+        expectedVersion: 2,
+        status: "revoked",
+        rationale: "A retired decision cannot transition to a second terminal state.",
       }),
-      expect.objectContaining({
-        type: "notification.created",
-        payload: expect.objectContaining({ notificationType: "decision_lifecycle", targetId: original.id }),
-      }),
-    ]));
-    await expect(service.changeDecisionLifecycle(owner, original.id, {
-      expectedVersion: 2,
-      status: "revoked",
-      rationale: "A retired decision cannot transition to a second terminal state.",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("records human clarification comments as a threaded question discussion", async () => {
     const { service } = await runtime();
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-comments-001",
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-comments-001",
+      }),
+    );
 
     await expect(
       service.addQuestionComment(agent, question.id, {
@@ -3091,10 +3433,14 @@ describe("Bridge decision workflow", () => {
   it("supports audited question edits, human mentions, clarification requests, and governed reopen", async () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-collaboration-history-001",
-      relatedLinks: [{ type: "work_item", label: "Retry policy work item", url: "https://tracker.example/BRG-33" }],
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-collaboration-history-001",
+        relatedLinks: [{ type: "work_item", label: "Retry policy work item", url: "https://tracker.example/BRG-33" }],
+      }),
+    );
 
     const comment = await service.addQuestionComment(contributor, question.id, {
       expectedVersion: question.version,
@@ -3143,16 +3489,20 @@ describe("Bridge decision workflow", () => {
     expect(editedComment.revisionHistory).toEqual([
       expect.objectContaining({ body: comment.body, editedById: contributor.id }),
     ]);
-    await expect(service.editQuestionResponse(owner, question.id, response.id, {
-      expectedVersion: 6,
-      answer: "Unauthorized edit",
-      rationale: "Only the author can edit the response.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.addQuestionComment(contributor, question.id, {
-      expectedVersion: 6,
-      body: "Invalid agent mention target.",
-      mentionedPrincipalIds: [agent.id],
-    })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.editQuestionResponse(owner, question.id, response.id, {
+        expectedVersion: 6,
+        answer: "Unauthorized edit",
+        rationale: "Only the author can edit the response.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.addQuestionComment(contributor, question.id, {
+        expectedVersion: 6,
+        body: "Invalid agent mention target.",
+        mentionedPrincipalIds: [agent.id],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
 
     const detail = await service.getQuestion(qaLead, question.id);
     expect(detail.relatedLinks).toEqual([
@@ -3160,46 +3510,65 @@ describe("Bridge decision workflow", () => {
     ]);
     expect(detail.editableResponseIds).toContain(response.id);
     expect(detail.editableCommentIds).toEqual([]);
-    expect((await service.listNotifications(qaLead, { projectId: project.id })).some((notification) =>
-      notification.targetId === comment.id && notification.type === "question_comment")).toBe(true);
+    expect(
+      (await service.listNotifications(qaLead, { projectId: project.id })).some(
+        (notification) => notification.targetId === comment.id && notification.type === "question_comment",
+      ),
+    ).toBe(true);
 
-    const clarificationQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-clarification-command-001",
-      title: "Which retry policy clarification does the owner need?",
-    }));
-    await expect(service.requestQuestionClarification(contributor, clarificationQuestion.id, {
-      expectedVersion: clarificationQuestion.version,
-      reason: "Only the accountable owner can move this question into discussion.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const clarificationQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-clarification-command-001",
+        title: "Which retry policy clarification does the owner need?",
+      }),
+    );
+    await expect(
+      service.requestQuestionClarification(contributor, clarificationQuestion.id, {
+        expectedVersion: clarificationQuestion.version,
+        reason: "Only the accountable owner can move this question into discussion.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const clarified = await service.requestQuestionClarification(owner, clarificationQuestion.id, {
       expectedVersion: clarificationQuestion.version,
       reason: "The owner needs clarification before comparing the proposed options.",
     });
     expect(clarified).toMatchObject({ status: "in_discussion", version: 2 });
 
-    const expiredQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-reopen-command-001",
-      title: "Which retry policy should reopen after expiry?",
-    }));
+    const expiredQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-reopen-command-001",
+        title: "Which retry policy should reopen after expiry?",
+      }),
+    );
     await repository.saveQuestion({ ...expiredQuestion, status: "expired" });
     const reopened = await service.reopenQuestion(owner, expiredQuestion.id, {
       expectedVersion: expiredQuestion.version,
       reason: "The original deadline passed before the owner could review the evidence.",
     });
     expect(reopened).toMatchObject({ status: "in_discussion", version: 2 });
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "question.clarification_requested", subjectId: clarificationQuestion.id }),
-      expect.objectContaining({ action: "question.reopened", subjectId: expiredQuestion.id }),
-      expect.objectContaining({ action: "response.edited", subjectId: response.id }),
-      expect.objectContaining({ action: "question.comment_edited", subjectId: question.id }),
-    ]));
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "question.clarification_requested", subjectId: clarificationQuestion.id }),
+        expect.objectContaining({ action: "question.reopened", subjectId: expiredQuestion.id }),
+        expect.objectContaining({ action: "response.edited", subjectId: response.id }),
+        expect.objectContaining({ action: "question.comment_edited", subjectId: question.id }),
+      ]),
+    );
   });
 
   it("delivers human notifications and supports scoped read state", async () => {
     const { repository, service } = await runtime();
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-notification-001",
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-notification-001",
+      }),
+    );
 
     const assigned = await service.listNotifications(owner, { projectId: project.id });
     expect(assigned).toEqual([
@@ -3281,10 +3650,12 @@ describe("Bridge decision workflow", () => {
     const { repository, service } = await runtime();
 
     await expect(service.listNotificationPreferences(agent)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.setNotificationPreference(agent, {
-      channel: "email",
-      preference: "muted",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.setNotificationPreference(agent, {
+        channel: "email",
+        preference: "muted",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const saved = await service.setNotificationPreference(owner, {
       channel: "email",
@@ -3297,8 +3668,7 @@ describe("Bridge decision workflow", () => {
       preference: "digest",
     });
     expect(await service.listNotificationPreferences(owner)).toEqual([saved]);
-    expect(await repository.getNotificationPreference(owner.organizationId, owner.id, "email"))
-      .toEqual(saved);
+    expect(await repository.getNotificationPreference(owner.organizationId, owner.id, "email")).toEqual(saved);
 
     const updated = await service.setNotificationPreference(owner, {
       channel: "email",
@@ -3312,23 +3682,27 @@ describe("Bridge decision workflow", () => {
     const { repository, service } = await runtime();
     await seedOwnershipMembers(repository);
     const timestamp = "2026-01-01T00:00:00.000Z";
-    const directoryMembers: readonly Principal[] = [architectureReviewer, {
-      id: "usr_inaccessible_role",
-      type: "human",
-      organizationId: project.organizationId,
-      projectIds: [],
-      allProjects: false,
-      roles: ["qa-lead"],
-      displayName: "Inaccessible QA Lead",
-    }, {
-      id: "agt_role_reviewer",
-      type: "agent",
-      organizationId: project.organizationId,
-      projectIds: [project.id],
-      allProjects: true,
-      roles: ["architecture-reviewer"],
-      displayName: "Agent Reviewer",
-    }];
+    const directoryMembers: readonly Principal[] = [
+      architectureReviewer,
+      {
+        id: "usr_inaccessible_role",
+        type: "human",
+        organizationId: project.organizationId,
+        projectIds: [],
+        allProjects: false,
+        roles: ["qa-lead"],
+        displayName: "Inaccessible QA Lead",
+      },
+      {
+        id: "agt_role_reviewer",
+        type: "agent",
+        organizationId: project.organizationId,
+        projectIds: [project.id],
+        allProjects: true,
+        roles: ["architecture-reviewer"],
+        displayName: "Agent Reviewer",
+      },
+    ];
     for (const member of directoryMembers) {
       await repository.savePrincipalIdentity({
         id: member.id,
@@ -3369,25 +3743,31 @@ describe("Bridge decision workflow", () => {
         { name: "Architecture Reviewer", description: "Reviews quality decisions." },
       ],
       teams: [],
-      rules: [{
-        key: "quality-routing",
-        name: "Quality routing",
-        priority: 10,
-        category: "quality",
-        owners: { principalIds: [], roles: ["qa-lead"], teamKeys: [] },
-        reviewers: { principalIds: [], roles: ["architecture-reviewer"], teamKeys: [] },
-      }],
+      rules: [
+        {
+          key: "quality-routing",
+          name: "Quality routing",
+          priority: 10,
+          category: "quality",
+          owners: { principalIds: [], roles: ["qa-lead"], teamKeys: [] },
+          reviewers: { principalIds: [], roles: ["architecture-reviewer"], teamKeys: [] },
+        },
+      ],
     });
 
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-role-notification-001",
-      category: "quality",
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-      risk: "medium",
-      reversible: true,
-      blocking: false,
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-role-notification-001",
+        category: "quality",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+        risk: "medium",
+        reversible: true,
+        blocking: false,
+      }),
+    );
     expect(question).toMatchObject({
       ownerIds: [],
       ownerRoles: ["qa-lead"],
@@ -3407,11 +3787,17 @@ describe("Bridge decision workflow", () => {
       expectedVersion: question.version,
       body: "Please confirm the quality routing evidence.",
     });
-    expect((await repository.listNotifications(project.organizationId, qaLead.id, project.id))
-      .map((notification) => notification.type)).toEqual(expect.arrayContaining(["question_comment", "question_assigned"]));
+    expect(
+      (await repository.listNotifications(project.organizationId, qaLead.id, project.id)).map(
+        (notification) => notification.type,
+      ),
+    ).toEqual(expect.arrayContaining(["question_comment", "question_assigned"]));
     expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toHaveLength(2);
-    expect((await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id))
-      .map((notification) => notification.type)).toEqual(["question_assigned"]);
+    expect(
+      (await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id)).map(
+        (notification) => notification.type,
+      ),
+    ).toEqual(["question_assigned"]);
 
     await service.reassignQuestion(owner, question.id, {
       expectedVersion: question.version + 1,
@@ -3422,14 +3808,20 @@ describe("Bridge decision workflow", () => {
       reason: "Add the quality owner to the review lane for this question.",
     });
     expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toHaveLength(3);
-    expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id)).toHaveLength(2);
+    expect(
+      await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id),
+    ).toHaveLength(2);
   });
 
   it("lets project administrators inspect delivery metrics and safely replay dead letters", async () => {
     const { repository, service } = await runtime();
-    await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-outbox-operations-001",
-    }));
+    await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-outbox-operations-001",
+      }),
+    );
     const [pending] = await repository.listOutboxEvents(project.id);
     expect(pending).toBeDefined();
 
@@ -3446,21 +3838,19 @@ describe("Bridge decision workflow", () => {
         oldestReadyAgeMs: 0,
       },
     });
-    await expect(service.inspectProjectOutbox(contributor, project.id, { limit: 50 }))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.inspectProjectOutbox(agent, project.id, { limit: 50 }))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 0 }))
-      .rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.inspectProjectOutbox(contributor, project.id, { limit: 50 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.inspectProjectOutbox(agent, project.id, { limit: 50 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 0 })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
 
     const [claimed] = await repository.claimOutboxEvents("2026-01-01T00:00:00.000Z", 1);
     expect(claimed).toMatchObject({ id: pending!.id, status: "processing", attempts: 1 });
-    await repository.failOutboxEvent(
-      pending!.id,
-      "provider unavailable",
-      "2026-01-01T00:00:00.000Z",
-      true,
-    );
+    await repository.failOutboxEvent(pending!.id, "provider unavailable", "2026-01-01T00:00:00.000Z", true);
     await repository.saveOutboxDelivery({
       id: "odl_failed_delivery",
       organizationId: project.organizationId,
@@ -3483,12 +3873,14 @@ describe("Bridge decision workflow", () => {
     expect(failures).toMatchObject({
       totalMatching: 1,
       items: [expect.objectContaining({ id: pending!.id, attempts: 1, lastError: "provider unavailable" })],
-      deliveries: [expect.objectContaining({
-        outboxEventId: pending!.id,
-        channel: "email",
-        status: "failed",
-        destinationHash: "a".repeat(64),
-      })],
+      deliveries: [
+        expect.objectContaining({
+          outboxEventId: pending!.id,
+          channel: "email",
+          status: "failed",
+          destinationHash: "a".repeat(64),
+        }),
+      ],
       metrics: {
         failedCount: 1,
         totalAttempts: 1,
@@ -3497,10 +3889,13 @@ describe("Bridge decision workflow", () => {
         deliveryStatusCounts: { delivered: 0, failed: 1, suppressed: 0, deferred: 0 },
       },
     });
-    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 2 }))
-      .rejects.toMatchObject({ code: "CONFLICT", details: { currentAttempts: 1 } });
-    await expect(service.replayOutboxEvent(outsider, pending!.id, { expectedAttempts: 1 }))
-      .rejects.toMatchObject({ code: "OUTBOX_EVENT_NOT_FOUND" });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 2 })).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { currentAttempts: 1 },
+    });
+    await expect(service.replayOutboxEvent(outsider, pending!.id, { expectedAttempts: 1 })).rejects.toMatchObject({
+      code: "OUTBOX_EVENT_NOT_FOUND",
+    });
 
     const replayed = await service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 });
     expect(replayed).toEqual({
@@ -3509,8 +3904,9 @@ describe("Bridge decision workflow", () => {
       attempts: 0,
       availableAt: "2026-01-01T00:00:00.000Z",
     });
-    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 }))
-      .rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.replayOutboxEvent(owner, pending!.id, { expectedAttempts: 1 })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
     expect(await repository.listAuditEvents(project.id)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3587,49 +3983,61 @@ describe("Bridge decision workflow", () => {
     });
     expect(recorded).not.toHaveProperty("digestAvailableAt");
     expect(recorded).not.toHaveProperty("digestLeaseUntil");
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "notification.delivery_feedback_recorded",
-        subjectType: "outbox_delivery",
-        subjectId: "odl_feedback",
-        reason: "provider_feedback:bounce",
-      }),
-    ]));
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "notification.delivery_feedback_recorded",
+          subjectType: "outbox_delivery",
+          subjectId: "odl_feedback",
+          reason: "provider_feedback:bounce",
+        }),
+      ]),
+    );
 
     await expect(service.recordOutboxDeliveryFeedback(githubIntegration, project.id, input)).resolves.toMatchObject({
       disposition: "idempotent_replay",
       matchedCount: 1,
       updatedCount: 0,
     });
-    await expect(service.recordOutboxDeliveryFeedback(githubIntegration, project.id, {
-      ...input,
-      type: "complaint",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
-    await expect(service.recordOutboxDeliveryFeedback(contributor, project.id, input))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.recordOutboxDeliveryFeedback(outsider, project.id, input))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(
+      service.recordOutboxDeliveryFeedback(githubIntegration, project.id, {
+        ...input,
+        type: "complaint",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.recordOutboxDeliveryFeedback(contributor, project.id, input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(service.recordOutboxDeliveryFeedback(outsider, project.id, input)).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
 
     const support = await service.getProjectSupport(owner, project.id);
     expect(support.delivery).toMatchObject({
       providerFeedbackCount: 1,
-      providerFeedback: [{
-        deliveryId: "odl_feedback",
-        channel: "email",
-        provider: "ses",
-        type: "bounce",
-        receivedAt: input.receivedAt,
-      }],
+      providerFeedback: [
+        {
+          deliveryId: "odl_feedback",
+          channel: "email",
+          provider: "ses",
+          type: "bounce",
+          receivedAt: input.receivedAt,
+        },
+      ],
     });
   });
 
   it("derives a privacy-safe project support view and restricts it to project operators", async () => {
     const { repository, service } = await runtime();
-    await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "support-unrouted-question-001",
-      intendedOwnerIds: [],
-      intendedOwnerRoles: [],
-    }));
+    await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "support-unrouted-question-001",
+        intendedOwnerIds: [],
+        intendedOwnerRoles: [],
+      }),
+    );
     const [unroutedQuestion] = await repository.listQuestions(project.id);
     expect(unroutedQuestion).toBeDefined();
     await repository.saveQuestion({ ...unroutedQuestion!, ownerIds: [], ownerRoles: [] });
@@ -3641,20 +4049,28 @@ describe("Bridge decision workflow", () => {
       scope: { component: "exports" },
       externalLinks: [],
     });
-    await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "support-blocked-question-001",
-      runId: blockedRun.run.id,
-      title: "Which retention policy should govern exports?",
-      context: "The export workflow needs a human retention decision before implementation can continue.",
-      whyItMatters: "A wrong retention period can violate policy or retain sensitive exports too long.",
-      category: "data-retention",
-      scope: { component: "exports" },
-    }));
-    const expiringAssumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "support-expiring-assumption-001",
-      runId: blockedRun.run.id,
-      expiresAt: "2026-01-05T00:00:00.000Z",
-    }));
+    await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "support-blocked-question-001",
+        runId: blockedRun.run.id,
+        title: "Which retention policy should govern exports?",
+        context: "The export workflow needs a human retention decision before implementation can continue.",
+        whyItMatters: "A wrong retention period can violate policy or retain sensitive exports too long.",
+        category: "data-retention",
+        scope: { component: "exports" },
+      }),
+    );
+    const expiringAssumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "support-expiring-assumption-001",
+        runId: blockedRun.run.id,
+        expiresAt: "2026-01-05T00:00:00.000Z",
+      }),
+    );
     const run = await service.startRun(agent, project.id, {
       idempotencyKey: "support-mcp-run-001",
       client: "codex",
@@ -3724,55 +4140,57 @@ describe("Bridge decision workflow", () => {
         remainingBlockingQuestionCount: 1,
       }),
     ]);
-    expect(support.delivery.deadLetterEvents).toEqual([
-      expect.objectContaining({ id: pending!.id, hasError: true }),
-    ]);
-    expect(support.adapters.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ client: "codex", capabilities: ["mcp"] }),
-      expect.objectContaining({ client: "claude_code", capabilities: ["cli"] }),
-    ]));
+    expect(support.delivery.deadLetterEvents).toEqual([expect.objectContaining({ id: pending!.id, hasError: true })]);
+    expect(support.adapters.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ client: "codex", capabilities: ["mcp"] }),
+        expect.objectContaining({ client: "claude_code", capabilities: ["cli"] }),
+      ]),
+    );
     expect(support.adapters.mcpDiagnostics).toBe("observed_from_runs");
-    expect(support.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        client: "codex",
-        status: "pass",
-        capabilities: ["instructions", "cli", "mcp"],
-        mcpStatus: "ready",
-        checks: [
-          { name: "api", status: "pass" },
-          { name: "project-config", status: "pass" },
-          { name: "mcp", status: "pass" },
-        ],
-        checkCount: 3,
-        passedCheckCount: 3,
-        failingCheckNames: [],
-        history: [expect.objectContaining({
-          status: "fail",
-          mcpStatus: "failed",
+    expect(support.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          client: "codex",
+          status: "pass",
+          capabilities: ["instructions", "cli", "mcp"],
+          mcpStatus: "ready",
+          checks: [
+            { name: "api", status: "pass" },
+            { name: "project-config", status: "pass" },
+            { name: "mcp", status: "pass" },
+          ],
           checkCount: 3,
-          passedCheckCount: 2,
-          failingCheckNames: ["mcp"],
-        })],
-        trend: expect.objectContaining({
-          direction: "improving",
-          observationCount: 2,
-          healthyObservationCount: 1,
+          passedCheckCount: 3,
+          failingCheckNames: [],
+          history: [
+            expect.objectContaining({
+              status: "fail",
+              mcpStatus: "failed",
+              checkCount: 3,
+              passedCheckCount: 2,
+              failingCheckNames: ["mcp"],
+            }),
+          ],
+          trend: expect.objectContaining({
+            direction: "improving",
+            observationCount: 2,
+            healthyObservationCount: 1,
+          }),
         }),
-      }),
-      expect.objectContaining({
-        client: "claude_code",
-        status: "fail",
-        checkCount: 2,
-        passedCheckCount: 1,
-        failingCheckNames: ["mcp"],
-      }),
-    ]));
+        expect.objectContaining({
+          client: "claude_code",
+          status: "fail",
+          checkCount: 2,
+          passedCheckCount: 1,
+          failingCheckNames: ["mcp"],
+        }),
+      ]),
+    );
     expect(JSON.stringify(support)).not.toContain("provider unavailable");
     expect(JSON.stringify(support)).not.toContain(expiringAssumption.statement);
-    await expect(service.getProjectSupport(contributor, project.id))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.getProjectSupport(agent, project.id))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectSupport(contributor, project.id)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectSupport(agent, project.id)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("keeps adapter diagnostic history bounded and tenant-safe", async () => {
@@ -3791,14 +4209,15 @@ describe("Bridge decision workflow", () => {
     const [diagnostic] = support.diagnostics;
     expect(diagnostic).toBeDefined();
     expect(diagnostic!.history).toHaveLength(20);
-    expect(diagnostic!.trend).toEqual(expect.objectContaining({
-      direction: "improving",
-      observationCount: 21,
-      healthyObservationCount: 11,
-    }));
+    expect(diagnostic!.trend).toEqual(
+      expect.objectContaining({
+        direction: "improving",
+        observationCount: 21,
+        healthyObservationCount: 11,
+      }),
+    );
     expect(JSON.stringify(diagnostic)).not.toContain(agent.id);
-    await expect(service.getProjectSupport(outsider, project.id))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.getProjectSupport(outsider, project.id)).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
   });
 
   it("elevates security questions and prevents cross-tenant access", async () => {
@@ -3827,65 +4246,101 @@ describe("Bridge decision workflow", () => {
       projectRoles: {},
     };
 
-    const ordinary = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "authorization-org-admin-question",
-      intendedOwnerIds: [qaLead.id],
-    }));
-    await expect(service.acceptAnswer(contributor, ordinary.id, {
-      optionKey: "transient",
-      rationale: "A contributor cannot accept an ordinary decision.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.acceptAnswer(organizationAdminWithoutProjectGrant, ordinary.id, {
-      optionKey: "transient",
-      rationale: "The organization administrator accepts within their own organization.",
-    })).resolves.toMatchObject({ ownerId: organizationAdmin.id });
+    const ordinary = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "authorization-org-admin-question",
+        intendedOwnerIds: [qaLead.id],
+      }),
+    );
+    await expect(
+      service.acceptAnswer(contributor, ordinary.id, {
+        optionKey: "transient",
+        rationale: "A contributor cannot accept an ordinary decision.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.acceptAnswer(organizationAdminWithoutProjectGrant, ordinary.id, {
+        optionKey: "transient",
+        rationale: "The organization administrator accepts within their own organization.",
+      }),
+    ).resolves.toMatchObject({ ownerId: organizationAdmin.id });
 
-    const adminPublication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "authorization-org-admin-artifact",
-      intendedReviewerIds: [qaLead.id],
-    }));
-    await expect(service.approveArtifactVersion(contributor, adminPublication.version.id, {
-      rationale: "A contributor cannot approve a specification.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.approveArtifactVersion(organizationAdminWithoutProjectGrant, adminPublication.version.id, {
-      rationale: "The organization administrator approves within their own organization.",
-    })).resolves.toMatchObject({ version: { approvedById: organizationAdmin.id, status: "approved" } });
+    const adminPublication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "authorization-org-admin-artifact",
+        intendedReviewerIds: [qaLead.id],
+      }),
+    );
+    await expect(
+      service.approveArtifactVersion(contributor, adminPublication.version.id, {
+        rationale: "A contributor cannot approve a specification.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.approveArtifactVersion(organizationAdminWithoutProjectGrant, adminPublication.version.id, {
+        rationale: "The organization administrator approves within their own organization.",
+      }),
+    ).resolves.toMatchObject({ version: { approvedById: organizationAdmin.id, status: "approved" } });
 
-    const ownerPublication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "authorization-decision-owner-artifact",
-      title: "Decision-owner specification",
-      intendedReviewerIds: [qaLead.id],
-    }));
-    await expect(service.approveArtifactVersion(decisionOwnerWithoutAdminRole, ownerPublication.version.id, {
-      rationale: "The configured project decision owner approves this immutable version.",
-    })).resolves.toMatchObject({ version: { approvedById: owner.id, status: "approved" } });
+    const ownerPublication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "authorization-decision-owner-artifact",
+        title: "Decision-owner specification",
+        intendedReviewerIds: [qaLead.id],
+      }),
+    );
+    await expect(
+      service.approveArtifactVersion(decisionOwnerWithoutAdminRole, ownerPublication.version.id, {
+        rationale: "The configured project decision owner approves this immutable version.",
+      }),
+    ).resolves.toMatchObject({ version: { approvedById: owner.id, status: "approved" } });
   });
 
   it("masks guessed project and object identifiers across organizations and project grants", async () => {
     const { repository, service } = await runtime();
-    const run = (await service.startRun(agent, project.id, {
-      idempotencyKey: "authorization-object-guess-run",
-      client: "codex",
-      capability: "cli",
-      taskSummary: "Create records for tenant-isolation verification",
-      scope: { component: "transfers" },
-      externalLinks: [],
-    })).run;
-    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "authorization-object-guess-assumption",
-      runId: run.id,
-    }));
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "authorization-object-guess-question",
-      blocking: false,
-    }));
+    const run = (
+      await service.startRun(agent, project.id, {
+        idempotencyKey: "authorization-object-guess-run",
+        client: "codex",
+        capability: "cli",
+        taskSummary: "Create records for tenant-isolation verification",
+        scope: { component: "transfers" },
+        externalLinks: [],
+      })
+    ).run;
+    const assumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "authorization-object-guess-assumption",
+        runId: run.id,
+      }),
+    );
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "authorization-object-guess-question",
+        blocking: false,
+      }),
+    );
     const decision = await service.acceptAnswer(owner, question.id, {
       optionKey: "transient",
       rationale: "Create an accepted decision for tenant-isolation verification.",
     });
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "authorization-object-guess-artifact",
-    }));
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "authorization-object-guess-artifact",
+      }),
+    );
     const notification = (await repository.listNotifications(project.organizationId, owner.id))[0];
     const outboxEvent = (await repository.listOutboxEvents(project.id))[0];
     expect(notification).toBeDefined();
@@ -3926,16 +4381,18 @@ describe("Bridge decision workflow", () => {
           code: "ARTIFACT_NOT_FOUND",
         },
         {
-          real: () => service.changeDecisionLifecycle(deniedPrincipal, decision.id, {
-            status: "revoked",
-            expectedVersion: decision.version,
-            rationale: "This inaccessible operation must fail before mutation.",
-          }),
-          absent: () => service.changeDecisionLifecycle(deniedPrincipal, "dec_absent", {
-            status: "revoked",
-            expectedVersion: 1,
-            rationale: "This absent operation must return the same resource class.",
-          }),
+          real: () =>
+            service.changeDecisionLifecycle(deniedPrincipal, decision.id, {
+              status: "revoked",
+              expectedVersion: decision.version,
+              rationale: "This inaccessible operation must fail before mutation.",
+            }),
+          absent: () =>
+            service.changeDecisionLifecycle(deniedPrincipal, "dec_absent", {
+              status: "revoked",
+              expectedVersion: 1,
+              rationale: "This absent operation must return the same resource class.",
+            }),
           code: "DECISION_NOT_FOUND",
         },
         {
@@ -3944,7 +4401,8 @@ describe("Bridge decision workflow", () => {
           code: "NOTIFICATION_NOT_FOUND",
         },
         {
-          real: () => service.replayOutboxEvent(deniedPrincipal, outboxEvent!.id, { expectedAttempts: outboxEvent!.attempts }),
+          real: () =>
+            service.replayOutboxEvent(deniedPrincipal, outboxEvent!.id, { expectedAttempts: outboxEvent!.attempts }),
           absent: () => service.replayOutboxEvent(deniedPrincipal, "obx_absent", { expectedAttempts: 0 }),
           code: "OUTBOX_EVENT_NOT_FOUND",
         },
@@ -4007,19 +4465,20 @@ describe("Bridge decision workflow", () => {
     expect(adminInbox.find((question) => question.id === protectedQuestion.id)?.inboxReasons).toEqual(
       expect.arrayContaining(["project_admin", "protected_review"]),
     );
-    expect((await service.listQuestionInbox(owner, project.id, { category: "qa" })).map((question) => question.id)).toEqual([
-      roleQuestion.id,
-    ]);
-    expect((await service.listQuestionInbox(owner, project.id, { role: "QA Lead" })).map((question) => question.id)).toEqual([
-      roleQuestion.id,
-    ]);
-    expect((await service.listQuestionInbox(owner, project.id, { risk: "protected" })).map((question) => question.id)).toEqual([
-      protectedQuestion.id,
-    ]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { category: "qa" })).map((question) => question.id),
+    ).toEqual([roleQuestion.id]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { role: "QA Lead" })).map((question) => question.id),
+    ).toEqual([roleQuestion.id]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { risk: "protected" })).map((question) => question.id),
+    ).toEqual([protectedQuestion.id]);
     expect(await service.listQuestionInbox(contributor, project.id)).toEqual([]);
 
-    expect((await service.listQuestions(qaLead, project.id)).find((question) =>
-      question.id === roleQuestion.id)).toMatchObject({
+    expect(
+      (await service.listQuestions(qaLead, project.id)).find((question) => question.id === roleQuestion.id),
+    ).toMatchObject({
       canAccept: true,
       canReassign: false,
       reviewRoles: [],
@@ -4037,37 +4496,53 @@ describe("Bridge decision workflow", () => {
 
   it("filters and prioritizes a due-aware inbox with canonical due timestamps", async () => {
     const { service } = await runtime();
-    const protectedQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "due-protected-question",
-      title: "Which privacy deletion control should ship?",
-      category: "privacy",
-      risk: "high",
-      blocking: true,
-      dueAt: "2026-02-01T00:00:00.000Z",
-    }));
-    const overdueQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "due-overdue-question",
-      title: "Which observability cleanup is already overdue?",
-      category: "observability",
-      risk: "low",
-      blocking: false,
-      dueAt: "2025-12-31T23:59:59.000Z",
-    }));
-    const blockingQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "due-blocking-question",
-      title: "Which rollout failure must block deployment?",
-      category: "operations",
-      risk: "high",
-      blocking: true,
-    }));
-    const dueSoonQuestion = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "due-soon-question",
-      title: "Which architecture follow-up is due this week?",
-      category: "architecture",
-      risk: "medium",
-      blocking: false,
-      dueAt: "2026-01-02T05:30:00+05:30",
-    }));
+    const protectedQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "due-protected-question",
+        title: "Which privacy deletion control should ship?",
+        category: "privacy",
+        risk: "high",
+        blocking: true,
+        dueAt: "2026-02-01T00:00:00.000Z",
+      }),
+    );
+    const overdueQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "due-overdue-question",
+        title: "Which observability cleanup is already overdue?",
+        category: "observability",
+        risk: "low",
+        blocking: false,
+        dueAt: "2025-12-31T23:59:59.000Z",
+      }),
+    );
+    const blockingQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "due-blocking-question",
+        title: "Which rollout failure must block deployment?",
+        category: "operations",
+        risk: "high",
+        blocking: true,
+      }),
+    );
+    const dueSoonQuestion = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "due-soon-question",
+        title: "Which architecture follow-up is due this week?",
+        category: "architecture",
+        risk: "medium",
+        blocking: false,
+        dueAt: "2026-01-02T05:30:00+05:30",
+      }),
+    );
 
     expect(dueSoonQuestion.dueAt).toBe("2026-01-02T00:00:00.000Z");
     const inbox = await service.listQuestionInbox(owner, project.id);
@@ -4077,20 +4552,19 @@ describe("Bridge decision workflow", () => {
       blockingQuestion.id,
       dueSoonQuestion.id,
     ]);
-    expect(inbox.map((question) => question.dueStatus)).toEqual([
-      "scheduled",
-      "overdue",
-      "none",
-      "due_soon",
-    ]);
-    expect((await service.listQuestionInbox(owner, project.id, { due: "overdue" })).map((question) =>
-      question.id)).toEqual([overdueQuestion.id]);
-    expect((await service.listQuestionInbox(owner, project.id, { due: "next_7_days" })).map((question) =>
-      question.id)).toEqual([dueSoonQuestion.id]);
-    expect((await service.listQuestionInbox(owner, project.id, { due: "scheduled" })).map((question) =>
-      question.id)).toEqual([protectedQuestion.id, overdueQuestion.id, dueSoonQuestion.id]);
-    expect((await service.listQuestionInbox(owner, project.id, { due: "none" })).map((question) =>
-      question.id)).toEqual([blockingQuestion.id]);
+    expect(inbox.map((question) => question.dueStatus)).toEqual(["scheduled", "overdue", "none", "due_soon"]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { due: "overdue" })).map((question) => question.id),
+    ).toEqual([overdueQuestion.id]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { due: "next_7_days" })).map((question) => question.id),
+    ).toEqual([dueSoonQuestion.id]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { due: "scheduled" })).map((question) => question.id),
+    ).toEqual([protectedQuestion.id, overdueQuestion.id, dueSoonQuestion.id]);
+    expect(
+      (await service.listQuestionInbox(owner, project.id, { due: "none" })).map((question) => question.id),
+    ).toEqual([blockingQuestion.id]);
   });
 
   it("records a separate protected-question review before owner acceptance", async () => {
@@ -4165,13 +4639,17 @@ describe("Bridge decision workflow", () => {
 
   it("exposes approval status and limits overrides to audited project administrators", async () => {
     const { repository, service } = await runtime();
-    const pending = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-approval-override",
-      title: "Which privacy retention control should be accepted administratively?",
-      category: "privacy",
-      risk: "low",
-      intendedOwnerIds: [owner.id],
-    }));
+    const pending = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-approval-override",
+        title: "Which privacy retention control should be accepted administratively?",
+        category: "privacy",
+        risk: "low",
+        intendedOwnerIds: [owner.id],
+      }),
+    );
     const pendingDetail = await service.getQuestion(organizationAdmin, pending.id);
     expect(pendingDetail).toMatchObject({
       risk: "protected",
@@ -4182,58 +4660,74 @@ describe("Bridge decision workflow", () => {
       },
       canOverrideApproval: true,
     });
-    await expect(service.overrideQuestionApproval(agent, pending.id, {
-      expectedVersion: pending.version,
-      optionKey: "transient",
-      rationale: "The agent cannot authorize a protected decision.",
-      reason: "Only a project administrator may use this override path.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.overrideQuestionApproval(contributor, pending.id, {
-      expectedVersion: pending.version,
-      optionKey: "transient",
-      rationale: "A contributor cannot authorize a protected decision.",
-      reason: "The contributor does not hold the project administrator role.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.overrideQuestionApproval(agent, pending.id, {
+        expectedVersion: pending.version,
+        optionKey: "transient",
+        rationale: "The agent cannot authorize a protected decision.",
+        reason: "Only a project administrator may use this override path.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.overrideQuestionApproval(contributor, pending.id, {
+        expectedVersion: pending.version,
+        optionKey: "transient",
+        rationale: "A contributor cannot authorize a protected decision.",
+        reason: "The contributor does not hold the project administrator role.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const decision = await service.overrideQuestionApproval(organizationAdmin, pending.id, {
       expectedVersion: pending.version,
       optionKey: "transient",
       rationale: "The privacy control is bounded and the designated reviewer is unavailable for this pilot decision.",
-      reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+      reason:
+        "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
     });
     expect(decision.ownerId).toBe(organizationAdmin.id);
     expect(await service.getQuestion(organizationAdmin, pending.id)).toMatchObject({
       status: "accepted",
       approvalOverride: {
         changedById: organizationAdmin.id,
-        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+        reason:
+          "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
         questionVersion: pending.version + 1,
       },
     });
-    expect((await repository.listAuditEvents(project.id)).find((event) =>
-      event.action === "question.approval_overridden" && event.subjectId === pending.id)).toMatchObject({
+    expect(
+      (await repository.listAuditEvents(project.id)).find(
+        (event) => event.action === "question.approval_overridden" && event.subjectId === pending.id,
+      ),
+    ).toMatchObject({
       actorId: organizationAdmin.id,
-      reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+      reason:
+        "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
     });
 
-    const alreadyReviewed = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "question-approval-override-satisfied",
-      title: "Which privacy deletion control should be accepted normally?",
-      category: "privacy",
-      risk: "low",
-      intendedOwnerIds: [owner.id],
-    }));
+    const alreadyReviewed = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "question-approval-override-satisfied",
+        title: "Which privacy deletion control should be accepted normally?",
+        category: "privacy",
+        risk: "low",
+        intendedOwnerIds: [owner.id],
+      }),
+    );
     await service.reviewQuestion(securityReviewer, alreadyReviewed.id, {
       expectedVersion: alreadyReviewed.version,
       status: "approved",
       rationale: "The privacy control is bounded and includes an enforceable deletion path.",
     });
-    await expect(service.overrideQuestionApproval(owner, alreadyReviewed.id, {
-      expectedVersion: alreadyReviewed.version + 1,
-      optionKey: "transient",
-      rationale: "An override cannot replace an approval that is already complete.",
-      reason: "The required reviewer approval is already recorded and ordinary acceptance is available.",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.overrideQuestionApproval(owner, alreadyReviewed.id, {
+        expectedVersion: alreadyReviewed.version + 1,
+        optionKey: "transient",
+        rationale: "An override cannot replace an approval that is already complete.",
+        reason: "The required reviewer approval is already recorded and ordinary acceptance is available.",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("versions specifications, requires human approval, and returns only approved versions as context", async () => {
@@ -4276,12 +4770,16 @@ describe("Bridge decision workflow", () => {
       versionId: first.version.id,
     });
 
-    const second = await service.publishArtifact(agent, project.id, artifactInput({
-      artifactId: first.artifact.id,
-      idempotencyKey: "artifact-key-002",
-      summary: "Adds jitter and a maximum attempt count to the transfer retry policy.",
-      body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
-    }));
+    const second = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        artifactId: first.artifact.id,
+        idempotencyKey: "artifact-key-002",
+        summary: "Adds jitter and a maximum attempt count to the transfer retry policy.",
+        body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
+      }),
+    );
     await service.approveArtifactVersion(owner, second.version.id, {
       rationale: "Jitter and a fixed attempt limit reduce synchronized load and bound execution time.",
     });
@@ -4299,15 +4797,22 @@ describe("Bridge decision workflow", () => {
       totalLines: 4,
     });
     expect(diff.lines).toEqual([
-      expect.objectContaining({ kind: "unchanged", oldLineNumber: 1, newLineNumber: 1, text: "# Transfer retry policy" }),
+      expect.objectContaining({
+        kind: "unchanged",
+        oldLineNumber: 1,
+        newLineNumber: 1,
+        text: "# Transfer retry policy",
+      }),
       expect.objectContaining({ kind: "unchanged", oldLineNumber: 2, newLineNumber: 2, text: "" }),
       expect.objectContaining({ kind: "removed", oldLineNumber: 3, text: expect.stringContaining("idempotency keys") }),
       expect.objectContaining({ kind: "added", newLineNumber: 3, text: expect.stringContaining("five attempts") }),
     ]);
-    await expect(service.diffArtifactVersions(outsider, first.artifact.id, {
-      fromVersionId: first.version.id,
-      toVersionId: second.version.id,
-    })).rejects.toMatchObject({ code: "ARTIFACT_NOT_FOUND" });
+    await expect(
+      service.diffArtifactVersions(outsider, first.artifact.id, {
+        fromVersionId: first.version.id,
+        toVersionId: second.version.id,
+      }),
+    ).rejects.toMatchObject({ code: "ARTIFACT_NOT_FOUND" });
     const artifact = await service.getArtifact(agent, first.artifact.id);
     expect(artifact.versions).toEqual([
       expect.objectContaining({
@@ -4321,14 +4826,16 @@ describe("Bridge decision workflow", () => {
         body: "# Transfer retry policy\n\nRetry transient failures with bounded exponential backoff, jitter, and five attempts.",
       }),
     ]);
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "artifact.version_commented",
-        subjectId: first.version.id,
-        assignmentId: first.version.reviewerAssignment?.id,
-        reviewerRouteSource: "explicit_reviewer",
-      }),
-    ]));
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "artifact.version_commented",
+          subjectId: first.version.id,
+          assignmentId: first.version.reviewerAssignment?.id,
+          reviewerRouteSource: "explicit_reviewer",
+        }),
+      ]),
+    );
   });
 
   it("resolves specification reviewers from direct users, roles, teams, and scoped ownership", async () => {
@@ -4341,32 +4848,38 @@ describe("Bridge decision workflow", () => {
         { name: "QA Lead", description: "Reviews quality and test implications." },
         { name: "Architecture Reviewer", description: "Reviews system architecture." },
       ],
-      teams: [{
-        key: "Architecture",
-        name: "Architecture",
-        memberIds: [architectureReviewer.id],
-      }],
-      rules: [{
-        key: "transfer-specification-review",
-        name: "Transfer specification review",
-        priority: 10,
-        component: "transfers",
-        owners: { principalIds: [], roles: [], teamKeys: [] },
-        reviewers: { principalIds: [], roles: ["qa-lead"], teamKeys: ["architecture"] },
-      }],
+      teams: [
+        {
+          key: "Architecture",
+          name: "Architecture",
+          memberIds: [architectureReviewer.id],
+        },
+      ],
+      rules: [
+        {
+          key: "transfer-specification-review",
+          name: "Transfer specification review",
+          priority: 10,
+          component: "transfers",
+          owners: { principalIds: [], roles: [], teamKeys: [] },
+          reviewers: { principalIds: [], roles: ["qa-lead"], teamKeys: ["architecture"] },
+        },
+      ],
     });
 
-    const explicit = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-explicit",
-      intendedReviewerIds: [owner.id],
-      intendedReviewerRoles: ["QA Lead"],
-      intendedReviewerTeamKeys: ["Architecture"],
-    }));
-    expect(explicit.artifact.reviewerIds).toEqual([
-      architectureReviewer.id,
-      owner.id,
-      qaLead.id,
-    ].sort((left, right) => left.localeCompare(right)));
+    const explicit = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "artifact-review-routing-explicit",
+        intendedReviewerIds: [owner.id],
+        intendedReviewerRoles: ["QA Lead"],
+        intendedReviewerTeamKeys: ["Architecture"],
+      }),
+    );
+    expect(explicit.artifact.reviewerIds).toEqual(
+      [architectureReviewer.id, owner.id, qaLead.id].sort((left, right) => left.localeCompare(right)),
+    );
     expect(explicit.version.reviewerAssignment).toEqual({
       id: expect.stringMatching(/^ara_/),
       reviewerIds: explicit.artifact.reviewerIds,
@@ -4378,15 +4891,18 @@ describe("Bridge decision workflow", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     });
 
-    const routed = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-rule",
-      title: "Transfer delivery contract",
-      intendedReviewerIds: [],
-    }));
-    expect(routed.artifact.reviewerIds).toEqual([
-      architectureReviewer.id,
-      qaLead.id,
-    ].sort((left, right) => left.localeCompare(right)));
+    const routed = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "artifact-review-routing-rule",
+        title: "Transfer delivery contract",
+        intendedReviewerIds: [],
+      }),
+    );
+    expect(routed.artifact.reviewerIds).toEqual(
+      [architectureReviewer.id, qaLead.id].sort((left, right) => left.localeCompare(right)),
+    );
     expect(routed.version.reviewerAssignment).toMatchObject({
       id: expect.stringMatching(/^ara_/),
       reviewerIds: routed.artifact.reviewerIds,
@@ -4397,16 +4913,20 @@ describe("Bridge decision workflow", () => {
       requestedReviewerRoles: [],
       requestedReviewerTeamKeys: [],
     });
-    expect(await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id))
-      .toHaveLength(2);
-    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id))
-      .toHaveLength(2);
+    expect(
+      await repository.listNotifications(project.organizationId, architectureReviewer.id, project.id),
+    ).toHaveLength(2);
+    expect(await repository.listNotifications(project.organizationId, qaLead.id, project.id)).toHaveLength(2);
 
-    const retained = await service.publishArtifact(agent, project.id, artifactInput({
-      artifactId: explicit.artifact.id,
-      idempotencyKey: "artifact-review-routing-retained",
-      intendedReviewerIds: [],
-    }));
+    const retained = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        artifactId: explicit.artifact.id,
+        idempotencyKey: "artifact-review-routing-retained",
+        intendedReviewerIds: [],
+      }),
+    );
     expect(retained.version.reviewerAssignment).toMatchObject({
       id: expect.stringMatching(/^ara_/),
       reviewerIds: explicit.artifact.reviewerIds,
@@ -4414,33 +4934,38 @@ describe("Bridge decision workflow", () => {
       ownershipVersion: 1,
       sourceAssignmentId: explicit.version.reviewerAssignment?.id,
     });
-    expect(retained.version.reviewerAssignment?.id)
-      .not.toBe(explicit.version.reviewerAssignment?.id);
+    expect(retained.version.reviewerAssignment?.id).not.toBe(explicit.version.reviewerAssignment?.id);
 
     const auditEvents = await repository.listAuditEvents(project.id);
-    expect(auditEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "artifact.version_published",
-        subjectId: explicit.version.id,
-        assignmentId: explicit.version.reviewerAssignment?.id,
-        reviewerRouteSource: "explicit_reviewer",
-      }),
-      expect.objectContaining({
-        action: "artifact.version_published",
-        subjectId: routed.version.id,
-        assignmentId: routed.version.reviewerAssignment?.id,
-        reviewerRouteSource: "scoped_ownership",
-      }),
-    ]));
+    expect(auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "artifact.version_published",
+          subjectId: explicit.version.id,
+          assignmentId: explicit.version.reviewerAssignment?.id,
+          reviewerRouteSource: "explicit_reviewer",
+        }),
+        expect.objectContaining({
+          action: "artifact.version_published",
+          subjectId: routed.version.id,
+          assignmentId: routed.version.reviewerAssignment?.id,
+          reviewerRouteSource: "scoped_ownership",
+        }),
+      ]),
+    );
   });
 
   it("requires a distinct human approval quorum before a specification becomes authoritative", async () => {
     const { repository, service } = await runtime();
-    const publication = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-approval-quorum-001",
-      intendedReviewerIds: [owner.id, qaLead.id],
-      requiredApprovals: 2,
-    }));
+    const publication = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "artifact-approval-quorum-001",
+        intendedReviewerIds: [owner.id, qaLead.id],
+        requiredApprovals: 2,
+      }),
+    );
     expect(publication.version.approvalStatus).toEqual({
       requiredCount: 2,
       approvedCount: 0,
@@ -4465,15 +4990,21 @@ describe("Bridge decision workflow", () => {
       },
       reviews: [expect.objectContaining({ reviewerId: owner.id, status: "approved" })],
     });
-    await expect(service.approveArtifactVersion(owner, publication.version.id, {
-      rationale: "A repeated approval from the same human must not satisfy the quorum twice.",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
-    expect((await service.getContext(agent, project.id, {
-      task: "Implement the transfer retry policy",
-      scope: { component: "transfers" },
-      categories: ["specification"],
-      maxItems: 20,
-    })).items).toEqual([]);
+    await expect(
+      service.approveArtifactVersion(owner, publication.version.id, {
+        rationale: "A repeated approval from the same human must not satisfy the quorum twice.",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      (
+        await service.getContext(agent, project.id, {
+          task: "Implement the transfer retry policy",
+          scope: { component: "transfers" },
+          categories: ["specification"],
+          maxItems: 20,
+        })
+      ).items,
+    ).toEqual([]);
 
     const completed = await service.approveArtifactVersion(qaLead, publication.version.id, {
       rationale: "The independent quality review confirms the retry policy is testable and observable.",
@@ -4494,26 +5025,32 @@ describe("Bridge decision workflow", () => {
         expect.objectContaining({ reviewerId: qaLead.id, status: "approved" }),
       ],
     });
-    expect((await service.getContext(agent, project.id, {
-      task: "Implement the transfer retry policy",
-      scope: { component: "transfers" },
-      categories: ["specification"],
-      maxItems: 20,
-    })).items).toEqual([expect.objectContaining({ id: publication.version.id, authority: "approved" })]);
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        action: "artifact.version_approval_recorded",
-        actorId: owner.id,
-        assignmentId: publication.version.reviewerAssignment?.id,
-        reviewerRouteSource: "explicit_reviewer",
-      }),
-      expect.objectContaining({
-        action: "artifact.version_approved",
-        actorId: qaLead.id,
-        assignmentId: publication.version.reviewerAssignment?.id,
-        reviewerRouteSource: "explicit_reviewer",
-      }),
-    ]));
+    expect(
+      (
+        await service.getContext(agent, project.id, {
+          task: "Implement the transfer retry policy",
+          scope: { component: "transfers" },
+          categories: ["specification"],
+          maxItems: 20,
+        })
+      ).items,
+    ).toEqual([expect.objectContaining({ id: publication.version.id, authority: "approved" })]);
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "artifact.version_approval_recorded",
+          actorId: owner.id,
+          assignmentId: publication.version.reviewerAssignment?.id,
+          reviewerRouteSource: "explicit_reviewer",
+        }),
+        expect.objectContaining({
+          action: "artifact.version_approved",
+          actorId: qaLead.id,
+          assignmentId: publication.version.reviewerAssignment?.id,
+          reviewerRouteSource: "explicit_reviewer",
+        }),
+      ]),
+    );
   });
 
   it("rejects specification reviewer targets that cannot resolve to active project humans", async () => {
@@ -4526,43 +5063,79 @@ describe("Bridge decision workflow", () => {
       rules: [],
     });
 
-    await expect(service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-invalid-user",
-      intendedReviewerIds: [agent.id],
-    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
-    await expect(service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-invalid-team",
-      intendedReviewerIds: [],
-      intendedReviewerTeamKeys: ["missing-team"],
-    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
-    await expect(service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-empty-role",
-      intendedReviewerIds: [],
-      intendedReviewerRoles: ["architecture-reviewer"],
-    }))).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
-    await expect(service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-routing-impossible-quorum",
-      intendedReviewerIds: [owner.id],
-      requiredApprovals: 2,
-    }))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.publishArtifact(
+        agent,
+        project.id,
+        artifactInput({
+          idempotencyKey: "artifact-review-routing-invalid-user",
+          intendedReviewerIds: [agent.id],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.publishArtifact(
+        agent,
+        project.id,
+        artifactInput({
+          idempotencyKey: "artifact-review-routing-invalid-team",
+          intendedReviewerIds: [],
+          intendedReviewerTeamKeys: ["missing-team"],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.publishArtifact(
+        agent,
+        project.id,
+        artifactInput({
+          idempotencyKey: "artifact-review-routing-empty-role",
+          intendedReviewerIds: [],
+          intendedReviewerRoles: ["architecture-reviewer"],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "POLICY_BLOCKED" });
+    await expect(
+      service.publishArtifact(
+        agent,
+        project.id,
+        artifactInput({
+          idempotencyKey: "artifact-review-routing-impossible-quorum",
+          intendedReviewerIds: [owner.id],
+          requiredApprovals: 2,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
     expect(await repository.listArtifacts(project.id)).toEqual([]);
   });
 
   it("bounds large specification diffs without changing immutable content", async () => {
     const { service } = await runtime();
-    const oldBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `old-line-${index}`)].join("\n");
-    const newBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `new-line-${index}`)].join("\n");
-    const first = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-large-diff-001",
-      summary: "Defines the original large generated specification for bounded diff verification.",
-      body: oldBody,
-    }));
-    const second = await service.publishArtifact(agent, project.id, artifactInput({
-      artifactId: first.artifact.id,
-      idempotencyKey: "artifact-large-diff-002",
-      summary: "Defines the replacement large generated specification for bounded diff verification.",
-      body: newBody,
-    }));
+    const oldBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `old-line-${index}`)].join(
+      "\n",
+    );
+    const newBody = ["# Large specification", ...Array.from({ length: 1_100 }, (_, index) => `new-line-${index}`)].join(
+      "\n",
+    );
+    const first = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "artifact-large-diff-001",
+        summary: "Defines the original large generated specification for bounded diff verification.",
+        body: oldBody,
+      }),
+    );
+    const second = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        artifactId: first.artifact.id,
+        idempotencyKey: "artifact-large-diff-002",
+        summary: "Defines the replacement large generated specification for bounded diff verification.",
+        body: newBody,
+      }),
+    );
 
     const diff = await service.diffArtifactVersions(owner, first.artifact.id, {
       fromVersionId: first.version.id,
@@ -4581,14 +5154,20 @@ describe("Bridge decision workflow", () => {
 
   it("records specification feedback and requires a new version after requested changes", async () => {
     const { repository, service } = await runtime();
-    const first = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "artifact-review-feedback-001",
-    }));
+    const first = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "artifact-review-feedback-001",
+      }),
+    );
 
-    await expect(service.reviewArtifactVersion(contributor, first.version.id, {
-      status: "commented",
-      body: "A contributor who is not a configured reviewer cannot submit formal review feedback.",
-    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      service.reviewArtifactVersion(contributor, first.version.id, {
+        status: "commented",
+        body: "A contributor who is not a configured reviewer cannot submit formal review feedback.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const comment = await service.reviewArtifactVersion(owner, first.version.id, {
       status: "commented",
@@ -4603,21 +5182,29 @@ describe("Bridge decision workflow", () => {
       body: "Add the retry classification rules and the dead-letter observability requirement.",
     });
     expect(requested.version.reviews).toHaveLength(2);
-    await expect(service.approveArtifactVersion(owner, first.version.id, {
-      rationale: "The original version cannot be approved after actionable changes were requested.",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.approveArtifactVersion(owner, first.version.id, {
+        rationale: "The original version cannot be approved after actionable changes were requested.",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
 
-    const replacement = await service.publishArtifact(agent, project.id, artifactInput({
-      artifactId: first.artifact.id,
-      idempotencyKey: "artifact-review-feedback-002",
-      summary: "Adds retry classification and dead-letter observability requirements.",
-      body: "# Transfer retry policy\n\nClassify transient failures, use bounded backoff, and emit dead-letter metrics for permanent failures.",
-    }));
+    const replacement = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        artifactId: first.artifact.id,
+        idempotencyKey: "artifact-review-feedback-002",
+        summary: "Adds retry classification and dead-letter observability requirements.",
+        body: "# Transfer retry policy\n\nClassify transient failures, use bounded backoff, and emit dead-letter metrics for permanent failures.",
+      }),
+    );
     expect(replacement.version.reviews).toEqual([]);
-    await expect(service.reviewArtifactVersion(owner, first.version.id, {
-      status: "commented",
-      body: "Historical versions cannot receive new formal review feedback.",
-    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.reviewArtifactVersion(owner, first.version.id, {
+        status: "commented",
+        body: "Historical versions cannot receive new formal review feedback.",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     await service.approveArtifactVersion(owner, replacement.version.id, {
       rationale: "The new immutable version addresses the requested classification and observability changes.",
     });
@@ -4637,19 +5224,23 @@ describe("Bridge decision workflow", () => {
         reviews: [expect.objectContaining({ reviewerId: owner.id, status: "approved" })],
       }),
     ]);
-    expect(await repository.listAuditEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "artifact.version_commented", subjectId: first.version.id }),
-      expect.objectContaining({ action: "artifact.version_changes_requested", subjectId: first.version.id }),
-    ]));
-    expect(await repository.listOutboxEvents(project.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "notification.created",
-        payload: expect.objectContaining({
-          notificationType: "artifact_review_feedback",
-          targetId: first.version.id,
+    expect(await repository.listAuditEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "artifact.version_commented", subjectId: first.version.id }),
+        expect.objectContaining({ action: "artifact.version_changes_requested", subjectId: first.version.id }),
+      ]),
+    );
+    expect(await repository.listOutboxEvents(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "notification.created",
+          payload: expect.objectContaining({
+            notificationType: "artifact_review_feedback",
+            targetId: first.version.id,
+          }),
         }),
-      }),
-    ]));
+      ]),
+    );
   });
 
   it("derives project-admin analytics by run cohort without returning stored content", async () => {
@@ -4669,10 +5260,14 @@ describe("Bridge decision workflow", () => {
       categories: [],
       maxItems: 20,
     });
-    const question = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "analytics-question-001",
-      runId: firstRun.run.id,
-    }));
+    const question = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "analytics-question-001",
+        runId: firstRun.run.id,
+      }),
+    );
     await service.proposeAnswer(contributor, question.id, {
       answer: "Retry only failures classified as transient.",
       rationale: "Permanent failures need operator review rather than repeated execution.",
@@ -4682,20 +5277,28 @@ describe("Bridge decision workflow", () => {
       optionKey: "transient",
       rationale: "Bounded retries for transient failures avoid duplicate work and retry loops.",
     });
-    const assumption = await service.recordAssumption(agent, project.id, assumptionInput({
-      idempotencyKey: "analytics-assumption-001",
-      runId: firstRun.run.id,
-    }));
+    const assumption = await service.recordAssumption(
+      agent,
+      project.id,
+      assumptionInput({
+        idempotencyKey: "analytics-assumption-001",
+        runId: firstRun.run.id,
+      }),
+    );
     await service.resolveAssumption(owner, assumption.id, {
       expectedVersion: assumption.version,
       status: "rejected",
       rationale: "The proposed namespace conflicts with the existing production metric contract.",
     });
-    const artifact = await service.publishArtifact(agent, project.id, artifactInput({
-      idempotencyKey: "analytics-artifact-001",
-      runId: firstRun.run.id,
-      citedDecisionIds: [decision.id],
-    }));
+    const artifact = await service.publishArtifact(
+      agent,
+      project.id,
+      artifactInput({
+        idempotencyKey: "analytics-artifact-001",
+        runId: firstRun.run.id,
+        citedDecisionIds: [decision.id],
+      }),
+    );
     await service.approveArtifactVersion(owner, artifact.version.id, {
       rationale: "The specification follows the accepted retry decision and remains operationally bounded.",
     });
@@ -4715,10 +5318,14 @@ describe("Bridge decision workflow", () => {
       categories: [],
       maxItems: 20,
     });
-    const reused = await service.createQuestion(agent, project.id, questionInput({
-      idempotencyKey: "analytics-question-reuse-001",
-      runId: secondRun.run.id,
-    }));
+    const reused = await service.createQuestion(
+      agent,
+      project.id,
+      questionInput({
+        idempotencyKey: "analytics-question-reuse-001",
+        runId: secondRun.run.id,
+      }),
+    );
     expect(reused.submissionDisposition).toBe("reused_accepted");
     await service.startRun(agent, project.id, {
       idempotencyKey: "analytics-run-claude-001",
@@ -4781,10 +5388,12 @@ describe("Bridge decision workflow", () => {
     expect(serialized).not.toContain(question.title);
     expect(serialized).not.toContain(artifact.version.body);
     expect(serialized).not.toContain(firstRun.run.taskSummary);
-    expect(analytics.privacy.excluded).toEqual(expect.arrayContaining([
-      expect.stringContaining("hidden reasoning"),
-      expect.stringContaining("specification titles"),
-    ]));
+    expect(analytics.privacy.excluded).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("hidden reasoning"),
+        expect.stringContaining("specification titles"),
+      ]),
+    );
 
     const claudeOnly = await service.getProjectAnalytics(owner, project.id, { client: "claude_code" });
     expect(claudeOnly).toMatchObject({
@@ -4792,12 +5401,11 @@ describe("Bridge decision workflow", () => {
       activity: { contextRetrievals: 0, questionSubmissions: 0, decisionsAccepted: 0 },
       byClient: [expect.objectContaining({ client: "claude_code", runCount: 1 })],
     });
-    await expect(service.getProjectAnalytics(contributor, project.id, {}))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.getProjectAnalytics(agent, project.id, {}))
-      .rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(service.getProjectAnalytics(outsider, project.id, {}))
-      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+    await expect(service.getProjectAnalytics(contributor, project.id, {})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(agent, project.id, {})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.getProjectAnalytics(outsider, project.id, {})).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
   });
 
   it("resolves OIDC identities only through active organization and project memberships", async () => {
@@ -4841,11 +5449,13 @@ describe("Bridge decision workflow", () => {
       version: 1,
     });
 
-    await expect(repository.resolveOidcPrincipal({
-      issuer: "https://identity.example/",
-      subject: "auth0|member",
-      organizationExternalId: "auth0-org-one",
-    })).resolves.toMatchObject({
+    await expect(
+      repository.resolveOidcPrincipal({
+        issuer: "https://identity.example/",
+        subject: "auth0|member",
+        organizationExternalId: "auth0-org-one",
+      }),
+    ).resolves.toMatchObject({
       id: "usr_oidc",
       organizationId: project.organizationId,
       projectIds: [project.id],
@@ -4864,10 +5474,12 @@ describe("Bridge decision workflow", () => {
       updatedAt: "2026-01-02T00:00:00.000Z",
       version: 2,
     });
-    await expect(repository.resolveOidcPrincipal({
-      issuer: "https://identity.example/",
-      subject: "auth0|member",
-      organizationExternalId: "auth0-org-one",
-    })).resolves.toBeUndefined();
+    await expect(
+      repository.resolveOidcPrincipal({
+        issuer: "https://identity.example/",
+        subject: "auth0|member",
+        organizationExternalId: "auth0-org-one",
+      }),
+    ).resolves.toBeUndefined();
   });
 });
