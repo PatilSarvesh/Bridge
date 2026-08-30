@@ -873,7 +873,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack and SES delivery, destination idempotency, normalized provider-feedback recording by provider message ID, feedback-aware retry suppression, scheduled assumption expiry/blocker escalation/email digest cycles, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; live provider ingress and deployment validation remain
+- **Status:** Partial — typed transactional events, claim leases, capped exponential retry with jitter, dead-letter handling, project-admin inspection, point-in-time metrics, optimistic audited replay, Slack and SES delivery, destination idempotency, normalized provider-feedback recording by provider message ID, an optional signed SES/SNS feedback ingress, feedback-aware retry suppression, scheduled assumption expiry/blocker escalation/email digest cycles, a bounded maintenance-role worker runtime, and worker Prometheus export are implemented; Slack ingress and live provider/deployment validation remain
 - **Dependencies:** BRG-003, BRG-012
 - **PRD references:** NTF-01, AUD-01, reliability requirements
 
@@ -886,7 +886,7 @@ Acceptance criteria:
 3. Handlers are idempotent by event and destination. **Event IDs are stable for handler-side idempotency; destination adapters remain.**
 4. Retries use bounded exponential backoff and dead-letter state. **Implemented with configurable attempts, base/cap settings, proportional jitter, deterministic coverage, and dead-letter state.**
 5. Operators can inspect and safely replay failed jobs. **Implemented through project-admin REST operations; replay preserves the event ID and requires the last observed attempt count.**
-6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot and through the worker's safe process-local Prometheus endpoint; hosted collection and alert delivery remain BRG-104 work. Normalized provider feedback is counted in the snapshot and receipt, while provider-specific webhook ingestion remains deployment work.**
+6. Queue lag and failure metrics are available. **Implemented as a project-scoped point-in-time operations snapshot and through the worker's safe process-local Prometheus endpoint; hosted collection and alert delivery remain BRG-104 work. Normalized provider feedback is counted in the snapshot and receipt; signed SES/SNS ingress is implemented, while Slack ingress and live provider routing remain deployment work.**
 
 ### BRG-091 — Provide durable in-app notifications
 
@@ -910,7 +910,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, a bounded secret-managed recipient directory, official AWS SES v2 sender, deployable immediate/digest worker composition, stable opaque provider tags, durable privacy-minimized delivery receipts, normalized SES bounce/complaint recording through the canonical REST boundary, feedback-aware retry suppression, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; live SES account/identity, webhook signature/ingress, authenticated-link, and failure-window validation remain
+- **Status:** Partial — provider-neutral safe templates, REST-managed human email preferences, a bounded secret-managed recipient directory, official AWS SES v2 sender, deployable immediate/digest worker composition, stable opaque provider tags, durable privacy-minimized delivery receipts, signed SNS bounce/complaint ingestion through a least-privilege canonical REST forwarder, feedback-aware retry suppression, one-time overdue-blocker escalation production, scheduled title-only digest batching with leases/retries, and retry/dead-letter observability are implemented; live SES account/identity, HTTPS routing/secret provisioning, authenticated-link, and failure-window validation remain
 - **Dependencies:** BRG-090, BRG-091
 - **PRD references:** NTF-02
 
@@ -922,14 +922,16 @@ Acceptance criteria:
 2. Emails contain minimal safe context and a signed-in Bridge link. **Minimal context, an auth-ready review URL, and OIDC web sign-in are implemented; hosted callback/link validation remains deployment work.**
 3. Delivery status and provider message ID are recorded without storing secrets. **Implemented with a destination hash, sanitized errors, and no persisted address or credentials.**
 4. Ordinary events honor notification preferences. **Human-owned immediate, muted, and digest email preferences persist through the canonical REST/application path and override the injected directory default. Digest receipts receive a durable due time and recoverable lease, group only same-recipient/project titles under a stable batch key, and retry without persisting addresses; protected review mail bypasses muting.**
-5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations; normalized provider feedback is visible in outbox/support reads and prevents another automatic retry.**
+5. Retry and permanent failure behavior are observable. **The email receipt and existing outbox retry/dead-letter state are returned by project-admin operations; signed SNS bounce/complaint feedback is normalized through the canonical REST endpoint, visible in outbox/support reads, and prevents another automatic retry.**
 
 Implementation note: the controlled-pilot worker accepts `email` or `all` channel mode, resolves exact
 Bridge principal IDs through a bounded deployment-secret JSON mapping, and sends through AWS SES v2
 using the standard AWS credential chain. Addresses and credentials are never copied into Bridge
-persistence or safe logs. SES verified identities, production access, live webhook feedback ingestion and
-signature verification, IAM policy,
-hosted links, and live failure-window evidence remain deployment-owner responsibilities.
+persistence or safe logs. The optional loopback-default SNS listener verifies version 1/2 signatures,
+exact topic mappings, bounded certificate/subscription URLs, and forwards only message ID/type/time
+through a scoped integration token. SES verified identities, production access, public HTTPS routing,
+topic policy, IAM/secret provisioning, hosted links, and live failure-window evidence remain
+deployment-owner responsibilities.
 
 ### BRG-093 — Integrate one pilot team channel
 
@@ -1108,7 +1110,7 @@ Implementation note: project and controlled-client filtering, lifecycle attribut
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, active assumptions nearing expiry, runs waiting for human input, dead-letter delivery jobs, normalized provider feedback on delivery receipts, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata with derived check totals, failed check names, a capped recent history, and local trend summaries; provider-backed disconnected integrations, live provider health, webhook/signature ingress, and richer provider diagnostics remain
+- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, active assumptions nearing expiry, runs waiting for human input, dead-letter delivery jobs, signed/normalized SES feedback on delivery receipts, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata with derived check totals, failed check names, a capped recent history, and local trend summaries; provider-backed disconnected integrations, live provider health, non-SES webhook/signature ingress, and richer provider diagnostics remain
 - **Dependencies:** BRG-032, BRG-090, BRG-104
 - **PRD references:** ADM-01, pilot plan
 

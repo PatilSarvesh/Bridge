@@ -1,4 +1,4 @@
-import { BridgeService, type BridgeReadiness } from "@bridge/application";
+import { type BridgeReadiness, BridgeService } from "@bridge/application";
 import { createPostgresBridgeStore, type PostgresBridgeStore } from "@bridge/database";
 import { BridgeMetrics, createSafeLogger, type SafeLogger } from "@bridge/observability";
 
@@ -24,6 +24,11 @@ import {
   type SesEmailEnvironment,
 } from "./ses.js";
 import {
+  loadSesFeedbackConfiguration,
+  type SesFeedbackConfiguration,
+  type SesFeedbackEnvironment,
+} from "./ses-feedback.js";
+import {
   createNotificationSlackHandler,
   createSlackChannelDirectoryFromEnvironment,
   createSlackWebhookSender,
@@ -36,6 +41,7 @@ export interface WorkerConfiguration {
   readonly publicWebUrl: string;
   readonly channel: "slack" | "email" | "all";
   readonly email?: SesEmailConfiguration;
+  readonly sesFeedback?: SesFeedbackConfiguration;
   readonly pollIntervalMs: number;
   readonly batchSize: number;
   readonly assumptionExpiryIntervalMs: number;
@@ -52,7 +58,7 @@ export interface WorkerConfiguration {
   readonly metricsPort: number;
 }
 
-export interface WorkerEnvironment extends SesEmailEnvironment {
+export interface WorkerEnvironment extends SesEmailEnvironment, SesFeedbackEnvironment {
   readonly BRIDGE_WORKER_DATABASE_URL?: string;
   readonly BRIDGE_PUBLIC_WEB_URL?: string;
   readonly BRIDGE_WORKER_CHANNEL?: string;
@@ -152,6 +158,7 @@ export function loadWorkerConfiguration(environment: WorkerEnvironment = process
     throw new Error("BRIDGE_WORKER_CHANNEL must be `slack`, `email`, or `all`.");
   }
   const email = channel === "email" || channel === "all" ? loadSesEmailConfiguration(environment) : undefined;
+  const sesFeedback = loadSesFeedbackConfiguration(environment);
   const baseBackoffMs = positiveInteger(environment, "BRIDGE_WORKER_BASE_BACKOFF_MS", 1_000, 100, 60_000);
   const maxBackoffMs = positiveInteger(environment, "BRIDGE_WORKER_MAX_BACKOFF_MS", 15 * 60 * 1_000, 1_000, 86_400_000);
   if (maxBackoffMs < baseBackoffMs) {
@@ -162,6 +169,7 @@ export function loadWorkerConfiguration(environment: WorkerEnvironment = process
     publicWebUrl,
     channel,
     ...(email ? { email } : {}),
+    ...(sesFeedback ? { sesFeedback } : {}),
     pollIntervalMs: positiveInteger(environment, "BRIDGE_WORKER_POLL_INTERVAL_MS", 1_000, 250, 60_000),
     batchSize: positiveInteger(environment, "BRIDGE_WORKER_BATCH_SIZE", 25, 1, 100),
     assumptionExpiryIntervalMs: positiveInteger(

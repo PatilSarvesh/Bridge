@@ -9,11 +9,13 @@ import {
 } from "@bridge/observability";
 
 import { startWorkerMetricsServer } from "./metrics-server.js";
+import { startSesFeedbackServer } from "./ses-feedback.js";
 
 export * from "./codex.js";
 export * from "./email.js";
 export * from "./metrics-server.js";
 export * from "./ses.js";
+export * from "./ses-feedback.js";
 export * from "./slack.js";
 
 export interface ReviewableDecision {
@@ -205,6 +207,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const configuration = loadWorkerConfiguration();
       const runtime = createConfiguredWorker(configuration);
       let metricsServer: Awaited<ReturnType<typeof startWorkerMetricsServer>> | undefined;
+      let sesFeedbackServer: Awaited<ReturnType<typeof startSesFeedbackServer>> | undefined;
       try {
         metricsServer = await startWorkerMetricsServer({
           metrics: runtime.metrics,
@@ -213,11 +216,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           checkReadiness: runtime.checkReadiness,
           logger,
         });
+        if (configuration.sesFeedback) {
+          sesFeedbackServer = await startSesFeedbackServer({
+            configuration: configuration.sesFeedback,
+            metrics: runtime.metrics,
+            logger,
+          });
+        }
         logger.info("service.started", {
           channel: configuration.channel,
           pollIntervalMs: configuration.pollIntervalMs,
           batchSize: configuration.batchSize,
           metricsPort: metricsServer.port,
+          feedbackIngress: sesFeedbackServer ? "enabled" : "disabled",
+          ...(sesFeedbackServer ? { feedbackPort: sesFeedbackServer.port } : {}),
           status: "running",
         });
         await runOutboxWorker({
@@ -242,9 +254,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         });
       } finally {
         try {
-          await metricsServer?.close();
+          await sesFeedbackServer?.close();
         } finally {
-          await runtime.close();
+          try {
+            await metricsServer?.close();
+          } finally {
+            await runtime.close();
+          }
         }
       }
     })

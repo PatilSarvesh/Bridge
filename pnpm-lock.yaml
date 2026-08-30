@@ -134,6 +134,9 @@ importers:
       '@bridge/application':
         specifier: workspace:*
         version: link:../../packages/application
+      '@bridge/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@bridge/database':
         specifier: workspace:*
         version: link:../../packages/database

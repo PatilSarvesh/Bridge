@@ -2833,9 +2833,10 @@ Implemented and locally verified on `codex/provider-delivery-feedback`:
 
 Deliberate boundaries:
 
-- Bridge does not yet ingest or verify SES SNS, Slack, or other provider webhooks. A trusted adapter
-  must authenticate and normalize provider events before calling the REST boundary; live account,
-  signature, deployment, and provider failure-window evidence remain external work.
+- Bridge now ships an optional signed SES/SNS adapter described in section 20.112. Slack and other
+  provider webhooks still require a trusted external adapter to authenticate and normalize events
+  before calling the REST boundary; all live account, routing, deployment, and provider
+  failure-window evidence remains external work.
 - Feedback is keyed to the provider message ID already present on a Bridge receipt. It does not
   infer delivery state from email addresses, store raw provider event bodies, or grant agents human
   approval authority.
@@ -3183,6 +3184,58 @@ Deliberate boundaries:
 - No schema, migration, production database command, hosted collector, paging route, or production
   readiness claim is included.
 
+### 20.112 Added optional signed SES/SNS feedback ingress (BRG-090/BRG-092/BRG-111)
+
+Implemented and locally verified:
+
+1. The worker can optionally open a separate `POST /webhooks/aws/ses` listener. It is disabled and
+   bound to loopback by default; enabling it requires an HTTPS canonical API origin (except explicit
+   loopback), one exact SNS-topic-to-project mapping, and a valid revocable Bridge service token.
+   The deployment identity must be type `integration`, restricted to the mapped project, and hold
+   only `bridge:notifications:write`.
+2. Before parsing provider content, the adapter checks the SNS message-type header/envelope pair,
+   rejects unmapped topic ARNs, permits only HTTPS signing-certificate URLs on the bounded regional
+   SNS host/path shape, fetches without redirects under size/time bounds, validates certificate
+   lifetime, and verifies AWS signature version 1 (RSA/SHA-1) or 2 (RSA/SHA-256). A one-hour,
+   16-key certificate cache is bounded and never stores provider messages.
+3. Signed notifications accept both SES `notificationType` and event-publishing `eventType` shapes,
+   tolerate unknown future fields, ignore non-bounce/complaint events, and forward only the SES
+   message ID, controlled feedback type, and provider timestamp. Recipient addresses, headers,
+   diagnostics, raw callbacks, certificate URLs, signatures, and tokens are neither forwarded to
+   the business endpoint nor written to logs, metrics, or PostgreSQL.
+4. The adapter calls the existing authenticated
+   `POST /v1/projects/:projectId/integrations/notifications/delivery-feedback` command. It does not
+   import a repository or write PostgreSQL directly, so tenant checks, service-token revocation,
+   scope enforcement, provider-message matching, auditing, and durable idempotency remain in the
+   canonical application/REST path. API or certificate outages return a retryable sanitized failure.
+5. SNS subscription confirmation remains a separate deployment opt-in. Only after signature/topic
+   verification may the adapter follow a no-redirect, same-SNS-host confirmation URL whose action,
+   topic, and token exactly match the signed envelope. Unsubscribe confirmations never mutate Bridge
+   authority or trigger automatic resubscription.
+6. A bounded 24-hour/10,000-entry process-local SNS message-ID cache reduces repeated forwarding;
+   the canonical feedback command remains the durable cross-process idempotency boundary. Worker
+   configuration, RSA verification, canonical field ordering, certificate SSRF rejection, exact
+   routing, header mismatch, PII-minimizing normalization, replay, scoped bearer forwarding,
+   confirmation controls, HTTP routing, and privacy-safe metrics have focused regression coverage.
+   The SES runbook, environment example, README, architecture, and backlog describe the deployment
+   contract and validation procedure. `pnpm check` passes across repository gates, contracts,
+   security, type checks, tests, builds, and packaged CLI smoke coverage; the opt-in PostgreSQL
+   integration suite was correctly skipped because no explicit isolated `BRIDGE_TEST_DATABASE_URL`
+   was supplied.
+
+Deliberate boundaries:
+
+- The ingress is co-hosted in the worker process, so deployment must treat its listener as part of
+  the worker trust boundary even though the callback code receives no repository handle and all
+  business mutation goes through REST. Public TLS termination, DNS/load-balancer routing,
+  distributed edge limits, SNS topic policy, IAM, secret rotation, and provider alerts are external.
+- The replay cache is not a durable raw-webhook ledger. Bridge intentionally does not store SNS
+  envelopes or recipient-level feedback. The existing receipt allows one normalized feedback fact;
+  a later conflicting type remains governed by the canonical command's explicit conflict policy.
+- This is repository-side conformance, not evidence from a live SES identity/topic/subscription or
+  hosted failure-window exercise. No schema, migration, MCP dependency, human approval mutation, or
+  production database command was added; REST remains canonical and MCP remains optional.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -3201,6 +3254,7 @@ Deliberate boundaries:
 - OIDC verifier and encrypted web session: `packages/auth/src/index.ts`
 - Authentication and organization operator guide: `docs/authentication.md`
 - SES email delivery runbook: `docs/runbooks/email-delivery.md`
+- Signed SES/SNS feedback ingress: `apps/worker/src/ses-feedback.ts`
 - Approved-specification drift guide: `docs/specification-drift.md`
 - PostgreSQL tenant-isolation and role guide: `docs/database-security.md`
 - PostgreSQL role reconciliation: `scripts/provision-postgres-roles.sql`

@@ -144,6 +144,29 @@ describe("worker runtime", () => {
     });
   });
 
+  it("loads the optional SES feedback listener independently from outbound channel selection", () => {
+    expect(
+      loadWorkerConfiguration({
+        BRIDGE_WORKER_DATABASE_URL: "postgresql://worker@example.test/bridge",
+        BRIDGE_WORKER_CHANNEL: "slack",
+        BRIDGE_SES_FEEDBACK_INGRESS_ENABLED: "true",
+        BRIDGE_SES_FEEDBACK_API_URL: "https://api.bridge.example",
+        BRIDGE_SES_FEEDBACK_SERVICE_TOKEN: `brg_srv_${"a".repeat(43)}`,
+        BRIDGE_SES_FEEDBACK_TOPIC_PROJECTS: JSON.stringify({
+          "arn:aws:sns:ap-south-1:123456789012:bridge-feedback": "prj_feedback",
+        }),
+      }),
+    ).toMatchObject({
+      channel: "slack",
+      sesFeedback: {
+        host: "127.0.0.1",
+        port: 4_300,
+        apiUrl: "https://api.bridge.example/",
+        confirmSubscriptions: false,
+      },
+    });
+  });
+
   it("processes a cycle and stops cleanly when the worker is aborted", async () => {
     const store = new RuntimeStore();
     const controller = new AbortController();

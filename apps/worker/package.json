@@ -14,6 +14,7 @@
   "dependencies": {
     "@aws-sdk/client-sesv2": "3.1120.0",
     "@bridge/application": "workspace:*",
+    "@bridge/contracts": "workspace:*",
     "@bridge/database": "workspace:*",
     "@bridge/domain": "workspace:*",
     "@bridge/observability": "workspace:*"

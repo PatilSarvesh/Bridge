@@ -16,11 +16,7 @@
     },
     "@bridge/application": {
       "path": "packages/application",
-      "allowedWorkspaceDependencies": [
-        "@bridge/contracts",
-        "@bridge/domain",
-        "@bridge/observability"
-      ]
+      "allowedWorkspaceDependencies": ["@bridge/contracts", "@bridge/domain", "@bridge/observability"]
     },
     "@bridge/auth": {
       "path": "packages/auth",
@@ -75,6 +71,7 @@
       "path": "apps/worker",
       "allowedWorkspaceDependencies": [
         "@bridge/application",
+        "@bridge/contracts",
         "@bridge/database",
         "@bridge/domain",
         "@bridge/observability"
