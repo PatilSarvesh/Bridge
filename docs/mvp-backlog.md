@@ -151,7 +151,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — all package boundaries and root typecheck/test/build commands are implemented; formal lint/format enforcement and per-application health surfaces remain
+- **Status:** Implemented — package/layer boundaries, root format/lint/typecheck/test/build commands, API/MCP repository-aware health, web API-aware health, worker maintenance-repository health, and the CLI doctor command are implemented and documented
 - **Dependencies:** None
 - **PRD references:** All MVP requirements
 

@@ -1,7 +1,7 @@
 import { BridgeMetrics } from "@bridge/observability";
 import { describe, expect, it } from "vitest";
 
-import { workerMetricsHttpResponse } from "./metrics-server.js";
+import { workerHttpResponse, workerMetricsHttpResponse } from "./metrics-server.js";
 
 describe("worker metrics HTTP surface", () => {
   it("serves bounded Prometheus metrics without reflecting request or tenant content", () => {
@@ -56,5 +56,59 @@ describe("worker metrics HTTP surface", () => {
       body: "Not found\n",
     });
     expect(metrics.renderPrometheus()).not.toContain("http://[");
+  });
+
+  it("reports liveness without depending on PostgreSQL", async () => {
+    const metrics = new BridgeMetrics();
+    let checks = 0;
+    const response = await workerHttpResponse(metrics, "GET", "/health/live", async () => {
+      checks += 1;
+      throw new Error("database unavailable");
+    });
+
+    expect(response).toMatchObject({
+      statusCode: 200,
+      headers: expect.objectContaining({ "cache-control": "no-store" }),
+    });
+    expect(JSON.parse(response.body)).toEqual({ service: "bridge-worker", status: "ok" });
+    expect(checks).toBe(0);
+  });
+
+  it("reports repository-backed readiness and sanitizes failures", async () => {
+    const metrics = new BridgeMetrics();
+    const ready = await workerHttpResponse(metrics, "GET", "/health/ready", async () => ({
+      status: "ready",
+      checks: [{ name: "repository", status: "ready", backend: "postgresql" }],
+    }));
+
+    expect(ready.statusCode).toBe(200);
+    expect(JSON.parse(ready.body)).toEqual({
+      service: "bridge-worker",
+      status: "ready",
+      checks: [{ name: "repository", status: "ready", backend: "postgresql" }],
+    });
+
+    const failed = await workerHttpResponse(metrics, "GET", "/health/ready", async () => {
+      throw new Error("postgresql://secret@database/bridge");
+    });
+    expect(failed.statusCode).toBe(503);
+    expect(failed.body).toContain("Repository dependency is unavailable.");
+    expect(failed.body).not.toContain("postgresql://");
+    expect(failed.body).not.toContain("secret");
+  });
+
+  it("bounds slow readiness checks and rejects health mutations", async () => {
+    const metrics = new BridgeMetrics();
+    const slow = await workerHttpResponse(metrics, "HEAD", "/health/ready", () => new Promise(() => undefined), 5);
+    expect(slow).toMatchObject({ statusCode: 503, body: "" });
+
+    const mutation = await workerHttpResponse(metrics, "POST", "/health/live", async () => ({
+      status: "ready",
+      checks: [{ name: "repository", status: "ready", backend: "postgresql" }],
+    }));
+    expect(mutation).toMatchObject({
+      statusCode: 405,
+      headers: expect.objectContaining({ allow: "GET, HEAD" }),
+    });
   });
 });

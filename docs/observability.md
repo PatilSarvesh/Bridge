@@ -36,7 +36,8 @@ Errors retain only a bounded error name and safe machine code when present. Logs
 
 ## Current operator behavior
 
-- `GET /health/live` and `GET /health/ready` return a correlation response header.
+- API and optional MCP `GET /health/live` and `GET /health/ready` return a correlation response header.
+- Web exposes dependency-free `/health/live` and a bounded API-aware `/health/ready`. The worker's loopback-default operations listener exposes `/health`, `/health/live`, and maintenance-repository-backed `/health/ready` beside `/metrics`; its health bodies never include connection strings or provider errors.
 - API completion/failure and MCP completion/failure events use safe structured logs when those standalone servers run.
 - API and MCP authentication failures emit a bounded `authentication.outcome` warning with the flow, fixed outcome, route/path, method, status, and the current correlation context; credential values and tenant attribution are never included.
 - Worker processed/retry/dead-letter log records reuse the outbox event's persisted correlation ID when a safe logger is supplied.
@@ -52,7 +53,7 @@ curl --silent http://127.0.0.1:4100/metrics
 curl --silent http://127.0.0.1:4200/metrics
 ```
 
-The endpoints intentionally contain no tenant, project, principal, record, prompt, answer, specification, destination, or other content labels. Operations use bounded route names; unmatched paths collapse to `unmatched`, and the registry collapses operations beyond its 128-label process budget to `overflow`. The worker listener defaults to `127.0.0.1:4200`; `BRIDGE_WORKER_METRICS_HOST` and `BRIDGE_WORKER_METRICS_PORT` are validated deployment overrides. A deployed reverse proxy or network policy must restrict every `/metrics` endpoint to the monitoring network because these scrape surfaces do not implement end-user authentication.
+The endpoints intentionally contain no tenant, project, principal, record, prompt, answer, specification, destination, or other content labels. Operations use bounded route names; unmatched paths collapse to `unmatched`, and the registry collapses operations beyond its 128-label process budget to `overflow`. The worker operations listener defaults to `127.0.0.1:4200`; `BRIDGE_WORKER_METRICS_HOST` and `BRIDGE_WORKER_METRICS_PORT` are validated deployment overrides for both health and metrics. A deployed reverse proxy or network policy must restrict `/metrics` to the monitoring network because the scrape surface does not implement end-user authentication.
 
 The registry records:
 
