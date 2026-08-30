@@ -38,6 +38,33 @@ Escalate when backlog age threatens the pilot objective, database saturation ris
 
 Escalate immediately for destructive statements, constraint failures involving tenant scope, missing migration history, or any mismatch between database schema and migration metadata.
 
+## Database transaction saturation
+
+Symptoms include sustained `bridge_database_transaction_slots_in_use` at or above 90% of
+`bridge_database_transaction_slots_capacity`, a non-zero
+`bridge_database_transaction_slots_waiting` gauge, rising admission-wait duration, repository
+transaction latency, or readiness failures.
+
+1. Identify the affected process instance and `application` or `maintenance` mode. Do not aggregate
+   away the scrape target while diagnosing one saturated instance.
+2. Correlate admission pressure with transaction latency/error metrics, readiness, worker backlog,
+   and approved PostgreSQL/RDS connection, lock, CPU, and storage telemetry.
+3. Find slow or unexpectedly concurrent Bridge operations through bounded operation metrics and safe
+   correlation-aware logs. Do not copy customer content, query parameters, or credentials into the
+   incident record.
+4. Do not increase `maxConnections`, worker concurrency, or instance count until the deployment owner
+   confirms database connection headroom. More Bridge processes multiply the possible server
+   connections and can worsen exhaustion.
+5. If maintenance work is the source, keep canonical API writes available and reduce or pause worker
+   cycles through the reviewed deployment control. Do not alter queue records directly.
+6. After remediation, confirm the waiting gauge returns to zero, utilization and admission latency
+   normalize, readiness stays green, and normal tenant-scoped read/write checks pass.
+
+These gauges cover FIFO admission for top-level Bridge repository and maintenance transactions.
+They do not report non-transactional health/bootstrap/identity queries, PostgreSQL server connection state,
+other clients, or RDS account limits. Provider/server telemetry remains required before declaring a
+database saturation incident resolved.
+
 ## Identity outage
 
 OIDC is now an active dependency for authenticated web/API deployments. Symptoms include provider authorization/token failures, JWKS fetch or key-rotation errors, valid users receiving `UNAUTHENTICATED`, or a broad increase in `401` metrics. Readiness still checks the canonical repository only, so an identity outage may leave `/health/ready` green.

@@ -7,7 +7,7 @@
 | Last updated | 2026-08-30, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Latest implementation slice | Completing BRG-002 with deployable web and worker liveness/readiness surfaces, bounded sanitized dependency probes, and documented per-application health semantics on feature branch `codex/application-health-surfaces` |
+| Latest implementation slice | Adding BRG-104 FIFO PostgreSQL transaction admission, bounded process-pressure metrics, and portable saturation dashboard/alert coverage on feature branch `codex/database-admission-telemetry` |
 | Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, privacy-safe API/MCP authentication outcome metrics and failure logs, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching and deployable SES composition, normalized SES/Slack provider feedback recording with tenant-safe matching and feedback-aware retry suppression, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export with trusted request-source and question policy/assignment provenance plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, deployment-ready API/MCP/web/worker health surfaces with CLI doctor diagnostics, a project-scoped pilot support view with persisted bounded adapter diagnostics, recent adapter diagnostic history and derived trends, Slack Incoming Webhook and AWS SES notification adapters, a deployable maintenance-role outbox worker, the in-app User Guide onboarding surface, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; tenant-attributed authentication audit policy, external scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live provider webhook/signature validation, live GitHub/identity-provider validation, live Slack/SES account and deployment validation, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, privacy-safe failed/unknown authentication outcome telemetry without tenant attribution, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, runtime-only secret-managed email addresses, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe email/Slack delivery receipts with normalized provider feedback, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until tenant-attributed authentication audit policy, external scope issuance, broader DLP, deployment, live provider webhook/database/audit validation, and provider-specific ingress verification are complete |
 
@@ -2225,7 +2225,7 @@ Implemented and locally verified:
 
 Deliberate boundaries:
 
-- Metrics remain process-local and reset on restart. Production scraping, storage, dashboard hosting, monitoring-network controls, rule evaluation, paging routes, and PostgreSQL pool saturation telemetry remain deployment responsibilities.
+- Metrics remain process-local and reset on restart. Production scraping, storage, dashboard hosting, monitoring-network controls, rule evaluation, paging routes, and PostgreSQL/RDS server-connection saturation telemetry remain deployment responsibilities; Bridge-owned transaction admission pressure is covered in section 20.111.
 - Jitter changes only asynchronous delivery timing. It cannot roll back a canonical REST write, alter a notification payload, accept a decision, approve a specification, or widen MCP/human authority.
 
 ### 20.73 Implemented role-aware derived question views (BRG-120)
@@ -2730,7 +2730,8 @@ Deliberate boundaries:
 Deliberate boundaries:
 
 - The counters are process-local and reset on restart; hosted aggregation, alert routing, and
-  PostgreSQL pool saturation remain deployment-owned BRG-104 work.
+  PostgreSQL/RDS server-connection saturation remain deployment-owned BRG-104 work. Bridge-owned
+  transaction admission pressure is covered in section 20.111.
 - Labels are intentionally fixed and omit tenant, project, principal, record, request content,
   and error text. The counters do not turn a conflict into an automatic retry or approval.
 
@@ -3149,6 +3150,39 @@ Deliberate boundaries:
 - No REST business contract, MCP tool, persistence schema, migration, human authority, or production
   database command was added. REST remains canonical and MCP remains optional.
 
+### 20.111 Added bounded PostgreSQL transaction admission telemetry (BRG-104)
+
+Implemented and locally verified:
+
+1. Every durable store now creates a FIFO transaction-admission boundary with the same validated
+   capacity as its Postgres.js connection maximum. API and MCP use the `application` mode; the
+   worker uses its separately configured `maintenance` mode.
+2. Top-level repository transactions and the worker's direct outbox/digest claim transactions must
+   acquire a slot before entering Postgres.js. Nested repository transactions reuse the parent slot,
+   and `finally` release preserves capacity after successful or failed work.
+3. The shared process-local registry exports configured, in-use, and waiting slot gauges plus an
+   admission-wait histogram using only the controlled `application`/`maintenance` label. No tenant,
+   project, principal, record, SQL, URL, or content label is added.
+4. The portable pilot dashboard now shows utilization, waiters, and p95 admission delay. A sustained
+   90% utilization or any queued work triggers the database transaction-saturation rule after five
+   minutes, with an incident procedure that requires provider correlation before capacity changes.
+5. Observability and database tests cover rendering, initial state, FIFO ordering, pressure, wait
+   duration, invalid capacity, and slot release after failure. Focused package tests and type checks
+   pass, and `pnpm check` passes across repository gates, contracts, security, type checks, tests,
+   builds, and packaged CLI smoke coverage. The opt-in PostgreSQL integration suite was correctly
+   skipped because no explicit isolated `BRIDGE_TEST_DATABASE_URL` was supplied.
+
+Deliberate boundaries:
+
+- These are Bridge process admission signals, not PostgreSQL/RDS server or connection-pool truth.
+  Non-transactional health/bootstrap/identity queries, other clients, server locks, and provider limits
+  remain outside the metric and require deployment-owned telemetry.
+- The admission boundary limits concurrent top-level transactions without changing tenant policy,
+  transaction isolation, application commands, or the REST/MCP contract. It does not authorize
+  direct database access or weaken human approval.
+- No schema, migration, production database command, hosted collector, paging route, or production
+  readiness claim is included.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -3175,6 +3209,7 @@ Deliberate boundaries:
 - Persisted-content secret detector: `packages/application/src/content-security.ts`
 - Database schema: `packages/database/src/schema.ts`
 - PostgreSQL repository: `packages/database/src/repository.ts`
+- PostgreSQL transaction admission boundary: `packages/database/src/transaction-admission.ts`
 - Project repository metadata schema/mappers: `packages/database/src/schema.ts`, `packages/database/src/mappers.ts`
 - Initial migration: `packages/database/drizzle/0000_nice_bulldozer.sql`
 - Agent-run migration: `packages/database/drizzle/0001_early_ricochet.sql`

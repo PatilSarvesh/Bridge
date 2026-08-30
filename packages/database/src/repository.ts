@@ -34,6 +34,8 @@ import type {
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
+import type { PostgresTransactionAdmission } from "./transaction-admission.js";
+
 import {
   artifactFromRows,
   adapterDiagnosticFromRow,
@@ -226,7 +228,12 @@ export class PostgresBridgeRepository implements BridgeRepository {
     private readonly metrics?: BridgeMetrics,
     private readonly transactionContext?: RepositoryTransactionContext,
     private readonly allowMaintenance = false,
+    private readonly transactionAdmission?: PostgresTransactionAdmission,
   ) {}
+
+  private runAdmittedTransaction<T>(work: () => Promise<T>): Promise<T> {
+    return this.transactionAdmission ? this.transactionAdmission.run(work) : work();
+  }
 
   private async lookupServiceToken(tokenHash: string): Promise<ServiceTokenLookupRow | undefined> {
     const rows = await this.database.execute<ServiceTokenLookupRow>(sql`
@@ -286,17 +293,26 @@ export class PostgresBridgeRepository implements BridgeRepository {
     let outcome: "success" | "error" = "success";
 
     try {
-      return await this.database.transaction(
-        async (transaction) => {
-          const scopedDatabase = transaction as unknown as BridgeDatabase;
-          if (context?.organizationId) {
-            await scopedDatabase.execute(
-              sql`select set_config('bridge.organization_id', ${context.organizationId}, true)`,
-            );
-          }
-          return work(new PostgresBridgeRepository(scopedDatabase, true, this.metrics, context, this.allowMaintenance));
-        },
-        { isolationLevel: "serializable" },
+      return await this.runAdmittedTransaction(() =>
+        this.database.transaction(
+          async (transaction) => {
+            const scopedDatabase = transaction as unknown as BridgeDatabase;
+            if (context?.organizationId) {
+              await scopedDatabase.execute(
+                sql`select set_config('bridge.organization_id', ${context.organizationId}, true)`,
+              );
+            }
+            return work(new PostgresBridgeRepository(
+              scopedDatabase,
+              true,
+              this.metrics,
+              context,
+              this.allowMaintenance,
+              this.transactionAdmission,
+            ));
+          },
+          { isolationLevel: "serializable" },
+        ),
       );
     } catch (error) {
       outcome = "error";
@@ -1694,14 +1710,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     if (this.lockAggregateReads) {
       return this.claimDeferredEmailDeliveriesInTransaction(this.database, now, limit, leaseMs);
     }
-    return this.database.transaction(async (transaction) =>
-      new PostgresBridgeRepository(
-        transaction as unknown as BridgeDatabase,
-        true,
-        this.metrics,
-        { maintenance: true },
-        true,
-      ).claimDeferredEmailDeliveries(now, limit, leaseMs),
+    return this.runAdmittedTransaction(() =>
+      this.database.transaction(async (transaction) =>
+        new PostgresBridgeRepository(
+          transaction as unknown as BridgeDatabase,
+          true,
+          this.metrics,
+          { maintenance: true },
+          true,
+          this.transactionAdmission,
+        ).claimDeferredEmailDeliveries(now, limit, leaseMs),
+      ),
     );
   }
 
@@ -1757,14 +1776,17 @@ export class PostgresBridgeRepository implements BridgeRepository {
     }
     if (this.lockAggregateReads) return this.claimOutboxEventsInTransaction(this.database, now, limit);
 
-    return this.database.transaction(async (transaction) =>
-      new PostgresBridgeRepository(
-        transaction as unknown as BridgeDatabase,
-        true,
-        this.metrics,
-        { maintenance: true },
-        true,
-      ).claimOutboxEvents(now, limit),
+    return this.runAdmittedTransaction(() =>
+      this.database.transaction(async (transaction) =>
+        new PostgresBridgeRepository(
+          transaction as unknown as BridgeDatabase,
+          true,
+          this.metrics,
+          { maintenance: true },
+          true,
+          this.transactionAdmission,
+        ).claimOutboxEvents(now, limit),
+      ),
     );
   }
 

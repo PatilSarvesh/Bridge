@@ -136,6 +136,13 @@ describe("Bridge observability primitives", () => {
       candidateCount: 12,
     });
     metrics.recordDatabaseTransaction({ backend: "postgresql", outcome: "success", durationMs: 20 });
+    metrics.recordDatabaseTransactionAdmission({
+      mode: "application",
+      capacity: 10,
+      inUse: 9,
+      waiting: 2,
+      waitDurationMs: 25,
+    });
     metrics.recordIdempotency({ operation: "question_submit", outcome: "created" });
     metrics.recordIdempotency({ operation: "question_submit", outcome: "reused_accepted" });
     metrics.recordConflict();
@@ -236,10 +243,31 @@ describe("Bridge observability primitives", () => {
       expect.objectContaining({ name: "bridge_outbox_last_cycle_claimed", value: 3 }),
       expect.objectContaining({ name: "bridge_outbox_oldest_claimed_age_seconds", value: 12 }),
       expect.objectContaining({ name: "bridge_outbox_last_cycle_timestamp_seconds", value: 1_786_320_000 }),
+      expect.objectContaining({
+        name: "bridge_database_transaction_slots_capacity",
+        labels: { mode: "application" },
+        value: 10,
+      }),
+      expect.objectContaining({
+        name: "bridge_database_transaction_slots_in_use",
+        labels: { mode: "application" },
+        value: 9,
+      }),
+      expect.objectContaining({
+        name: "bridge_database_transaction_slots_waiting",
+        labels: { mode: "application" },
+        value: 2,
+      }),
     ]));
     expect(snapshot.histograms).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "bridge_context_candidate_count", count: 1, sum: 12 }),
       expect.objectContaining({ name: "bridge_http_request_duration_seconds", count: 1, sum: 0.125 }),
+      expect.objectContaining({
+        name: "bridge_database_transaction_admission_wait_duration_seconds",
+        labels: { mode: "application" },
+        count: 1,
+        sum: 0.025,
+      }),
     ]));
 
     const rendered = metrics.renderPrometheus();
@@ -253,6 +281,9 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain('bridge_conflicts_total 1');
     expect(rendered).toContain('bridge_mcp_sessions_total{outcome="failed"} 1');
     expect(rendered).toContain('bridge_mcp_tool_duration_seconds_bucket{le="+Inf",tool="bridge_get_context"} 1');
+    expect(rendered).toContain('bridge_database_transaction_slots_capacity{mode="application"} 10');
+    expect(rendered).toContain('bridge_database_transaction_slots_waiting{mode="application"} 2');
+    expect(rendered).toContain('bridge_database_transaction_admission_wait_duration_seconds_sum{mode="application"} 0.025');
     expect(rendered).not.toContain("ignored=true");
     expect(rendered).not.toContain("organizationId");
     expect(rendered).not.toContain("projectId=prj_");

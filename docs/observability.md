@@ -61,6 +61,7 @@ The registry records:
 - authentication outcomes by service and fixed flow/outcome (`authenticated`, `missing_credentials`, `invalid_credentials`, `authorization_denied`, or `configuration_error`), without tenant, project, principal, credential, or provider-response labels;
 - context success/error count, latency, result count, and candidate count;
 - in-memory/PostgreSQL transaction count, outcome, and duration;
+- configured, in-use, and waiting top-level PostgreSQL transaction admission slots plus admission wait duration, separated only by controlled `application`/`maintenance` mode;
 - most recent outbox-cycle timestamp and claim count, oldest claimed event age, processed work, retries, and dead letters;
 - email and Slack delivery/policy outcome and handler duration.
 - high-confidence content-secret rejections by controlled content and detector type, without tenant, project, principal, record, or matched-value labels.
@@ -77,7 +78,7 @@ Authentication outcome metrics are diagnostic transport signals, not audit recor
 ## Remaining BRG-104 work
 
 - OpenTelemetry spans/export and production collector wiring.
-- Stable PostgreSQL pool-utilization telemetry supplied by the selected deployment/provider.
+- Stable PostgreSQL/RDS server-connection and pool-utilization telemetry supplied by the selected deployment/provider. Bridge transaction admission metrics are process pressure, not provider saturation proof, and do not cover non-transactional health/bootstrap/identity queries.
 - Production scraping/collector integration and evaluation of the included alert rules for every deployed API, MCP, and worker instance.
 - Validation and tuning of the initial service objectives against representative pilot telemetry.
 - Deployment-owned log access control, retention, and audit evidence.

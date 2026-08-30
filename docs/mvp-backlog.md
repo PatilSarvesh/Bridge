@@ -1066,7 +1066,7 @@ Acceptance criteria:
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/authentication/authorization/context/database/outbox/notification metrics, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, PostgreSQL pool saturation, and pilot calibration remain
+- **Status:** Partial — bounded correlation and safe logs, process-local API/MCP/worker Prometheus export, request/authentication/authorization/context/database/outbox/notification metrics, bounded top-level PostgreSQL transaction admission and pressure signals, bounded MCP session/tool metrics, fixed-vocabulary idempotency/conflict metrics, a pilot dashboard, Prometheus-compatible alert rules, and initial objectives are implemented; production collection/alert delivery, provider/server connection saturation telemetry, and pilot calibration remain
 - **Dependencies:** BRG-002, BRG-090
 - **PRD references:** Non-functional requirements, success guardrails
 

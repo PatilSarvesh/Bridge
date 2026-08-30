@@ -170,6 +170,45 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "Database transaction slot utilization",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 48 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "max by (job, instance, mode) (bridge_database_transaction_slots_in_use) / clamp_min(max by (job, instance, mode) (bridge_database_transaction_slots_capacity), 1)",
+          "legendFormat": "{{job}} {{instance}} {{mode}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Database transactions waiting for a slot",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 48 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "max by (job, instance, mode) (bridge_database_transaction_slots_waiting)",
+          "legendFormat": "{{job}} {{instance}} {{mode}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Database transaction admission p95 wait",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 48 },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job, instance, mode) (rate(bridge_database_transaction_admission_wait_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{job}} {{instance}} {{mode}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -180,5 +219,5 @@
   "timezone": "browser",
   "title": "Bridge pilot operations",
   "uid": "bridge-pilot-operations",
-  "version": 3
+  "version": 4
 }
