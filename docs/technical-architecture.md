@@ -1065,10 +1065,16 @@ source/credential key plus route, method, and auth/read/write bucket. The standa
 applies the same bounded policy at the `/mcp` HTTP transport and again by authenticated
 organization/principal/tool inside the MCP server. Allowed responses expose `RateLimit-Limit`,
 `RateLimit-Remaining`, and `RateLimit-Reset`; rejected requests return `429` with `Retry-After`
-and a sanitized `RATE_LIMITED` error. These controls prevent an unbounded local flood without
-storing credentials or customer content, but they are not a distributed gateway limiter or a
-tenant billing quota; production must add those deployment controls and calibrate them from pilot
-traffic.
+and a sanitized `RATE_LIMITED` error. After REST authentication, the API additionally checks a
+hashed organization/route quota and a hashed principal/route quota for the operation's read/write
+class. This consolidates one principal across credential rotation and network-source changes while
+limiting aggregate organization traffic. Principal admission runs first so a principal-denied retry
+does not consume shared organization allowance; unauthenticated failures never create tenant quota state.
+Allowed responses expose the more restrictive transport or principal policy without disclosing
+organization activity, while an exhausted organization quota returns only its bounded limit/reset
+envelope. These controls prevent an unbounded local flood without storing credentials or customer
+content, but they are not a distributed gateway limiter or a tenant billing quota; production must
+add those deployment controls and calibrate them from pilot traffic.
 
 ### 20.3 Agent-specific threats
 

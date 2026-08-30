@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 
-export type BridgeRateLimitBucket = "auth" | "read" | "write" | "mcp";
+export type BridgeRateLimitBucket =
+  | "auth"
+  | "read"
+  | "write"
+  | "mcp"
+  | "organization_read"
+  | "organization_write"
+  | "principal_read"
+  | "principal_write";
 
 export interface BridgeRateLimitPolicy {
   readonly maxRequests: number;
@@ -12,6 +20,10 @@ export const defaultBridgeRateLimitPolicies: Readonly<Record<BridgeRateLimitBuck
   read: { maxRequests: 240, windowMs: 60_000 },
   write: { maxRequests: 120, windowMs: 60_000 },
   mcp: { maxRequests: 120, windowMs: 60_000 },
+  organization_read: { maxRequests: 2_400, windowMs: 60_000 },
+  organization_write: { maxRequests: 1_200, windowMs: 60_000 },
+  principal_read: { maxRequests: 240, windowMs: 60_000 },
+  principal_write: { maxRequests: 120, windowMs: 60_000 },
 };
 
 export interface BridgeRateLimitOptions {
@@ -75,6 +87,22 @@ export class BridgeRateLimiter {
       read: normalizedPolicy(options.policies?.read, defaultBridgeRateLimitPolicies.read),
       write: normalizedPolicy(options.policies?.write, defaultBridgeRateLimitPolicies.write),
       mcp: normalizedPolicy(options.policies?.mcp, defaultBridgeRateLimitPolicies.mcp),
+      organization_read: normalizedPolicy(
+        options.policies?.organization_read,
+        defaultBridgeRateLimitPolicies.organization_read,
+      ),
+      organization_write: normalizedPolicy(
+        options.policies?.organization_write,
+        defaultBridgeRateLimitPolicies.organization_write,
+      ),
+      principal_read: normalizedPolicy(
+        options.policies?.principal_read,
+        defaultBridgeRateLimitPolicies.principal_read,
+      ),
+      principal_write: normalizedPolicy(
+        options.policies?.principal_write,
+        defaultBridgeRateLimitPolicies.principal_write,
+      ),
     };
   }
 

@@ -67,6 +67,8 @@ import {
 import type { BridgeService, ProjectSupportView } from "@bridge/application";
 import {
   BridgeMetrics,
+  type BridgeRateLimitBucket,
+  type BridgeRateLimitDecision,
   BridgeRateLimiter,
   correlationIdHeader,
   createSafeLogger,
@@ -75,7 +77,6 @@ import {
   resolveCorrelationId,
   runWithCorrelationContext,
 } from "@bridge/observability";
-import type { BridgeRateLimitBucket } from "@bridge/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -88,9 +89,10 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly metrics?: BridgeMetrics;
   readonly rateLimiter?: BridgeRateLimiter;
+  readonly authenticatedRateLimiter?: BridgeRateLimiter;
 }
 
-async function resolvePrincipal(
+async function authenticatePrincipal(
   request: FastifyRequest,
   options: BuildAppOptions,
 ): Promise<Principal> {
@@ -294,6 +296,57 @@ function apiRateLimitKey(request: FastifyRequest): string {
   return hashRateLimitKey("api", source, identityHint, request.method, route);
 }
 
+type AuthenticatedApiRateLimitBucket = Extract<
+  BridgeRateLimitBucket,
+  "organization_read" | "organization_write" | "principal_read" | "principal_write"
+>;
+
+function requiresAuthenticatedApiQuota(request: FastifyRequest): boolean {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (!route.startsWith("/v1/") || request.method === "OPTIONS") return false;
+  return route === "/v1/auth/me" || !route.startsWith("/v1/auth/");
+}
+
+function authenticatedApiQuotaBuckets(request: FastifyRequest): {
+  readonly organization: AuthenticatedApiRateLimitBucket;
+  readonly principal: AuthenticatedApiRateLimitBucket;
+} {
+  const suffix = request.method === "GET" || request.method === "HEAD" ? "read" : "write";
+  return {
+    organization: `organization_${suffix}`,
+    principal: `principal_${suffix}`,
+  };
+}
+
+function authenticatedApiQuotaKey(
+  request: FastifyRequest,
+  principal: Principal,
+  dimension: "organization" | "principal",
+): string {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "unknown";
+  return hashRateLimitKey(
+    "api-authenticated",
+    dimension,
+    principal.organizationId,
+    ...(dimension === "principal" ? [principal.id] : []),
+    request.method,
+    route,
+  );
+}
+
+function moreRestrictiveRateLimitDecision(
+  left: BridgeRateLimitDecision | undefined,
+  right: BridgeRateLimitDecision,
+): BridgeRateLimitDecision {
+  if (!left) return right;
+  const leftRemainingRatio = left.remaining / left.limit;
+  const rightRemainingRatio = right.remaining / right.limit;
+  if (leftRemainingRatio !== rightRemainingRatio) {
+    return leftRemainingRatio < rightRemainingRatio ? left : right;
+  }
+  return left.limit <= right.limit ? left : right;
+}
+
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const developmentPrincipalHeaderAllowed = options.allowDevelopmentPrincipalHeader ??
     process.env.NODE_ENV !== "production";
@@ -306,8 +359,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({ logger: false });
   const metrics = options.metrics ?? new BridgeMetrics();
   const rateLimiter = options.rateLimiter ?? new BridgeRateLimiter();
+  const authenticatedRateLimiter = options.authenticatedRateLimiter ?? new BridgeRateLimiter();
   const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
+  const transportRateLimitDecisionByRequest = new WeakMap<FastifyRequest, BridgeRateLimitDecision>();
+  const principalByRequest = new WeakMap<FastifyRequest, Principal>();
+  const resolvePrincipal = async (
+    request: FastifyRequest,
+    requestOptions: BuildAppOptions,
+  ): Promise<Principal> => {
+    const cached = principalByRequest.get(request);
+    if (cached) return cached;
+    const principal = await authenticatePrincipal(request, requestOptions);
+    principalByRequest.set(request, principal);
+    return principal;
+  };
   await app.register(cors, {
     origin: options.corsOrigin ?? true,
     credentials: true,
@@ -330,6 +396,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const bucket = apiRateLimitBucket(request);
     if (bucket) {
       const decision = rateLimiter.check(apiRateLimitKey(request), bucket);
+      transportRateLimitDecisionByRequest.set(request, decision);
       for (const [name, value] of Object.entries(rateLimitHeaders(decision))) reply.header(name, value);
       if (!decision.allowed) {
         metrics.recordRateLimitDenial({ service: "api", bucket });
@@ -347,6 +414,51 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       }
     }
     runWithCorrelationContext({ correlationId, source: "api" }, done);
+  });
+
+  app.addHook("preHandler", async (request, reply) => {
+    if (!requiresAuthenticatedApiQuota(request)) return;
+    const principal = await resolvePrincipal(request, options);
+    const buckets = authenticatedApiQuotaBuckets(request);
+    const principalDecision = authenticatedRateLimiter.check(
+      authenticatedApiQuotaKey(request, principal, "principal"),
+      buckets.principal,
+    );
+    const visibleDecision = moreRestrictiveRateLimitDecision(
+      transportRateLimitDecisionByRequest.get(request),
+      principalDecision,
+    );
+    for (const [name, value] of Object.entries(rateLimitHeaders(visibleDecision))) {
+      reply.header(name, value);
+    }
+    if (!principalDecision.allowed) {
+      reply.header("Retry-After", principalDecision.retryAfterSeconds.toString());
+      metrics.recordRateLimitDenial({ service: "api", bucket: buckets.principal });
+      throw new BridgeError(
+        "RATE_LIMITED",
+        "Too many requests. Retry later.",
+        429,
+        { retryAfterSeconds: principalDecision.retryAfterSeconds },
+      );
+    }
+
+    const organizationDecision = authenticatedRateLimiter.check(
+      authenticatedApiQuotaKey(request, principal, "organization"),
+      buckets.organization,
+    );
+    if (!organizationDecision.allowed) {
+      for (const [name, value] of Object.entries(rateLimitHeaders(organizationDecision))) {
+        reply.header(name, value);
+      }
+      reply.header("Retry-After", organizationDecision.retryAfterSeconds.toString());
+      metrics.recordRateLimitDenial({ service: "api", bucket: buckets.organization });
+      throw new BridgeError(
+        "RATE_LIMITED",
+        "Too many requests. Retry later.",
+        429,
+        { retryAfterSeconds: organizationDecision.retryAfterSeconds },
+      );
+    }
   });
 
   app.addHook("onResponse", (request, reply, done) => {

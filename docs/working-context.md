@@ -4,10 +4,10 @@
 |---|---|
 | Purpose | Durable handoff context for future implementation sessions and context compaction |
 | Status | Active; update after every meaningful product decision or implementation slice |
-| Last updated | 2026-08-29, Asia/Kolkata |
+| Last updated | 2026-08-30, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Latest implementation slice | BRG-100 trusted request-source plus question policy/assignment audit provenance; implemented and locally verified on feature branch `codex/brg-100-audit-routing-provenance`, pending review |
+| Latest implementation slice | BRG-101 authenticated organization/principal REST quotas; implementation, focused regressions, and the full `pnpm check` pass on feature branch `codex/brg-101-authenticated-rest-rate-limits`, pending pull-request review |
 | Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching and deployable SES composition, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export with trusted request-source and question policy/assignment provenance plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, Slack Incoming Webhook and AWS SES notification adapters, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack/SES account and deployment validation, provider feedback handling, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, runtime-only secret-managed email addresses, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe email/Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
@@ -2945,6 +2945,45 @@ Deliberate boundaries:
 - BRG-100 remains partial only for failed/unknown authentication attribution and production
   retention controls. REST remains canonical and MCP remains optional.
 
+### 20.105 Added authenticated organization/principal REST quotas (BRG-101)
+
+Implemented and full-check verified:
+
+1. Every protected `/v1` operation now resolves and caches its trusted principal in a central
+   Fastify pre-handler before consuming two process-local fixed-window quotas: one shared by the
+   organization and route, and one shared by the exact principal and route. Read and write classes
+   remain separate. The principal check runs first, so retries already denied for one principal do
+   not continue consuming the organization's shared allowance.
+2. Quota keys are SHA-256 hashes over controlled dimensions. Rotating a bearer token or changing a
+   source address no longer resets a principal quota, while principals in a different organization
+   never share organization quota state. Raw credentials, organization IDs, principal IDs, routes,
+   and content never enter limiter state labels or metrics.
+3. Public OIDC configuration/login/callback/logout routes retain only the existing pre-authentication
+   transport safeguard. Failed authentication never creates tenant quota state. Health and metrics
+   probes remain outside the `/v1` limiter boundary.
+4. Successful responses expose the more restrictive transport or principal limit without revealing
+   aggregate organization activity. Exhausted organization or principal quotas return the existing
+   sanitized `429 RATE_LIMITED` envelope, standard reset/retry headers, and a fixed-vocabulary
+   denial metric.
+5. Bounded environment settings tune the shared authenticated window and four organization/principal
+   read/write limits. Invalid values fail startup without echoing their contents; defaults preserve
+   the existing request envelope for ordinary local development.
+6. Observability and API regressions cover defaults and invalid configuration, token/source changes,
+   failed authentication, principal-denial isolation from the organization allowance, endpoint
+   independence, cross-principal organization aggregation, cross-tenant separation, sanitized
+   responses, headers, and privacy-safe metrics. This slice changes no REST schema, MCP requirement,
+   database record, migration, or human approval rule.
+
+Deliberate boundaries:
+
+- These quotas are bounded process-local abuse safeguards. A multi-instance deployment still needs
+  a distributed gateway limiter and calibrated organization/principal policy; Bridge does not claim
+  tenant billing quotas or production enforcement from in-process state.
+- Authentication, authorization, project membership, human approval, and application policy remain
+  authoritative. Quota admission never grants access or changes a governed record.
+- REST remains canonical and MCP remains optional. The existing MCP transport/tool limits are
+  unchanged by this REST-focused slice.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -3039,7 +3078,7 @@ Deliberate boundaries:
 - Slack pilot notification handler and Incoming Webhook sender: `apps/worker/src/slack.ts`
 - Correlation and safe structured logging: `packages/observability/src/index.ts`
 - Bounded metrics registry and Prometheus rendering: `packages/observability/src/metrics.ts`
-- Bounded transport rate limiter and privacy-safe rate-limit keys: `packages/observability/src/rate-limit.ts`
+- Bounded transport/authenticated rate limiter, privacy-safe keys, and API quota configuration: `packages/observability/src/rate-limit.ts`, `apps/api/src/rate-limit-config.ts`, and `apps/api/src/app.ts`
 - MCP HTTP rate-limit boundary: `apps/mcp/src/http-rate-limit.ts`, `apps/mcp/src/server.ts`
 - Observability behavior and boundaries: `docs/observability.md`
 - Product analytics definitions and privacy boundary: `docs/product-analytics.md`

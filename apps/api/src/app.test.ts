@@ -208,6 +208,209 @@ describe("Bridge API vertical slice", () => {
     );
   });
 
+  it("enforces authenticated principal quotas across credential changes per REST endpoint", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    let authenticationCount = 0;
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => {
+        authenticationCount += 1;
+        return demoPrincipals.architect;
+      },
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      authenticator,
+      metrics,
+      rateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: { read: { maxRequests: 100, windowMs: 60_000 } },
+      }),
+      authenticatedRateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: {
+          organization_read: { maxRequests: 10, windowMs: 60_000 },
+          principal_read: { maxRequests: 1, windowMs: 60_000 },
+        },
+      }),
+    });
+    apps.push(app);
+
+    const first = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      remoteAddress: "192.0.2.1",
+      headers: { authorization: "Bearer first-credential" },
+    });
+    const second = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      remoteAddress: "192.0.2.2",
+      headers: { authorization: "Bearer rotated-credential" },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers).toMatchObject({
+      "ratelimit-limit": "1",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "60",
+    });
+    expect(second.statusCode).toBe(429);
+    expect(second.headers).toMatchObject({
+      "ratelimit-limit": "1",
+      "ratelimit-remaining": "0",
+      "retry-after": "60",
+    });
+    expect(second.json()).toEqual({
+      code: "RATE_LIMITED",
+      message: "Too many requests. Retry later.",
+      details: { retryAfterSeconds: 60 },
+    });
+
+    const separateEndpoint = await app.inject({
+      method: "GET",
+      url: "/v1/principals",
+      headers: { authorization: "Bearer third-credential" },
+    });
+    expect(separateEndpoint.statusCode).toBe(200);
+    expect(authenticationCount).toBe(3);
+    const renderedMetrics = metrics.renderPrometheus();
+    expect(renderedMetrics).toContain(
+      'bridge_rate_limit_denials_total{bucket="principal_read",service="api"} 1',
+    );
+    expect(renderedMetrics).not.toContain("first-credential");
+    expect(renderedMetrics).not.toContain("rotated-credential");
+    expect(renderedMetrics).not.toContain(demoPrincipals.architect.id);
+  });
+
+  it("does not create authenticated quota state when authentication fails", async () => {
+    const runtime = await createDemoRuntime();
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async ({ authorization }) => {
+        if (!authorization) {
+          throw new BridgeError("UNAUTHENTICATED", "A valid bearer credential is required.", 401);
+        }
+        return demoPrincipals.architect;
+      },
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      authenticator,
+      rateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: { read: { maxRequests: 100, windowMs: 60_000 } },
+      }),
+      authenticatedRateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: {
+          organization_read: { maxRequests: 1, windowMs: 60_000 },
+          principal_read: { maxRequests: 1, windowMs: 60_000 },
+        },
+      }),
+    });
+    apps.push(app);
+
+    const unauthenticated = await app.inject({ method: "GET", url: "/v1/projects" });
+    expect(unauthenticated.statusCode).toBe(401);
+
+    const authenticated = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer valid-credential" },
+    });
+    expect(authenticated.statusCode).toBe(200);
+    expect(authenticated.headers).toMatchObject({
+      "ratelimit-limit": "1",
+      "ratelimit-remaining": "0",
+    });
+  });
+
+  it("enforces an organization quota across principals without crossing tenant boundaries", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    let currentPrincipal: Principal = demoPrincipals.architect;
+    const authenticator: AuthenticationProvider = {
+      mode: "oidc",
+      publicConfiguration: () => ({ mode: "oidc" }),
+      authenticateRequest: async () => currentPrincipal,
+      beginWebLogin: async () => { throw new Error("not used"); },
+      completeWebLogin: async () => { throw new Error("not used"); },
+      endWebSession: () => { throw new Error("not used"); },
+    };
+    const app = await buildApp({
+      service: runtime.service,
+      principals: runtime.principals,
+      authenticator,
+      metrics,
+      rateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: { read: { maxRequests: 100, windowMs: 60_000 } },
+      }),
+      authenticatedRateLimiter: new BridgeRateLimiter({
+        now: () => 0,
+        policies: {
+          organization_read: { maxRequests: 2, windowMs: 60_000 },
+          principal_read: { maxRequests: 1, windowMs: 60_000 },
+        },
+      }),
+    });
+    apps.push(app);
+
+    expect((await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer architect" },
+    })).statusCode).toBe(200);
+    expect((await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer architect-rotated" },
+    })).statusCode).toBe(429);
+    currentPrincipal = demoPrincipals.qaLead;
+    expect((await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer qa-lead" },
+    })).statusCode).toBe(200);
+    currentPrincipal = demoPrincipals.businessAnalyst;
+    const organizationDenied = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer business-analyst" },
+    });
+    expect(organizationDenied.statusCode).toBe(429);
+    expect(organizationDenied.headers).toMatchObject({
+      "ratelimit-limit": "2",
+      "ratelimit-remaining": "0",
+      "retry-after": "60",
+    });
+    expect(organizationDenied.body).not.toContain(demoPrincipals.architect.organizationId);
+
+    currentPrincipal = demoPrincipals.outsider;
+    expect((await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { authorization: "Bearer outsider" },
+    })).statusCode).toBe(200);
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_rate_limit_denials_total{bucket="organization_read",service="api"} 1',
+    );
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_rate_limit_denials_total{bucket="principal_read",service="api"} 1',
+    );
+  });
+
   it("distinguishes liveness from dependency-backed readiness without leaking failures", async () => {
     const metrics = new BridgeMetrics();
     const runtime = await createDemoRuntime({ serviceOptions: { metrics } });

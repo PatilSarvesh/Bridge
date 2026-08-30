@@ -2,6 +2,7 @@ import { OidcAuthenticator, type OidcConfiguration } from "@bridge/auth";
 import { BridgeMetrics } from "@bridge/observability";
 
 import { buildApp } from "./app.js";
+import { createAuthenticatedApiRateLimiter } from "./rate-limit-config.js";
 import { createRuntimeForServer } from "./runtime-bootstrap.js";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -17,6 +18,7 @@ if (process.env.NODE_ENV === "production" && oidcEnabled && !databaseUrl) {
   throw new Error("DATABASE_URL is required for durable production organization membership.");
 }
 const metrics = new BridgeMetrics();
+const authenticatedRateLimiter = createAuthenticatedApiRateLimiter();
 const { runtime, postgresStore } = await createRuntimeForServer({
   ...(databaseUrl ? { databaseUrl } : {}),
   ...(devSeedDatabaseUrl ? { devSeedDatabaseUrl } : {}),
@@ -118,6 +120,7 @@ const app = await buildApp({
   ...(authenticator ? { corsOrigin: new URL(publicWebUrl).origin } : {}),
   logger: true,
   metrics,
+  authenticatedRateLimiter,
 });
 
 if (postgresStore) {

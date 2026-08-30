@@ -4,7 +4,7 @@
 |---|---|
 | Status | Active implementation and follow-up tracker |
 | Version | 0.1 |
-| Last updated | 2026-08-29 |
+| Last updated | 2026-08-30 |
 | Product requirements | [Bridge PRD](./bridge-prd.md) |
 | Technical design | [Bridge Technical Architecture](./technical-architecture.md) |
 | Approved choices | [Bridge Pilot Decisions](./pilot-decisions.md) |
@@ -991,7 +991,7 @@ record remain readable through an explicit legacy fallback.
 
 - **Priority:** P0
 - **Size:** L
-- **Status:** Partial — Zod schemas, collection/length limits, request rate limits, safe text rendering, dependency-free Markdown block rendering without raw HTML injection, bounded client link destinations, URL validation, shared high-confidence secret blocking with privacy-safe metrics, and explicit untrusted-context labeling are implemented; broader DLP/redaction policy and richer per-tenant quotas remain
+- **Status:** Partial — Zod schemas, collection/length limits, pre-authentication transport limits, authenticated process-local organization/principal REST quotas, MCP transport/tool limits, safe text rendering, dependency-free Markdown block rendering without raw HTML injection, bounded client link destinations, URL validation, shared high-confidence secret blocking with privacy-safe metrics, and explicit untrusted-context labeling are implemented; broader DLP/redaction policy and distributed multi-instance quotas remain
 - **Dependencies:** BRG-030, BRG-052, BRG-080
 - **PRD references:** Security and privacy requirements
 
@@ -1015,10 +1015,13 @@ as a system, developer, or policy instruction. This is an explicit handling sign
 that content is safe to execute or that broader DLP/redaction has been implemented.
 
 Implementation note: the API applies bounded process-local fixed-window limits to `/v1` routes by
-hashed source/credential, route, method, and read/write/auth bucket. The standalone MCP process
-limits both the HTTP transport and authenticated tool calls with standard `RateLimit-*` headers,
-`Retry-After`, and a `429 RATE_LIMITED` response. Deployment gateways still need distributed
-organization/principal quotas and calibrated limits before production.
+hashed source/credential, route, method, and read/write/auth bucket. After a trusted principal is
+resolved, each protected REST operation also consumes a hashed organization/endpoint and
+principal/endpoint quota for its read/write class; public auth routes and failed authentication do
+not create tenant quota state. The standalone MCP process limits both the HTTP transport and
+authenticated tool calls with standard `RateLimit-*` headers, `Retry-After`, and a `429
+RATE_LIMITED` response. Deployment gateways still need distributed organization/principal quotas
+and calibrated limits before production.
 
 ### BRG-102 — Verify authorization and tenant isolation matrix
 
