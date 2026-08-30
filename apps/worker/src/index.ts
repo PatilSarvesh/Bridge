@@ -206,11 +206,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const runtime = createConfiguredWorker(configuration);
       let metricsServer: Awaited<ReturnType<typeof startWorkerMetricsServer>> | undefined;
       try {
-        await runtime.store.repository.checkHealth();
         metricsServer = await startWorkerMetricsServer({
           metrics: runtime.metrics,
           host: configuration.metricsHost,
           port: configuration.metricsPort,
+          checkReadiness: runtime.checkReadiness,
           logger,
         });
         logger.info("service.started", {
@@ -218,7 +218,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           pollIntervalMs: configuration.pollIntervalMs,
           batchSize: configuration.batchSize,
           metricsPort: metricsServer.port,
-          status: "ready",
+          status: "running",
         });
         await runOutboxWorker({
           store: runtime.store.repository,

@@ -100,6 +100,7 @@ Responsibilities:
 - Inbox, question discussion, decision acceptance, artifact review, assumptions, and run views.
 - Administrative configuration for ownership, roles, policy, and integrations.
 - No direct database access from the browser.
+- Expose dependency-free liveness and bounded API-aware readiness without reflecting upstream errors or configuration.
 
 The web application calls the public API with an encrypted OIDC session cookie in authenticated mode. Local development can instead use a fixed principal identifier; production startup rejects that mechanism.
 
@@ -141,6 +142,7 @@ Responsibilities:
 - Perform duplicate suggestions, conflict scans, scheduled assumption expiry, overdue blocking-question escalation, and impact analysis.
 - Synchronize external links and integration metadata.
 - Retry transient failures with bounded exponential backoff and dead-letter handling.
+- Expose liveness, maintenance-repository readiness, and Prometheus metrics from one bounded operations listener; provider degradation does not make the durable queue process unready.
 
 ### 5.5 CLI
 
@@ -1181,11 +1183,12 @@ These are implementation defaults, not product SLAs, and must be tuned from pilo
 
 ### 23.4 Health semantics
 
-- `GET /health/live` reports only that the API or MCP HTTP process can serve a request. The API's legacy `GET /health` remains a liveness alias.
-- `GET /health/ready` calls the application repository health boundary. It returns `200` when the dependency responds and a sanitized `503` when it does not.
+- `GET /health/live` reports only that the API, MCP, web, or worker HTTP process can serve a request. API and worker keep `GET /health` as a liveness alias.
+- API and MCP `GET /health/ready` call the application repository health boundary. Worker readiness calls the same boundary through its separately configured maintenance repository. Each returns `200` when the dependency responds and a sanitized `503` when it does not.
+- Web `GET /health/ready` performs a bounded, non-cached server-side probe of the canonical API readiness endpoint. Its target comes only from trusted deployment configuration, rejects credential-bearing, non-HTTP(S), and self-referential URLs, and never copies an upstream body or error into its response.
 - Liveness must not depend on PostgreSQL, because restarting a healthy process does not repair a database outage. Traffic routing and rollout gates use readiness.
 - Notification-provider failure is degraded delivery, not core API unavailability while canonical PostgreSQL state remains writable. Queue/provider telemetry belongs to BRG-104.
-- Worker and CLI are command/process surfaces rather than HTTP services; long-running worker health reporting remains deployment/observability work.
+- The long-running worker starts its loopback-default operations listener before polling and keeps retrying repository work during an outage, allowing liveness to remain green while readiness is red. `bridge doctor` is the CLI health command and continues to verify API/repository, project, instruction, and optional MCP state through canonical transports.
 
 ### 23.5 Pilot readiness evidence boundary
 

@@ -1,4 +1,4 @@
-import { BridgeService } from "@bridge/application";
+import { BridgeService, type BridgeReadiness } from "@bridge/application";
 import { createPostgresBridgeStore, type PostgresBridgeStore } from "@bridge/database";
 import { BridgeMetrics, createSafeLogger, type SafeLogger } from "@bridge/observability";
 
@@ -79,6 +79,7 @@ export interface ConfiguredWorker {
   readonly assumptionExpiryCycle: AssumptionExpiryCycle;
   readonly blockingQuestionEscalationCycle: BlockingQuestionEscalationCycle;
   readonly metrics: BridgeMetrics;
+  readonly checkReadiness: () => Promise<BridgeReadiness>;
   readonly close: () => Promise<void>;
   readonly emailDigestCycle?: () => Promise<EmailDigestCycleResult>;
 }
@@ -283,6 +284,7 @@ export function createConfiguredWorker(
     blockingQuestionEscalationCycle: () => service.escalateDueBlockingQuestions(),
     ...(emailDigestCycle ? { emailDigestCycle } : {}),
     metrics,
+    checkReadiness: () => service.checkReadiness(),
     close: store.close,
   };
 }

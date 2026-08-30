@@ -163,7 +163,26 @@ Human project administrators can separately download a bounded governed-data arc
 
 ## Operational health and recovery
 
-The API and standalone MCP service expose `GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness. The API keeps `GET /health` as a compatibility liveness alias. Readiness returns `503` with a sanitized dependency result when PostgreSQL is unavailable; load balancers should route traffic using readiness, not the compatibility endpoint.
+Every deployable service now has an explicit health surface. API and standalone MCP expose
+`GET /health/live` for process liveness and `GET /health/ready` for repository-backed readiness.
+Web exposes the same paths on port `3000`; its readiness probe makes one bounded server-side call to
+the canonical API readiness endpoint configured by `BRIDGE_WEB_API_URL` (falling back to
+`NEXT_PUBLIC_BRIDGE_API_URL`). The worker operations listener on `127.0.0.1:4200` serves those
+health paths beside `/metrics`; worker readiness checks only its maintenance PostgreSQL repository,
+not Slack or SES. API and worker keep `GET /health` as a compatibility liveness alias. Readiness
+returns `503` with a sanitized dependency result when a required dependency is unavailable;
+load balancers and rollout gates should use readiness, not the compatibility endpoint.
+
+```bash
+curl --fail http://127.0.0.1:3000/health/live
+curl --fail http://127.0.0.1:3000/health/ready
+curl --fail http://127.0.0.1:4000/health/ready
+# When the durable worker is running:
+curl --fail http://127.0.0.1:4200/health/ready
+```
+
+`bridge doctor` remains the CLI health command: it checks API/repository readiness, project mapping,
+generated instructions, and the optional MCP endpoint without creating a second business boundary.
 
 Bridge includes a read-only verifier for an already restored, isolated PostgreSQL database:
 
