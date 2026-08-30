@@ -3978,8 +3978,11 @@ export class BridgeService {
         }
       }
       const pending = deliveries.filter((delivery) => !delivery.feedback);
-      const updatedAt = this.now().toISOString();
+      const feedbackObservedAt = this.now().toISOString();
       for (const delivery of pending) {
+        const updatedAt = new Date(
+          Math.max(Date.parse(delivery.updatedAt), Date.parse(feedbackObservedAt)),
+        ).toISOString();
         const {
           digestAvailableAt: _digestAvailableAt,
           digestLeaseUntil: _digestLeaseUntil,
