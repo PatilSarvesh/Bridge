@@ -3,6 +3,7 @@ import type { BridgeRateLimitBucket } from "./rate-limit.js";
 export type BridgeServiceName = "api" | "mcp" | "worker";
 export type BridgeRequestOutcome = "success" | "client_error" | "server_error";
 export type BridgeDatabaseBackend = "memory" | "postgresql";
+export type BridgeDatabaseConnectionMode = "application" | "maintenance";
 export type BridgeOperationOutcome = "success" | "error";
 export type BridgeMcpSessionOutcome = "initialized" | "failed";
 export type BridgeAuthenticationFlow = "api" | "mcp" | "web_callback" | "web_logout";
@@ -126,6 +127,14 @@ export interface DatabaseTransactionMetric {
   readonly durationMs: number;
 }
 
+export interface DatabaseTransactionAdmissionMetric {
+  readonly mode: BridgeDatabaseConnectionMode;
+  readonly capacity: number;
+  readonly inUse: number;
+  readonly waiting: number;
+  readonly waitDurationMs?: number;
+}
+
 export interface OutboxCycleMetric {
   readonly claimed: number;
   readonly processed: number;
@@ -220,6 +229,23 @@ const definitions = {
   databaseTransactionDuration: {
     name: "bridge_database_transaction_duration_seconds",
     help: "Bridge repository transaction duration in seconds.",
+    buckets: secondsBuckets,
+  },
+  databaseTransactionSlotsCapacity: {
+    name: "bridge_database_transaction_slots_capacity",
+    help: "Configured Bridge top-level PostgreSQL transaction admission capacity.",
+  },
+  databaseTransactionSlotsInUse: {
+    name: "bridge_database_transaction_slots_in_use",
+    help: "Bridge top-level PostgreSQL transactions currently holding an admission slot.",
+  },
+  databaseTransactionSlotsWaiting: {
+    name: "bridge_database_transaction_slots_waiting",
+    help: "Bridge top-level PostgreSQL transactions waiting for an admission slot.",
+  },
+  databaseTransactionAdmissionWaitDuration: {
+    name: "bridge_database_transaction_admission_wait_duration_seconds",
+    help: "Time Bridge top-level PostgreSQL transactions wait for an admission slot.",
     buckets: secondsBuckets,
   },
   idempotencyOperations: {
@@ -400,6 +426,20 @@ export class BridgeMetrics {
       labels,
       finiteNonNegative(metric.durationMs) / 1_000,
     );
+  }
+
+  recordDatabaseTransactionAdmission(metric: DatabaseTransactionAdmissionMetric): void {
+    const labels = { mode: metric.mode };
+    this.setGauge(definitions.databaseTransactionSlotsCapacity, labels, countValue(metric.capacity));
+    this.setGauge(definitions.databaseTransactionSlotsInUse, labels, countValue(metric.inUse));
+    this.setGauge(definitions.databaseTransactionSlotsWaiting, labels, countValue(metric.waiting));
+    if (metric.waitDurationMs !== undefined) {
+      this.observe(
+        definitions.databaseTransactionAdmissionWaitDuration,
+        labels,
+        finiteNonNegative(metric.waitDurationMs) / 1_000,
+      );
+    }
   }
 
   recordIdempotency(metric: IdempotencyMetric): void {

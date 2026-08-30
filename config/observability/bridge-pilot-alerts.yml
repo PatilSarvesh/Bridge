@@ -50,6 +50,22 @@ groups:
           summary: PostgreSQL transactions or readiness indicate exhaustion or unavailability
           runbook: docs/runbooks/incidents.md
 
+      - alert: BridgeDatabaseTransactionSaturation
+        expr: |
+          max(
+            bridge_database_transaction_slots_in_use
+            /
+            clamp_min(bridge_database_transaction_slots_capacity, 1)
+          ) >= 0.90
+          or max(bridge_database_transaction_slots_waiting) > 0
+        for: 5m
+        labels:
+          severity: page
+          service: bridge-database
+        annotations:
+          summary: Bridge PostgreSQL transaction admission is saturated or queued
+          runbook: docs/runbooks/incidents.md
+
       - alert: BridgeOutboxBacklog
         expr: |
           max(bridge_outbox_oldest_claimed_age_seconds) > 300
