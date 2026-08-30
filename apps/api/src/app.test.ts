@@ -1366,6 +1366,12 @@ describe("Bridge API vertical slice", () => {
           checkCount: 2,
           passedCheckCount: 2,
           failingCheckNames: [],
+          history: [],
+          trend: {
+            direction: "insufficient_data",
+            observationCount: 1,
+            healthyObservationCount: 1,
+          },
         }),
       ],
     });

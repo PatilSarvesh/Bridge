@@ -3572,6 +3572,16 @@ describe("Bridge decision workflow", () => {
     await service.recordAdapterDiagnostic(agent, project.id, {
       client: "codex",
       capabilities: ["instructions", "cli", "mcp"],
+      mcpStatus: "failed",
+      checks: [
+        { name: "api", status: "pass" },
+        { name: "project-config", status: "pass" },
+        { name: "mcp", status: "fail" },
+      ],
+    });
+    await service.recordAdapterDiagnostic(agent, project.id, {
+      client: "codex",
+      capabilities: ["instructions", "cli", "mcp"],
       mcpStatus: "ready",
       checks: [
         { name: "api", status: "pass" },
@@ -3636,6 +3646,18 @@ describe("Bridge decision workflow", () => {
         checkCount: 3,
         passedCheckCount: 3,
         failingCheckNames: [],
+        history: [expect.objectContaining({
+          status: "fail",
+          mcpStatus: "failed",
+          checkCount: 3,
+          passedCheckCount: 2,
+          failingCheckNames: ["mcp"],
+        })],
+        trend: expect.objectContaining({
+          direction: "improving",
+          observationCount: 2,
+          healthyObservationCount: 1,
+        }),
       }),
       expect.objectContaining({
         client: "claude_code",
@@ -3651,6 +3673,32 @@ describe("Bridge decision workflow", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(service.getProjectSupport(agent, project.id))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("keeps adapter diagnostic history bounded and tenant-safe", async () => {
+    const { service } = await runtime();
+    for (let index = 0; index < 22; index += 1) {
+      const failed = index % 2 === 0;
+      await service.recordAdapterDiagnostic(agent, project.id, {
+        client: "codex",
+        capabilities: ["cli"],
+        mcpStatus: failed ? "failed" : "not_configured",
+        checks: [{ name: "api", status: failed ? "fail" : "pass" }],
+      });
+    }
+
+    const support = await service.getProjectSupport(owner, project.id);
+    const [diagnostic] = support.diagnostics;
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic!.history).toHaveLength(20);
+    expect(diagnostic!.trend).toEqual(expect.objectContaining({
+      direction: "improving",
+      observationCount: 21,
+      healthyObservationCount: 11,
+    }));
+    expect(JSON.stringify(diagnostic)).not.toContain(agent.id);
+    await expect(service.getProjectSupport(outsider, project.id))
+      .rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
   });
 
   it("elevates security questions and prevents cross-tenant access", async () => {

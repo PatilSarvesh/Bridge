@@ -352,6 +352,17 @@ export interface AgentRun {
   readonly version: number;
 }
 
+export const ADAPTER_DIAGNOSTIC_HISTORY_LIMIT = 20;
+
+export interface AdapterDiagnosticHistoryEntry {
+  readonly status: "pass" | "fail";
+  readonly mcpStatus: AdapterDiagnosticMcpStatus;
+  readonly checkCount: number;
+  readonly passedCheckCount: number;
+  readonly failingCheckNames: readonly AdapterDiagnosticCheckName[];
+  readonly observedAt: string;
+}
+
 export interface AdapterDiagnostic {
   readonly organizationId: string;
   readonly projectId: string;
@@ -367,6 +378,8 @@ export interface AdapterDiagnostic {
   }[];
   readonly status: "pass" | "fail";
   readonly observedAt: string;
+  /** Prior bounded observations for this project/client; the current row is stored separately. */
+  readonly history: readonly AdapterDiagnosticHistoryEntry[];
 }
 
 export interface Assumption {

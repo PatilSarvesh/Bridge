@@ -518,6 +518,7 @@ export function adapterDiagnosticToRow(
     checks: diagnostic.checks,
     status: diagnostic.status,
     observedAt: diagnostic.observedAt,
+    history: diagnostic.history,
   };
 }
 
@@ -534,6 +535,7 @@ export function adapterDiagnosticFromRow(row: AdapterDiagnosticRow): AdapterDiag
     checks: row.checks,
     status: row.status as AdapterDiagnostic["status"],
     observedAt: row.observedAt,
+    history: row.history ?? [],
   };
 }
 

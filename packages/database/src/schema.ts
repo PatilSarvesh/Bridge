@@ -586,6 +586,7 @@ export const adapterDiagnostics = pgTable(
     checks: jsonb("checks").$type<AdapterDiagnostic["checks"]>().notNull(),
     status: text("status").notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true, mode: "string" }).notNull(),
+    history: jsonb("history").$type<AdapterDiagnostic["history"]>().default([]).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.organizationId, table.projectId, table.client] }),
@@ -597,6 +598,10 @@ export const adapterDiagnostics = pgTable(
     check(
       "bridge_adapter_diagnostics_status_check",
       sql`${table.status} IN ('pass', 'fail')`,
+    ),
+    check(
+      "bridge_adapter_diagnostics_history_shape_check",
+      sql`jsonb_typeof(${table.history}) = 'array' AND jsonb_array_length(${table.history}) <= 20`,
     ),
     foreignKey({
       name: "bridge_adapter_diagnostics_project_fk",

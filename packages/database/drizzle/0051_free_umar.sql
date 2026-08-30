@@ -1,0 +1,2 @@
+ALTER TABLE "bridge_adapter_diagnostics" ADD COLUMN "history" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "bridge_adapter_diagnostics" ADD CONSTRAINT "bridge_adapter_diagnostics_history_shape_check" CHECK (jsonb_typeof("bridge_adapter_diagnostics"."history") = 'array' AND jsonb_array_length("bridge_adapter_diagnostics"."history") <= 20);
