@@ -7,7 +7,9 @@ export type BridgeIconName =
   | "bell"
   | "bridge"
   | "chevron"
+  | "copy"
   | "decisions"
+  | "guide"
   | "inbox"
   | "organization"
   | "ownership"
@@ -28,7 +30,9 @@ const iconPaths: Record<BridgeIconName, ReactNode> = {
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
   bridge: <><path d="M4 18V8"/><path d="M20 18V8"/><path d="M4 11c4-3 12-3 16 0"/><path d="M4 15c4-3 12-3 16 0"/><path d="M2 20h20"/></>,
   chevron: <path d="m9 18 6-6-6-6"/>,
+  copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>,
   decisions: <><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.2 2.2L15.8 9"/></>,
+  guide: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16"/><path d="M8 7h8"/><path d="M8 11h8"/></>,
   inbox: <><path d="M4 4h16v13H4z"/><path d="M4 13h4l2 3h4l2-3h4"/></>,
   organization: <><path d="M3 21h18"/><path d="M5 21V6l7-3 7 3v15"/><path d="M9 9h1"/><path d="M14 9h1"/><path d="M9 13h1"/><path d="M14 13h1"/><path d="M10 21v-4h4v4"/></>,
   ownership: <><circle cx="9" cy="8" r="3"/><path d="M3.5 20c.7-4 2.5-6 5.5-6s4.8 2 5.5 6"/><circle cx="17" cy="9" r="2"/><path d="M16 14c2.7 0 4.2 1.7 4.5 5"/></>,

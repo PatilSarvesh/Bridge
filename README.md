@@ -206,6 +206,10 @@ Bridge is a shared service, not an SDK that must be embedded into every agent or
 
 The prototype packages an installable CLI tarball with `pnpm cli:pack`; `pnpm check` now installs and executes that artifact under a temporary global prefix. The tagged release workflow and operator steps are documented in [`docs/distribution.md`](docs/distribution.md). Public or organization-registry publication remains a later owner decision.
 
+### User Guide in the web UI
+
+The Bridge web workspace includes a **User guide** tab with the same fresh-project path in a readable, copyable format. It starts with the recommended CLI-over-REST setup, then keeps MCP and durable local PostgreSQL behind optional disclosures. Use it when onboarding a teammate or connecting a new repository; the guide also covers readiness checks, `bridge doctor`, ordinary agent prompts, human review, conformance, and loopback connectivity recovery. The guide is presentation-only and does not replace the canonical REST workflow or human approval controls.
+
 Against an OIDC-configured Bridge API, authenticate once before using repository or operator commands:
 
 ```bash
