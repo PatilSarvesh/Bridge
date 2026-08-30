@@ -57,16 +57,12 @@ import {
   revokeServiceIdentityInputSchema,
   rotateServiceIdentityInputSchema,
 } from "@bridge/contracts";
-import {
-  assertPrincipalScope,
-  bridgeScopes,
-  BridgeError,
-  type BridgeScope,
-  type Principal,
-} from "@bridge/domain";
+import { assertPrincipalScope, bridgeScopes, BridgeError, type BridgeScope, type Principal } from "@bridge/domain";
 import type { BridgeService, ProjectSupportView } from "@bridge/application";
 import {
   BridgeMetrics,
+  type BridgeRateLimitBucket,
+  type BridgeRateLimitDecision,
   BridgeRateLimiter,
   correlationIdHeader,
   createSafeLogger,
@@ -75,7 +71,6 @@ import {
   resolveCorrelationId,
   runWithCorrelationContext,
 } from "@bridge/observability";
-import type { BridgeRateLimitBucket } from "@bridge/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
@@ -88,16 +83,12 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly metrics?: BridgeMetrics;
   readonly rateLimiter?: BridgeRateLimiter;
+  readonly authenticatedRateLimiter?: BridgeRateLimiter;
 }
 
-async function resolvePrincipal(
-  request: FastifyRequest,
-  options: BuildAppOptions,
-): Promise<Principal> {
+async function authenticatePrincipal(request: FastifyRequest, options: BuildAppOptions): Promise<Principal> {
   if (options.authenticator) {
-    const authorization = typeof request.headers.authorization === "string"
-      ? request.headers.authorization
-      : undefined;
+    const authorization = typeof request.headers.authorization === "string" ? request.headers.authorization : undefined;
     const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
     const principal = await options.authenticator.authenticateRequest({
       ...(authorization ? { authorization } : {}),
@@ -109,11 +100,7 @@ async function resolvePrincipal(
   }
   const principalId = request.headers["x-bridge-principal-id"];
   if (typeof principalId !== "string") {
-    throw new BridgeError(
-      "UNAUTHENTICATED",
-      "Set x-bridge-principal-id for the local vertical slice.",
-      401,
-    );
+    throw new BridgeError("UNAUTHENTICATED", "Set x-bridge-principal-id for the local vertical slice.", 401);
   }
   const principal = options.principals[principalId];
   if (!principal) {
@@ -268,9 +255,7 @@ function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefin
   const method = request.method as ScopedHttpMethod;
   const rule = endpointScopeRules.find((candidate) => candidate.match.test(route));
   if (rule?.scopes[method]) return rule.scopes[method];
-  return method === "GET" || method === "HEAD"
-    ? bridgeScopes.read
-    : bridgeScopes.write;
+  return method === "GET" || method === "HEAD" ? bridgeScopes.read : bridgeScopes.write;
 }
 
 function apiRateLimitBucket(request: FastifyRequest): BridgeRateLimitBucket | undefined {
@@ -284,19 +269,71 @@ function apiRateLimitKey(request: FastifyRequest): string {
   const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "unknown";
   const source = request.raw.socket.remoteAddress ?? request.ip ?? "unknown";
   const principalHeader = request.headers["x-bridge-principal-id"];
-  const identityHint = typeof principalHeader === "string"
-    ? `principal:${principalHeader}`
-    : typeof request.headers.authorization === "string"
-    ? `authorization:${request.headers.authorization}`
-    : typeof request.headers.cookie === "string"
-    ? `cookie:${request.headers.cookie}`
-    : "anonymous";
+  const identityHint =
+    typeof principalHeader === "string"
+      ? `principal:${principalHeader}`
+      : typeof request.headers.authorization === "string"
+        ? `authorization:${request.headers.authorization}`
+        : typeof request.headers.cookie === "string"
+          ? `cookie:${request.headers.cookie}`
+          : "anonymous";
   return hashRateLimitKey("api", source, identityHint, request.method, route);
 }
 
+type AuthenticatedApiRateLimitBucket = Extract<
+  BridgeRateLimitBucket,
+  "organization_read" | "organization_write" | "principal_read" | "principal_write"
+>;
+
+function requiresAuthenticatedApiQuota(request: FastifyRequest): boolean {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (!route.startsWith("/v1/") || request.method === "OPTIONS") return false;
+  return route === "/v1/auth/me" || !route.startsWith("/v1/auth/");
+}
+
+function authenticatedApiQuotaBuckets(request: FastifyRequest): {
+  readonly organization: AuthenticatedApiRateLimitBucket;
+  readonly principal: AuthenticatedApiRateLimitBucket;
+} {
+  const suffix = request.method === "GET" || request.method === "HEAD" ? "read" : "write";
+  return {
+    organization: `organization_${suffix}`,
+    principal: `principal_${suffix}`,
+  };
+}
+
+function authenticatedApiQuotaKey(
+  request: FastifyRequest,
+  principal: Principal,
+  dimension: "organization" | "principal",
+): string {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "unknown";
+  return hashRateLimitKey(
+    "api-authenticated",
+    dimension,
+    principal.organizationId,
+    ...(dimension === "principal" ? [principal.id] : []),
+    request.method,
+    route,
+  );
+}
+
+function moreRestrictiveRateLimitDecision(
+  left: BridgeRateLimitDecision | undefined,
+  right: BridgeRateLimitDecision,
+): BridgeRateLimitDecision {
+  if (!left) return right;
+  const leftRemainingRatio = left.remaining / left.limit;
+  const rightRemainingRatio = right.remaining / right.limit;
+  if (leftRemainingRatio !== rightRemainingRatio) {
+    return leftRemainingRatio < rightRemainingRatio ? left : right;
+  }
+  return left.limit <= right.limit ? left : right;
+}
+
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
-  const developmentPrincipalHeaderAllowed = options.allowDevelopmentPrincipalHeader ??
-    process.env.NODE_ENV !== "production";
+  const developmentPrincipalHeaderAllowed =
+    options.allowDevelopmentPrincipalHeader ?? process.env.NODE_ENV !== "production";
   if (!options.authenticator && !developmentPrincipalHeaderAllowed) {
     throw new Error("OIDC authentication is required when NODE_ENV=production.");
   }
@@ -306,20 +343,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({ logger: false });
   const metrics = options.metrics ?? new BridgeMetrics();
   const rateLimiter = options.rateLimiter ?? new BridgeRateLimiter();
+  const authenticatedRateLimiter = options.authenticatedRateLimiter ?? new BridgeRateLimiter();
   const safeLogger = options.logger ? createSafeLogger({ service: "bridge-api" }) : undefined;
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
+  const transportRateLimitDecisionByRequest = new WeakMap<FastifyRequest, BridgeRateLimitDecision>();
+  const principalByRequest = new WeakMap<FastifyRequest, Principal>();
+  const resolvePrincipal = async (request: FastifyRequest, requestOptions: BuildAppOptions): Promise<Principal> => {
+    const cached = principalByRequest.get(request);
+    if (cached) return cached;
+    const principal = await authenticatePrincipal(request, requestOptions);
+    principalByRequest.set(request, principal);
+    return principal;
+  };
   await app.register(cors, {
     origin: options.corsOrigin ?? true,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
     allowedHeaders: ["authorization", "content-type", "x-bridge-principal-id", correlationIdHeader],
-    exposedHeaders: [
-      correlationIdHeader,
-      "RateLimit-Limit",
-      "RateLimit-Remaining",
-      "RateLimit-Reset",
-      "Retry-After",
-    ],
+    exposedHeaders: [correlationIdHeader, "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "Retry-After"],
   });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -330,23 +371,61 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const bucket = apiRateLimitBucket(request);
     if (bucket) {
       const decision = rateLimiter.check(apiRateLimitKey(request), bucket);
+      transportRateLimitDecisionByRequest.set(request, decision);
       for (const [name, value] of Object.entries(rateLimitHeaders(decision))) reply.header(name, value);
       if (!decision.allowed) {
         metrics.recordRateLimitDenial({ service: "api", bucket });
         reply.header("Retry-After", decision.retryAfterSeconds.toString());
-        runWithCorrelationContext(
-          { correlationId, source: "api" },
-          () => done(new BridgeError(
-            "RATE_LIMITED",
-            "Too many requests. Retry later.",
-            429,
-            { retryAfterSeconds: decision.retryAfterSeconds },
-          )),
+        runWithCorrelationContext({ correlationId, source: "api" }, () =>
+          done(
+            new BridgeError("RATE_LIMITED", "Too many requests. Retry later.", 429, {
+              retryAfterSeconds: decision.retryAfterSeconds,
+            }),
+          ),
         );
         return;
       }
     }
     runWithCorrelationContext({ correlationId, source: "api" }, done);
+  });
+
+  app.addHook("preHandler", async (request, reply) => {
+    if (!requiresAuthenticatedApiQuota(request)) return;
+    const principal = await resolvePrincipal(request, options);
+    const buckets = authenticatedApiQuotaBuckets(request);
+    const principalDecision = authenticatedRateLimiter.check(
+      authenticatedApiQuotaKey(request, principal, "principal"),
+      buckets.principal,
+    );
+    const visibleDecision = moreRestrictiveRateLimitDecision(
+      transportRateLimitDecisionByRequest.get(request),
+      principalDecision,
+    );
+    for (const [name, value] of Object.entries(rateLimitHeaders(visibleDecision))) {
+      reply.header(name, value);
+    }
+    if (!principalDecision.allowed) {
+      reply.header("Retry-After", principalDecision.retryAfterSeconds.toString());
+      metrics.recordRateLimitDenial({ service: "api", bucket: buckets.principal });
+      throw new BridgeError("RATE_LIMITED", "Too many requests. Retry later.", 429, {
+        retryAfterSeconds: principalDecision.retryAfterSeconds,
+      });
+    }
+
+    const organizationDecision = authenticatedRateLimiter.check(
+      authenticatedApiQuotaKey(request, principal, "organization"),
+      buckets.organization,
+    );
+    if (!organizationDecision.allowed) {
+      for (const [name, value] of Object.entries(rateLimitHeaders(organizationDecision))) {
+        reply.header(name, value);
+      }
+      reply.header("Retry-After", organizationDecision.retryAfterSeconds.toString());
+      metrics.recordRateLimitDenial({ service: "api", bucket: buckets.organization });
+      throw new BridgeError("RATE_LIMITED", "Too many requests. Retry later.", 429, {
+        retryAfterSeconds: organizationDecision.retryAfterSeconds,
+      });
+    }
   });
 
   app.addHook("onResponse", (request, reply, done) => {
@@ -371,9 +450,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     safeLogger?.error("request.failed", {
       method: request.method,
       route: request.routeOptions.url,
-      statusCode: error instanceof BridgeError
-        ? error.statusCode
-        : error instanceof ZodError ? 400 : 500,
+      statusCode: error instanceof BridgeError ? error.statusCode : error instanceof ZodError ? 400 : 500,
       error,
     });
     if (error instanceof BridgeError) {
@@ -399,26 +476,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const liveness = async () => ({ status: "ok", service: "bridge-api" });
   app.get("/health", liveness);
   app.get("/health/live", liveness);
-  app.get("/metrics", async (_request, reply) => reply
-    .type("text/plain; version=0.0.4; charset=utf-8")
-    .send(metrics.renderPrometheus()));
+  app.get("/metrics", async (_request, reply) =>
+    reply.type("text/plain; version=0.0.4; charset=utf-8").send(metrics.renderPrometheus()),
+  );
   app.get("/health/ready", async (_request, reply) => {
     const readiness = await options.service.checkReadiness();
-    return reply
-      .status(readiness.status === "ready" ? 200 : 503)
-      .send({ service: "bridge-api", ...readiness });
+    return reply.status(readiness.status === "ready" ? 200 : 503).send({ service: "bridge-api", ...readiness });
   });
 
-  app.get("/v1/auth/config", async () => options.authenticator
-    ? options.authenticator.publicConfiguration()
-    : developmentAuthConfiguration());
+  app.get("/v1/auth/config", async () =>
+    options.authenticator ? options.authenticator.publicConfiguration() : developmentAuthConfiguration(),
+  );
 
   if (options.authenticator) {
     app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/login", async (request, reply) => {
       const login = await options.authenticator!.beginWebLogin(request.query.returnTo);
-      return reply
-        .header("set-cookie", login.transactionCookie)
-        .redirect(login.authorizationUrl);
+      return reply.header("set-cookie", login.transactionCookie).redirect(login.authorizationUrl);
     });
     app.get<{
       Querystring: { code?: string; state?: string; error?: string };
@@ -440,9 +513,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolveOptionalWebPrincipal(request, options);
       const logout = options.authenticator!.endWebSession(request.query.returnTo);
       if (principal) await options.service.recordAuthenticationEvent(principal, "authentication.logged_out");
-      return reply
-        .header("set-cookie", logout.clearSessionCookie)
-        .redirect(logout.redirectUrl);
+      return reply.header("set-cookie", logout.clearSessionCookie).redirect(logout.redirectUrl);
     });
   }
 
@@ -461,18 +532,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     };
   });
 
-  app.get<{ Querystring: Record<string, string | undefined> }>(
-    "/v1/notifications",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const query = notificationListQuerySchema.parse({
-        projectId: request.query.projectId,
-        unreadOnly: request.query.unreadOnly === "true",
-      });
-      const items = await options.service.listNotifications(principal, query);
-      return { items, unreadCount: items.filter((notification) => !notification.readAt).length };
-    },
-  );
+  app.get<{ Querystring: Record<string, string | undefined> }>("/v1/notifications", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const query = notificationListQuerySchema.parse({
+      projectId: request.query.projectId,
+      unreadOnly: request.query.unreadOnly === "true",
+    });
+    const items = await options.service.listNotifications(principal, query);
+    return { items, unreadCount: items.filter((notification) => !notification.readAt).length };
+  });
 
   app.get("/v1/notifications/preferences", async (request) => {
     const principal = await resolvePrincipal(request, options);
@@ -480,31 +548,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return { items };
   });
 
-  app.post<{ Body: unknown }>(
-    "/v1/notifications/preferences",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = notificationPreferenceInputSchema.parse(request.body ?? {});
-      return options.service.setNotificationPreference(principal, input);
-    },
-  );
+  app.post<{ Body: unknown }>("/v1/notifications/preferences", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = notificationPreferenceInputSchema.parse(request.body ?? {});
+    return options.service.setNotificationPreference(principal, input);
+  });
 
-  app.post<{ Params: { notificationId: string } }>(
-    "/v1/notifications/:notificationId/read",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return options.service.markNotificationRead(principal, request.params.notificationId);
-    },
-  );
+  app.post<{ Params: { notificationId: string } }>("/v1/notifications/:notificationId/read", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return options.service.markNotificationRead(principal, request.params.notificationId);
+  });
 
-  app.post<{ Body: unknown }>(
-    "/v1/notifications/read-all",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = notificationReadAllInputSchema.parse(request.body ?? {});
-      return options.service.markAllNotificationsRead(principal, input);
-    },
-  );
+  app.post<{ Body: unknown }>("/v1/notifications/read-all", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = notificationReadAllInputSchema.parse(request.body ?? {});
+    return options.service.markAllNotificationsRead(principal, input);
+  });
 
   app.get<{
     Params: { projectId: string };
@@ -567,25 +626,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.post<{ Params: { eventId: string }; Body: unknown }>(
-    "/v1/admin/outbox/:eventId/replay",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = replayOutboxEventInputSchema.parse(request.body);
-      return options.service.replayOutboxEvent(principal, request.params.eventId, input);
-    },
-  );
+  app.post<{ Params: { eventId: string }; Body: unknown }>("/v1/admin/outbox/:eventId/replay", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = replayOutboxEventInputSchema.parse(request.body);
+    return options.service.replayOutboxEvent(principal, request.params.eventId, input);
+  });
 
   app.get("/v1/principals", async (request) => {
     const principal = await resolvePrincipal(request, options);
     return {
-      items: (await options.service.listOrganizationPrincipals(principal))
-        .map((candidate) => ({
-          id: candidate.id,
-          displayName: candidate.displayName,
-          roles: candidate.roles,
-          projectRoles: candidate.projectRoles ?? {},
-        })),
+      items: (await options.service.listOrganizationPrincipals(principal)).map((candidate) => ({
+        id: candidate.id,
+        displayName: candidate.displayName,
+        roles: candidate.roles,
+        projectRoles: candidate.projectRoles ?? {},
+      })),
     };
   });
 
@@ -598,13 +653,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return { items, projects };
   });
 
-  app.get<{ Querystring: Record<string, string | undefined> }>(
-    "/v1/admin/organization/audit",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return options.service.listOrganizationAudit(principal, auditListQuerySchema.parse(request.query));
-    },
-  );
+  app.get<{ Querystring: Record<string, string | undefined> }>("/v1/admin/organization/audit", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return options.service.listOrganizationAudit(principal, auditListQuerySchema.parse(request.query));
+  });
 
   app.post<{ Body: unknown }>("/v1/admin/organization/audit/export", async (request, reply) => {
     const principal = await resolvePrincipal(request, options);
@@ -622,9 +674,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = await resolvePrincipal(request, options);
     const input = createOrganizationMemberInputSchema.parse(request.body);
     const registration = await options.service.createOrganizationMember(principal, input);
-    return reply
-      .status(registration.disposition === "created" ? 201 : 200)
-      .send(registration);
+    return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
   });
 
   app.patch<{ Params: { memberId: string }; Body: unknown }>(
@@ -641,17 +691,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return { items: await options.service.listDirectoryGroups(principal) };
   });
 
-  app.post<{ Body: unknown }>(
-    "/v1/admin/organization/directory-groups",
-    async (request, reply) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = createDirectoryGroupInputSchema.parse(request.body);
-      const registration = await options.service.createDirectoryGroup(principal, input);
-      return reply
-        .status(registration.disposition === "created" ? 201 : 200)
-        .send(registration);
-    },
-  );
+  app.post<{ Body: unknown }>("/v1/admin/organization/directory-groups", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = createDirectoryGroupInputSchema.parse(request.body);
+    const registration = await options.service.createDirectoryGroup(principal, input);
+    return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
+  });
 
   app.post<{ Params: { groupId: string }; Body: unknown }>(
     "/v1/admin/organization/directory-groups/:groupId/sync",
@@ -696,9 +741,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     const principal = await resolvePrincipal(request, options);
     const input = registerProjectInputSchema.parse(request.body);
     const registration = await options.service.registerProject(principal, input);
-    return reply
-      .status(registration.disposition === "created" ? 201 : 200)
-      .send(registration);
+    return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
   });
 
   app.get("/v1/projects", async (request) => {
@@ -717,33 +760,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = linkRepositoryInputSchema.parse(request.body);
       const registration = await options.service.linkRepository(principal, request.params.projectId, input);
-      return reply
-        .status(registration.disposition === "created" ? 201 : 200)
-        .send(registration);
+      return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/projects/:projectId/repositories",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/repositories", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listProjectRepositories(principal, request.params.projectId) };
+  });
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/integrations/github/pull-requests",
     async (request, reply) => {
       const principal = await resolvePrincipal(request, options);
       const input = syncGithubPullRequestInputSchema.parse(request.body);
-      const registration = await options.service.syncGithubPullRequest(
-        principal,
-        request.params.projectId,
-        input,
-      );
-      return reply
-        .status(registration.disposition === "created" ? 201 : 200)
-        .send(registration);
+      const registration = await options.service.syncGithubPullRequest(principal, request.params.projectId, input);
+      return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
     },
   );
 
@@ -753,11 +785,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const query = githubPullRequestListQuerySchema.parse(request.query);
       return {
-        items: await options.service.listGithubPullRequests(
-          principal,
-          request.params.projectId,
-          query,
-        ),
+        items: await options.service.listGithubPullRequests(principal, request.params.projectId, query),
       };
     },
   );
@@ -765,41 +793,23 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{
     Params: { projectId: string; pullRequestNumber: string };
     Querystring: unknown;
-  }>(
-    "/v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const pullRequestNumber = Number(request.params.pullRequestNumber);
-      if (
-        !Number.isInteger(pullRequestNumber) ||
-        pullRequestNumber < 1 ||
-        pullRequestNumber > 2_147_483_647
-      ) {
-        throw new BridgeError("VALIDATION_FAILED", "Pull-request number must be a positive integer.", 400);
-      }
-      const query = githubPullRequestContextQuerySchema.parse(request.query);
-      return options.service.getGithubPullRequestContext(
-        principal,
-        request.params.projectId,
-        pullRequestNumber,
-        query,
-      );
-    },
-  );
+  }>("/v1/projects/:projectId/integrations/github/pull-requests/:pullRequestNumber/context", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const pullRequestNumber = Number(request.params.pullRequestNumber);
+    if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1 || pullRequestNumber > 2_147_483_647) {
+      throw new BridgeError("VALIDATION_FAILED", "Pull-request number must be a positive integer.", 400);
+    }
+    const query = githubPullRequestContextQuerySchema.parse(request.query);
+    return options.service.getGithubPullRequestContext(principal, request.params.projectId, pullRequestNumber, query);
+  });
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/projects/:projectId/integrations/github/issues",
     async (request, reply) => {
       const principal = await resolvePrincipal(request, options);
       const input = syncGithubIssueInputSchema.parse(request.body);
-      const registration = await options.service.syncGithubIssue(
-        principal,
-        request.params.projectId,
-        input,
-      );
-      return reply
-        .status(registration.disposition === "created" ? 201 : 200)
-        .send(registration);
+      const registration = await options.service.syncGithubIssue(principal, request.params.projectId, input);
+      return reply.status(registration.disposition === "created" ? 201 : 200).send(registration);
     },
   );
 
@@ -809,11 +819,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const query = githubIssueListQuerySchema.parse(request.query);
       return {
-        items: await options.service.listGithubIssues(
-          principal,
-          request.params.projectId,
-          query,
-        ),
+        items: await options.service.listGithubIssues(principal, request.params.projectId, query),
       };
     },
   );
@@ -821,63 +827,41 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get<{
     Params: { projectId: string; issueNumber: string };
     Querystring: unknown;
-  }>(
-    "/v1/projects/:projectId/integrations/github/issues/:issueNumber/context",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const issueNumber = Number(request.params.issueNumber);
-      if (!Number.isInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) {
-        throw new BridgeError("VALIDATION_FAILED", "Issue number must be a positive integer.", 400);
-      }
-      const query = githubIssueContextQuerySchema.parse(request.query);
-      return options.service.getGithubIssueContext(
-        principal,
-        request.params.projectId,
-        issueNumber,
-        query,
-      );
-    },
-  );
+  }>("/v1/projects/:projectId/integrations/github/issues/:issueNumber/context", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const issueNumber = Number(request.params.issueNumber);
+    if (!Number.isInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) {
+      throw new BridgeError("VALIDATION_FAILED", "Issue number must be a positive integer.", 400);
+    }
+    const query = githubIssueContextQuerySchema.parse(request.query);
+    return options.service.getGithubIssueContext(principal, request.params.projectId, issueNumber, query);
+  });
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/admin/projects/:projectId/ownership",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return options.service.getProjectOwnershipConfiguration(principal, request.params.projectId);
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/admin/projects/:projectId/ownership", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return options.service.getProjectOwnershipConfiguration(principal, request.params.projectId);
+  });
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/admin/projects/:projectId/ownership",
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       const input = replaceProjectOwnershipInputSchema.parse(request.body);
-      return options.service.replaceProjectOwnershipConfiguration(
-        principal,
-        request.params.projectId,
-        input,
-      );
+      return options.service.replaceProjectOwnershipConfiguration(principal, request.params.projectId, input);
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/admin/projects/:projectId/policy",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return options.service.getProjectPolicyConfiguration(principal, request.params.projectId);
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/admin/projects/:projectId/policy", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return options.service.getProjectPolicyConfiguration(principal, request.params.projectId);
+  });
 
   app.post<{ Params: { projectId: string }; Body: unknown }>(
     "/v1/admin/projects/:projectId/policy",
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       const input = replaceProjectPolicyInputSchema.parse(request.body);
-      return options.service.replaceProjectPolicyConfiguration(
-        principal,
-        request.params.projectId,
-        input,
-      );
+      return options.service.replaceProjectPolicyConfiguration(principal, request.params.projectId, input);
     },
   );
 
@@ -911,50 +895,34 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.post<{ Params: { projectId: string }; Body: unknown }>(
-    "/v1/projects/:projectId/runs",
-    async (request, reply) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = startAgentRunInputSchema.parse(request.body);
-      const registration = await options.service.startRun(principal, request.params.projectId, input);
-      return reply.status(201).send(registration);
-    },
-  );
+  app.post<{ Params: { projectId: string }; Body: unknown }>("/v1/projects/:projectId/runs", async (request, reply) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = startAgentRunInputSchema.parse(request.body);
+    const registration = await options.service.startRun(principal, request.params.projectId, input);
+    return reply.status(201).send(registration);
+  });
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/projects/:projectId/runs",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return { items: await options.service.listRuns(principal, request.params.projectId) };
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/runs", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listRuns(principal, request.params.projectId) };
+  });
 
   app.get<{ Params: { runId: string } }>("/v1/runs/:runId", async (request) => {
     const principal = await resolvePrincipal(request, options);
     return options.service.getRun(principal, request.params.runId);
   });
 
-  app.patch<{ Params: { runId: string }; Body: unknown }>(
-    "/v1/runs/:runId",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = reportAgentRunInputSchema.parse(request.body);
-      return options.service.reportRun(principal, request.params.runId, input);
-    },
-  );
+  app.patch<{ Params: { runId: string }; Body: unknown }>("/v1/runs/:runId", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = reportAgentRunInputSchema.parse(request.body);
+    return options.service.reportRun(principal, request.params.runId, input);
+  });
 
-  app.post<{ Params: { runId: string }; Body: unknown }>(
-    "/v1/runs/:runId/continuation",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = continuationQuerySchema.parse(request.body);
-      return options.service.getContinuation(
-        principal,
-        request.params.runId,
-        input.resumeContextKey,
-      );
-    },
-  );
+  app.post<{ Params: { runId: string }; Body: unknown }>("/v1/runs/:runId/continuation", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = continuationQuerySchema.parse(request.body);
+    return options.service.getContinuation(principal, request.params.runId, input.resumeContextKey);
+  });
 
   app.post<{ Params: { decisionId: string }; Body: unknown }>(
     "/v1/decisions/:decisionId/lifecycle",
@@ -983,9 +951,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       `/v1/decisions/:decisionId/${action}`,
       async (request) => {
         const principal = await resolvePrincipal(request, options);
-        const body = typeof request.body === "object" && request.body !== null
-          ? request.body as Record<string, unknown>
-          : {};
+        const body =
+          typeof request.body === "object" && request.body !== null ? (request.body as Record<string, unknown>) : {};
         const input = changeDecisionLifecycleInputSchema.parse({ ...body, status });
         return options.service.changeDecisionLifecycle(principal, request.params.decisionId, input);
       },
@@ -1009,11 +976,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = findQuestionMatchesInputSchema.parse(request.body);
       return {
-        items: await options.service.findQuestionMatches(
-          principal,
-          request.params.projectId,
-          input,
-        ),
+        items: await options.service.findQuestionMatches(principal, request.params.projectId, input),
       };
     },
   );
@@ -1023,30 +986,20 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request, reply) => {
       const principal = await resolvePrincipal(request, options);
       const input = recordAssumptionInputSchema.parse(request.body);
-      const assumption = await options.service.recordAssumption(
-        principal,
-        request.params.projectId,
-        input,
-      );
+      const assumption = await options.service.recordAssumption(principal, request.params.projectId, input);
       return reply.status(201).send(assumption);
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/projects/:projectId/assumptions",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return { items: await options.service.listAssumptions(principal, request.params.projectId) };
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/assumptions", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listAssumptions(principal, request.params.projectId) };
+  });
 
-  app.get<{ Params: { assumptionId: string } }>(
-    "/v1/assumptions/:assumptionId",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return options.service.getAssumption(principal, request.params.assumptionId);
-    },
-  );
+  app.get<{ Params: { assumptionId: string } }>("/v1/assumptions/:assumptionId", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return options.service.getAssumption(principal, request.params.assumptionId);
+  });
 
   app.post<{ Params: { assumptionId: string }; Body: unknown }>(
     "/v1/assumptions/:assumptionId/resolve",
@@ -1057,13 +1010,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/projects/:projectId/questions",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return { items: await options.service.listQuestions(principal, request.params.projectId) };
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/questions", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listQuestions(principal, request.params.projectId) };
+  });
 
   app.get<{ Params: { projectId: string }; Querystring: Record<string, string | undefined> }>(
     "/v1/projects/:projectId/inbox",
@@ -1092,11 +1042,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         maxQuestionsPerDigest: request.query.maxQuestionsPerDigest,
       });
       return {
-        items: await options.service.listQuestionDecisionDigests(
-          principal,
-          request.params.projectId,
-          query,
-        ),
+        items: await options.service.listQuestionDecisionDigests(principal, request.params.projectId, query),
       };
     },
   );
@@ -1176,12 +1122,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       const input = editQuestionCommentInputSchema.parse(request.body);
-      return options.service.editQuestionComment(
-        principal,
-        request.params.questionId,
-        request.params.commentId,
-        input,
-      );
+      return options.service.editQuestionComment(principal, request.params.questionId, request.params.commentId, input);
     },
   );
 
@@ -1194,14 +1135,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.post<{ Params: { questionId: string }; Body: unknown }>(
-    "/v1/questions/:questionId/reopen",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      const input = questionClarificationInputSchema.parse(request.body);
-      return options.service.reopenQuestion(principal, request.params.questionId, input);
-    },
-  );
+  app.post<{ Params: { questionId: string }; Body: unknown }>("/v1/questions/:questionId/reopen", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    const input = questionClarificationInputSchema.parse(request.body);
+    return options.service.reopenQuestion(principal, request.params.questionId, input);
+  });
 
   app.post<{ Params: { questionId: string }; Body: unknown }>(
     "/v1/questions/:questionId/accept",
@@ -1228,13 +1166,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request) => {
       const principal = await resolvePrincipal(request, options);
       const query = decisionListQuerySchema.parse({
-        includeHistory: request.query.includeHistory === undefined
-          ? undefined
-          : request.query.includeHistory === "true"
-            ? true
-            : request.query.includeHistory === "false"
-              ? false
-              : request.query.includeHistory,
+        includeHistory:
+          request.query.includeHistory === undefined
+            ? undefined
+            : request.query.includeHistory === "true"
+              ? true
+              : request.query.includeHistory === "false"
+                ? false
+                : request.query.includeHistory,
         search: request.query.search,
         status: request.query.status,
         category: request.query.category,
@@ -1284,13 +1223,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   );
 
-  app.get<{ Params: { projectId: string } }>(
-    "/v1/projects/:projectId/artifacts",
-    async (request) => {
-      const principal = await resolvePrincipal(request, options);
-      return { items: await options.service.listArtifacts(principal, request.params.projectId) };
-    },
-  );
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/artifacts", async (request) => {
+    const principal = await resolvePrincipal(request, options);
+    return { items: await options.service.listArtifacts(principal, request.params.projectId) };
+  });
 
   app.get<{ Params: { artifactId: string } }>("/v1/artifacts/:artifactId", async (request) => {
     const principal = await resolvePrincipal(request, options);
@@ -1321,11 +1257,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (request, reply) => {
       const principal = await resolvePrincipal(request, options);
       const input = approveArtifactVersionInputSchema.parse(request.body);
-      const publication = await options.service.approveArtifactVersion(
-        principal,
-        request.params.versionId,
-        input,
-      );
+      const publication = await options.service.approveArtifactVersion(principal, request.params.versionId, input);
       return reply.status(201).send(publication);
     },
   );

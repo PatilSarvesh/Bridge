@@ -49,6 +49,13 @@ dependency audit used by CI. When changing a shared Zod schema or a REST/MCP rou
 the reviewed snapshots explicitly with `pnpm contracts:baseline:update`; ordinary checks never
 rewrite them.
 
+The API applies a privacy-safe transport limiter before authentication and separate process-local
+organization and principal quotas after a trusted principal is resolved. Authenticated quotas are
+scoped by REST route and read/write class, survive token rotation or source-address changes, and can
+be tuned through the bounded `BRIDGE_API_*_LIMIT` values in `.env.example`. They are abuse
+safeguards rather than billing limits; a multi-instance deployment still needs a distributed
+gateway quota.
+
 ### Local Docker services
 
 Bridge includes a loopback-only Docker Compose stack for durable local development. It starts

@@ -2,6 +2,7 @@ import { OidcAuthenticator, type OidcConfiguration } from "@bridge/auth";
 import { BridgeMetrics } from "@bridge/observability";
 
 import { buildApp } from "./app.js";
+import { createAuthenticatedApiRateLimiter } from "./rate-limit-config.js";
 import { createRuntimeForServer } from "./runtime-bootstrap.js";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -17,6 +18,7 @@ if (process.env.NODE_ENV === "production" && oidcEnabled && !databaseUrl) {
   throw new Error("DATABASE_URL is required for durable production organization membership.");
 }
 const metrics = new BridgeMetrics();
+const authenticatedRateLimiter = createAuthenticatedApiRateLimiter();
 const { runtime, postgresStore } = await createRuntimeForServer({
   ...(databaseUrl ? { databaseUrl } : {}),
   ...(devSeedDatabaseUrl ? { devSeedDatabaseUrl } : {}),
@@ -39,9 +41,7 @@ if (oidcEnabled) {
   const cliClientId = process.env.BRIDGE_OIDC_CLI_CLIENT_ID?.trim();
   const cliRedirectUri = process.env.BRIDGE_OIDC_CLI_REDIRECT_URI?.trim();
   if (Boolean(cliClientId) !== Boolean(cliRedirectUri)) {
-    throw new Error(
-      "BRIDGE_OIDC_CLI_CLIENT_ID and BRIDGE_OIDC_CLI_REDIRECT_URI must be configured together.",
-    );
+    throw new Error("BRIDGE_OIDC_CLI_CLIENT_ID and BRIDGE_OIDC_CLI_REDIRECT_URI must be configured together.");
   }
   const configuration: OidcConfiguration = {
     issuer: requiredEnvironment("BRIDGE_OIDC_ISSUER"),
@@ -71,44 +71,48 @@ if (oidcEnabled) {
   ] as const;
   const bootstrapRequested = bootstrapNames.some((name) => Boolean(process.env[name]?.trim()));
   if (bootstrapRequested) {
-    const values = Object.fromEntries(
-      bootstrapNames.map((name) => [name, requiredEnvironment(name)]),
-    ) as Record<(typeof bootstrapNames)[number], string>;
+    const values = Object.fromEntries(bootstrapNames.map((name) => [name, requiredEnvironment(name)])) as Record<
+      (typeof bootstrapNames)[number],
+      string
+    >;
     const now = new Date().toISOString();
-    await runtime.repository.transaction(async (repository) => {
-      await repository.saveOrganization({
-        id: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
-        externalIdentityProviderId: values.BRIDGE_BOOTSTRAP_OIDC_ORGANIZATION_ID,
-        slug: values.BRIDGE_BOOTSTRAP_ORGANIZATION_SLUG,
-        name: values.BRIDGE_BOOTSTRAP_ORGANIZATION_NAME,
-        createdAt: now,
-      });
-      await repository.savePrincipalIdentity({
-        id: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
-        type: "human",
-        displayName: values.BRIDGE_BOOTSTRAP_ADMIN_NAME,
-        oidcIssuer: `${requiredEnvironment("BRIDGE_OIDC_ISSUER").replace(/\/+$/, "")}/`,
-        oidcSubject: values.BRIDGE_BOOTSTRAP_ADMIN_SUBJECT,
-        createdAt: now,
-      });
-      const existingMembership = await repository.getOrganizationMembership(
-        values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
-        values.BRIDGE_BOOTSTRAP_ADMIN_ID,
-      );
-      if (!existingMembership) {
-        await repository.saveOrganizationMembership({
-          organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
-          principalId: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
-          status: "active",
-          roles: ["organization-admin", "project-admin"],
-          allProjects: true,
-          provisioning: "manual",
+    await runtime.repository.transaction(
+      async (repository) => {
+        await repository.saveOrganization({
+          id: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
+          externalIdentityProviderId: values.BRIDGE_BOOTSTRAP_OIDC_ORGANIZATION_ID,
+          slug: values.BRIDGE_BOOTSTRAP_ORGANIZATION_SLUG,
+          name: values.BRIDGE_BOOTSTRAP_ORGANIZATION_NAME,
           createdAt: now,
-          updatedAt: now,
-          version: 1,
         });
-      }
-    }, { organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID });
+        await repository.savePrincipalIdentity({
+          id: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
+          type: "human",
+          displayName: values.BRIDGE_BOOTSTRAP_ADMIN_NAME,
+          oidcIssuer: `${requiredEnvironment("BRIDGE_OIDC_ISSUER").replace(/\/+$/, "")}/`,
+          oidcSubject: values.BRIDGE_BOOTSTRAP_ADMIN_SUBJECT,
+          createdAt: now,
+        });
+        const existingMembership = await repository.getOrganizationMembership(
+          values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
+          values.BRIDGE_BOOTSTRAP_ADMIN_ID,
+        );
+        if (!existingMembership) {
+          await repository.saveOrganizationMembership({
+            organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID,
+            principalId: values.BRIDGE_BOOTSTRAP_ADMIN_ID,
+            status: "active",
+            roles: ["organization-admin", "project-admin"],
+            allProjects: true,
+            provisioning: "manual",
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+          });
+        }
+      },
+      { organizationId: values.BRIDGE_BOOTSTRAP_ORGANIZATION_ID },
+    );
   }
 }
 const app = await buildApp({
@@ -118,6 +122,7 @@ const app = await buildApp({
   ...(authenticator ? { corsOrigin: new URL(publicWebUrl).origin } : {}),
   logger: true,
   metrics,
+  authenticatedRateLimiter,
 });
 
 if (postgresStore) {
