@@ -4,6 +4,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import { BridgeIcon, type BridgeIconName } from "./bridge-icon";
 import { MarkdownDocument } from "./markdown-document";
+import { UserGuide } from "./user-guide";
 
 const apiUrl = process.env.NEXT_PUBLIC_BRIDGE_API_URL ?? "http://127.0.0.1:4000";
 const defaultPrincipalId = "usr_architect";
@@ -723,6 +724,7 @@ type View =
   | "decisions"
   | "assumptions"
   | "runs"
+  | "guide"
   | "repositories"
   | "ownership"
   | "policy"
@@ -745,6 +747,7 @@ const primaryNavigation: readonly NavigationItem[] = [
   { view: "specifications", label: "Specifications", icon: "specifications" },
   { view: "assumptions", label: "Assumptions", icon: "assumptions" },
   { view: "runs", label: "Agent runs", icon: "runs" },
+  { view: "guide", label: "User guide", icon: "guide" },
 ];
 
 const administrationNavigation: readonly NavigationItem[] = [
@@ -1827,7 +1830,7 @@ export default function Home() {
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const requestedView = parameters.get("view");
-    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "repositories", "ownership", "policy", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
+    if (["inbox", "questions", "specifications", "notifications", "decisions", "assumptions", "runs", "guide", "repositories", "ownership", "policy", "organization", "analytics", "audit", "support"].includes(requestedView ?? "")) {
       setView(requestedView as View);
     }
     const projectId = parameters.get("projectId");
@@ -2061,6 +2064,7 @@ export default function Home() {
     decisions: "Decisions",
     assumptions: "Assumptions",
     runs: "Agent Runs",
+    guide: "User Guide",
     repositories: "Repositories",
     ownership: "Ownership",
     policy: "Policy",
@@ -2750,8 +2754,10 @@ export default function Home() {
             <strong>{viewTitle[view]}</strong>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-project"><BridgeIcon name="bridge" size={15} />{view === "organization"
-              ? "Member access and roles"
+            <span className="topbar-project"><BridgeIcon name="bridge" size={15} />{view === "guide"
+              ? "Connect a project with CLI or REST"
+              : view === "organization"
+                ? "Member access and roles"
               : view === "support"
                 ? "Pilot health and operator signals"
               : view === "audit" && auditScope === "organization"
@@ -2773,7 +2779,9 @@ export default function Home() {
         <div className="content">
           {error ? <div className="error" role="alert">{error}</div> : null}
 
-          {view === "support" ? (
+          {view === "guide" ? (
+            <UserGuide />
+          ) : view === "support" ? (
             <>
               <div className="title-row">
                 <div>

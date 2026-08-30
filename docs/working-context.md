@@ -7,8 +7,8 @@
 | Last updated | 2026-08-30, Asia/Kolkata |
 | Product | Bridge |
 | Workspace | Canonical local GitHub clone: `/Users/patilsarvesh/Repos/Bridge`; original reviewed build workspace: `/Users/patilsarvesh/Documents/ChatGPT/Bridge` |
-| Latest implementation slice | BRG-101 authenticated organization/principal REST quotas; implementation, focused regressions, and the full `pnpm check` pass on feature branch `codex/brg-101-authenticated-rest-rate-limits`, pending pull-request review |
-| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching and deployable SES composition, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export with trusted request-source and question policy/assignment provenance plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, Slack Incoming Webhook and AWS SES notification adapters, and a deployable maintenance-role outbox worker, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack/SES account and deployment validation, provider feedback handling, and other live integrations remain pending |
+| Latest implementation slice | Added the in-app User Guide tab with a tested CLI-over-REST onboarding path, optional MCP/PostgreSQL setup, and troubleshooting; implementation is in progress on feature branch `codex/user-guide` |
+| Current implementation phase | OIDC web/API authentication with durable human sign-in/logout audit events, interactive CLI PKCE, versioned audited organization/project member administration, bounded provider-group membership lifecycle synchronization with manual-access precedence, versioned project role/team/ownership configuration, versioned limited risk/routing/protected-action policy with immutable safety floors, explainable owner/reviewer question routing with administrator-only versioned reassignment, read-only role-aware question explanation/rewriting with immutable source context, personalized low-risk decision digests with individual human acceptance, advisory active-decision conflict detection across overlapping scopes, bounded transitive decision impact graphs with preview and lifecycle evidence, explicit-file approved-specification drift capture and CI checks, configured direct/role/team artifact reviewer routing with distinct-human per-version approval quorum, a due-aware personalized inbox with URL-persisted filters and server-derived action authority, governed human question collaboration with related links, mentions, revision history, clarification, and controlled reopen, completed assumption confirmation/decision-linking and scheduled expiry notification, role-directory fanout for durable in-app notifications, durable human-owned email delivery preferences with provider-neutral scheduled digest batching and deployable SES composition, revocable scoped service identities with mapped least-privilege capabilities, permission-restricted metadata audit browsing/export with trusted request-source and question policy/assignment provenance plus audited bounded governed project-data export, coarse-compatible mapped REST/MCP bearer capabilities, MCP protected-resource metadata, bounded MCP session/tool telemetry, REST-canonical project repository records plus read-only GitHub pull-request/issue metadata integrations, interactive authorized-project selection and API-validated repository initialization, project-scoped Codex/Claude MCP configuration generation, shared high-confidence secret blocking, forced RLS on the core tenant data plane, security-definer bootstrap-directory lookups, repeatable PostgreSQL role/grant reconciliation, a project-scoped pilot support view with persisted bounded adapter diagnostics, Slack Incoming Webhook and AWS SES notification adapters, a deployable maintenance-role outbox worker, the in-app User Guide onboarding surface, executable Biome/repository/dependency/transport contract quality gates, reproducible local Docker services, a guarded local BRG-112 evidence runner, and a repository-side BRG-112 pilot readiness evidence pack complement the governed decision/specification MVP; failed/unknown authentication attribution, external token scope issuance, MCP-side token issuance, provider-backed invitations/SCIM hosting, richer connector diagnostics, live GitHub/identity-provider validation, live Slack/SES account and deployment validation, provider feedback handling, and other live integrations remain pending |
 | Security posture | Production-shaped OIDC verification, membership enforcement, durable success/logout audit events for trusted human web sessions, revocable noninteractive credentials, coarse-compatible mapped non-human REST/MCP capability checks, active-directory filtering for role-based human notification fanout and configured artifact reviewer resolution, human-owned tenant-scoped email preference records, runtime-only secret-managed email addresses, pre-persistence high-confidence credential detection, transaction-scoped forced RLS, bounded security-definer bootstrap lookups, fail-closed role/grant reconciliation, permission-restricted pilot support diagnostics, secret-safe email/Slack delivery receipts, and CI high-confidence secret/dependency gates are implemented for web/API, CLI, and optionally authenticated MCP use, but the product is not fully production-secure until failed/unknown authentication handling, external scope issuance, broader DLP, deployment, and live provider/database/audit validation are complete |
 
 ## 1. How to use and maintain this file
@@ -2984,6 +2984,36 @@ Deliberate boundaries:
 - REST remains canonical and MCP remains optional. The existing MCP transport/tool limits are
   unchanged by this REST-focused slice.
 
+### 20.106 Added in-app User Guide onboarding surface
+
+Implemented on feature branch `codex/user-guide`:
+
+1. The web workspace now exposes a top-level **User guide** tab beside the existing work views.
+   It uses the existing navigation, project shell, responsive breakpoints, Bridge icon family, and
+   control-canvas tokens rather than creating a second workspace or route system.
+2. The guide presents a six-step, readable CLI-over-REST path: start Bridge, package/install the
+   CLI, initialize the repository, give the agent a normal request, review the human boundary in
+   Bridge, and run conformance. Code blocks are copyable and commands match the documented fresh-
+   project acceptance flow.
+3. MCP and durable local PostgreSQL are available as optional expandable paths. The page states
+   that MCP requires organizational approval, that PostgreSQL examples are loopback/local-only,
+   and that migrations remain explicit operator actions. Troubleshooting covers CLI connectivity,
+   missing `pnpm exec bridge`, a loading web page, and restart persistence without bypassing REST.
+4. The guide content is kept in a standalone module with focused regression coverage for the six
+   steps, readiness/init/conformance commands, optional MCP/PostgreSQL instructions, human-only
+   approval language, and the bounded troubleshooting set. TypeScript/build validation covers the
+   rendered component; browser review remains a delivery gate.
+
+Deliberate boundaries:
+
+- This is a presentation and onboarding change. REST contracts, application policy, project access,
+  persistence, approval authority, and MCP behavior are unchanged.
+- The guide does not run a database command, embed credentials, store customer data, or claim that
+  MCP is required. The PostgreSQL block is an instruction for explicitly configured local
+  development only.
+- The guide mirrors the README but does not replace the CLI, repository snapshots, or operator/CI
+  recovery path when an agent cannot reach the API.
+
 ## 21. Important implementation files
 
 - Product requirements: `docs/bridge-prd.md`
@@ -3070,6 +3100,7 @@ Deliberate boundaries:
 - CLI: `apps/cli/src/index.ts`
 - CLI PKCE, loopback callback, and OS credential stores: `apps/cli/src/auth.ts`
 - Web UI: `apps/web/app/page.tsx`
+- In-app onboarding guide: `apps/web/app/user-guide.tsx`, `apps/web/app/user-guide-content.ts`, and `apps/web/app/user-guide.test.tsx`
 - Safe readable specification Markdown: `apps/web/app/markdown-parser.ts`, `apps/web/app/markdown-document.tsx`
 - Web styles: `apps/web/app/globals.css`
 - Worker outbox cycle/runtime: `apps/worker/src/index.ts`, `apps/worker/src/runtime.ts`
