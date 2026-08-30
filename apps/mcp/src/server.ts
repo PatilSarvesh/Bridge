@@ -15,7 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Request, Response } from "express";
 
-import { resolveMcpPrincipal, sendMcpAuthenticationError } from "./auth.js";
+import { classifyMcpAuthenticationOutcome, resolveMcpPrincipal, sendMcpAuthenticationError } from "./auth.js";
 import { createBridgeMcpServer } from "./bridge-server.js";
 import { enforceMcpRateLimit } from "./http-rate-limit.js";
 
@@ -153,7 +153,20 @@ app.post("/mcp", async (request: Request, response: Response) => {
       ...(developmentPrincipal ? { developmentPrincipal } : {}),
       production: process.env.NODE_ENV === "production",
     });
+    metrics.recordAuthentication({ service: "mcp", flow: "mcp", outcome: "authenticated" });
   } catch (error) {
+    const outcome = classifyMcpAuthenticationOutcome(error, Boolean(request.header("authorization")));
+    metrics.recordAuthentication({ service: "mcp", flow: "mcp", outcome });
+    logger.warn("authentication.outcome", {
+      method: request.method,
+      path: request.path,
+      authFlow: "mcp",
+      authOutcome: outcome,
+      statusCode:
+        error instanceof Error && "statusCode" in error && typeof error.statusCode === "number"
+          ? error.statusCode
+          : 401,
+    });
     logger.error("request.authentication_failed", {
       method: request.method,
       path: request.path,

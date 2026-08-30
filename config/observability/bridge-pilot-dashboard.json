@@ -158,6 +158,18 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "title": "Authentication outcomes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+      "targets": [
+        {
+          "expr": "sum by (service, flow, outcome) (increase(bridge_authentication_outcomes_total[15m]))",
+          "legendFormat": "{{service}} {{flow}} {{outcome}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -168,5 +180,5 @@
   "timezone": "browser",
   "title": "Bridge pilot operations",
   "uid": "bridge-pilot-operations",
-  "version": 2
+  "version": 3
 }

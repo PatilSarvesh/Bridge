@@ -1,7 +1,7 @@
 import { BridgeError, type Principal } from "@bridge/domain";
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveMcpPrincipal } from "./auth.js";
+import { classifyMcpAuthenticationOutcome, resolveMcpPrincipal } from "./auth.js";
 
 const agent: Principal = {
   id: "agt_mcp",
@@ -17,6 +17,21 @@ function request(authorization?: string) {
 }
 
 describe("MCP authentication boundary", () => {
+  it("classifies failures without exposing credential or tenant values", () => {
+    expect(classifyMcpAuthenticationOutcome(new BridgeError("UNAUTHENTICATED", "invalid", 401), false)).toBe(
+      "missing_credentials",
+    );
+    expect(classifyMcpAuthenticationOutcome(new BridgeError("UNAUTHENTICATED", "invalid", 401), true)).toBe(
+      "invalid_credentials",
+    );
+    expect(classifyMcpAuthenticationOutcome(new BridgeError("FORBIDDEN", "denied", 403), true)).toBe(
+      "authorization_denied",
+    );
+    expect(classifyMcpAuthenticationOutcome(new BridgeError("IDENTITY_NOT_CONFIGURED", "missing", 503), false)).toBe(
+      "configuration_error",
+    );
+  });
+
   it("rejects missing or malformed bearer credentials when OIDC is enabled", async () => {
     const verifier = { authenticateAccessToken: vi.fn(async () => agent) };
     await expect(resolveMcpPrincipal(request(), { verifier, production: true }))

@@ -61,6 +61,8 @@ import { assertPrincipalScope, bridgeScopes, BridgeError, type BridgeScope, type
 import type { BridgeService, ProjectSupportView } from "@bridge/application";
 import {
   BridgeMetrics,
+  type BridgeAuthenticationFlow,
+  type BridgeAuthenticationOutcome,
   type BridgeRateLimitBucket,
   type BridgeRateLimitDecision,
   BridgeRateLimiter,
@@ -237,6 +239,7 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
 async function resolveOptionalWebPrincipal(
   request: FastifyRequest,
   options: BuildAppOptions,
+  onUnauthenticated?: () => void,
 ): Promise<Principal | undefined> {
   if (!options.authenticator) return undefined;
   const cookie = typeof request.headers.cookie === "string" ? request.headers.cookie : undefined;
@@ -244,9 +247,32 @@ async function resolveOptionalWebPrincipal(
   try {
     return await options.authenticator.authenticateRequest({ cookie });
   } catch (error) {
-    if (error instanceof BridgeError && error.code === "UNAUTHENTICATED") return undefined;
+    if (error instanceof BridgeError && error.code === "UNAUTHENTICATED") {
+      onUnauthenticated?.();
+      return undefined;
+    }
     throw error;
   }
+}
+
+function requestHasAuthenticationMaterial(request: FastifyRequest): boolean {
+  return [request.headers.authorization, request.headers.cookie, request.headers["x-bridge-principal-id"]].some(
+    (value) => typeof value === "string" && value.length > 0,
+  );
+}
+
+function authenticationFailureOutcome(request: FastifyRequest, error: unknown): BridgeAuthenticationOutcome {
+  if (error instanceof BridgeError && error.code === "FORBIDDEN") return "authorization_denied";
+  if (error instanceof BridgeError && error.code === "IDENTITY_NOT_CONFIGURED") return "configuration_error";
+  if (!(error instanceof BridgeError)) return "configuration_error";
+  return requestHasAuthenticationMaterial(request) ? "invalid_credentials" : "missing_credentials";
+}
+
+function authenticationFlowForRoute(request: FastifyRequest): BridgeAuthenticationFlow | undefined {
+  const route = request.routeOptions.url ?? request.url?.split("?", 1)[0] ?? "";
+  if (route === "/v1/auth/callback") return "web_callback";
+  if (route === "/v1/auth/logout") return "web_logout";
+  return undefined;
 }
 
 function requiredScopeForRequest(request: FastifyRequest): BridgeScope | undefined {
@@ -348,12 +374,43 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const requestStartedAt = new WeakMap<FastifyRequest, number>();
   const transportRateLimitDecisionByRequest = new WeakMap<FastifyRequest, BridgeRateLimitDecision>();
   const principalByRequest = new WeakMap<FastifyRequest, Principal>();
+  const authenticationOutcomeRecorded = new WeakSet<FastifyRequest>();
+  const recordAuthenticationOutcome = (
+    request: FastifyRequest,
+    flow: BridgeAuthenticationFlow,
+    outcome: BridgeAuthenticationOutcome,
+    statusCode?: number,
+  ): void => {
+    if (authenticationOutcomeRecorded.has(request)) return;
+    authenticationOutcomeRecorded.add(request);
+    metrics.recordAuthentication({ service: "api", flow, outcome });
+    if (outcome !== "authenticated") {
+      safeLogger?.warn("authentication.outcome", {
+        method: request.method,
+        route: request.routeOptions.url ?? "unmatched",
+        statusCode: statusCode ?? (outcome === "authorization_denied" ? 403 : 401),
+        authFlow: flow,
+        authOutcome: outcome,
+      });
+    }
+  };
   const resolvePrincipal = async (request: FastifyRequest, requestOptions: BuildAppOptions): Promise<Principal> => {
     const cached = principalByRequest.get(request);
     if (cached) return cached;
-    const principal = await authenticatePrincipal(request, requestOptions);
-    principalByRequest.set(request, principal);
-    return principal;
+    try {
+      const principal = await authenticatePrincipal(request, requestOptions);
+      recordAuthenticationOutcome(request, "api", "authenticated");
+      principalByRequest.set(request, principal);
+      return principal;
+    } catch (error) {
+      recordAuthenticationOutcome(
+        request,
+        "api",
+        authenticationFailureOutcome(request, error),
+        error instanceof BridgeError ? error.statusCode : undefined,
+      );
+      throw error;
+    }
   };
   await app.register(cors, {
     origin: options.corsOrigin ?? true,
@@ -447,6 +504,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const authenticationFlow = authenticationFlowForRoute(request);
+    if (authenticationFlow) {
+      recordAuthenticationOutcome(
+        request,
+        authenticationFlow,
+        authenticationFailureOutcome(request, error),
+        error instanceof BridgeError ? error.statusCode : undefined,
+      );
+    }
     safeLogger?.error("request.failed", {
       method: request.method,
       route: request.routeOptions.url,
@@ -504,15 +570,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         ...(request.query.state ? { state: request.query.state } : {}),
         ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
       });
+      recordAuthenticationOutcome(request, "web_callback", "authenticated");
       await options.service.recordAuthenticationEvent(callback.principal, "authentication.succeeded");
       return reply
         .header("set-cookie", [callback.sessionCookie, callback.clearTransactionCookie])
         .redirect(callback.redirectUrl);
     });
     app.get<{ Querystring: { returnTo?: string } }>("/v1/auth/logout", async (request, reply) => {
-      const principal = await resolveOptionalWebPrincipal(request, options);
+      const principal = await resolveOptionalWebPrincipal(request, options, () =>
+        recordAuthenticationOutcome(request, "web_logout", "invalid_credentials"),
+      );
       const logout = options.authenticator!.endWebSession(request.query.returnTo);
-      if (principal) await options.service.recordAuthenticationEvent(principal, "authentication.logged_out");
+      if (principal) {
+        recordAuthenticationOutcome(request, "web_logout", "authenticated");
+        await options.service.recordAuthenticationEvent(principal, "authentication.logged_out");
+      }
       return reply.header("set-cookie", logout.clearSessionCookie).redirect(logout.redirectUrl);
     });
   }

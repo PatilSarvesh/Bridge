@@ -89,6 +89,8 @@ describe("Bridge observability primitives", () => {
         artifactBody: "private specification",
         arbitraryNote: "free-form customer content",
         error: new Error("database password=SENSITIVE_PASSWORD"),
+        authFlow: "api",
+        authOutcome: "invalid_credentials",
         correlationId: "forged_correlation",
         service: "forged-service",
         event: "forged-event",
@@ -109,6 +111,8 @@ describe("Bridge observability primitives", () => {
       artifactBody: "[redacted]",
       arbitraryNote: "[redacted]",
       error: { errorName: "Error" },
+      authFlow: "api",
+      authOutcome: "invalid_credentials",
     });
     expect(JSON.stringify(record)).not.toContain("SENSITIVE");
     expect(redactLogAttributes({ prompt: "private", count: 2 })).toEqual({
@@ -149,6 +153,9 @@ describe("Bridge observability primitives", () => {
       secretType: "private_key",
     });
     metrics.recordRateLimitDenial({ service: "api", bucket: "write" });
+    metrics.recordAuthentication({ service: "api", flow: "api", outcome: "missing_credentials" });
+    metrics.recordAuthentication({ service: "api", flow: "web_callback", outcome: "authenticated" });
+    metrics.recordAuthentication({ service: "mcp", flow: "mcp", outcome: "invalid_credentials" });
     metrics.recordMcpSession({ outcome: "initialized" });
     metrics.recordMcpSession({ outcome: "failed" });
     metrics.recordMcpToolCall({
@@ -182,6 +189,16 @@ describe("Bridge observability primitives", () => {
       expect.objectContaining({
         name: "bridge_rate_limit_denials_total",
         labels: { bucket: "write", service: "api" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_authentication_outcomes_total",
+        labels: { flow: "api", outcome: "missing_credentials", service: "api" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: "bridge_authentication_outcomes_total",
+        labels: { flow: "mcp", outcome: "invalid_credentials", service: "mcp" },
         value: 1,
       }),
       expect.objectContaining({
@@ -231,6 +248,7 @@ describe("Bridge observability primitives", () => {
     expect(rendered).toContain('bridge_http_request_duration_seconds_bucket{le="+Inf",operation="/v1/projects/:projectId/context",service="api"} 1');
     expect(rendered).toContain('bridge_content_secret_detections_total{content_type="artifact",secret_type="private_key"} 1');
     expect(rendered).toContain('bridge_rate_limit_denials_total{bucket="write",service="api"} 1');
+    expect(rendered).toContain('bridge_authentication_outcomes_total{flow="api",outcome="missing_credentials",service="api"} 1');
     expect(rendered).toContain('bridge_idempotency_operations_total{operation="question_submit",outcome="created"} 1');
     expect(rendered).toContain('bridge_conflicts_total 1');
     expect(rendered).toContain('bridge_mcp_sessions_total{outcome="failed"} 1');

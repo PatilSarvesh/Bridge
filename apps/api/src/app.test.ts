@@ -303,6 +303,7 @@ describe("Bridge API vertical slice", () => {
 
   it("does not create authenticated quota state when authentication fails", async () => {
     const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
     const authenticator: AuthenticationProvider = {
       mode: "oidc",
       publicConfiguration: () => ({ mode: "oidc" }),
@@ -326,6 +327,7 @@ describe("Bridge API vertical slice", () => {
       service: runtime.service,
       principals: runtime.principals,
       authenticator,
+      metrics,
       rateLimiter: new BridgeRateLimiter({
         now: () => 0,
         policies: { read: { maxRequests: 100, windowMs: 60_000 } },
@@ -353,6 +355,49 @@ describe("Bridge API vertical slice", () => {
       "ratelimit-limit": "1",
       "ratelimit-remaining": "0",
     });
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_authentication_outcomes_total{flow="api",outcome="missing_credentials",service="api"} 1',
+    );
+    expect(metrics.renderPrometheus()).toContain(
+      'bridge_authentication_outcomes_total{flow="api",outcome="authenticated",service="api"} 1',
+    );
+  });
+
+  it("records invalid local identities without exposing identity or tenant values", async () => {
+    const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
+    const app = await buildApp({ service: runtime.service, principals: runtime.principals, metrics });
+    apps.push(app);
+
+    expect((await app.inject({ method: "GET", url: "/v1/projects" })).statusCode).toBe(401);
+    const unknown = await app.inject({
+      method: "GET",
+      url: "/v1/projects",
+      headers: { "x-bridge-principal-id": "usr_unknown_identity" },
+    });
+    expect(unknown.statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/projects",
+          headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const rendered = metrics.renderPrometheus();
+    expect(rendered).toContain(
+      'bridge_authentication_outcomes_total{flow="api",outcome="missing_credentials",service="api"} 1',
+    );
+    expect(rendered).toContain(
+      'bridge_authentication_outcomes_total{flow="api",outcome="invalid_credentials",service="api"} 1',
+    );
+    expect(rendered).toContain(
+      'bridge_authentication_outcomes_total{flow="api",outcome="authenticated",service="api"} 1',
+    );
+    expect(rendered).not.toContain("usr_unknown_identity");
+    expect(rendered).not.toContain(demoProject.organizationId);
   });
 
   it("enforces an organization quota across principals without crossing tenant boundaries", async () => {
@@ -3635,6 +3680,7 @@ describe("Bridge API vertical slice", () => {
 
   it("uses authenticated sessions or bearer tokens instead of the development principal header", async () => {
     const runtime = await createDemoRuntime();
+    const metrics = new BridgeMetrics();
     const authenticator: AuthenticationProvider = {
       mode: "oidc",
       publicConfiguration: () => ({
@@ -3667,6 +3713,7 @@ describe("Bridge API vertical slice", () => {
       service: runtime.service,
       principals: runtime.principals,
       authenticator,
+      metrics,
     });
     apps.push(app);
 
@@ -3732,6 +3779,21 @@ describe("Bridge API vertical slice", () => {
           subjectId: demoPrincipals.architect.id,
         }),
       ]),
+    );
+    expect(metrics.renderPrometheus()).toEqual(
+      expect.stringContaining(
+        'bridge_authentication_outcomes_total{flow="api",outcome="invalid_credentials",service="api"} 1',
+      ),
+    );
+    expect(metrics.renderPrometheus()).toEqual(
+      expect.stringContaining(
+        'bridge_authentication_outcomes_total{flow="web_callback",outcome="authenticated",service="api"} 1',
+      ),
+    );
+    expect(metrics.renderPrometheus()).toEqual(
+      expect.stringContaining(
+        'bridge_authentication_outcomes_total{flow="web_logout",outcome="authenticated",service="api"} 1',
+      ),
     );
   });
 });

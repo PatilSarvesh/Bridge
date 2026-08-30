@@ -1,5 +1,6 @@
 import type { Principal } from "@bridge/domain";
 import { BridgeError } from "@bridge/domain";
+import type { BridgeAuthenticationOutcome } from "@bridge/observability";
 import type { Response } from "express";
 
 export interface McpAccessTokenVerifier {
@@ -20,6 +21,15 @@ export interface McpPrincipalResolutionOptions {
 function bearerToken(authorization: string | undefined): string | undefined {
   const match = authorization?.match(/^Bearer\s+([^\s]+)$/i);
   return match?.[1];
+}
+
+export function classifyMcpAuthenticationOutcome(
+  error: unknown,
+  hasAuthorization: boolean,
+): BridgeAuthenticationOutcome {
+  if (error instanceof BridgeError && error.code === "IDENTITY_NOT_CONFIGURED") return "configuration_error";
+  if (error instanceof BridgeError && error.code === "FORBIDDEN") return "authorization_denied";
+  return hasAuthorization ? "invalid_credentials" : "missing_credentials";
 }
 
 export async function resolveMcpPrincipal(
