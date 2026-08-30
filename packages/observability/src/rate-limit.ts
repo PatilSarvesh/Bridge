@@ -95,10 +95,7 @@ export class BridgeRateLimiter {
         options.policies?.organization_write,
         defaultBridgeRateLimitPolicies.organization_write,
       ),
-      principal_read: normalizedPolicy(
-        options.policies?.principal_read,
-        defaultBridgeRateLimitPolicies.principal_read,
-      ),
+      principal_read: normalizedPolicy(options.policies?.principal_read, defaultBridgeRateLimitPolicies.principal_read),
       principal_write: normalizedPolicy(
         options.policies?.principal_write,
         defaultBridgeRateLimitPolicies.principal_write,
@@ -114,20 +111,14 @@ export class BridgeRateLimiter {
     const stateKey = `${bucket}:${normalizedKey}`;
     let window = this.windows.get(stateKey);
 
-    if (
-      window === undefined
-      && this.windows.size >= this.maxKeys
-    ) {
-      const oldest = [...this.windows.entries()]
-        .sort(([, left], [, right]) => left.lastSeenAtMs - right.lastSeenAtMs)[0];
+    if (window === undefined && this.windows.size >= this.maxKeys) {
+      const oldest = [...this.windows.entries()].sort(
+        ([, left], [, right]) => left.lastSeenAtMs - right.lastSeenAtMs,
+      )[0];
       if (oldest) this.windows.delete(oldest[0]);
     }
 
-    if (
-      window === undefined
-      || now < window.startedAtMs
-      || now >= window.startedAtMs + policy.windowMs
-    ) {
+    if (window === undefined || now < window.startedAtMs || now >= window.startedAtMs + policy.windowMs) {
       window = { startedAtMs: now, count: 0, lastSeenAtMs: now };
       this.windows.set(stateKey, window);
     } else {

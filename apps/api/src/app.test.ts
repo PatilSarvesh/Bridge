@@ -18,8 +18,9 @@ describe("Bridge API vertical slice", () => {
   it("fails closed when production starts without OIDC", async () => {
     const runtime = await createDemoRuntime();
     vi.stubEnv("NODE_ENV", "production");
-    await expect(buildApp({ service: runtime.service, principals: runtime.principals }))
-      .rejects.toThrow("OIDC authentication is required");
+    await expect(buildApp({ service: runtime.service, principals: runtime.principals })).rejects.toThrow(
+      "OIDC authentication is required",
+    );
   });
 
   it("enforces explicit read/write scopes for non-human bearer principals", async () => {
@@ -129,17 +130,27 @@ describe("Bridge API vertical slice", () => {
       mode: "oidc",
       publicConfiguration: () => ({ mode: "oidc" }),
       authenticateRequest: async () => currentPrincipal,
-      beginWebLogin: async () => { throw new Error("not used"); },
-      completeWebLogin: async () => { throw new Error("not used"); },
-      endWebSession: () => { throw new Error("not used"); },
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
     };
     const app = await buildApp({ service: runtime.service, principals: runtime.principals, authenticator });
     apps.push(app);
 
-    expect((await app.inject({
-      method: "GET",
-      url: `/v1/projects/${demoProject.id}/questions`,
-    })).statusCode).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/v1/projects/${demoProject.id}/questions`,
+        })
+      ).statusCode,
+    ).toBe(200);
     const projectsDenied = await app.inject({ method: "GET", url: "/v1/projects" });
     expect(projectsDenied.statusCode).toBe(403);
     expect(projectsDenied.json()).toMatchObject({
@@ -203,9 +214,7 @@ describe("Bridge API vertical slice", () => {
 
     const live = await app.inject({ method: "GET", url: "/health/live" });
     expect(live.statusCode).toBe(200);
-    expect(metrics.renderPrometheus()).toContain(
-      'bridge_rate_limit_denials_total{bucket="read",service="api"} 1',
-    );
+    expect(metrics.renderPrometheus()).toContain('bridge_rate_limit_denials_total{bucket="read",service="api"} 1');
   });
 
   it("enforces authenticated principal quotas across credential changes per REST endpoint", async () => {
@@ -219,9 +228,15 @@ describe("Bridge API vertical slice", () => {
         authenticationCount += 1;
         return demoPrincipals.architect;
       },
-      beginWebLogin: async () => { throw new Error("not used"); },
-      completeWebLogin: async () => { throw new Error("not used"); },
-      endWebSession: () => { throw new Error("not used"); },
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
     };
     const app = await buildApp({
       service: runtime.service,
@@ -280,9 +295,7 @@ describe("Bridge API vertical slice", () => {
     expect(separateEndpoint.statusCode).toBe(200);
     expect(authenticationCount).toBe(3);
     const renderedMetrics = metrics.renderPrometheus();
-    expect(renderedMetrics).toContain(
-      'bridge_rate_limit_denials_total{bucket="principal_read",service="api"} 1',
-    );
+    expect(renderedMetrics).toContain('bridge_rate_limit_denials_total{bucket="principal_read",service="api"} 1');
     expect(renderedMetrics).not.toContain("first-credential");
     expect(renderedMetrics).not.toContain("rotated-credential");
     expect(renderedMetrics).not.toContain(demoPrincipals.architect.id);
@@ -299,9 +312,15 @@ describe("Bridge API vertical slice", () => {
         }
         return demoPrincipals.architect;
       },
-      beginWebLogin: async () => { throw new Error("not used"); },
-      completeWebLogin: async () => { throw new Error("not used"); },
-      endWebSession: () => { throw new Error("not used"); },
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
     };
     const app = await buildApp({
       service: runtime.service,
@@ -344,9 +363,15 @@ describe("Bridge API vertical slice", () => {
       mode: "oidc",
       publicConfiguration: () => ({ mode: "oidc" }),
       authenticateRequest: async () => currentPrincipal,
-      beginWebLogin: async () => { throw new Error("not used"); },
-      completeWebLogin: async () => { throw new Error("not used"); },
-      endWebSession: () => { throw new Error("not used"); },
+      beginWebLogin: async () => {
+        throw new Error("not used");
+      },
+      completeWebLogin: async () => {
+        throw new Error("not used");
+      },
+      endWebSession: () => {
+        throw new Error("not used");
+      },
     };
     const app = await buildApp({
       service: runtime.service,
@@ -367,22 +392,34 @@ describe("Bridge API vertical slice", () => {
     });
     apps.push(app);
 
-    expect((await app.inject({
-      method: "GET",
-      url: "/v1/projects",
-      headers: { authorization: "Bearer architect" },
-    })).statusCode).toBe(200);
-    expect((await app.inject({
-      method: "GET",
-      url: "/v1/projects",
-      headers: { authorization: "Bearer architect-rotated" },
-    })).statusCode).toBe(429);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/projects",
+          headers: { authorization: "Bearer architect" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/projects",
+          headers: { authorization: "Bearer architect-rotated" },
+        })
+      ).statusCode,
+    ).toBe(429);
     currentPrincipal = demoPrincipals.qaLead;
-    expect((await app.inject({
-      method: "GET",
-      url: "/v1/projects",
-      headers: { authorization: "Bearer qa-lead" },
-    })).statusCode).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/projects",
+          headers: { authorization: "Bearer qa-lead" },
+        })
+      ).statusCode,
+    ).toBe(200);
     currentPrincipal = demoPrincipals.businessAnalyst;
     const organizationDenied = await app.inject({
       method: "GET",
@@ -398,11 +435,15 @@ describe("Bridge API vertical slice", () => {
     expect(organizationDenied.body).not.toContain(demoPrincipals.architect.organizationId);
 
     currentPrincipal = demoPrincipals.outsider;
-    expect((await app.inject({
-      method: "GET",
-      url: "/v1/projects",
-      headers: { authorization: "Bearer outsider" },
-    })).statusCode).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v1/projects",
+          headers: { authorization: "Bearer outsider" },
+        })
+      ).statusCode,
+    ).toBe(200);
     expect(metrics.renderPrometheus()).toContain(
       'bridge_rate_limit_denials_total{bucket="organization_read",service="api"} 1',
     );
@@ -445,7 +486,9 @@ describe("Bridge API vertical slice", () => {
     const scrape = await app.inject({ method: "GET", url: "/metrics" });
     expect(scrape.statusCode).toBe(200);
     expect(scrape.headers["content-type"]).toContain("text/plain");
-    expect(scrape.body).toContain('bridge_authorization_denials_total{operation="/v1/principals",service="api",status="401"} 1');
+    expect(scrape.body).toContain(
+      'bridge_authorization_denials_total{operation="/v1/principals",service="api",status="401"} 1',
+    );
     expect(scrape.body).not.toContain(demoProject.id);
 
     class UnavailableRepository extends InMemoryBridgeRepository {
@@ -463,11 +506,13 @@ describe("Bridge API vertical slice", () => {
     expect(unavailable.json()).toEqual({
       service: "bridge-api",
       status: "not_ready",
-      checks: [{
-        name: "repository",
-        status: "failed",
-        message: "Repository dependency is unavailable.",
-      }],
+      checks: [
+        {
+          name: "repository",
+          status: "failed",
+          message: "Repository dependency is unavailable.",
+        },
+      ],
     });
     expect(unavailable.body).not.toContain("SENSITIVE_INTERNAL_DETAIL");
   });
@@ -489,8 +534,9 @@ describe("Bridge API vertical slice", () => {
         expect.objectContaining({ id: demoPrincipals.qaLead.id, roles: expect.arrayContaining(["qa-lead"]) }),
       ]),
     );
-    expect(response.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id))
-      .not.toContain(demoPrincipals.outsider.id);
+    expect(response.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).not.toContain(
+      demoPrincipals.outsider.id,
+    );
   });
 
   it("returns resource-specific not-found responses for cross-tenant and unassigned ID guesses", async () => {
@@ -669,15 +715,21 @@ describe("Bridge API vertical slice", () => {
       headers: adminHeader,
     });
     expect(projectView.statusCode).toBe(200);
-    expect(projectView.json()).toMatchObject({ offset: 0, limit: 1, items: [expect.objectContaining({
-      scope: "project",
-      projectId: demoProject.id,
-      source: "api",
-      policyRuleKey: "protected-release",
-      assignmentId: "qas_api_audit_view",
-      beforeVersion: 1,
-      afterVersion: 2,
-    })] });
+    expect(projectView.json()).toMatchObject({
+      offset: 0,
+      limit: 1,
+      items: [
+        expect.objectContaining({
+          scope: "project",
+          projectId: demoProject.id,
+          source: "api",
+          policyRuleKey: "protected-release",
+          assignmentId: "qas_api_audit_view",
+          beforeVersion: 1,
+          afterVersion: 2,
+        }),
+      ],
+    });
 
     const contributorDenied = await app.inject({
       method: "GET",
@@ -759,13 +811,15 @@ describe("Bridge API vertical slice", () => {
     expect(organizationView.statusCode).toBe(200);
     expect(organizationView.json()).toMatchObject({
       totalMatching: 1,
-      items: [expect.objectContaining({
-        scope: "organization",
-        action: "organization_member.created",
-        source: "api",
-        beforeVersion: 0,
-        afterVersion: 1,
-      })],
+      items: [
+        expect.objectContaining({
+          scope: "organization",
+          action: "organization_member.created",
+          source: "api",
+          beforeVersion: 0,
+          afterVersion: 1,
+        }),
+      ],
     });
     const organizationDenied = await app.inject({
       method: "GET",
@@ -787,9 +841,7 @@ describe("Bridge API vertical slice", () => {
     expect(csvExport.body).toContain('"beforeVersion"');
     expect(csvExport.body).toContain('"organization_member.created"');
     await expect(runtime.repository.listOrganizationAuditEvents(demoProject.organizationId)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ action: "audit.exported", subjectType: "audit_export" })]),
     );
   });
 
@@ -922,8 +974,16 @@ describe("Bridge API vertical slice", () => {
         reversible: false,
         blocking: true,
         options: [
-          { key: "critical-only", label: "Critical failures only", tradeoffs: "Protects release flow while blocking serious defects." },
-          { key: "any-failure", label: "Any failure", tradeoffs: "Maximizes caution but can delay unrelated releases." },
+          {
+            key: "critical-only",
+            label: "Critical failures only",
+            tradeoffs: "Protects release flow while blocking serious defects.",
+          },
+          {
+            key: "any-failure",
+            label: "Any failure",
+            tradeoffs: "Maximizes caution but can delay unrelated releases.",
+          },
         ],
         recommendationKey: "critical-only",
         scope: { component: "release-pipeline" },
@@ -961,8 +1021,14 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
     });
     expect(notifications.statusCode).toBe(200);
-    const listed = notifications.json<{ items: Array<{ id: string; type: string; targetId: string }>; unreadCount: number }>();
-    expect(listed).toMatchObject({ unreadCount: 1, items: [expect.objectContaining({ type: "question_assigned", targetId: question.id })] });
+    const listed = notifications.json<{
+      items: Array<{ id: string; type: string; targetId: string }>;
+      unreadCount: number;
+    }>();
+    expect(listed).toMatchObject({
+      unreadCount: 1,
+      items: [expect.objectContaining({ type: "question_assigned", targetId: question.id })],
+    });
 
     const agentNotifications = await app.inject({
       method: "GET",
@@ -1046,7 +1112,11 @@ describe("Bridge API vertical slice", () => {
         reversible: false,
         blocking: true,
         options: [
-          { key: "three", label: "Three attempts", tradeoffs: "Surfaces failures quickly but tolerates fewer transient outages." },
+          {
+            key: "three",
+            label: "Three attempts",
+            tradeoffs: "Surfaces failures quickly but tolerates fewer transient outages.",
+          },
           { key: "five", label: "Five attempts", tradeoffs: "Tolerates longer outages but delays operator action." },
         ],
         recommendationKey: "five",
@@ -1056,12 +1126,7 @@ describe("Bridge API vertical slice", () => {
     const [pending] = await runtime.repository.listOutboxEvents(demoProject.id);
     expect(pending).toBeDefined();
     await runtime.repository.claimOutboxEvents(pending!.availableAt, 1);
-    await runtime.repository.failOutboxEvent(
-      pending!.id,
-      "provider unavailable",
-      pending!.availableAt,
-      true,
-    );
+    await runtime.repository.failOutboxEvent(pending!.id, "provider unavailable", pending!.availableAt, true);
     await runtime.repository.saveOutboxDelivery({
       id: "odl_api_delivery",
       organizationId: pending!.organizationId,
@@ -1086,11 +1151,13 @@ describe("Bridge API vertical slice", () => {
     expect(inspection.json()).toMatchObject({
       totalMatching: 1,
       items: [expect.objectContaining({ id: pending!.id, status: "dead_letter", attempts: 1 })],
-      deliveries: [expect.objectContaining({
-        outboxEventId: pending!.id,
-        channel: "email",
-        status: "failed",
-      })],
+      deliveries: [
+        expect.objectContaining({
+          outboxEventId: pending!.id,
+          channel: "email",
+          status: "failed",
+        }),
+      ],
       metrics: {
         statusCounts: { pending: 0, processing: 0, processed: 0, failed: 0, dead_letter: 1 },
         failedCount: 1,
@@ -1247,13 +1314,15 @@ describe("Bridge API vertical slice", () => {
         items: [expect.objectContaining({ client: "codex", capabilities: ["cli"] })],
         mcpDiagnostics: "observed_from_doctor",
       },
-      diagnostics: [expect.objectContaining({
-        client: "codex",
-        mcpStatus: "not_configured",
-        checkCount: 2,
-        passedCheckCount: 2,
-        failingCheckNames: [],
-      })],
+      diagnostics: [
+        expect.objectContaining({
+          client: "codex",
+          mcpStatus: "not_configured",
+          checkCount: 2,
+          passedCheckCount: 2,
+          failingCheckNames: [],
+        }),
+      ],
     });
 
     const denied = await app.inject({
@@ -1289,8 +1358,16 @@ describe("Bridge API vertical slice", () => {
         blocking: true,
         dueAt,
         options: [
-          { key: "critical-only", label: "Block on critical failures", tradeoffs: "Keeps release flow moving while protecting critical paths." },
-          { key: "any-failure", label: "Block on any failure", tradeoffs: "Maximizes caution but may delay fixes unrelated to the release." },
+          {
+            key: "critical-only",
+            label: "Block on critical failures",
+            tradeoffs: "Keeps release flow moving while protecting critical paths.",
+          },
+          {
+            key: "any-failure",
+            label: "Block on any failure",
+            tradeoffs: "Maximizes caution but may delay fixes unrelated to the release.",
+          },
         ],
         recommendationKey: "critical-only",
         scope: { component: "release-pipeline" },
@@ -1305,17 +1382,16 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
     });
     expect(qaInbox.statusCode).toBe(200);
-    expect(qaInbox.json<{ items: Array<{ id: string; canAccept: boolean; inboxReasons: string[] }> }>().items)
-      .toEqual([
-        expect.objectContaining({
-          id: roleQuestionId,
-          canAccept: true,
-          canReassign: false,
-          dueAt,
-          dueStatus: "due_soon",
-          inboxReasons: ["role_owner"],
-        }),
-      ]);
+    expect(qaInbox.json<{ items: Array<{ id: string; canAccept: boolean; inboxReasons: string[] }> }>().items).toEqual([
+      expect.objectContaining({
+        id: roleQuestionId,
+        canAccept: true,
+        canReassign: false,
+        dueAt,
+        dueStatus: "due_soon",
+        inboxReasons: ["role_owner"],
+      }),
+    ]);
 
     const filteredInbox = await app.inject({
       method: "GET",
@@ -1420,30 +1496,31 @@ describe("Bridge API vertical slice", () => {
     const runtime = await createDemoRuntime();
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
-    const createQuestion = async (suffix: string) => app.inject({
-      method: "POST",
-      url: `/v1/projects/${demoProject.id}/questions`,
-      headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
-      payload: {
-        idempotencyKey: `api-question-digest-${suffix}`,
-        title: `Which onboarding hint should use the ${suffix} presentation?`,
-        type: "decision",
-        category: "product-experience",
-        context: `The onboarding flow needs a bounded ${suffix} presentation for routine user guidance.`,
-        whyItMatters: `A consistent ${suffix} presentation keeps the low-risk onboarding choice understandable.`,
-        intendedOwnerIds: [demoPrincipals.qaLead.id],
-        intendedOwnerRoles: [],
-        risk: "low",
-        reversible: true,
-        blocking: false,
-        options: [
-          { key: "transient", label: "Use the hint", tradeoffs: "Adds guidance with minor visual weight." },
-          { key: "all", label: "Omit the hint", tradeoffs: "Keeps the view sparse but may reduce comprehension." },
-        ],
-        recommendationKey: "transient",
-        scope: { component: "onboarding" },
-      },
-    });
+    const createQuestion = async (suffix: string) =>
+      app.inject({
+        method: "POST",
+        url: `/v1/projects/${demoProject.id}/questions`,
+        headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
+        payload: {
+          idempotencyKey: `api-question-digest-${suffix}`,
+          title: `Which onboarding hint should use the ${suffix} presentation?`,
+          type: "decision",
+          category: "product-experience",
+          context: `The onboarding flow needs a bounded ${suffix} presentation for routine user guidance.`,
+          whyItMatters: `A consistent ${suffix} presentation keeps the low-risk onboarding choice understandable.`,
+          intendedOwnerIds: [demoPrincipals.qaLead.id],
+          intendedOwnerRoles: [],
+          risk: "low",
+          reversible: true,
+          blocking: false,
+          options: [
+            { key: "transient", label: "Use the hint", tradeoffs: "Adds guidance with minor visual weight." },
+            { key: "all", label: "Omit the hint", tradeoffs: "Keeps the view sparse but may reduce comprehension." },
+          ],
+          recommendationKey: "transient",
+          scope: { component: "onboarding" },
+        },
+      });
     const first = await createQuestion("inline");
     const second = await createQuestion("popover");
     expect(first.statusCode).toBe(201);
@@ -1456,14 +1533,16 @@ describe("Bridge API vertical slice", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      items: [{
-        category: "product-experience",
-        scope: { component: "onboarding" },
-        questionCount: 2,
-        remainingQuestionCount: 0,
-        humanApprovalRequired: true,
-        batchAcceptanceAvailable: false,
-      }],
+      items: [
+        {
+          category: "product-experience",
+          scope: { component: "onboarding" },
+          questionCount: 2,
+          remainingQuestionCount: 0,
+          humanApprovalRequired: true,
+          batchAcceptanceAvailable: false,
+        },
+      ],
     });
 
     const unrouted = await app.inject({
@@ -1535,8 +1614,9 @@ describe("Bridge API vertical slice", () => {
       url: "/v1/projects",
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
-    expect(projects.json<{ items: Array<{ id: string }> }>().items.map((project) => project.id))
-      .toContain(registration.project.id);
+    expect(projects.json<{ items: Array<{ id: string }> }>().items.map((project) => project.id)).toContain(
+      registration.project.id,
+    );
 
     const repositoryPayload = {
       idempotencyKey: "api-repository-link-001",
@@ -1576,8 +1656,9 @@ describe("Bridge API vertical slice", () => {
       payload: repositoryPayload,
     });
     expect(repositoryReplay.statusCode).toBe(200);
-    expect(repositoryReplay.json<{ repository: { id: string } }>().repository.id)
-      .toBe(linkedRepository.json<{ repository: { id: string } }>().repository.id);
+    expect(repositoryReplay.json<{ repository: { id: string } }>().repository.id).toBe(
+      linkedRepository.json<{ repository: { id: string } }>().repository.id,
+    );
 
     const visibleRepositories = await app.inject({
       method: "GET",
@@ -1585,8 +1666,9 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
     expect(visibleRepositories.statusCode).toBe(200);
-    expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items)
-      .toEqual([{ ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository }]);
+    expect(visibleRepositories.json<{ items: Array<{ canonicalUrl: string }> }>().items).toEqual([
+      { ...linkedRepository.json<{ repository: Record<string, unknown> }>().repository },
+    ]);
 
     const pullRequestPayload = {
       repositoryId: linkedRepository.json<{ repository: { id: string } }>().repository.id,
@@ -1699,14 +1781,16 @@ describe("Bridge API vertical slice", () => {
         expectedVersion: 0,
         roles: [{ name: "QA Lead", description: "Owns quality and release-readiness decisions." }],
         teams: [{ key: "quality", name: "Quality", memberIds: [demoPrincipals.qaLead.id] }],
-        rules: [{
-          key: "quality-ownership",
-          name: "Quality ownership",
-          priority: 10,
-          category: "quality",
-          owners: { principalIds: [], roles: ["QA Lead"], teamKeys: ["quality"] },
-          reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
-        }],
+        rules: [
+          {
+            key: "quality-ownership",
+            name: "Quality ownership",
+            priority: 10,
+            category: "quality",
+            owners: { principalIds: [], roles: ["QA Lead"], teamKeys: ["quality"] },
+            reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
+          },
+        ],
       },
     });
     expect(configured.statusCode).toBe(200);
@@ -1733,11 +1817,15 @@ describe("Bridge API vertical slice", () => {
     const app = await buildApp({ service: runtime.service, principals: runtime.principals });
     apps.push(app);
     const url = `/v1/admin/projects/${demoProject.id}/policy`;
-    expect((await app.inject({
-      method: "GET",
-      url,
-      headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
-    })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url,
+          headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
+        })
+      ).statusCode,
+    ).toBe(403);
 
     const initial = await app.inject({
       method: "GET",
@@ -1746,8 +1834,9 @@ describe("Bridge API vertical slice", () => {
     });
     expect(initial.statusCode).toBe(200);
     expect(initial.json()).toMatchObject({ projectId: demoProject.id, version: 0, rules: [] });
-    expect(initial.json<{ defaultRules: { key: string }[] }>().defaultRules.map((rule) => rule.key))
-      .toContain("bridge-authentication");
+    expect(initial.json<{ defaultRules: { key: string }[] }>().defaultRules.map((rule) => rule.key)).toContain(
+      "bridge-authentication",
+    );
 
     const configured = await app.inject({
       method: "POST",
@@ -1755,27 +1844,31 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
       payload: {
         expectedVersion: 0,
-        rules: [{
-          key: "quality-transfer",
-          name: "Block transfer quality questions",
-          priority: 10,
-          category: "quality",
-          scope: { component: "transfers" },
-          action: "block",
-          minimumRisk: "high",
-          requiredOwnerRoles: ["QA Lead"],
-          requiredReviewerRoles: [],
-        }],
+        rules: [
+          {
+            key: "quality-transfer",
+            name: "Block transfer quality questions",
+            priority: 10,
+            category: "quality",
+            scope: { component: "transfers" },
+            action: "block",
+            minimumRisk: "high",
+            requiredOwnerRoles: ["QA Lead"],
+            requiredReviewerRoles: [],
+          },
+        ],
       },
     });
     expect(configured.statusCode).toBe(200);
     expect(configured.json()).toMatchObject({
       version: 1,
-      rules: [{
-        key: "quality-transfer",
-        requiredOwnerRoles: ["qa-lead"],
-        requiredReviewerRoles: [],
-      }],
+      rules: [
+        {
+          key: "quality-transfer",
+          requiredOwnerRoles: ["qa-lead"],
+          requiredReviewerRoles: [],
+        },
+      ],
     });
 
     const weakened = await app.inject({
@@ -1784,17 +1877,19 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
       payload: {
         expectedVersion: 1,
-        rules: [{
-          key: "weaken-authentication",
-          name: "Weaken authentication",
-          priority: 10,
-          category: "authentication",
-          scope: {},
-          action: "block",
-          minimumRisk: "high",
-          requiredOwnerRoles: [],
-          requiredReviewerRoles: [],
-        }],
+        rules: [
+          {
+            key: "weaken-authentication",
+            name: "Weaken authentication",
+            priority: 10,
+            category: "authentication",
+            scope: {},
+            action: "block",
+            minimumRisk: "high",
+            requiredOwnerRoles: [],
+            requiredReviewerRoles: [],
+          },
+        ],
       },
     });
     expect(weakened.statusCode).toBe(403);
@@ -1814,15 +1909,17 @@ describe("Bridge API vertical slice", () => {
         expectedVersion: 0,
         roles: [],
         teams: [{ key: "quality", name: "Quality", memberIds: [demoPrincipals.qaLead.id] }],
-        rules: [{
-          key: "transfer-quality",
-          name: "Transfer quality",
-          priority: 10,
-          category: "architecture",
-          component: "transfers",
-          owners: { principalIds: [], roles: [], teamKeys: ["quality"] },
-          reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
-        }],
+        rules: [
+          {
+            key: "transfer-quality",
+            name: "Transfer quality",
+            priority: 10,
+            category: "architecture",
+            component: "transfers",
+            owners: { principalIds: [], roles: [], teamKeys: ["quality"] },
+            reviewers: { principalIds: [demoPrincipals.architect.id], roles: [], teamKeys: [] },
+          },
+        ],
       },
     });
     expect(configured.statusCode).toBe(200);
@@ -2023,16 +2120,23 @@ describe("Bridge API vertical slice", () => {
         headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
       }),
     ]);
-    expect(projectsResponse.json<{ items: Array<{ id: string; name: string }> }>().items)
-      .toContainEqual(expect.objectContaining({ id: projectId, name: "Hospital Management System" }));
+    expect(projectsResponse.json<{ items: Array<{ id: string; name: string }> }>().items).toContainEqual(
+      expect.objectContaining({ id: projectId, name: "Hospital Management System" }),
+    );
     expect(questionsResponse.json<{ items: unknown[] }>().items).toHaveLength(1);
-    expect(artifactsResponse.json<{ items: Array<{ type: string }> }>().items.map((item) => item.type).sort())
-      .toEqual([...specificationTypes].sort());
-    expect(finalRunResponse.json<{
-      status: string;
-      questionIds: string[];
-      artifactVersionIds: string[];
-    }>()).toMatchObject({
+    expect(
+      artifactsResponse
+        .json<{ items: Array<{ type: string }> }>()
+        .items.map((item) => item.type)
+        .sort(),
+    ).toEqual([...specificationTypes].sort());
+    expect(
+      finalRunResponse.json<{
+        status: string;
+        questionIds: string[];
+        artifactVersionIds: string[];
+      }>(),
+    ).toMatchObject({
       status: "waiting_for_human",
       questionIds: [expect.any(String)],
       artifactVersionIds: [expect.any(String), expect.any(String), expect.any(String), expect.any(String)],
@@ -2089,16 +2193,18 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
     });
     expect(response.statusCode).toBe(200);
-    const conflict = response.json<{ items: Array<{
-      confidence: string;
-      scopeRelation: string;
-      overlappingFields: string[];
-      signals: string[];
-      left: { id: string };
-      right: { id: string };
-      advisory: boolean;
-      humanResolutionRequired: boolean;
-    }> }>().items[0]!;
+    const conflict = response.json<{
+      items: Array<{
+        confidence: string;
+        scopeRelation: string;
+        overlappingFields: string[];
+        signals: string[];
+        left: { id: string };
+        right: { id: string };
+        advisory: boolean;
+        humanResolutionRequired: boolean;
+      }>;
+    }>().items[0]!;
     expect(conflict).toMatchObject({
       confidence: "high",
       scopeRelation: "exact",
@@ -2309,8 +2415,16 @@ describe("Bridge API vertical slice", () => {
         reversible: true,
         blocking: true,
         options: [
-          { key: "critical-path", label: "Require critical-path coverage", tradeoffs: "Adds release work but protects intake behavior." },
-          { key: "smoke-only", label: "Require smoke coverage only", tradeoffs: "Faster release with less regression confidence." },
+          {
+            key: "critical-path",
+            label: "Require critical-path coverage",
+            tradeoffs: "Adds release work but protects intake behavior.",
+          },
+          {
+            key: "smoke-only",
+            label: "Require smoke coverage only",
+            tradeoffs: "Faster release with less regression confidence.",
+          },
         ],
         recommendationKey: "critical-path",
         scope: { repository: "hospital-management-system", component: "patient-registration" },
@@ -2324,7 +2438,10 @@ describe("Bridge API vertical slice", () => {
       method: "POST",
       url: `/v1/questions/${question.id}/accept`,
       headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
-      payload: { optionKey: "critical-path", rationale: "A contributor without the assigned QA role cannot accept this decision." },
+      payload: {
+        optionKey: "critical-path",
+        rationale: "A contributor without the assigned QA role cannot accept this decision.",
+      },
     });
     expect(contributorDenied.statusCode).toBe(403);
 
@@ -2332,7 +2449,10 @@ describe("Bridge API vertical slice", () => {
       method: "POST",
       url: `/v1/questions/${question.id}/accept`,
       headers: { "x-bridge-principal-id": demoPrincipals.qaLead.id },
-      payload: { optionKey: "critical-path", rationale: "The QA lead accepts critical-path coverage for patient registration." },
+      payload: {
+        optionKey: "critical-path",
+        rationale: "The QA lead accepts critical-path coverage for patient registration.",
+      },
     });
     expect(accepted.statusCode).toBe(201);
   });
@@ -2409,7 +2529,11 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
     expect(context.json<{ items: Array<{ id: string; authority: string; trustLevel: string }> }>().items).toEqual([
-      expect.objectContaining({ id: confirmedBody.confirmedDecisionId, authority: "approved", trustLevel: "untrusted_data" }),
+      expect.objectContaining({
+        id: confirmedBody.confirmedDecisionId,
+        authority: "approved",
+        trustLevel: "untrusted_data",
+      }),
       expect.objectContaining({ id: assumption.id, authority: "confirmed", trustLevel: "untrusted_data" }),
     ]);
   });
@@ -2494,16 +2618,18 @@ describe("Bridge API vertical slice", () => {
       canContinue: true,
       acceptedDecisionIds: [expect.any(String)],
     });
-    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: "run.continuation_ready",
-        payload: expect.objectContaining({
-          runId: registration.run.id,
-          client: "codex",
-          vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
+    expect(await runtime.repository.listOutboxEvents(demoProject.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.continuation_ready",
+          payload: expect.objectContaining({
+            runId: registration.run.id,
+            client: "codex",
+            vendorSessionId: "123e4567-e89b-42d3-a456-426614174000",
+          }),
         }),
-      }),
-    ]));
+      ]),
+    );
   });
 
   it("supports shared responses before the owner accepts a question and returns the decision as context", async () => {
@@ -2582,7 +2708,9 @@ describe("Bridge API vertical slice", () => {
     expect(contextResponse.json<{ items: Array<{ title: string; trustLevel: string }> }>().items[0]?.title).toBe(
       "Retry transient failures",
     );
-    expect(contextResponse.json<{ items: Array<{ trustLevel: string }> }>().items[0]?.trustLevel).toBe("untrusted_data");
+    expect(contextResponse.json<{ items: Array<{ trustLevel: string }> }>().items[0]?.trustLevel).toBe(
+      "untrusted_data",
+    );
   });
 
   it("records threaded clarification comments with optimistic version checks", async () => {
@@ -2619,7 +2747,10 @@ describe("Bridge API vertical slice", () => {
       method: "POST",
       url: `/v1/questions/${question.id}/comments`,
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
-      payload: { expectedVersion: question.version, body: "Agents cannot impersonate human clarification participants." },
+      payload: {
+        expectedVersion: question.version,
+        body: "Agents cannot impersonate human clarification participants.",
+      },
     });
     expect(agentComment.statusCode).toBe(403);
 
@@ -2655,10 +2786,7 @@ describe("Bridge API vertical slice", () => {
     expect(detail.statusCode).toBe(200);
     expect(detail.json<{ status: string; comments: Array<{ id: string; parentCommentId?: string }> }>()).toMatchObject({
       status: "in_discussion",
-      comments: [
-        expect.objectContaining({ id: root.id }),
-        expect.objectContaining({ parentCommentId: root.id }),
-      ],
+      comments: [expect.objectContaining({ id: root.id }), expect.objectContaining({ parentCommentId: root.id })],
     });
 
     const missingParent = await app.inject({
@@ -2805,17 +2933,26 @@ describe("Bridge API vertical slice", () => {
       method: "POST",
       url: `/v1/questions/${clarificationId.id}/clarification`,
       headers: { "x-bridge-principal-id": demoPrincipals.contributor.id },
-      payload: { expectedVersion: clarificationId.version, reason: "Only the accountable owner can request more context." },
+      payload: {
+        expectedVersion: clarificationId.version,
+        reason: "Only the accountable owner can request more context.",
+      },
     });
     expect(deniedClarification.statusCode).toBe(403);
     const requestedClarification = await app.inject({
       method: "POST",
       url: `/v1/questions/${clarificationId.id}/clarification`,
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
-      payload: { expectedVersion: clarificationId.version, reason: "The owner needs more context before comparing the options." },
+      payload: {
+        expectedVersion: clarificationId.version,
+        reason: "The owner needs more context before comparing the options.",
+      },
     });
     expect(requestedClarification.statusCode).toBe(200);
-    expect(requestedClarification.json<{ status: string; version: number }>()).toMatchObject({ status: "in_discussion", version: 2 });
+    expect(requestedClarification.json<{ status: string; version: number }>()).toMatchObject({
+      status: "in_discussion",
+      version: 2,
+    });
   });
 
   it("finds and reuses an exact project question instead of creating another interruption", async () => {
@@ -2871,8 +3008,9 @@ describe("Bridge API vertical slice", () => {
       },
     });
     expect(typoMatches.statusCode).toBe(200);
-    expect(typoMatches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items)
-      .toEqual([expect.objectContaining({ questionId: firstQuestion.id, matchKind: "related" })]);
+    expect(typoMatches.json<{ items: Array<{ questionId: string; matchKind: string }> }>().items).toEqual([
+      expect.objectContaining({ questionId: firstQuestion.id, matchKind: "related" }),
+    ]);
 
     const reused = await app.inject({
       method: "POST",
@@ -2927,7 +3065,11 @@ describe("Bridge API vertical slice", () => {
         reversible: false,
         blocking: true,
         options: [
-          { key: "transient", label: "Retain only the governed period", tradeoffs: "Limits exposure but requires deletion controls." },
+          {
+            key: "transient",
+            label: "Retain only the governed period",
+            tradeoffs: "Limits exposure but requires deletion controls.",
+          },
           { key: "all", label: "Retain indefinitely", tradeoffs: "Simplifies retrieval but increases privacy risk." },
         ],
         recommendationKey: "transient",
@@ -3014,41 +3156,46 @@ describe("Bridge API vertical slice", () => {
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
       payload: {
         expectedVersion: 0,
-        rules: [{
-          key: "release-quorum",
-          name: "Require two security reviews for release decisions",
-          priority: 10,
-          category: "release",
-          scope: {},
-          action: "protected_approval",
-          minimumRisk: "protected",
-          requiredOwnerRoles: [],
-          requiredReviewerRoles: ["security-reviewer"],
-          reviewerQuorum: { "security-reviewer": 2 },
-        }],
+        rules: [
+          {
+            key: "release-quorum",
+            name: "Require two security reviews for release decisions",
+            priority: 10,
+            category: "release",
+            scope: {},
+            action: "protected_approval",
+            minimumRisk: "protected",
+            requiredOwnerRoles: [],
+            requiredReviewerRoles: ["security-reviewer"],
+            reviewerQuorum: { "security-reviewer": 2 },
+          },
+        ],
       },
     });
     expect(policy.statusCode).toBe(200);
-    expect(policy.json<{ rules: Array<{ reviewerQuorum?: Record<string, number> }> }>().rules[0]?.reviewerQuorum)
-      .toEqual({ "security-reviewer": 2 });
+    expect(
+      policy.json<{ rules: Array<{ reviewerQuorum?: Record<string, number> }> }>().rules[0]?.reviewerQuorum,
+    ).toEqual({ "security-reviewer": 2 });
     const invalidPolicy = await app.inject({
       method: "POST",
       url: `/v1/admin/projects/${demoProject.id}/policy`,
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
       payload: {
         expectedVersion: 1,
-        rules: [{
-          key: "invalid-quorum",
-          name: "Invalid reviewer quorum",
-          priority: 10,
-          category: "release",
-          scope: {},
-          action: "protected_approval",
-          minimumRisk: "protected",
-          requiredOwnerRoles: [],
-          requiredReviewerRoles: ["security-reviewer"],
-          reviewerQuorum: { "architecture-reviewer": 2 },
-        }],
+        rules: [
+          {
+            key: "invalid-quorum",
+            name: "Invalid reviewer quorum",
+            priority: 10,
+            category: "release",
+            scope: {},
+            action: "protected_approval",
+            minimumRisk: "protected",
+            requiredOwnerRoles: [],
+            requiredReviewerRoles: ["security-reviewer"],
+            reviewerQuorum: { "architecture-reviewer": 2 },
+          },
+        ],
       },
     });
     expect(invalidPolicy.statusCode).toBe(400);
@@ -3085,8 +3232,11 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/questions/${question.id}`,
       headers: { "x-bridge-principal-id": demoPrincipals.architect.id },
     });
-    expect(initialDetail.json<{ approvalStatus: { satisfied: boolean; requirements: Array<{ approvedCount: number; requiredCount: number }> } }>()
-      .approvalStatus).toMatchObject({ satisfied: false, requirements: [{ approvedCount: 0, requiredCount: 2 }] });
+    expect(
+      initialDetail.json<{
+        approvalStatus: { satisfied: boolean; requirements: Array<{ approvedCount: number; requiredCount: number }> };
+      }>().approvalStatus,
+    ).toMatchObject({ satisfied: false, requirements: [{ approvedCount: 0, requiredCount: 2 }] });
 
     const firstReview = await app.inject({
       method: "POST",
@@ -3134,7 +3284,11 @@ describe("Bridge API vertical slice", () => {
         reversible: false,
         blocking: true,
         options: [
-          { key: "bounded", label: "Use a bounded retention period", tradeoffs: "Requires the administrator to record why the normal reviewer route was unavailable." },
+          {
+            key: "bounded",
+            label: "Use a bounded retention period",
+            tradeoffs: "Requires the administrator to record why the normal reviewer route was unavailable.",
+          },
           { key: "defer", label: "Defer the retention change", tradeoffs: "Keeps the current control in place." },
         ],
         recommendationKey: "bounded",
@@ -3164,7 +3318,8 @@ describe("Bridge API vertical slice", () => {
         expectedVersion: overrideQuestion.version,
         optionKey: "bounded",
         rationale: "The administrator reviewed the bounded privacy control and accepted the residual risk.",
-        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+        reason:
+          "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
       },
     });
     expect(acceptedOverride.statusCode).toBe(201);
@@ -3177,7 +3332,8 @@ describe("Bridge API vertical slice", () => {
     expect(audit.json<{ items: Array<{ action: string; reason?: string }> }>().items).toEqual([
       expect.objectContaining({
         action: "question.approval_overridden",
-        reason: "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
+        reason:
+          "The configured reviewer is unavailable before the release window; the administrator reviewed the evidence directly.",
       }),
     ]);
     const exportResponse = await app.inject({
@@ -3236,10 +3392,14 @@ describe("Bridge API vertical slice", () => {
     ]);
 
     expect(requests.map((response) => response.statusCode).sort()).toEqual([201, 409]);
-    expect((await runtime.service.listDecisions(demoPrincipals.qaLead, demoProject.id, {
-      includeHistory: true,
-      scope: {},
-    })).filter((decision) => decision.questionId === question.id)).toHaveLength(1);
+    expect(
+      (
+        await runtime.service.listDecisions(demoPrincipals.qaLead, demoProject.id, {
+          includeHistory: true,
+          scope: {},
+        })
+      ).filter((decision) => decision.questionId === question.id),
+    ).toHaveLength(1);
   });
 
   it("publishes an agent specification, accepts only human approval, and includes it in context", async () => {
@@ -3371,8 +3531,7 @@ describe("Bridge API vertical slice", () => {
     const replacement = replacementResponse.json<{
       version: { id: string; reviewerAssignment: { id: string } };
     }>();
-    expect(replacement.version.reviewerAssignment.id)
-      .not.toBe(publication.version.reviewerAssignment.id);
+    expect(replacement.version.reviewerAssignment.id).not.toBe(publication.version.reviewerAssignment.id);
 
     const diffResponse = await app.inject({
       method: "GET",
@@ -3469,8 +3628,9 @@ describe("Bridge API vertical slice", () => {
       url: `/v1/artifacts/${publication.artifact.id}`,
       headers: { "x-bridge-principal-id": demoPrincipals.agent.id },
     });
-    expect(detail.json<{ versions: Array<{ reviews: Array<{ status: string }> }> }>().versions[0]?.reviews)
-      .toEqual([expect.objectContaining({ status: "changes_requested" })]);
+    expect(detail.json<{ versions: Array<{ reviews: Array<{ status: string }> }> }>().versions[0]?.reviews).toEqual([
+      expect.objectContaining({ status: "changes_requested" }),
+    ]);
   });
 
   it("uses authenticated sessions or bearer tokens instead of the development principal header", async () => {
@@ -3525,8 +3685,7 @@ describe("Bridge API vertical slice", () => {
       headers: { authorization: "Bearer valid-token" },
     });
     expect(bearer.statusCode).toBe(200);
-    expect(bearer.json<{ items: Project[] }>().items)
-      .toEqual([expect.objectContaining({ id: demoProject.id })]);
+    expect(bearer.json<{ items: Project[] }>().items).toEqual([expect.objectContaining({ id: demoProject.id })]);
 
     const me = await app.inject({
       method: "GET",
