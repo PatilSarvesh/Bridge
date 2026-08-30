@@ -787,6 +787,23 @@ describe("PostgreSQL domain mappings", () => {
     expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow)).toEqual(outboxDelivery);
   });
 
+  it("normalizes PostgreSQL timestamp text for delivery records", () => {
+    const mapped = outboxDeliveryFromRow({
+      ...(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow),
+      createdAt: "2026-08-07 10:02:11+00",
+      updatedAt: "2026-08-07 10:02:12+00",
+      feedbackReceivedAt: "2026-08-07 10:02:13+00",
+    });
+
+    expect(mapped).toMatchObject({
+      createdAt: "2026-08-07T10:02:11.000Z",
+      updatedAt: "2026-08-07T10:02:12.000Z",
+      feedback: {
+        receivedAt: "2026-08-07T10:02:13.000Z",
+      },
+    });
+  });
+
   it("ships reviewed deferred constraints for atomic aggregate references", () => {
     const migration = readFileSync(new URL("../drizzle/0000_nice_bulldozer.sql", import.meta.url), "utf8");
     expect(migration).toContain("bridge_questions_decision_fk");

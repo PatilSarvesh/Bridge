@@ -93,6 +93,11 @@ export type NotificationPreferenceRow = typeof notificationPreferences.$inferSel
 export type OutboxEventRow = typeof outboxEvents.$inferSelect;
 export type OutboxDeliveryRow = typeof outboxDeliveries.$inferSelect;
 
+function timestampFromDatabase(value: string): string {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
+}
+
 export function organizationToRow(organization: Organization): typeof organizations.$inferInsert {
   return {
     id: organization.id,
@@ -387,10 +392,10 @@ export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
     status: row.status as OutboxDelivery["status"],
     attemptCount: row.attemptCount,
     preference: row.preference as OutboxDelivery["preference"],
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    ...(row.digestAvailableAt === null ? {} : { digestAvailableAt: row.digestAvailableAt }),
-    ...(row.digestLeaseUntil === null ? {} : { digestLeaseUntil: row.digestLeaseUntil }),
+    createdAt: timestampFromDatabase(row.createdAt),
+    updatedAt: timestampFromDatabase(row.updatedAt),
+    ...(row.digestAvailableAt === null ? {} : { digestAvailableAt: timestampFromDatabase(row.digestAvailableAt) }),
+    ...(row.digestLeaseUntil === null ? {} : { digestLeaseUntil: timestampFromDatabase(row.digestLeaseUntil) }),
     ...(row.providerMessageId === null ? {} : { providerMessageId: row.providerMessageId }),
     ...(row.lastError === null ? {} : { lastError: row.lastError }),
     ...(row.feedbackProvider === null && row.feedbackType === null && row.feedbackReceivedAt === null
@@ -399,7 +404,7 @@ export function outboxDeliveryFromRow(row: OutboxDeliveryRow): OutboxDelivery {
           feedback: {
             provider: row.feedbackProvider as NotificationDeliveryFeedback["provider"],
             type: row.feedbackType as NotificationDeliveryFeedback["type"],
-            receivedAt: row.feedbackReceivedAt!,
+            receivedAt: timestampFromDatabase(row.feedbackReceivedAt!),
           },
         }),
   };
