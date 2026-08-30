@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type {
-  Notification,
-  NotificationQuestionContext,
-  OutboxDelivery,
-  OutboxEvent,
-} from "@bridge/domain";
+import type { Notification, NotificationQuestionContext, OutboxDelivery, OutboxEvent } from "@bridge/domain";
 import type { BridgeMetrics, BridgeNotificationOutcome } from "@bridge/observability";
 
 import { sanitizeDeliveryError } from "./email.js";
@@ -67,7 +62,11 @@ export interface SlackBlock {
 export type SlackFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 function safeLine(value: string, limit: number): string {
-  return value.replace(/[\r\n\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
+  return value
+    .replace(/[\r\n\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 function escapeMrkdwn(value: string): string {
@@ -115,9 +114,7 @@ function parseProjectChannelMapping(raw: string): ReadonlyMap<string, SlackChann
   return new Map(entries);
 }
 
-export function createSlackChannelDirectory(
-  mapping: Readonly<Record<string, string>>,
-): SlackChannelDirectory {
+export function createSlackChannelDirectory(mapping: Readonly<Record<string, string>>): SlackChannelDirectory {
   const channels = new Map<string, SlackChannelConfiguration>();
   for (const [projectId, webhookUrl] of Object.entries(mapping)) {
     const normalizedProjectId = projectId.trim();
@@ -165,7 +162,9 @@ export function createSlackWebhookSender(fetcher: SlackFetch = fetch): SlackSend
       }
       const providerMessageId = response.headers.get("x-slack-req-id")?.trim();
       return {
-        providerMessageId: providerMessageId || `slack_${createHash("sha256").update(request.idempotencyKey).digest("hex").slice(0, 32)}`,
+        providerMessageId:
+          providerMessageId ||
+          `slack_${createHash("sha256").update(request.idempotencyKey).digest("hex").slice(0, 32)}`,
       };
     },
   };
@@ -185,16 +184,18 @@ function semanticDedupeKey(
   question: NotificationQuestionContext | undefined,
 ): string {
   return `sdl_${createHash("sha256")
-    .update([
-      projectId,
-      notification.type,
-      notification.targetType,
-      notification.targetId,
-      notification.title,
-      question?.id ?? "",
-      question?.status ?? "",
-      question?.risk ?? "",
-    ].join("\0"))
+    .update(
+      [
+        projectId,
+        notification.type,
+        notification.targetType,
+        notification.targetId,
+        notification.title,
+        question?.id ?? "",
+        question?.status ?? "",
+        question?.risk ?? "",
+      ].join("\0"),
+    )
     .digest("hex")}`;
 }
 
@@ -206,7 +207,11 @@ function safeProviderMessageId(value: string): string {
   return messageId;
 }
 
-function notificationUrl(publicBaseUrl: string, notification: Notification, question?: NotificationQuestionContext): string {
+function notificationUrl(
+  publicBaseUrl: string,
+  notification: Notification,
+  question?: NotificationQuestionContext,
+): string {
   const url = new URL(publicBaseUrl);
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("Bridge publicBaseUrl must use HTTP or HTTPS.");
@@ -222,10 +227,12 @@ async function ownerLabel(
   owners: SlackOwnerDirectory | undefined,
 ): Promise<string> {
   if (!context || context.ownerIds.length === 0) return "Unassigned";
-  const names = await Promise.all(context.ownerIds.slice(0, 10).map(async (ownerId) => {
-    const displayName = await owners?.resolveDisplayName(ownerId);
-    return safeLine(displayName || ownerId, 120);
-  }));
+  const names = await Promise.all(
+    context.ownerIds.slice(0, 10).map(async (ownerId) => {
+      const displayName = await owners?.resolveDisplayName(ownerId);
+      return safeLine(displayName || ownerId, 120);
+    }),
+  );
   return names.join(", ").slice(0, 300);
 }
 
@@ -258,10 +265,12 @@ export async function renderSlackNotification(
     },
     {
       type: "context",
-      elements: [{
-        type: "mrkdwn",
-        text: "Final acceptance and approval remain in Bridge.",
-      }],
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Final acceptance and approval remain in Bridge.",
+        },
+      ],
     },
   ];
   return {
@@ -295,7 +304,7 @@ export function createNotificationSlackHandler(
       }
 
       const existing = await options.store.getOutboxDelivery(event.id, "slack");
-      if (existing && existing.status !== "failed") {
+      if (existing && (existing.status !== "failed" || existing.feedback)) {
         outcome = "skipped";
         return;
       }

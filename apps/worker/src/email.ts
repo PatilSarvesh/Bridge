@@ -272,7 +272,7 @@ export function createNotificationEmailHandler(
       }
 
       const existing = await options.store.getOutboxDelivery(event.id, "email");
-      if (existing && existing.status !== "failed") {
+      if (existing && (existing.status !== "failed" || existing.feedback)) {
         outcome = "skipped";
         return;
       }

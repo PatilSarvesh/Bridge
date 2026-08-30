@@ -5,7 +5,7 @@ import { buildTransportSnapshot } from "./contract-schema-gates.mjs";
 test("transport snapshot covers templated REST routes and reviewed response categories", async () => {
   const snapshot = await buildTransportSnapshot();
 
-  assert.equal(snapshot.rest.length, 88);
+  assert.equal(snapshot.rest.length, 89);
   assert.equal(snapshot.mcp.length, 17);
   assert.deepEqual(snapshot.restContracts["POST /v1/decisions/:decisionId/:action"], {
     requestSchema: "changeDecisionLifecycleInputSchema",

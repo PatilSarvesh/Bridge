@@ -42,6 +42,7 @@ import {
   questionInboxQuerySchema,
   linkRepositoryInputSchema,
   recordAdapterDiagnosticInputSchema,
+  recordOutboxDeliveryFeedbackInputSchema,
   recordAssumptionInputSchema,
   replaceProjectOwnershipInputSchema,
   replaceProjectPolicyInputSchema,
@@ -169,6 +170,10 @@ const endpointScopeRules: readonly EndpointScopeRule[] = [
   {
     match: /^\/v1\/projects\/[^/]+\/adapter-diagnostics$/,
     scopes: { POST: bridgeScopes.diagnosticsWrite },
+  },
+  {
+    match: /^\/v1\/projects\/[^/]+\/integrations\/notifications\/delivery-feedback$/,
+    scopes: { POST: bridgeScopes.notificationsWrite },
   },
   {
     match: /^\/v1\/projects\/[^/]+\/context$/,
@@ -943,6 +948,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       const principal = await resolvePrincipal(request, options);
       const input = recordAdapterDiagnosticInputSchema.parse(request.body);
       return options.service.recordAdapterDiagnostic(principal, request.params.projectId, input);
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: unknown }>(
+    "/v1/projects/:projectId/integrations/notifications/delivery-feedback",
+    async (request) => {
+      const principal = await resolvePrincipal(request, options);
+      const input = recordOutboxDeliveryFeedbackInputSchema.parse(request.body);
+      return options.service.recordOutboxDeliveryFeedback(principal, request.params.projectId, input);
     },
   );
 

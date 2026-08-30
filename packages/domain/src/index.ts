@@ -15,6 +15,8 @@ import type {
   ArtifactVersionStatus,
   DecisionStatus,
   DeliveryChannel,
+  NotificationDeliveryFeedbackProvider,
+  NotificationDeliveryFeedbackType,
   NotificationDeliveryPreference,
   PrincipalType,
   NotificationType,
@@ -33,6 +35,8 @@ import type {
 export type {
   AuditSource,
   DeliveryChannel,
+  NotificationDeliveryFeedbackProvider,
+  NotificationDeliveryFeedbackType,
   NotificationDeliveryPreference,
   OutboxDeliveryStatus,
   OutboxEventStatus,
@@ -546,7 +550,15 @@ export interface Notification {
   readonly type: NotificationType;
   readonly title: string;
   readonly body: string;
-  readonly targetType: "question" | "response" | "comment" | "review" | "decision" | "assumption" | "artifact" | "artifact_version";
+  readonly targetType:
+    | "question"
+    | "response"
+    | "comment"
+    | "review"
+    | "decision"
+    | "assumption"
+    | "artifact"
+    | "artifact_version";
   readonly targetId: string;
   readonly createdAt: string;
   readonly readAt?: string;
@@ -637,6 +649,13 @@ export interface OutboxDelivery {
   readonly digestLeaseUntil?: string;
   readonly providerMessageId?: string;
   readonly lastError?: string;
+  readonly feedback?: NotificationDeliveryFeedback;
+}
+
+export interface NotificationDeliveryFeedback {
+  readonly provider: NotificationDeliveryFeedbackProvider;
+  readonly type: NotificationDeliveryFeedbackType;
+  readonly receivedAt: string;
 }
 
 export interface Question {
@@ -819,11 +838,7 @@ export function artifactApprovalStatus(
       .filter((review) => review.status === "approved" && review.reviewerType === "human")
       .map((review) => review.reviewerId),
   );
-  if (
-    approvedReviewerIds.size === 0 &&
-    version.approvedById &&
-    ["approved", "superseded"].includes(version.status)
-  ) {
+  if (approvedReviewerIds.size === 0 && version.approvedById && ["approved", "superseded"].includes(version.status)) {
     approvedReviewerIds.add(version.approvedById);
   }
   const reviewerIds = [...approvedReviewerIds].sort((left, right) => left.localeCompare(right));
@@ -875,7 +890,25 @@ export interface AuditEvent {
   readonly actorId: string;
   readonly actorType: PrincipalType;
   readonly action: string;
-  readonly subjectType: "project" | "repository" | "pull_request_context" | "work_item" | "ownership_configuration" | "policy_configuration" | "question" | "response" | "decision" | "assumption" | "artifact" | "artifact_version" | "context_snapshot" | "run" | "outbox_event" | "audit_export" | "project_export";
+  readonly subjectType:
+    | "project"
+    | "repository"
+    | "pull_request_context"
+    | "work_item"
+    | "ownership_configuration"
+    | "policy_configuration"
+    | "question"
+    | "response"
+    | "decision"
+    | "assumption"
+    | "artifact"
+    | "artifact_version"
+    | "context_snapshot"
+    | "run"
+    | "outbox_event"
+    | "outbox_delivery"
+    | "audit_export"
+    | "project_export";
   readonly subjectId: string;
   /** The trusted Bridge transport/application boundary that produced this event. */
   readonly source?: AuditSource;
@@ -899,11 +932,9 @@ export type ReviewerRouteSource = QuestionRouteSource | ArtifactReviewerRouteSou
 export function assertProjectAccess(principal: Principal, project: Project): void {
   if (
     principal.organizationId !== project.organizationId ||
-    (
-      !principalHasRole(principal, "organization-admin") &&
+    (!principalHasRole(principal, "organization-admin") &&
       !principal.allProjects &&
-      !principal.projectIds.includes(project.id)
-    )
+      !principal.projectIds.includes(project.id))
   ) {
     throw new BridgeError("FORBIDDEN", "The principal cannot access this project.", 403);
   }
@@ -926,17 +957,12 @@ export function normalizeRoleName(value: string): string {
 export function principalHasRole(principal: Principal, role: string, projectId?: string): boolean {
   const normalizedRole = normalizeRoleName(role);
   const organizationRoles = principal.roles.map(normalizeRoleName);
-  if (
-    projectId &&
-    normalizedRole === "project-admin" &&
-    organizationRoles.includes("organization-admin")
-  ) {
+  if (projectId && normalizedRole === "project-admin" && organizationRoles.includes("organization-admin")) {
     return true;
   }
-  return [
-    ...organizationRoles,
-    ...(projectId ? principal.projectRoles?.[projectId] ?? [] : []),
-  ].some((principalRole) => normalizeRoleName(principalRole) === normalizedRole);
+  return [...organizationRoles, ...(projectId ? (principal.projectRoles?.[projectId] ?? []) : [])].some(
+    (principalRole) => normalizeRoleName(principalRole) === normalizedRole,
+  );
 }
 
 export const bridgeScopes = bridgeCapabilityScopes;
@@ -976,26 +1002,20 @@ export function principalHasScope(principal: Principal, scope: BridgeScope): boo
   return false;
 }
 
-export function assertPrincipalScope(
-  principal: Principal,
-  scope: BridgeScope,
-  action: string,
-): void {
+export function assertPrincipalScope(principal: Principal, scope: BridgeScope, action: string): void {
   if (principalHasScope(principal, scope)) return;
-  throw new BridgeError(
-    "FORBIDDEN",
-    `${action} requires the ${scope} capability.`,
-    403,
-    { requiredScope: scope },
-  );
+  throw new BridgeError("FORBIDDEN", `${action} requires the ${scope} capability.`, 403, { requiredScope: scope });
 }
 
 function hasQuestionOwnerMatch(principal: Principal, question: Question): boolean {
-  const assigned = question.ownerIds.includes(principal.id) ||
+  const assigned =
+    question.ownerIds.includes(principal.id) ||
     question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId)) ||
     principalHasRole(principal, "project-admin", question.projectId);
-  return assigned && (question.requiredOwnerRoles ?? []).every((role) =>
-    principalHasRole(principal, role, question.projectId));
+  return (
+    assigned &&
+    (question.requiredOwnerRoles ?? []).every((role) => principalHasRole(principal, role, question.projectId))
+  );
 }
 
 function requiredQuestionReviewerRoles(question: Question): readonly string[] {
@@ -1009,15 +1029,17 @@ function requiredQuestionReviewerRoles(question: Question): readonly string[] {
 export function questionApprovalStatus(question: Question): QuestionApprovalStatus {
   const quorum = question.requiredReviewerQuorum ?? {};
   const requirements = requiredQuestionReviewerRoles(question).map((role): QuestionApprovalRequirement => {
-    const configuredCount = Object.entries(quorum).find(([configuredRole]) => normalizeRoleName(configuredRole) === role)?.[1];
+    const configuredCount = Object.entries(quorum).find(
+      ([configuredRole]) => normalizeRoleName(configuredRole) === role,
+    )?.[1];
     const requiredCount = Math.max(1, configuredCount ?? 1);
     const roleReviews = question.reviews.filter((review) => normalizeRoleName(review.reviewerRole) === role);
-    const approvedReviewerIds = [...new Set(
-      roleReviews.filter((review) => review.status === "approved").map((review) => review.reviewerId),
-    )];
-    const rejectedReviewerIds = [...new Set(
-      roleReviews.filter((review) => review.status === "rejected").map((review) => review.reviewerId),
-    )];
+    const approvedReviewerIds = [
+      ...new Set(roleReviews.filter((review) => review.status === "approved").map((review) => review.reviewerId)),
+    ];
+    const rejectedReviewerIds = [
+      ...new Set(roleReviews.filter((review) => review.status === "rejected").map((review) => review.reviewerId)),
+    ];
     const approvedCount = Math.min(requiredCount, approvedReviewerIds.length);
     const satisfied = approvedCount >= requiredCount;
     return {
@@ -1041,7 +1063,8 @@ function hasRequiredQuestionReviews(principal: Principal, question: Question): b
   if (question.risk !== "protected") return true;
   return questionApprovalStatus(question).requirements.every((requirement) => {
     if (requirement.status === "rejected" && requirement.approvedCount < requirement.requiredCount) return false;
-    const principalCountsAsApproval = principalHasRole(principal, requirement.role, question.projectId) &&
+    const principalCountsAsApproval =
+      principalHasRole(principal, requirement.role, question.projectId) &&
       !requirement.reviewerIds.includes(principal.id);
     return requirement.approvedCount + (principalCountsAsApproval ? 1 : 0) >= requirement.requiredCount;
   });
@@ -1052,7 +1075,8 @@ export function canAcceptQuestion(principal: Principal, question: Question): boo
     principal.type !== "human" ||
     !["open", "in_discussion"].includes(question.status) ||
     !hasQuestionOwnerMatch(principal, question)
-  ) return false;
+  )
+    return false;
   return question.risk !== "protected" || hasRequiredQuestionReviews(principal, question);
 }
 
@@ -1080,15 +1104,16 @@ export function editableQuestionCommentIds(principal: Principal, question: Quest
     .map((comment) => comment.id);
 }
 
-export function questionReviewRoles(
-  principal: Principal,
-  question: Question,
-): readonly string[] {
+export function questionReviewRoles(principal: Principal, question: Question): readonly string[] {
   if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
-  return requiredQuestionReviewerRoles(question).filter((role) =>
-    principalHasRole(principal, role, question.projectId) &&
-    !question.reviews.some((review) =>
-      review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role)));
+  return requiredQuestionReviewerRoles(question).filter(
+    (role) =>
+      principalHasRole(principal, role, question.projectId) &&
+      !question.reviews.some(
+        (review) =>
+          review.reviewerId === principal.id && normalizeRoleName(review.reviewerRole) === normalizeRoleName(role),
+      ),
+  );
 }
 
 export function questionDueStatus(question: Question, now: Date): QuestionDueStatus {
@@ -1100,21 +1125,19 @@ export function questionDueStatus(question: Question, now: Date): QuestionDueSta
   return "scheduled";
 }
 
-export function questionInboxItem(
-  principal: Principal,
-  question: Question,
-  now: Date,
-): QuestionInboxItem {
+export function questionInboxItem(principal: Principal, question: Question, now: Date): QuestionInboxItem {
   const approvalStatus = questionApprovalStatus(question);
   return {
     ...question,
     inboxReasons: questionInboxReasons(principal, question),
     canAccept: canAcceptQuestion(principal, question),
     reviewRoles: questionReviewRoles(principal, question),
-    canReassign: principal.type === "human" &&
+    canReassign:
+      principal.type === "human" &&
       ["open", "in_discussion"].includes(question.status) &&
       principalHasRole(principal, "project-admin", question.projectId),
-    canOverrideApproval: principal.type === "human" &&
+    canOverrideApproval:
+      principal.type === "human" &&
       ["open", "in_discussion"].includes(question.status) &&
       question.risk === "protected" &&
       principalHasRole(principal, "project-admin", question.projectId) &&
@@ -1128,21 +1151,21 @@ export function questionInboxItem(
   };
 }
 
-export function questionInboxReasons(
-  principal: Principal,
-  question: Question,
-): readonly QuestionInboxReason[] {
+export function questionInboxReasons(principal: Principal, question: Question): readonly QuestionInboxReason[] {
   if (principal.type !== "human" || !["open", "in_discussion"].includes(question.status)) return [];
   const reasons: QuestionInboxReason[] = [];
   if (question.ownerIds.includes(principal.id)) reasons.push("direct_owner");
-  if (question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId))) reasons.push("role_owner");
+  if (question.ownerRoles.some((role) => principalHasRole(principal, role, question.projectId)))
+    reasons.push("role_owner");
   if ((question.reviewerIds ?? []).includes(principal.id)) reasons.push("direct_reviewer");
   if ((question.reviewerRoles ?? []).some((role) => principalHasRole(principal, role, question.projectId))) {
     reasons.push("role_reviewer");
   }
   if (principalHasRole(principal, "project-admin", question.projectId)) reasons.push("project_admin");
-  if (question.risk === "protected" && requiredQuestionReviewerRoles(question).some((role) =>
-    principalHasRole(principal, role, question.projectId))) {
+  if (
+    question.risk === "protected" &&
+    requiredQuestionReviewerRoles(question).some((role) => principalHasRole(principal, role, question.projectId))
+  ) {
     reasons.push("protected_review");
   }
   return reasons;
@@ -1151,12 +1174,13 @@ export function questionInboxReasons(
 export function assertCanAccept(principal: Principal, question: Question): void {
   assertHuman(principal, "Accepting a decision");
   if (!hasQuestionOwnerMatch(principal, question)) {
-    throw new BridgeError("FORBIDDEN", "Only a configured decision owner or assigned role can accept this answer.", 403);
+    throw new BridgeError(
+      "FORBIDDEN",
+      "Only a configured decision owner or assigned role can accept this answer.",
+      403,
+    );
   }
-  if (
-    question.risk === "protected" &&
-    !hasRequiredQuestionReviews(principal, question)
-  ) {
+  if (question.risk === "protected" && !hasRequiredQuestionReviews(principal, question)) {
     throw new BridgeError(
       "POLICY_BLOCKED",
       "Protected decisions require every policy-specified human review role.",
@@ -1172,8 +1196,7 @@ export function assertCanApproveArtifact(
   version?: ArtifactVersion,
 ): void {
   assertHuman(principal, "Approving a specification");
-  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)
-    .includes(principal.id);
+  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds).includes(principal.id);
   const isDecisionOwner = projectDecisionOwnerIds.includes(principal.id);
   const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isDecisionOwner && !isProjectAdmin) {
@@ -1185,21 +1208,12 @@ export function assertCanApproveArtifact(
   }
 }
 
-export function assertCanReviewArtifact(
-  principal: Principal,
-  artifact: Artifact,
-  version?: ArtifactVersion,
-): void {
+export function assertCanReviewArtifact(principal: Principal, artifact: Artifact, version?: ArtifactVersion): void {
   assertHuman(principal, "Reviewing a specification");
-  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds)
-    .includes(principal.id);
+  const isReviewer = (version?.reviewerAssignment?.reviewerIds ?? artifact.reviewerIds).includes(principal.id);
   const isProjectAdmin = principalHasRole(principal, "project-admin", artifact.projectId);
   if (!isReviewer && !isProjectAdmin) {
-    throw new BridgeError(
-      "FORBIDDEN",
-      "Only a configured specification reviewer can add formal review feedback.",
-      403,
-    );
+    throw new BridgeError("FORBIDDEN", "Only a configured specification reviewer can add formal review feedback.", 403);
   }
 }
 

@@ -155,36 +155,40 @@ const question: Question = {
     ownershipVersion: 1,
     policyVersion: 0,
   },
-  assignmentHistory: [{
-    id: "qas_mapping",
-    kind: "initial",
-    changedById: "agt_codex",
-    changedByType: "agent",
-    ownerIds: ["usr_owner"],
-    ownerRoles: ["architect"],
-    reviewerIds: ["usr_reviewer"],
-    reviewerRoles: ["architecture-reviewer"],
-    route: {
-      ownerSource: "explicit_owner",
-      reviewerSource: "scoped_ownership",
-      reviewerRuleKey: "architecture-review",
-      ownershipVersion: 1,
-      policyVersion: 0,
+  assignmentHistory: [
+    {
+      id: "qas_mapping",
+      kind: "initial",
+      changedById: "agt_codex",
+      changedByType: "agent",
+      ownerIds: ["usr_owner"],
+      ownerRoles: ["architect"],
+      reviewerIds: ["usr_reviewer"],
+      reviewerRoles: ["architecture-reviewer"],
+      route: {
+        ownerSource: "explicit_owner",
+        reviewerSource: "scoped_ownership",
+        reviewerRuleKey: "architecture-review",
+        ownershipVersion: 1,
+        policyVersion: 0,
+      },
+      createdAt: "2026-08-07T10:00:00.000Z",
+      questionVersion: 1,
     },
-    createdAt: "2026-08-07T10:00:00.000Z",
-    questionVersion: 1,
-  }],
+  ],
   options: [
     { key: "postgres", label: "PostgreSQL", tradeoffs: "Operational dependency with strong transactions." },
     { key: "memory", label: "Memory", tradeoffs: "Simple but state is lost on restart." },
   ],
   recommendationKey: "postgres",
   scope: { repository: "bridge", component: "persistence" },
-  relatedLinks: [{
-    type: "work_item",
-    label: "Persistence decision work item",
-    url: "https://example.test/work/42",
-  }],
+  relatedLinks: [
+    {
+      type: "work_item",
+      label: "Persistence decision work item",
+      url: "https://example.test/work/42",
+    },
+  ],
   createdById: "agt_codex",
   createdByType: "agent",
   createdAt: "2026-08-07T10:00:00.000Z",
@@ -199,16 +203,18 @@ const question: Question = {
       rationale: "Atomic durable state is required.",
       optionKey: "postgres",
       mentionedPrincipalIds: ["usr_reviewer"],
-      revisionHistory: [{
-        id: "rsv_mapping",
-        answer: "Use a durable PostgreSQL-backed repository.",
-        rationale: "The repository must survive process restarts.",
-        optionKey: "postgres",
-        mentionedPrincipalIds: [],
-        editedById: "usr_owner",
-        editedByType: "human",
-        editedAt: "2026-08-07T10:02:00.000Z",
-      }],
+      revisionHistory: [
+        {
+          id: "rsv_mapping",
+          answer: "Use a durable PostgreSQL-backed repository.",
+          rationale: "The repository must survive process restarts.",
+          optionKey: "postgres",
+          mentionedPrincipalIds: [],
+          editedById: "usr_owner",
+          editedByType: "human",
+          editedAt: "2026-08-07T10:02:00.000Z",
+        },
+      ],
       createdAt: "2026-08-07T10:01:00.000Z",
     },
   ],
@@ -232,14 +238,16 @@ const question: Question = {
       authorType: "human",
       body: "Please confirm the migration rollback path before accepting this choice.",
       mentionedPrincipalIds: ["usr_reviewer"],
-      revisionHistory: [{
-        id: "csv_mapping",
-        body: "Please confirm the migration rollback path and observability plan before accepting this choice.",
-        mentionedPrincipalIds: [],
-        editedById: "usr_owner",
-        editedByType: "human",
-        editedAt: "2026-08-07T10:02:15.000Z",
-      }],
+      revisionHistory: [
+        {
+          id: "csv_mapping",
+          body: "Please confirm the migration rollback path and observability plan before accepting this choice.",
+          mentionedPrincipalIds: [],
+          editedById: "usr_owner",
+          editedByType: "human",
+          editedAt: "2026-08-07T10:02:15.000Z",
+        },
+      ],
       createdAt: "2026-08-07T10:01:45.000Z",
     },
   ],
@@ -439,6 +447,11 @@ const outboxDelivery: OutboxDelivery = {
   attemptCount: 1,
   preference: "immediate",
   providerMessageId: "provider-message-mapping",
+  feedback: {
+    provider: "ses",
+    type: "bounce",
+    receivedAt: "2026-08-07T10:02:13.000Z",
+  },
   createdAt: "2026-08-07T10:02:11.000Z",
   updatedAt: "2026-08-07T10:02:12.000Z",
 };
@@ -565,26 +578,25 @@ describe("PostgreSQL domain mappings", () => {
 
     expect(organizationFromRow(organizationToRow(organization) as OrganizationRow)).toEqual(organization);
     expect(principalIdentityFromRow(principalIdentityToRow(identity) as PrincipalIdentityRow)).toEqual(identity);
-    expect(organizationMembershipFromRow(
-      organizationMembershipToRow(organizationMembership) as OrganizationMembershipRow,
-    )).toEqual(organizationMembership);
-    expect(directoryGroupFromRow(directoryGroupToRow(directoryGroup) as DirectoryGroupRow))
-      .toEqual(directoryGroup);
-    expect(directoryGroupMemberFromRow(
-      directoryGroupMemberToRow(directoryGroupMember) as DirectoryGroupMemberRow,
-    )).toEqual(directoryGroupMember);
-    expect(projectMembershipFromRow(
-      projectMembershipToRow(projectMembership) as ProjectMembershipRow,
-    )).toEqual(projectMembership);
-    expect(serviceCredentialFromRow(
-      serviceCredentialToRow(serviceCredential) as ServiceCredentialRow,
-    )).toEqual(serviceCredential);
-    expect(organizationAuditEventFromRow(
-      organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow,
-    )).toEqual(organizationAuditEvent);
-    expect(organizationAuditEventFromRow(
-      organizationAuditEventToRow(authenticationAuditEvent) as OrganizationAuditEventRow,
-    )).toEqual(authenticationAuditEvent);
+    expect(
+      organizationMembershipFromRow(organizationMembershipToRow(organizationMembership) as OrganizationMembershipRow),
+    ).toEqual(organizationMembership);
+    expect(directoryGroupFromRow(directoryGroupToRow(directoryGroup) as DirectoryGroupRow)).toEqual(directoryGroup);
+    expect(
+      directoryGroupMemberFromRow(directoryGroupMemberToRow(directoryGroupMember) as DirectoryGroupMemberRow),
+    ).toEqual(directoryGroupMember);
+    expect(projectMembershipFromRow(projectMembershipToRow(projectMembership) as ProjectMembershipRow)).toEqual(
+      projectMembership,
+    );
+    expect(serviceCredentialFromRow(serviceCredentialToRow(serviceCredential) as ServiceCredentialRow)).toEqual(
+      serviceCredential,
+    );
+    expect(
+      organizationAuditEventFromRow(organizationAuditEventToRow(organizationAuditEvent) as OrganizationAuditEventRow),
+    ).toEqual(organizationAuditEvent);
+    expect(
+      organizationAuditEventFromRow(organizationAuditEventToRow(authenticationAuditEvent) as OrganizationAuditEventRow),
+    ).toEqual(authenticationAuditEvent);
   });
 
   it("round-trips projects, runs, assumptions, questions, and artifact aggregates", () => {
@@ -599,8 +611,9 @@ describe("PostgreSQL domain mappings", () => {
       canonicalUrl: "https://github.com/bridge-org/bridge",
       createdAt: "2026-08-07T10:00:00.000Z",
     };
-    expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow))
-      .toEqual(repositoryRecord);
+    expect(repositoryRecordFromRow(repositoryRecordToRow(repositoryRecord) as RepositoryRecordRow)).toEqual(
+      repositoryRecord,
+    );
     const pullRequest: GithubPullRequestContext = {
       id: "gpr_mapping",
       organizationId: project.organizationId,
@@ -620,9 +633,7 @@ describe("PostgreSQL domain mappings", () => {
       updatedAt: "2026-08-07T11:01:00.000Z",
       version: 1,
     };
-    expect(githubPullRequestFromRow(
-      githubPullRequestToRow(pullRequest) as GithubPullRequestRow,
-    )).toEqual(pullRequest);
+    expect(githubPullRequestFromRow(githubPullRequestToRow(pullRequest) as GithubPullRequestRow)).toEqual(pullRequest);
     const issue: GithubIssueWorkItem = {
       id: "gwi_mapping",
       organizationId: project.organizationId,
@@ -647,42 +658,50 @@ describe("PostgreSQL domain mappings", () => {
       projectId: project.id,
       roles: [{ name: "qa-lead", description: "Owns project quality decisions." }],
       teams: [{ key: "quality", name: "Quality", memberIds: ["usr_qa"] }],
-      rules: [{
-        key: "quality",
-        name: "Quality ownership",
-        priority: 10,
-        category: "quality",
-        owners: { principalIds: [], roles: ["qa-lead"], teamKeys: ["quality"] },
-        reviewers: { principalIds: ["usr_owner"], roles: [], teamKeys: [] },
-      }],
+      rules: [
+        {
+          key: "quality",
+          name: "Quality ownership",
+          priority: 10,
+          category: "quality",
+          owners: { principalIds: [], roles: ["qa-lead"], teamKeys: ["quality"] },
+          reviewers: { principalIds: ["usr_owner"], roles: [], teamKeys: [] },
+        },
+      ],
       version: 1,
       updatedById: "usr_owner",
       updatedAt: "2026-08-07T10:00:00.000Z",
     };
-    expect(projectOwnershipConfigurationFromRow(
-      projectOwnershipConfigurationToRow(ownershipConfiguration) as ProjectOwnershipConfigurationRow,
-    )).toEqual(ownershipConfiguration);
+    expect(
+      projectOwnershipConfigurationFromRow(
+        projectOwnershipConfigurationToRow(ownershipConfiguration) as ProjectOwnershipConfigurationRow,
+      ),
+    ).toEqual(ownershipConfiguration);
     const policyConfiguration: ProjectPolicyConfiguration = {
       organizationId: project.organizationId,
       projectId: project.id,
-      rules: [{
-        key: "quality-transfer",
-        name: "Transfer quality",
-        priority: 10,
-        category: "quality",
-        scope: { component: "transfers" },
-        action: "block",
-        minimumRisk: "high",
-        requiredOwnerRoles: ["qa-lead"],
-        requiredReviewerRoles: [],
-      }],
+      rules: [
+        {
+          key: "quality-transfer",
+          name: "Transfer quality",
+          priority: 10,
+          category: "quality",
+          scope: { component: "transfers" },
+          action: "block",
+          minimumRisk: "high",
+          requiredOwnerRoles: ["qa-lead"],
+          requiredReviewerRoles: [],
+        },
+      ],
       version: 1,
       updatedById: "usr_owner",
       updatedAt: "2026-08-07T10:00:00.000Z",
     };
-    expect(projectPolicyConfigurationFromRow(
-      projectPolicyConfigurationToRow(policyConfiguration) as ProjectPolicyConfigurationRow,
-    )).toEqual(policyConfiguration);
+    expect(
+      projectPolicyConfigurationFromRow(
+        projectPolicyConfigurationToRow(policyConfiguration) as ProjectPolicyConfigurationRow,
+      ),
+    ).toEqual(policyConfiguration);
     const auditEvent: AuditEvent = {
       id: "aud_mapping",
       correlationId: "cor_mapping",
@@ -717,13 +736,11 @@ describe("PostgreSQL domain mappings", () => {
       subjectId: question.id,
       createdAt: "2026-08-07T10:02:00.000Z",
     };
-    expect(auditEventFromRow(auditEventToRow(legacyAuditEvent) as AuditEventRow)).toEqual(
-      legacyAuditEvent,
-    );
+    expect(auditEventFromRow(auditEventToRow(legacyAuditEvent) as AuditEventRow)).toEqual(legacyAuditEvent);
     expect(runFromRow(runToRow(run) as AgentRunRow)).toEqual(run);
-    expect(adapterDiagnosticFromRow(
-      adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow,
-    )).toEqual(adapterDiagnostic);
+    expect(adapterDiagnosticFromRow(adapterDiagnosticToRow(adapterDiagnostic) as AdapterDiagnosticRow)).toEqual(
+      adapterDiagnostic,
+    );
     expect(assumptionFromRow(assumptionToRow(assumption) as AssumptionRow)).toEqual(assumption);
     expect(decisionFromRow(decisionToRow(decision) as DecisionRow)).toEqual(decision);
     const {
@@ -744,8 +761,9 @@ describe("PostgreSQL domain mappings", () => {
       version: 1,
     };
     expect(decisionFromRow(decisionToRow(assumptionDecision) as DecisionRow)).toEqual(assumptionDecision);
-    expect(contextSnapshotFromRow(contextSnapshotToRow(contextSnapshot) as ContextSnapshotRow))
-      .toEqual(contextSnapshot);
+    expect(contextSnapshotFromRow(contextSnapshotToRow(contextSnapshot) as ContextSnapshotRow)).toEqual(
+      contextSnapshot,
+    );
 
     const questionRow = questionToRow(question) as QuestionRow;
     const responseRows = question.responses.map(responseToRow) as QuestionResponseRow[];
@@ -754,35 +772,47 @@ describe("PostgreSQL domain mappings", () => {
     const artifactRow = artifactToRow(artifact) as ArtifactRow;
     const versionRows = artifact.versions.map(artifactVersionToRow) as ArtifactVersionRow[];
     expect(artifactFromRows(artifactRow, versionRows)).toEqual(artifact);
-    expect(artifactVersionFromRow({
-      ...versionRows[0]!,
-      reviewerAssignment: null,
-    })).not.toHaveProperty("reviewerAssignment");
+    expect(
+      artifactVersionFromRow({
+        ...versionRows[0]!,
+        reviewerAssignment: null,
+      }),
+    ).not.toHaveProperty("reviewerAssignment");
 
     expect(notificationFromRow(notificationToRow(notification) as NotificationRow)).toEqual(notification);
-    expect(notificationPreferenceFromRow(
-      notificationPreferenceToRow(notificationPreference) as NotificationPreferenceRow,
-    )).toEqual(notificationPreference);
+    expect(
+      notificationPreferenceFromRow(notificationPreferenceToRow(notificationPreference) as NotificationPreferenceRow),
+    ).toEqual(notificationPreference);
     expect(outboxEventFromRow(outboxEventToRow(outboxEvent) as OutboxEventRow)).toEqual(outboxEvent);
-    expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow))
-      .toEqual(outboxDelivery);
+    expect(outboxDeliveryFromRow(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow)).toEqual(outboxDelivery);
+  });
+
+  it("normalizes PostgreSQL timestamp text for delivery records", () => {
+    const mapped = outboxDeliveryFromRow({
+      ...(outboxDeliveryToRow(outboxDelivery) as OutboxDeliveryRow),
+      createdAt: "2026-08-07 10:02:11+00",
+      updatedAt: "2026-08-07 10:02:12+00",
+      feedbackReceivedAt: "2026-08-07 10:02:13+00",
+    });
+
+    expect(mapped).toMatchObject({
+      createdAt: "2026-08-07T10:02:11.000Z",
+      updatedAt: "2026-08-07T10:02:12.000Z",
+      feedback: {
+        receivedAt: "2026-08-07T10:02:13.000Z",
+      },
+    });
   });
 
   it("ships reviewed deferred constraints for atomic aggregate references", () => {
-    const migration = readFileSync(
-      new URL("../drizzle/0000_nice_bulldozer.sql", import.meta.url),
-      "utf8",
-    );
+    const migration = readFileSync(new URL("../drizzle/0000_nice_bulldozer.sql", import.meta.url), "utf8");
     expect(migration).toContain("bridge_questions_decision_fk");
     expect(migration).toContain("bridge_artifacts_current_version_fk");
     expect(migration.match(/DEFERRABLE INITIALLY DEFERRED/g)).toHaveLength(5);
     expect(migration).toContain("bridge_artifact_versions_one_approved_idx");
     expect(migration).toContain("bridge_questions_organization_project_fk");
 
-    const runMigration = readFileSync(
-      new URL("../drizzle/0001_early_ricochet.sql", import.meta.url),
-      "utf8",
-    );
+    const runMigration = readFileSync(new URL("../drizzle/0001_early_ricochet.sql", import.meta.url), "utf8");
     expect(runMigration).toContain("bridge_agent_runs_terminal_check");
     expect(runMigration).toContain("bridge_questions_run_scope_fk");
     expect(runMigration).toContain("bridge_context_snapshots_run_scope_fk");
@@ -803,38 +833,26 @@ describe("PostgreSQL domain mappings", () => {
     );
     expect(assumptionMigration).toContain("'decision', 'assumption', 'artifact'");
 
-    const projectMigration = readFileSync(
-      new URL("../drizzle/0003_project_registration.sql", import.meta.url),
-      "utf8",
-    );
+    const projectMigration = readFileSync(new URL("../drizzle/0003_project_registration.sql", import.meta.url), "utf8");
     expect(projectMigration).toContain("'project', 'question', 'response'");
 
-    const commentMigration = readFileSync(
-      new URL("../drizzle/0006_question_comments.sql", import.meta.url),
-      "utf8",
-    );
+    const commentMigration = readFileSync(new URL("../drizzle/0006_question_comments.sql", import.meta.url), "utf8");
     expect(commentMigration).toContain('ADD COLUMN "comments" jsonb');
-    expect(commentMigration).toContain('jsonb_typeof("comments") = \'array\'');
+    expect(commentMigration).toContain("jsonb_typeof(\"comments\") = 'array'");
 
-    const roleMigration = readFileSync(
-      new URL("../drizzle/0004_role_aware_questions.sql", import.meta.url),
-      "utf8",
-    );
+    const roleMigration = readFileSync(new URL("../drizzle/0004_role_aware_questions.sql", import.meta.url), "utf8");
     expect(roleMigration).toContain('"owner_roles" jsonb');
-    expect(roleMigration).toContain('jsonb_typeof("owner_roles") = \'array\'');
+    expect(roleMigration).toContain("jsonb_typeof(\"owner_roles\") = 'array'");
 
-    const reviewMigration = readFileSync(
-      new URL("../drizzle/0005_question_reviews.sql", import.meta.url),
-      "utf8",
-    );
+    const reviewMigration = readFileSync(new URL("../drizzle/0005_question_reviews.sql", import.meta.url), "utf8");
     expect(reviewMigration).toContain('"reviews" jsonb');
-    expect(reviewMigration).toContain('jsonb_typeof("reviews") = \'array\'');
+    expect(reviewMigration).toContain("jsonb_typeof(\"reviews\") = 'array'");
 
     const notificationMigration = readFileSync(
       new URL("../drizzle/0007_in_app_notifications.sql", import.meta.url),
       "utf8",
     );
-    expect(notificationMigration).toContain("CREATE TABLE \"bridge_notifications\"");
+    expect(notificationMigration).toContain('CREATE TABLE "bridge_notifications"');
     expect(notificationMigration).toContain("bridge_notifications_recipient_created_idx");
     expect(notificationMigration).toContain("bridge_notifications_organization_project_fk");
 
@@ -842,15 +860,12 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0037_aberrant_ezekiel.sql", import.meta.url),
       "utf8",
     );
-    expect(notificationPreferenceMigration).toContain("CREATE TABLE \"bridge_notification_preferences\"");
+    expect(notificationPreferenceMigration).toContain('CREATE TABLE "bridge_notification_preferences"');
     expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_membership_fk");
     expect(notificationPreferenceMigration).toContain("bridge_notification_preferences_tenant");
 
-    const outboxMigration = readFileSync(
-      new URL("../drizzle/0008_transactional_outbox.sql", import.meta.url),
-      "utf8",
-    );
-    expect(outboxMigration).toContain("CREATE TABLE \"bridge_outbox_events\"");
+    const outboxMigration = readFileSync(new URL("../drizzle/0008_transactional_outbox.sql", import.meta.url), "utf8");
+    expect(outboxMigration).toContain('CREATE TABLE "bridge_outbox_events"');
     expect(outboxMigration).toContain("bridge_outbox_events_status_check");
     expect(outboxMigration).toContain("bridge_outbox_events_type_check");
     expect(outboxMigration).toContain("bridge_outbox_status_available_idx");
@@ -867,10 +882,11 @@ describe("PostgreSQL domain mappings", () => {
     expect(decisionLifecycleMigration).toContain("decision_lifecycle");
     expect(decisionLifecycleMigration).toContain("decision.lifecycle_changed");
     const guardedDecisionScopeIndex =
-      "CREATE UNIQUE INDEX IF NOT EXISTS \"bridge_decisions_organization_project_id_unique\"";
+      'CREATE UNIQUE INDEX IF NOT EXISTS "bridge_decisions_organization_project_id_unique"';
     expect(decisionLifecycleMigration).toContain(guardedDecisionScopeIndex);
-    expect(decisionLifecycleMigration.indexOf(guardedDecisionScopeIndex))
-      .toBeLessThan(decisionLifecycleMigration.indexOf("ADD CONSTRAINT \"bridge_decisions_replacement_scope_fk\""));
+    expect(decisionLifecycleMigration.indexOf(guardedDecisionScopeIndex)).toBeLessThan(
+      decisionLifecycleMigration.indexOf('ADD CONSTRAINT "bridge_decisions_replacement_scope_fk"'),
+    );
 
     const artifactReviewMigration = readFileSync(
       new URL("../drizzle/0010_safe_white_queen.sql", import.meta.url),
@@ -918,10 +934,7 @@ describe("PostgreSQL domain mappings", () => {
     expect(assumptionNotificationMigration).toContain("assumption_expired");
     expect(assumptionNotificationMigration).toContain("DROP CONSTRAINT IF EXISTS");
 
-    const decisionSearchMigration = readFileSync(
-      new URL("../drizzle/0011_keen_galactus.sql", import.meta.url),
-      "utf8",
-    );
+    const decisionSearchMigration = readFileSync(new URL("../drizzle/0011_keen_galactus.sql", import.meta.url), "utf8");
     expect(decisionSearchMigration).toContain('CREATE INDEX "bridge_decisions_full_text_idx"');
     expect(decisionSearchMigration).toContain("USING gin");
     expect(decisionSearchMigration).toContain("setweight(to_tsvector('simple'");
@@ -937,10 +950,11 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0013_ancient_gwen_stacy.sql", import.meta.url),
       "utf8",
     );
-    expect(emailDeliveryMigration).toContain("CREATE TABLE \"bridge_outbox_deliveries\"");
+    expect(emailDeliveryMigration).toContain('CREATE TABLE "bridge_outbox_deliveries"');
     expect(emailDeliveryMigration).toContain("bridge_outbox_events_org_project_id_unique");
-    expect(emailDeliveryMigration.indexOf("bridge_outbox_events_org_project_id_unique"))
-      .toBeLessThan(emailDeliveryMigration.indexOf("bridge_outbox_deliveries_event_scope_fk"));
+    expect(emailDeliveryMigration.indexOf("bridge_outbox_events_org_project_id_unique")).toBeLessThan(
+      emailDeliveryMigration.indexOf("bridge_outbox_deliveries_event_scope_fk"),
+    );
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_result_check");
     expect(emailDeliveryMigration).toContain("bridge_outbox_deliveries_destination_hash_check");
 
@@ -952,10 +966,7 @@ describe("PostgreSQL domain mappings", () => {
     expect(slackDeliveryMigration).toContain("DROP CONSTRAINT IF EXISTS");
     expect(slackDeliveryMigration).toContain("'email', 'slack'");
 
-    const slackDedupeMigration = readFileSync(
-      new URL("../drizzle/0023_normal_synch.sql", import.meta.url),
-      "utf8",
-    );
+    const slackDedupeMigration = readFileSync(new URL("../drizzle/0023_normal_synch.sql", import.meta.url), "utf8");
     expect(slackDedupeMigration).toContain('ADD COLUMN "dedupe_key" text');
     expect(slackDedupeMigration).toContain("bridge_outbox_deliveries_project_channel_dedupe_idx");
 
@@ -970,10 +981,7 @@ describe("PostgreSQL domain mappings", () => {
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_mcp_status_check");
     expect(adapterDiagnosticMigration).toContain("bridge_adapter_diagnostics_status_check");
 
-    const repositoryMigration = readFileSync(
-      new URL("../drizzle/0025_calm_vengeance.sql", import.meta.url),
-      "utf8",
-    );
+    const repositoryMigration = readFileSync(new URL("../drizzle/0025_calm_vengeance.sql", import.meta.url), "utf8");
     expect(repositoryMigration).toContain('CREATE TABLE "bridge_project_repositories"');
     expect(repositoryMigration).toContain("bridge_project_repositories_org_provider_owner_name_unique");
     expect(repositoryMigration).toContain("bridge_project_repositories_organization_project_fk");
@@ -990,10 +998,7 @@ describe("PostgreSQL domain mappings", () => {
     expect(ownershipMigration).toContain("bridge_project_ownership_configurations_roles_shape_check");
     expect(ownershipMigration).toContain("'ownership_configuration'");
 
-    const policyMigration = readFileSync(
-      new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url),
-      "utf8",
-    );
+    const policyMigration = readFileSync(new URL("../drizzle/0027_vengeful_lady_ursula.sql", import.meta.url), "utf8");
     expect(policyMigration).toContain('CREATE TABLE "bridge_project_policy_configurations"');
     expect(policyMigration).toContain("bridge_project_policy_configurations_project_fk");
     expect(policyMigration).toContain("bridge_project_policy_configurations_tenant");
@@ -1003,16 +1008,10 @@ describe("PostgreSQL domain mappings", () => {
     expect(policyMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
       policyMigration.indexOf('ALTER COLUMN "policy_action" SET NOT NULL'),
     );
-    const requiredOwnerMigration = readFileSync(
-      new URL("../drizzle/0028_cold_tombstone.sql", import.meta.url),
-      "utf8",
-    );
+    const requiredOwnerMigration = readFileSync(new URL("../drizzle/0028_cold_tombstone.sql", import.meta.url), "utf8");
     expect(requiredOwnerMigration).toContain('ADD COLUMN "required_owner_roles"');
     expect(requiredOwnerMigration).toContain("bridge_questions_required_owner_roles_shape_check");
-    const routingMigration = readFileSync(
-      new URL("../drizzle/0029_unknown_madame_hydra.sql", import.meta.url),
-      "utf8",
-    );
+    const routingMigration = readFileSync(new URL("../drizzle/0029_unknown_madame_hydra.sql", import.meta.url), "utf8");
     expect(routingMigration).toContain('ADD COLUMN "reviewer_ids"');
     expect(routingMigration).toContain('ADD COLUMN "routing"');
     expect(routingMigration).toContain('ADD COLUMN "assignment_history"');
@@ -1021,17 +1020,11 @@ describe("PostgreSQL domain mappings", () => {
     expect(routingMigration.indexOf('UPDATE "bridge_questions" SET')).toBeLessThan(
       routingMigration.indexOf('ALTER COLUMN "routing" SET NOT NULL'),
     );
-    const dueDateMigration = readFileSync(
-      new URL("../drizzle/0030_gray_smasher.sql", import.meta.url),
-      "utf8",
-    );
+    const dueDateMigration = readFileSync(new URL("../drizzle/0030_gray_smasher.sql", import.meta.url), "utf8");
     expect(dueDateMigration).toContain('ADD COLUMN "due_at" timestamp with time zone');
     expect(dueDateMigration).toContain('CREATE INDEX "bridge_questions_project_due_idx"');
 
-    const approvalMigration = readFileSync(
-      new URL("../drizzle/0031_deep_vampiro.sql", import.meta.url),
-      "utf8",
-    );
+    const approvalMigration = readFileSync(new URL("../drizzle/0031_deep_vampiro.sql", import.meta.url), "utf8");
     expect(approvalMigration).toContain('ADD COLUMN "reason" text');
     expect(approvalMigration).toContain('ADD COLUMN "required_reviewer_quorum" jsonb');
     expect(approvalMigration).toContain('ADD COLUMN "approval_override" jsonb');
@@ -1052,29 +1045,28 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0014_first_jane_foster.sql", import.meta.url),
       "utf8",
     );
-    expect(correlationMigration).toContain("UPDATE \"bridge_audit_events\"");
-    expect(correlationMigration).toContain("UPDATE \"bridge_outbox_events\"");
-    expect(correlationMigration.indexOf("SET \"correlation_id\""))
-      .toBeLessThan(correlationMigration.indexOf("ALTER COLUMN \"correlation_id\" SET NOT NULL"));
+    expect(correlationMigration).toContain('UPDATE "bridge_audit_events"');
+    expect(correlationMigration).toContain('UPDATE "bridge_outbox_events"');
+    expect(correlationMigration.indexOf('SET "correlation_id"')).toBeLessThan(
+      correlationMigration.indexOf('ALTER COLUMN "correlation_id" SET NOT NULL'),
+    );
     expect(correlationMigration).toContain("bridge_audit_events_correlation_check");
     expect(correlationMigration).toContain("bridge_outbox_events_correlation_check");
     expect(correlationMigration).toContain("bridge_outbox_correlation_idx");
 
-    const identityMigration = readFileSync(
-      new URL("../drizzle/0015_spooky_bulldozer.sql", import.meta.url),
-      "utf8",
+    const identityMigration = readFileSync(new URL("../drizzle/0015_spooky_bulldozer.sql", import.meta.url), "utf8");
+    expect(identityMigration).toContain('CREATE TABLE "bridge_organizations"');
+    expect(identityMigration).toContain('CREATE TABLE "bridge_organization_memberships"');
+    expect(identityMigration).toContain('CREATE TABLE "bridge_project_memberships"');
+    expect(identityMigration.indexOf('INSERT INTO "bridge_organizations"')).toBeLessThan(
+      identityMigration.indexOf("bridge_projects_organization_id_bridge_organizations_id_fk"),
     );
-    expect(identityMigration).toContain("CREATE TABLE \"bridge_organizations\"");
-    expect(identityMigration).toContain("CREATE TABLE \"bridge_organization_memberships\"");
-    expect(identityMigration).toContain("CREATE TABLE \"bridge_project_memberships\"");
-    expect(identityMigration.indexOf("INSERT INTO \"bridge_organizations\""))
-      .toBeLessThan(identityMigration.indexOf("bridge_projects_organization_id_bridge_organizations_id_fk"));
 
     const memberAdministrationMigration = readFileSync(
       new URL("../drizzle/0016_charming_siren.sql", import.meta.url),
       "utf8",
     );
-    expect(memberAdministrationMigration).toContain("CREATE TABLE \"bridge_organization_audit_events\"");
+    expect(memberAdministrationMigration).toContain('CREATE TABLE "bridge_organization_audit_events"');
     expect(memberAdministrationMigration).toContain("bridge_organization_memberships_positive_version_check");
     expect(memberAdministrationMigration).toContain("bridge_project_memberships_positive_version_check");
     expect(memberAdministrationMigration).toContain("bridge_organization_audit_events_action_check");
@@ -1084,7 +1076,7 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0017_cooing_slipstream.sql", import.meta.url),
       "utf8",
     );
-    expect(serviceIdentityMigration).toContain("CREATE TABLE \"bridge_service_credentials\"");
+    expect(serviceIdentityMigration).toContain('CREATE TABLE "bridge_service_credentials"');
     expect(serviceIdentityMigration).toContain("bridge_service_credentials_token_hash_unique");
     expect(serviceIdentityMigration).toContain("bridge_service_credentials_positive_version_check");
     expect(serviceIdentityMigration).toContain("service_identity.created");
@@ -1093,14 +1085,11 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0018_brainy_blonde_phantom.sql", import.meta.url),
       "utf8",
     );
-    expect(rotationMigration).toContain("ADD COLUMN \"rotated_at\"");
+    expect(rotationMigration).toContain('ADD COLUMN "rotated_at"');
     expect(rotationMigration).toContain("service_identity.rotated");
 
-    const auditExportMigration = readFileSync(
-      new URL("../drizzle/0019_luxuriant_wallop.sql", import.meta.url),
-      "utf8",
-    );
-    expect(auditExportMigration).toContain("DROP CONSTRAINT IF EXISTS \"bridge_organization_audit_events_action_check\"");
+    const auditExportMigration = readFileSync(new URL("../drizzle/0019_luxuriant_wallop.sql", import.meta.url), "utf8");
+    expect(auditExportMigration).toContain('DROP CONSTRAINT IF EXISTS "bridge_organization_audit_events_action_check"');
     expect(auditExportMigration).toContain("'audit.exported'");
     expect(auditExportMigration).toContain("'audit_export'");
 
@@ -1116,18 +1105,14 @@ describe("PostgreSQL domain mappings", () => {
       new URL("../drizzle/0046_new_thunderball.sql", import.meta.url),
       "utf8",
     );
-    expect(automaticContinuationMigration).toContain(
-      "ADD COLUMN \"continuation_mode\" text DEFAULT 'manual' NOT NULL",
-    );
-    expect(automaticContinuationMigration).toContain(
-      "ALTER COLUMN \"continuation_mode\" DROP DEFAULT",
-    );
+    expect(automaticContinuationMigration).toContain("ADD COLUMN \"continuation_mode\" text DEFAULT 'manual' NOT NULL");
+    expect(automaticContinuationMigration).toContain('ALTER COLUMN "continuation_mode" DROP DEFAULT');
     expect(automaticContinuationMigration).toContain("bridge_agent_runs_continuation_mode_check");
     expect(automaticContinuationMigration).toContain(
-      "ALTER TABLE \"bridge_run_continuation_locators\" ADD COLUMN \"vendor_session_id\" text",
+      'ALTER TABLE "bridge_run_continuation_locators" ADD COLUMN "vendor_session_id" text',
     );
     expect(automaticContinuationMigration).not.toContain(
-      "ALTER TABLE \"bridge_agent_runs\" ADD COLUMN \"vendor_session_id\"",
+      'ALTER TABLE "bridge_agent_runs" ADD COLUMN "vendor_session_id"',
     );
     expect(automaticContinuationMigration).toContain("'run.continuation_ready'");
 
@@ -1141,16 +1126,17 @@ describe("PostgreSQL domain mappings", () => {
     expect(questionSearchMigration).toContain("bridge_questions_context_trigram_idx");
     expect(questionSearchMigration).toContain("gin_trgm_ops");
     expect(questionSearchMigration).toContain("coalesce(\"project_id\", '')");
-    expect(questionSearchMigration).toContain("lower(\"project_id\" || ':' || \"title\")");
+    expect(questionSearchMigration).toContain('lower("project_id" || \':\' || "title")');
 
-    const auditLineageMigration = readFileSync(
-      new URL("../drizzle/0048_lovely_ultimo.sql", import.meta.url),
-      "utf8",
-    );
+    const auditLineageMigration = readFileSync(new URL("../drizzle/0048_lovely_ultimo.sql", import.meta.url), "utf8");
     expect(auditLineageMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "before_version" integer');
     expect(auditLineageMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "after_version" integer');
-    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "before_version" integer');
-    expect(auditLineageMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "after_version" integer');
+    expect(auditLineageMigration).toContain(
+      'ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "before_version" integer',
+    );
+    expect(auditLineageMigration).toContain(
+      'ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "after_version" integer',
+    );
 
     const auditProvenanceMigration = readFileSync(
       new URL("../drizzle/0049_bent_galactus.sql", import.meta.url),
@@ -1159,26 +1145,57 @@ describe("PostgreSQL domain mappings", () => {
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "source" text');
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "policy_rule_key" text');
     expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "assignment_id" text');
-    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "owner_route_source" text');
-    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_audit_events" ADD COLUMN "reviewer_route_source" text');
-    expect(auditProvenanceMigration).toContain('ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "source" text');
+    expect(auditProvenanceMigration).toContain(
+      'ALTER TABLE "bridge_audit_events" ADD COLUMN "owner_route_source" text',
+    );
+    expect(auditProvenanceMigration).toContain(
+      'ALTER TABLE "bridge_audit_events" ADD COLUMN "reviewer_route_source" text',
+    );
+    expect(auditProvenanceMigration).toContain(
+      'ALTER TABLE "bridge_organization_audit_events" ADD COLUMN "source" text',
+    );
 
     const artifactReviewerAssignmentMigration = readFileSync(
       new URL("../drizzle/0050_natural_miek.sql", import.meta.url),
       "utf8",
     );
-    expect(artifactReviewerAssignmentMigration)
-      .toContain('ALTER TABLE "bridge_artifact_versions" ADD COLUMN "reviewer_assignment" jsonb');
-    expect(artifactReviewerAssignmentMigration)
-      .toContain("bridge_artifact_versions_reviewer_assignment_shape_check");
+    expect(artifactReviewerAssignmentMigration).toContain(
+      'ALTER TABLE "bridge_artifact_versions" ADD COLUMN "reviewer_assignment" jsonb',
+    );
+    expect(artifactReviewerAssignmentMigration).toContain("bridge_artifact_versions_reviewer_assignment_shape_check");
 
     const adapterDiagnosticHistoryMigration = readFileSync(
       new URL("../drizzle/0051_free_umar.sql", import.meta.url),
       "utf8",
     );
-    expect(adapterDiagnosticHistoryMigration)
-      .toContain('ALTER TABLE "bridge_adapter_diagnostics" ADD COLUMN "history" jsonb DEFAULT \'[]\'::jsonb NOT NULL');
-    expect(adapterDiagnosticHistoryMigration)
-      .toContain("bridge_adapter_diagnostics_history_shape_check");
+    expect(adapterDiagnosticHistoryMigration).toContain(
+      'ALTER TABLE "bridge_adapter_diagnostics" ADD COLUMN "history" jsonb DEFAULT \'[]\'::jsonb NOT NULL',
+    );
+    expect(adapterDiagnosticHistoryMigration).toContain("bridge_adapter_diagnostics_history_shape_check");
+
+    const deliveryFeedbackMigration = readFileSync(
+      new URL("../drizzle/0052_condemned_giant_man.sql", import.meta.url),
+      "utf8",
+    );
+    expect(deliveryFeedbackMigration).toContain(
+      'ALTER TABLE "bridge_outbox_deliveries" ADD COLUMN "feedback_provider" text',
+    );
+    expect(deliveryFeedbackMigration).toContain("bridge_outbox_deliveries_feedback_check");
+    expect(deliveryFeedbackMigration).toContain("bridge_outbox_deliveries_project_channel_provider_idx");
+
+    const auditSubjectMigration = readFileSync(
+      new URL("../drizzle/0053_organic_carmella_unuscione.sql", import.meta.url),
+      "utf8",
+    );
+    expect(auditSubjectMigration).toContain("DROP CONSTRAINT IF EXISTS");
+    expect(auditSubjectMigration).toContain("'outbox_delivery'");
+
+    const deliveryResultMigration = readFileSync(
+      new URL("../drizzle/0054_little_talisman.sql", import.meta.url),
+      "utf8",
+    );
+    expect(deliveryResultMigration).toContain('DROP CONSTRAINT IF EXISTS "bridge_outbox_deliveries_result_check"');
+    expect(deliveryResultMigration).toContain("feedback_provider");
+    expect(deliveryResultMigration).toContain("provider_message_id");
   });
 });

@@ -77,6 +77,7 @@
     "POST /v1/projects/:projectId/assumptions",
     "POST /v1/projects/:projectId/integrations/github/issues",
     "POST /v1/projects/:projectId/integrations/github/pull-requests",
+    "POST /v1/projects/:projectId/integrations/notifications/delivery-feedback",
     "POST /v1/projects/:projectId/questions",
     "POST /v1/projects/:projectId/questions/matches",
     "POST /v1/projects/:projectId/repositories",
@@ -310,6 +311,10 @@
     },
     "POST /v1/projects/:projectId/adapter-diagnostics": {
       "requestSchema": "recordAdapterDiagnosticInputSchema",
+      "responseContract": "record"
+    },
+    "POST /v1/projects/:projectId/integrations/notifications/delivery-feedback": {
+      "requestSchema": "recordOutboxDeliveryFeedbackInputSchema",
       "responseContract": "record"
     },
     "GET /v1/projects/:projectId/context": {
