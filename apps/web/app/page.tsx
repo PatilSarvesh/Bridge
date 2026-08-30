@@ -679,6 +679,20 @@ interface ProjectSupport {
     readonly passedCheckCount: number;
     readonly failingCheckNames: readonly string[];
     readonly observedAt: string;
+    readonly history: readonly {
+      readonly status: "pass" | "fail";
+      readonly mcpStatus: "ready" | "failed" | "not_configured";
+      readonly checkCount: number;
+      readonly passedCheckCount: number;
+      readonly failingCheckNames: readonly string[];
+      readonly observedAt: string;
+    }[];
+    readonly trend: {
+      readonly direction: "improving" | "degrading" | "stable" | "insufficient_data";
+      readonly observationCount: number;
+      readonly healthyObservationCount: number;
+      readonly lastChangedAt?: string;
+    };
   }[];
 }
 
@@ -2976,7 +2990,7 @@ export default function Home() {
 
                   <section className="analytics-panel support-panel">
                     <div className="analytics-panel-heading">
-                      <div><h2>Repository diagnostics</h2><p>Latest bounded <code>bridge doctor</code> results are stored per adapter. Review the health summary and failed check names here; Bridge never stores URLs, errors, or repository content.</p></div>
+                      <div><h2>Repository diagnostics</h2><p>Latest bounded <code>bridge doctor</code> results are stored per adapter, with a compact recent history and local trend. Review the health summary and failed check names here; Bridge never stores URLs, errors, or repository content.</p></div>
                       <small>{support.diagnostics.filter((diagnostic) => diagnostic.status === "pass").length} of {support.diagnostics.length} healthy</small>
                     </div>
                     {support.diagnostics.length === 0 ? <div className="empty">No bridge doctor reports are recorded.</div> : (
@@ -2996,6 +3010,7 @@ export default function Home() {
                               <div><dt>MCP</dt><dd>{diagnostic.mcpStatus.replaceAll("_", " ")}</dd></div>
                               <div><dt>Checks</dt><dd>{diagnostic.passedCheckCount} / {diagnostic.checkCount} passing</dd></div>
                               <div><dt>Observed</dt><dd><time dateTime={diagnostic.observedAt}>{new Date(diagnostic.observedAt).toLocaleString()}</time></dd></div>
+                              <div><dt>Trend</dt><dd className={`support-diagnostic-trend-${diagnostic.trend.direction}`}>{diagnostic.trend.direction.replaceAll("_", " ")}</dd></div>
                             </dl>
                             <div className={`support-diagnostic-checks ${diagnostic.failingCheckNames.length > 0 ? "is-failing" : "is-passing"}`}>
                               {diagnostic.failingCheckNames.length > 0 ? (
@@ -3016,6 +3031,24 @@ export default function Home() {
                               <span>Capabilities</span>
                               {diagnostic.capabilities.map((capability) => capability.replaceAll("_", " ")).join(", ") || "No capabilities reported"}
                             </p>
+                            <details className="support-diagnostic-history">
+                              <summary>Recent history <span>{diagnostic.history.length} prior · {diagnostic.trend.observationCount} total · {diagnostic.trend.healthyObservationCount} healthy</span></summary>
+                              {diagnostic.history.length === 0 ? (
+                                <p>No earlier observations are stored yet.</p>
+                              ) : (
+                                <ol>
+                                  {[...diagnostic.history].reverse().map((observation, index) => (
+                                    <li key={`${observation.observedAt}-${observation.status}-${index}`}>
+                                      <span className={`support-diagnostic-history-status support-diagnostic-history-status-${observation.status}`}>
+                                        {observation.status === "pass" ? "Healthy" : "Needs attention"}
+                                      </span>
+                                      <span>{observation.passedCheckCount} / {observation.checkCount} checks passing</span>
+                                      <time dateTime={observation.observedAt}>{new Date(observation.observedAt).toLocaleString()}</time>
+                                    </li>
+                                  ))}
+                                </ol>
+                              )}
+                            </details>
                           </article>
                         ))}
                       </div>

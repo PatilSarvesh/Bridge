@@ -458,6 +458,7 @@ const adapterDiagnostic: AdapterDiagnostic = {
   ],
   status: "pass",
   observedAt: "2026-08-07T10:02:13.000Z",
+  history: [],
 };
 
 describe("PostgreSQL domain mappings", () => {
@@ -1170,5 +1171,14 @@ describe("PostgreSQL domain mappings", () => {
       .toContain('ALTER TABLE "bridge_artifact_versions" ADD COLUMN "reviewer_assignment" jsonb');
     expect(artifactReviewerAssignmentMigration)
       .toContain("bridge_artifact_versions_reviewer_assignment_shape_check");
+
+    const adapterDiagnosticHistoryMigration = readFileSync(
+      new URL("../drizzle/0051_free_umar.sql", import.meta.url),
+      "utf8",
+    );
+    expect(adapterDiagnosticHistoryMigration)
+      .toContain('ALTER TABLE "bridge_adapter_diagnostics" ADD COLUMN "history" jsonb DEFAULT \'[]\'::jsonb NOT NULL');
+    expect(adapterDiagnosticHistoryMigration)
+      .toContain("bridge_adapter_diagnostics_history_shape_check");
   });
 });

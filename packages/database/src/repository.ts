@@ -1080,6 +1080,7 @@ export class PostgresBridgeRepository implements BridgeRepository {
           checks: row.checks,
           status: row.status,
           observedAt: row.observedAt,
+          history: row.history,
         },
       });
   }

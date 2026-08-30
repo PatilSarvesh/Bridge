@@ -1107,7 +1107,7 @@ Implementation note: project and controlled-client filtering, lifecycle attribut
 
 - **Priority:** P0
 - **Size:** M
-- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, active assumptions nearing expiry, runs waiting for human input, dead-letter delivery jobs, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata with derived check totals and failed check names; provider-backed disconnected integrations, time-series history, and richer diagnostics remain
+- **Status:** Partial — project-scoped operator support API and web view now surface unrouted active questions, overdue protected decisions, active assumptions nearing expiry, runs waiting for human input, dead-letter delivery jobs, recorded agent capabilities, and the latest bounded per-adapter `bridge doctor` status/check metadata with derived check totals, failed check names, a capped recent history, and local trend summaries; provider-backed disconnected integrations, live provider health, and richer provider diagnostics remain
 - **Dependencies:** BRG-032, BRG-090, BRG-104
 - **PRD references:** ADM-01, pilot plan
 
@@ -1116,7 +1116,7 @@ As a pilot administrator, I need to see configuration health, unresolved routing
 Acceptance criteria:
 
 1. View lists unroutable questions and overdue protected decisions.
-2. View lists dead-letter jobs and bounded adapter/diagnostic status without secrets; provider-backed disconnected integrations remain deployment work.
+2. View lists dead-letter jobs and bounded adapter/diagnostic status without secrets; recent local report history is capped at 20 observations and provider-backed disconnected integrations remain deployment work.
 3. View lists adapter capability levels and last successful MCP check.
 4. Actions respect project and organization administration boundaries.
 5. Support access never bypasses tenant authorization silently.

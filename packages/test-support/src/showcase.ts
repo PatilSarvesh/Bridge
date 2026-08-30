@@ -1476,6 +1476,7 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
         ],
         status: "pass",
         observedAt: shiftedIso(anchor, 0, -3),
+        history: [],
       },
       {
         organizationId: project.organizationId,
@@ -1494,6 +1495,7 @@ Consumers ignore unknown additive fields. Breaking changes require a new event v
         ],
         status: "fail",
         observedAt: shiftedIso(anchor, -1),
+        history: [],
       },
     ];
     const existingDiagnostics = new Set((await scopedRepository.listAdapterDiagnostics(project.id)).map((diagnostic) => diagnostic.client));

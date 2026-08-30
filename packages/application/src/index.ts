@@ -64,6 +64,7 @@ import type {
   Risk,
 } from "@bridge/contracts";
 import {
+  ADAPTER_DIAGNOSTIC_HISTORY_LIMIT,
   assertCanApproveArtifact,
   assertCanReviewArtifact,
   assertCanAccept,
@@ -80,6 +81,7 @@ import {
   reviewDateFor,
   type AgentRun,
   type AdapterDiagnostic,
+  type AdapterDiagnosticHistoryEntry,
   type Assumption,
   type AuditEvent,
   type Artifact,
@@ -654,6 +656,13 @@ export interface ProjectSupportView {
     readonly passedCheckCount: number;
     readonly failingCheckNames: readonly string[];
     readonly observedAt: string;
+    readonly history: readonly AdapterDiagnosticHistoryEntry[];
+    readonly trend: {
+      readonly direction: "improving" | "degrading" | "stable" | "insufficient_data";
+      readonly observationCount: number;
+      readonly healthyObservationCount: number;
+      readonly lastChangedAt?: string;
+    };
   }[];
 }
 
@@ -1059,6 +1068,54 @@ const MAX_EXACT_DIFF_CELLS = 1_000_000;
 const MAX_EXACT_DIFF_DIMENSION = 5_000;
 const MAX_RENDERED_DIFF_LINES = 2_000;
 const SUPPORT_ASSUMPTION_EXPIRY_WINDOW_MS = 7 * 86_400_000;
+
+const adapterDiagnosticHistoryEntry = (
+  diagnostic: Pick<AdapterDiagnostic, "status" | "mcpStatus" | "checks" | "observedAt">,
+): AdapterDiagnosticHistoryEntry => {
+  const failingCheckNames = diagnostic.checks
+    .filter((check) => check.status === "fail")
+    .map((check) => check.name);
+  return {
+    status: diagnostic.status,
+    mcpStatus: diagnostic.mcpStatus,
+    checkCount: diagnostic.checks.length,
+    passedCheckCount: diagnostic.checks.length - failingCheckNames.length,
+    failingCheckNames,
+    observedAt: diagnostic.observedAt,
+  };
+};
+
+const adapterDiagnosticTrend = (
+  diagnostic: AdapterDiagnostic,
+): {
+  readonly direction: "improving" | "degrading" | "stable" | "insufficient_data";
+  readonly observationCount: number;
+  readonly healthyObservationCount: number;
+  readonly lastChangedAt?: string;
+} => {
+  const observations = [...diagnostic.history, adapterDiagnosticHistoryEntry(diagnostic)];
+  let lastChangedAt: string | undefined;
+  for (let index = 1; index < observations.length; index += 1) {
+    if (observations[index]!.status !== observations[index - 1]!.status) {
+      lastChangedAt = observations[index]!.observedAt;
+    }
+  }
+  const latest = observations[observations.length - 1];
+  const previous = observations[observations.length - 2];
+  const direction = !previous || !latest
+    ? "insufficient_data"
+    : latest.status === "pass" && previous.status === "fail"
+      ? "improving"
+      : latest.status === "fail" && previous.status === "pass"
+        ? "degrading"
+        : "stable";
+  return {
+    direction,
+    observationCount: observations.length,
+    healthyObservationCount: observations.filter((observation) => observation.status === "pass").length,
+    ...(lastChangedAt ? { lastChangedAt } : {}),
+  };
+};
 
 const policyRule = (
   key: string,
@@ -3920,6 +3977,9 @@ export class BridgeService {
   ): Promise<AdapterDiagnostic> {
     return this.tenantTransaction(principal, async (repository) => {
       const project = await this.requireProject(principal, projectId, repository);
+      const previous = (await repository.listAdapterDiagnostics(projectId))
+        .find((diagnostic) => diagnostic.client === input.client);
+      const observedAt = this.now().toISOString();
       const diagnostic: AdapterDiagnostic = {
         organizationId: project.organizationId,
         projectId,
@@ -3931,7 +3991,11 @@ export class BridgeService {
         mcpStatus: input.mcpStatus,
         checks: input.checks,
         status: input.checks.every((check) => check.status === "pass") ? "pass" : "fail",
-        observedAt: this.now().toISOString(),
+        observedAt,
+        history: [
+          ...(previous?.history ?? []),
+          ...(previous ? [adapterDiagnosticHistoryEntry(previous)] : []),
+        ].slice(-ADAPTER_DIAGNOSTIC_HISTORY_LIMIT),
       };
       await repository.saveAdapterDiagnostic(diagnostic);
       return diagnostic;
@@ -4103,6 +4167,8 @@ export class BridgeService {
             passedCheckCount: diagnostic.checks.length - failingCheckNames.length,
             failingCheckNames,
             observedAt: diagnostic.observedAt,
+            history: diagnostic.history,
+            trend: adapterDiagnosticTrend(diagnostic),
           };
         }),
       };

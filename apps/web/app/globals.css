@@ -485,6 +485,9 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
 .support-diagnostic-meta dt, .support-diagnostic-meta dd { margin: 0; }
 .support-diagnostic-meta dd { overflow-wrap: anywhere; font-size: .8rem; font-weight: 680; line-height: 1.35; }
 .support-diagnostic-meta time { color: inherit; }
+.support-diagnostic-trend-improving { color: var(--success); }
+.support-diagnostic-trend-degrading { color: var(--danger); }
+.support-diagnostic-trend-stable, .support-diagnostic-trend-insufficient_data { color: var(--muted); }
 .support-diagnostic-checks { display: grid; gap: 8px; min-width: 0; padding: 12px; border-radius: 9px; }
 .support-diagnostic-checks.is-passing { background: var(--success-soft); color: var(--success); }
 .support-diagnostic-checks.is-failing { background: var(--danger-soft); color: var(--danger); }
@@ -493,6 +496,17 @@ textarea:focus { border-color: #8fb0f5; background: var(--surface); }
 .support-diagnostic-check-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .support-diagnostic-check-list li { padding: 4px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: .72rem; line-height: 1.1; }
 .support-diagnostic-capabilities { display: grid; gap: 4px; min-width: 0; margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
+.support-diagnostic-history { min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.support-diagnostic-history summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 44px; cursor: pointer; color: var(--text); font-size: .82rem; font-weight: 720; }
+.support-diagnostic-history summary span { color: var(--muted); font-size: .72rem; font-weight: 560; text-align: right; }
+.support-diagnostic-history p { margin: 2px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.4; }
+.support-diagnostic-history ol { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.support-diagnostic-history li { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: .74rem; line-height: 1.35; }
+.support-diagnostic-history li:first-child { border-top: 0; }
+.support-diagnostic-history time { grid-column: 2; color: var(--muted); }
+.support-diagnostic-history-status { font-weight: 720; }
+.support-diagnostic-history-status-pass { color: var(--success); }
+.support-diagnostic-history-status-fail { color: var(--danger); }
 .audit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .action-menu { position: relative; }
 .action-menu > summary { min-height: 38px; padding: 9px 28px 9px 13px; cursor: pointer; list-style: none; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-weight: 690; }
